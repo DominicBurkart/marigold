@@ -1,0 +1,39 @@
+repos:
+-    repo:                  local
+     hooks:
+        -   id:             format
+            name:           Fmt
+            description:    Runs `cargo fmt` on the repository.
+            entry:          bash -c 'cargo fmt "$@"' --
+            args:           ["--"]
+            language:       system
+            types:          [rust]
+        -   id:             clippy
+            name:           Clippy
+            description:    Runs `cargo clippy` on the repository.
+            entry:          bash -c 'cargo clippy "$@"' --
+            args:           ["--", "-D", "warnings"]
+            language:       system
+            types:          [rust]
+            pass_filenames: false
+        -   id:             check
+            name:           Cargo Check
+            description:    Runs `cargo check` on the repository.
+            entry:          bash -c 'cargo check "$@"' --
+            language:       system
+            types:          [ rust ]
+            pass_filenames: false
+- repo:                     https://github.com/pre-commit/pre-commit-hooks
+  rev:                      v3.2.0
+  hooks:
+    - id:                   trailing-whitespace
+    - id:                   mixed-line-ending
+    - id:                   end-of-file-fixer
+    - id:                   check-merge-conflict
+    - id:                   check-toml
+    - id:                   check-yaml
+- repo:                     https://github.com/jumanjihouse/pre-commit-hooks
+  rev:                      2.1.4
+  hooks:
+    - id:                   markdownlint
+    - id:                   shellcheck
