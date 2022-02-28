@@ -1,15 +1,6 @@
-[package]
-name = "glass"
-version = "0.1.0"
-edition = "2021"
-authors = ["Dominic <code@dominic.computer>"]
-build = "build.rs"
-
-[build-dependencies]
-lalrpop = "0.19.7"
-
-[dependencies]
-lalrpop-util = {version="0.19.7", features=["lexer"]}
-regex = "1"
-num-traits = "0.2"
-itertools = "0.10.2"
+[workspace]
+members = [
+  "glass",
+  "glass-macros",
+  "glass-grammar"
+]

@@ -6,9 +6,9 @@ pub Expr: String = {
 }
 
 Stream: String = {
-  <inp: InputFunction> <funs:("." <StreamFunction>)*> <out: OutputFunction> => {
+  <inp: InputFunction> <funs:("." <StreamFunction>)*> "." <out: OutputFunction> => {
     let intermediate = funs.join(".");
-    format!("{inp}{intermediate}{out}")
+    format!("async {{use glass_grammar::itertools::Itertools; {inp}.{intermediate}{out}}}")
   },
 }
 
