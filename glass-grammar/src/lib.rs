@@ -10,6 +10,8 @@ use crate::ast::Token;
 
 pub use itertools;
 
+pub mod expressions;
+
 lalrpop_mod!(#[allow(clippy::all)] pub ast);
 
 lazy_static! {

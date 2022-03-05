@@ -1,3 +1,5 @@
+use crate::expressions::StreamExpr;
+
 grammar;
 
 pub Expr: String = {
@@ -7,9 +9,13 @@ pub Expr: String = {
 
 Stream: String = {
   <inp: InputFunction> <funs:("." <StreamFunction>)*> "." <out: OutputFunction> => {
-    let intermediate = funs.join(".");
-    format!("async {{use glass_grammar::itertools::Itertools; {inp}.{intermediate}{out}}}")
-  },
+      let exp = StreamExpr {
+        inp,
+        funs,
+        out
+      };
+      exp.code()
+    },
 }
 
 InputFunction: String = {
