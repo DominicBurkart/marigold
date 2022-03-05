@@ -1,4 +1,4 @@
-use crate::expressions::StreamExpr;
+use crate::nodes;
 
 grammar;
 
@@ -9,7 +9,7 @@ pub Expr: String = {
 
 Stream: String = {
   <inp: InputFunction> <funs:("." <StreamFunction>)*> "." <out: OutputFunction> => {
-      let exp = StreamExpr {
+      let exp = nodes::StreamExpr {
         inp,
         funs,
         out
@@ -18,9 +18,15 @@ Stream: String = {
     },
 }
 
-InputFunction: String = {
-  "range(" <n: r"[0-9]+"> ")" => format!("(0..{n})"),
-  "range(" <n1: r"[0-9]+"> "," <n2: r"[0-9]+"> ")" => format!("({n1}..{n2})"),
+InputFunction: nodes::InputFunctionExpr = {
+  "range(" <n: r"[0-9]+"> ")" => nodes::InputFunctionExpr{
+    variability: nodes::InputVariability::Constant,
+    code: format!("(0..{n})"),
+  },
+  "range(" <n1: r"[0-9]+"> "," <n2: r"[0-9]+"> ")" => nodes::InputFunctionExpr{
+    variability: nodes::InputVariability::Constant,
+    code: format!("({n1}..{n2})"),
+  }
 }
 
 StreamFunction: String = {
