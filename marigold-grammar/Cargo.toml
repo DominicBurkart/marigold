@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Dominic <code@dominic.computer>"]
 build = "build.rs"
+description = "Grammar for the marigold language."
+license = "Apache-2.0 OR MIT"
 
 [build-dependencies]
 lalrpop = "0.19.7"

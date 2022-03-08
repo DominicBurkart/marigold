@@ -3,6 +3,8 @@ name = "marigold-macros"
 version = "0.1.0"
 edition = "2021"
 authors = ["Dominic <code@dominic.computer>"]
+description = "Macros for the marigold language."
+license = "Apache-2.0 OR MIT"
 
 [lib]
 proc-macro = true

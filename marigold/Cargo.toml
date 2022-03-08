@@ -3,6 +3,8 @@ name = "marigold"
 version = "0.1.0"
 edition = "2021"
 authors = ["Dominic <code@dominic.computer>"]
+description = "The Marigold Programming Language."
+license = "Apache-2.0 OR MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
