@@ -18,7 +18,9 @@ lazy_static! {
     static ref PARSER: ast::ExprParser = ast::ExprParser::new();
 }
 
-pub fn glass_parse<'a>(s: &'a str) -> Result<String, ParseError<usize, Token<'a>, &'static str>> {
+pub fn marigold_parse<'a>(
+    s: &'a str,
+) -> Result<String, ParseError<usize, Token<'a>, &'static str>> {
     PARSER.parse(s)
 }
 

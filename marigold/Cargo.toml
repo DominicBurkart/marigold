@@ -1,5 +1,5 @@
 [package]
-name = "glass"
+name = "marigold"
 version = "0.1.0"
 edition = "2021"
 authors = ["Dominic <code@dominic.computer>"]
@@ -10,8 +10,8 @@ authors = ["Dominic <code@dominic.computer>"]
 anyhow = "1.0"
 tokio = { version = "1", features = ["rt", "macros"] }
 
-[dependencies.glass-grammar]
-path = "../glass-grammar"
+[dependencies.marigold-grammar]
+path = "../marigold-grammar"
 
-[dependencies.glass-macros]
-path = "../glass-macros"
+[dependencies.marigold-macros]
+path = "../marigold-macros"

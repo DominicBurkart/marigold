@@ -1,5 +1,5 @@
 [package]
-name = "glass-grammar"
+name = "marigold-grammar"
 version = "0.1.0"
 edition = "2021"
 authors = ["Dominic <code@dominic.computer>"]
@@ -14,3 +14,4 @@ regex = "1"
 num-traits = "0.2"
 itertools = "0.10.2"
 lazy_static = "1.4"
+rusymbols = "0.1.2"

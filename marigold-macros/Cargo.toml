@@ -1,5 +1,5 @@
 [package]
-name = "glass-macros"
+name = "marigold-macros"
 version = "0.1.0"
 edition = "2021"
 authors = ["Dominic <code@dominic.computer>"]
@@ -11,5 +11,5 @@ proc-macro = true
 
 [dependencies]
 
-[dependencies.glass-grammar]
-path = "../glass-grammar"
+[dependencies.marigold-grammar]
+path = "../marigold-grammar"

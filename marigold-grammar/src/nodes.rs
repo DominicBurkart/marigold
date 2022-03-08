@@ -1,15 +1,15 @@
-pub struct StreamExpr {
-    pub inp: InputFunctionExpr,
+pub struct StreamNode {
+    pub inp: InputFunctionNode,
     pub funs: Vec<String>,
     pub out: String,
 }
 
-impl StreamExpr {
+impl StreamNode {
     pub fn code(&self) -> String {
         let inp = &self.inp.code;
         let intermediate = self.funs.join(".");
         let out = &self.out;
-        format!("async {{use glass_grammar::itertools::Itertools; {inp}.{intermediate}{out}}}")
+        format!("async {{use marigold_grammar::itertools::Itertools; {inp}.{intermediate}{out}}}")
     }
 }
 
@@ -20,7 +20,7 @@ pub enum InputVariability {
     Variable,
 }
 
-pub struct InputFunctionExpr {
+pub struct InputFunctionNode {
     pub variability: InputVariability,
     pub code: String,
 }

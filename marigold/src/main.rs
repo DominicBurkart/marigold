@@ -6,11 +6,11 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use glass_macros::glass;
+    use marigold_macros::marigold;
 
     #[tokio::test]
     async fn it_works() {
-        let r = glass!(
+        let r = marigold!(
             range(0, 2)
                 .permutations(2)
                 .combinations(2)

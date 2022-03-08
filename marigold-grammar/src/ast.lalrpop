@@ -9,7 +9,7 @@ pub Expr: String = {
 
 Stream: String = {
   <inp: InputFunction> <funs:("." <StreamFunction>)*> "." <out: OutputFunction> => {
-      let exp = nodes::StreamExpr {
+      let exp = nodes::StreamNode {
         inp,
         funs,
         out
@@ -18,12 +18,12 @@ Stream: String = {
     },
 }
 
-InputFunction: nodes::InputFunctionExpr = {
-  "range(" <n: r"[0-9]+"> ")" => nodes::InputFunctionExpr{
+InputFunction: nodes::InputFunctionNode = {
+  "range(" <n: r"[0-9]+"> ")" => nodes::InputFunctionNode{
     variability: nodes::InputVariability::Constant,
     code: format!("(0..{n})"),
   },
-  "range(" <n1: r"[0-9]+"> "," <n2: r"[0-9]+"> ")" => nodes::InputFunctionExpr{
+  "range(" <n1: r"[0-9]+"> "," <n2: r"[0-9]+"> ")" => nodes::InputFunctionNode{
     variability: nodes::InputVariability::Constant,
     code: format!("({n1}..{n2})"),
   }

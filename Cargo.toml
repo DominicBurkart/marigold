@@ -1,6 +1,6 @@
 [workspace]
 members = [
-  "glass",
-  "glass-macros",
-  "glass-grammar"
+  "marigold",
+  "marigold-macros",
+  "marigold-grammar"
 ]
