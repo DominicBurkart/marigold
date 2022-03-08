@@ -13,3 +13,4 @@ proc-macro = true
 
 [dependencies.marigold-grammar]
 path = "../marigold-grammar"
+version = "0.1"
