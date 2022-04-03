@@ -19,12 +19,9 @@ Stream: String = {
 }
 
 InputFunction: nodes::InputFunctionNode = {
-  "range(" <n: r"[0-9]+"> ")" => nodes::InputFunctionNode{
-    variability: nodes::InputVariability::Constant,
-    code: format!("(0..{n})"),
-  },
   "range(" <n1: r"[0-9]+"> "," <n2: r"[0-9]+"> ")" => nodes::InputFunctionNode{
     variability: nodes::InputVariability::Constant,
+    input_count: nodes::InputCount::Known((n2.parse::<num_bigint::BigInt>().unwrap() - n1.parse::<num_bigint::BigInt>().unwrap()).to_biguint().unwrap()),
     code: format!("({n1}..{n2})"),
   }
 }
@@ -32,7 +29,7 @@ InputFunction: nodes::InputFunctionNode = {
 StreamFunction: String = {
   "permutations("<n: r"[0-9]+"> ")" => format!("permutations({n})"),
   "combinations("<n: r"[0-9]+"> ")" => format!("combinations({n})"),
-  "keep_first_n(" <n: r"[0-9]+"> "," <value_fn: r"[a-zA-Z_]"> ")" => format!("sorted_by({value_fn}).take({n})"),
+  "keep_first_n(" <n: r"[0-9]+"> "," <value_fn: r"[a-zA-Z_]+"> ")" => format!("sorted_by({value_fn}).take({n})"),
 }
 
 OutputFunction: String = {
