@@ -1,16 +1,28 @@
 pub struct StreamNode {
     pub inp: InputFunctionNode,
-    pub funs: Vec<String>,
+    pub funs: Vec<StreamFunctionNode>,
     pub out: String,
 }
 
 impl StreamNode {
     pub fn code(&self) -> String {
         let inp = &self.inp.code;
-        let intermediate = self.funs.join(".");
+        let intermediate = self
+            .funs
+            .iter()
+            .map(|f| f.code.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
         let out = &self.out;
         format!("async {{use marigold_grammar::itertools::Itertools; {inp}.{intermediate}{out}}}")
     }
+}
+
+pub struct StreamFunctionNode {
+    pub code: String,
+    // pub computational_complexity: String,
+    // pub memory: String,
+    // pub new_era: bool,
 }
 
 /// Number of inputs
