@@ -16,4 +16,4 @@ quote = "1.0"
 
 [dependencies.marigold-grammar]
 path = "../marigold-grammar"
-version = "0.1"
+version = "=0.1.1"
