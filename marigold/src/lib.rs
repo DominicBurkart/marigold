@@ -1,10 +1,14 @@
+pub use crate as marigold; // used so that the tests can reference re-exported values
+pub use marigold_impl;
+pub use marigold_macros::marigold as m;
+
 #[cfg(test)]
 mod tests {
-    use marigold_macros::marigold;
+    use super::*;
 
     #[tokio::test]
     async fn chained_permutations_and_combinations() {
-        let r = marigold!(
+        let r = m!(
             range(0, 2)
                 .permutations(2)
                 .combinations(2)
@@ -18,7 +22,7 @@ mod tests {
     #[tokio::test]
     async fn sort_by_external_function() {
         let sorter = |a: &Vec<Vec<i32>>, b: &Vec<Vec<i32>>| a[0].partial_cmp(&b[0]).unwrap();
-        let r = marigold!(
+        let r = m!(
             range(0, 5)
                 .permutations(3)
                 .combinations(2)

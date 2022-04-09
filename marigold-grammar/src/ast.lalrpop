@@ -22,13 +22,13 @@ InputFunction: nodes::InputFunctionNode = {
   "range(" <n1: r"[0-9]+"> "," <n2: r"[0-9]+"> ")" => nodes::InputFunctionNode{
     variability: nodes::InputVariability::Constant,
     input_count: nodes::InputCount::Known((n2.parse::<num_bigint::BigInt>().unwrap() - n1.parse::<num_bigint::BigInt>().unwrap()).to_biguint().unwrap()),
-    code: format!("({n1}..{n2})"),
+    code: format!("crate::marigold::marigold_impl::futures::stream::iter({n1}..{n2})"),
   }
 }
 
 StreamFunction: nodes::StreamFunctionNode = {
   "permutations("<n: r"[0-9]+"> ")" => nodes::StreamFunctionNode {
-    code: format!("permutations({n})")
+    code: format!("permutations({n}).await")
   },
   "combinations("<n: r"[0-9]+"> ")" =>  nodes::StreamFunctionNode {
     code: format!("combinations({n})")

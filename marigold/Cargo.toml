@@ -19,3 +19,7 @@ version = "0.1"
 [dependencies.marigold-macros]
 path = "../marigold-macros"
 version = "0.1"
+
+[dependencies.marigold-impl]
+path = "../marigold-impl"
+version = "0.1"
