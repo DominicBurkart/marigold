@@ -2,5 +2,6 @@
 members = [
   "marigold",
   "marigold-macros",
-  "marigold-grammar"
+  "marigold-grammar",
+  "marigold-impl"
 ]
