@@ -12,6 +12,7 @@ license = "Apache-2.0 OR MIT"
 itertools = "0.10.2"
 futures = "0.3"
 async-trait = "0.1.53"
+binary-heap-plus = "0.4.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }

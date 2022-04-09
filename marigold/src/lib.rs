@@ -23,17 +23,16 @@ mod tests {
 
     #[tokio::test]
     async fn sort_by_external_function() {
-        let sorter = |a: &Vec<Vec<i32>>, b: &Vec<Vec<i32>>| a[0].partial_cmp(&b[0]).unwrap();
+        let sorter = |a: &Vec<i32>, b: &Vec<i32>| a[0].partial_cmp(&b[0]).unwrap();
         let r = m!(
-            range(0, 5)
-                .permutations(3)
-                .combinations(2)
+            range(0, 2)
+                .permutations(2)
                 .keep_first_n(1, sorter)
                 .return
         )
         .await
         .collect::<Vec<_>>()
         .await;
-        assert_eq!(r, vec![vec![vec![0, 1, 2], vec![0, 1, 3]]]);
+        assert_eq!(r, vec![vec![1, 0]]);
     }
 }

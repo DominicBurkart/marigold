@@ -34,7 +34,7 @@ StreamFunction: nodes::StreamFunctionNode = {
     code: format!("combinations({n}).await")
   },
   "keep_first_n(" <n: r"[0-9]+"> "," <value_fn: r"[a-zA-Z_]+"> ")" =>  nodes::StreamFunctionNode {
-    code: format!("sorted_by({value_fn}).take({n})")
+    code: format!("keep_first_n({n}, {value_fn}).await")
   },
 }
 
