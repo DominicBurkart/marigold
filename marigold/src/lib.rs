@@ -5,7 +5,6 @@ pub use marigold_macros::marigold as m;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::StreamExt;
 
     #[tokio::test]
     async fn chained_permutations_and_combinations() {
@@ -13,10 +12,9 @@ mod tests {
             range(0, 2)
                 .permutations(2)
                 .combinations(2)
+                .to_vec()
                 .return
         )
-        .await
-        .collect::<Vec<_>>()
         .await;
         assert_eq!(r, vec![vec![vec![0, 1], vec![1, 0]]]);
     }
@@ -28,10 +26,9 @@ mod tests {
             range(0, 2)
                 .permutations(2)
                 .keep_first_n(1, sorter)
+                .to_vec()
                 .return
         )
-        .await
-        .collect::<Vec<_>>()
         .await;
         assert_eq!(r, vec![vec![1, 0]]);
     }
