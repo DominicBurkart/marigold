@@ -24,7 +24,7 @@ mod tests {
     use super::Vectable;
 
     #[tokio::test]
-    async fn combinations() {
+    async fn to_vec() {
         assert_eq!(
             futures::stream::iter(vec![1, 2, 3]).to_vec().await,
             vec![1, 2, 3]
