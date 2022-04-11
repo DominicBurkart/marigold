@@ -59,13 +59,13 @@ mod tests {
     async fn keep_first_n() {
         assert_eq!(
             futures::stream::iter(1..10)
-                .keep_first_n(5, |a, b| (a % 2).cmp(&(b % 2))) // odd numbers
+                .keep_first_n(5, |a, b| (a % 2).cmp(&(b % 2))) // keep odd numbers
                 .await
-                .keep_first_n(5, |a, b| a.cmp(b)) // sort them again so it's easier to compare
+                .keep_first_n(2, |a, b| a.cmp(b)) // keep largest odd 2 numbers
                 .await
                 .collect::<Vec<_>>()
                 .await,
-            vec![9, 7, 5, 3, 1]
+            vec![9, 7]
         );
     }
 }
