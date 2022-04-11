@@ -32,4 +32,20 @@ mod tests {
         .await;
         assert_eq!(r, vec![vec![1, 0]]);
     }
+
+    #[tokio::test]
+    async fn test_filter() {
+        let is_odd_number = |i: &i32| i % 2 == 1;
+
+        assert_eq!(
+            m!(
+                range(0, 10)
+                .filter(is_odd_number)
+                .to_vec()
+                .return
+            )
+            .await,
+            vec![1, 3, 5, 7, 9]
+        );
+    }
 }

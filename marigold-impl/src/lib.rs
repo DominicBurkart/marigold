@@ -8,3 +8,5 @@ pub use combinations::Combinable;
 pub use keep_first_n::KeepFirstN;
 pub use permutations::Permutable;
 pub use to_vec::Vectable;
+
+pub use futures::StreamExt;
