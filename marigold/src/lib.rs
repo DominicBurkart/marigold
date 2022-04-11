@@ -4,7 +4,7 @@
 //! ## Example Usage
 //!
 //! ```rust
-//! ##[tokio::main]
+//! # #[tokio::main]
 //! # async fn main() {
 //! use marigold::m;
 //!
