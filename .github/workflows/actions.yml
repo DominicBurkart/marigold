@@ -1,4 +1,4 @@
-name:                pre-commit
+name:                actions
 
 on:                  [push]
 
@@ -24,7 +24,7 @@ jobs:
           toolchain: stable
     - run:           cargo test
   linux_x86:
-    name:            Linux x86
+    name:            Linux x86 Build
     runs-on:         ubuntu-latest
     steps:
       - uses:        actions/checkout@v2
@@ -39,7 +39,7 @@ jobs:
           command:   build
           args:      --target x86_64-unknown-linux-gnu
   linux_aarch64:
-    name:            Aarch64
+    name:            Aarch64 Build
     runs-on:         ubuntu-latest
     steps:
       - uses:        actions/checkout@v2
@@ -54,7 +54,7 @@ jobs:
           command:   build
           args:      --target aarch64-unknown-linux-gnu
   linux_arm7:
-    name:            Linux ARMv7
+    name:            Linux ARMv7 Build
     runs-on:         ubuntu-latest
     steps:
       - uses:        actions/checkout@v2
@@ -69,7 +69,7 @@ jobs:
           command:   build
           args:      --target armv7-unknown-linux-gnueabihf
   mac_x86:
-    name:            Mac x86_64
+    name:            Mac x86_64 Build
     runs-on:         ubuntu-latest
     steps:
       - uses:        actions/checkout@v2
@@ -84,7 +84,7 @@ jobs:
           command:   build
           args:      --target x86_64-apple-darwin
   windows_x86:
-    name:            Windows x86_64
+    name:            Windows x86_64 Build
     runs-on:         ubuntu-latest
     steps:
       - uses:        actions/checkout@v2
