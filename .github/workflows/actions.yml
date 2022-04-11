@@ -65,7 +65,7 @@ jobs:
           args:      --target armv7-unknown-linux-gnueabihf
   mac_x86:
     name:            Mac x86_64 Build
-    runs-on:         ubuntu-latest
+    runs-on:         macos-latest
     steps:
       - uses:        actions/checkout@v2
       - uses:        actions-rs/toolchain@v1
