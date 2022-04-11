@@ -7,7 +7,7 @@ env:
 
 jobs:
   pre-commit:
-    name:            Pre-commit hooks
+    name:            Pre-commit Hooks
     runs-on:         ubuntu-latest
     steps:
     - uses:          actions/checkout@v2
