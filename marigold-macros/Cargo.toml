@@ -1,6 +1,6 @@
 [package]
 name = "marigold-macros"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Dominic <code@dominic.computer>"]
 description = "Macros for the marigold language."
@@ -16,4 +16,4 @@ quote = "1.0"
 
 [dependencies.marigold-grammar]
 path = "../marigold-grammar"
-version = "=0.1.2"
+version = "=0.1.3"
