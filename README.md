@@ -7,4 +7,18 @@
 [![wasm](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml)
 [![last commit](https://img.shields.io/github/last-commit/dominicburkart/marigold)](https://github.com/DominicBurkart/marigold)
 
-(WIP) Marigold is a domain-specific language for analyzing data streams that compiles to asynchronous Rust. 
+(WIP) Marigold is a domain-specific language for data pipelining and analysis.
+Marigold compiles to asynchronous Rust, and can be accessed in a macro:
+
+```rust
+use marigold::m;
+
+let odd_digits = m!(
+  range(0, 10)
+    .filter(|i| i % 2 == 1)
+    .to_vec()
+    .return
+).await;
+
+println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
+```
