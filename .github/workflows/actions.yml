@@ -13,8 +13,6 @@ jobs:
     - uses:          actions/checkout@v2
     - uses:          actions/setup-python@v2
     - uses:          actions-rs/toolchain@v1
-      with:
-          toolchain: stable
     - uses:          pre-commit/action@v2.0.3
   test:
     name:            Tests
@@ -22,8 +20,6 @@ jobs:
     steps:
     - uses:          actions/checkout@v2
     - uses:          actions-rs/toolchain@v1
-      with:
-          toolchain: stable
     - run:           cargo test
   linux_x86:
     name:            Linux x86 Build
@@ -32,7 +28,6 @@ jobs:
       - uses:        actions/checkout@v2
       - uses:        actions-rs/toolchain@v1
         with:
-          toolchain: stable
           target:    x86_64-unknown-linux-gnu
           override:  true
       - uses:        actions-rs/cargo@v1
@@ -47,7 +42,6 @@ jobs:
       - uses:        actions/checkout@v2
       - uses:        actions-rs/toolchain@v1
         with:
-          toolchain: stable
           target:    aarch64-unknown-linux-gnu
           override:  true
       - uses:        actions-rs/cargo@v1
@@ -62,7 +56,6 @@ jobs:
       - uses:        actions/checkout@v2
       - uses:        actions-rs/toolchain@v1
         with:
-          toolchain: stable
           target:    armv7-unknown-linux-gnueabihf
           override:  true
       - uses:        actions-rs/cargo@v1
@@ -77,7 +70,6 @@ jobs:
       - uses:        actions/checkout@v2
       - uses:        actions-rs/toolchain@v1
         with:
-          toolchain: stable
           target:    x86_64-apple-darwin
           override:  true
       - uses:        actions-rs/cargo@v1
@@ -92,7 +84,6 @@ jobs:
       - uses:        actions/checkout@v2
       - uses:        actions-rs/toolchain@v1
         with:
-          toolchain: stable
           target:    x86_64-pc-windows-gnu
           override:  true
       - uses:        actions-rs/cargo@v1
