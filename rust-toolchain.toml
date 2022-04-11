@@ -1,5 +1,5 @@
 [toolchain]
 channel = "stable"
-components = [ "rustfmt", "clippy" ]
+components = [ "rustfmt", "clippy", "rust-src" ]
 profile = "minimal"
 targets = [ "wasm32-unknown-unknown", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"]
