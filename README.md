@@ -1,7 +1,7 @@
 # marigold
 
-[![crates.io](https://img.shields.io/crates/v/turbolift.svg)](https://crates.io/crates/marigold)
-[![docs.rs](https://img.shields.io/docsrs/turbolift.svg)](https://docs.rs/marigold)
+[![crates.io](https://img.shields.io/crates/v/marigold.svg)](https://crates.io/crates/marigold)
+[![docs.rs](https://img.shields.io/docsrs/marigold.svg)](https://docs.rs/marigold)
 [![tests](https://github.com/DominicBurkart/marigold/actions/workflows/tests.yaml/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/tests.yaml)
 [![style](https://github.com/DominicBurkart/marigold/actions/workflows/pre-commit.yaml/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/pre-commit.yaml)
 [![wasm](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml)
