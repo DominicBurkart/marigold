@@ -73,4 +73,28 @@ mod tests {
             vec![1, 3, 5, 7, 9]
         );
     }
+
+    #[tokio::test]
+    async fn test_permutations_with_replacement() {
+        assert_eq!(
+            m!(
+                range(0, 3)
+                    .permutations_with_replacement(2)
+                    .to_vec()
+                    .return
+            )
+            .await,
+            vec![
+                vec![0, 0],
+                vec![0, 1],
+                vec![0, 2],
+                vec![1, 0],
+                vec![1, 1],
+                vec![1, 2],
+                vec![2, 0],
+                vec![2, 1],
+                vec![2, 2]
+            ]
+        );
+    }
 }

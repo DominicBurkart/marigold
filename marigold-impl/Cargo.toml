@@ -13,6 +13,8 @@ itertools = "0.10.2"
 futures = "0.3"
 async-trait = "0.1.53"
 binary-heap-plus = "0.4.1"
+gen-nested-iter-yield = "0.1.0"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
+genawaiter = {version = "0.99.1", features = ["futures03"]}

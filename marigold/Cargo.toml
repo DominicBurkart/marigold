@@ -12,6 +12,8 @@ repository = "https://github.com/DominicBurkart/marigold"
 [dependencies]
 anyhow = "1.0"
 tokio = { version = "1", features = ["rt", "macros"] }
+genawaiter = {version = "0.99.1", features = ["futures03"]}
+
 
 [dependencies.marigold-grammar]
 path = "../marigold-grammar"

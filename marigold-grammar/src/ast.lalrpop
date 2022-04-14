@@ -30,6 +30,14 @@ StreamFunction: nodes::StreamFunctionNode = {
   "permutations("<n: r"[0-9]+"> ")" => nodes::StreamFunctionNode {
     code: format!("permutations({n}).await")
   },
+  "permutations_with_replacement("<n: r"[0-9]+"> ")" => nodes::StreamFunctionNode {
+    code: format!("collect_and_apply(|values| async {{
+              crate::marigold::marigold_impl::gen_nested_iter_yield::nested_iter_yield!(values.iter(), {n}, .to_owned())
+          }})
+          .await
+          .await
+    ")
+  },
   "combinations("<n: r"[0-9]+"> ")" =>  nodes::StreamFunctionNode {
     code: format!("combinations({n}).await")
   },
