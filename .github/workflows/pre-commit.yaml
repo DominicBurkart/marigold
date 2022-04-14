@@ -1,4 +1,4 @@
-name:                Pre-Commit Hooks
+name:                precommit hooks
 
 on:                  [push]
 
