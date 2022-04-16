@@ -6,6 +6,8 @@ authors = ["Dominic <code@dominic.computer>"]
 build = "build.rs"
 description = "Grammar for the marigold language."
 license = "Apache-2.0 OR MIT"
+repository = "https://github.com/DominicBurkart/marigold"
+
 
 [build-dependencies]
 lalrpop = "0.19.7"

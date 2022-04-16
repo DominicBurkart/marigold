@@ -5,6 +5,8 @@ edition = "2021"
 authors = ["Dominic <code@dominic.computer>"]
 description = "Internal logic for the marigold language."
 license = "Apache-2.0 OR MIT"
+repository = "https://github.com/DominicBurkart/marigold"
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
