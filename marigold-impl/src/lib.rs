@@ -13,3 +13,4 @@ pub use to_vec::Vectable;
 
 pub use futures::StreamExt;
 pub use gen_nested_iter_yield;
+pub use genawaiter;

@@ -3,5 +3,6 @@ members = [
   "marigold",
   "marigold-macros",
   "marigold-grammar",
-  "marigold-impl"
+  "marigold-impl",
+  "color-palette-picker"
 ]

@@ -1,0 +1,14 @@
+[package]
+name = "color-palette-picker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = {version = "1", features = ["rt", "macros", "rt-multi-thread"]}
+prisma = "0.1.1"
+cute = "0.3.0"
+once_cell = "1.10.0"
+
+[dependencies.marigold]
+path = "../marigold"
+version = "=0.1.7"

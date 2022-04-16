@@ -14,7 +14,7 @@ impl StreamNode {
             .collect::<Vec<_>>()
             .join(".");
         let out = &self.out;
-        format!("async {{use marigold::marigold_impl::*; {inp}.{intermediate}{out}}}")
+        format!("async {{use ::marigold::marigold_impl::*; {inp}.{intermediate}{out}}}")
     }
 }
 

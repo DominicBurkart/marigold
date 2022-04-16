@@ -22,7 +22,7 @@ InputFunction: nodes::InputFunctionNode = {
   "range(" <n1: r"[0-9]+"> "," <n2: r"[0-9]+"> ")" => nodes::InputFunctionNode{
     variability: nodes::InputVariability::Constant,
     input_count: nodes::InputCount::Known((n2.parse::<num_bigint::BigInt>().unwrap() - n1.parse::<num_bigint::BigInt>().unwrap()).to_biguint().unwrap()),
-    code: format!("crate::marigold::marigold_impl::futures::stream::iter({n1}..{n2})"),
+    code: format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})"),
   }
 }
 
@@ -32,7 +32,7 @@ StreamFunction: nodes::StreamFunctionNode = {
   },
   "permutations_with_replacement("<n: r"[0-9]+"> ")" => nodes::StreamFunctionNode {
     code: format!("collect_and_apply(|values| async {{
-              crate::marigold::marigold_impl::gen_nested_iter_yield::nested_iter_yield!(values.iter(), {n}, .to_owned())
+              ::marigold::marigold_impl::gen_nested_iter_yield::nested_iter_yield!(values.iter(), {n}, .to_owned(), ::marigold::marigold_impl::)
           }})
           .await
           .await
