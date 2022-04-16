@@ -57,7 +57,7 @@ where
             parking_lot::RwLock::new(first_n_mutex.lock().peek().unwrap().to_owned());
 
         self.for_each_concurrent(
-            /* compare up to the number of items we will keep at a time*/ n,
+            /* arbitrarily set concurrency limit */ 256,
             |item| async {
                 if sorted_by(&*smallest_kept.read(), &item) == Ordering::Less {
                     let mut first_n_mut = first_n_mutex.lock();
