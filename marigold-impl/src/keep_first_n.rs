@@ -56,15 +56,18 @@ where
         let smallest_kept =
             parking_lot::RwLock::new(first_n_mutex.lock().peek().unwrap().to_owned());
 
-        self.for_each(|item| async {
-            if sorted_by(&*smallest_kept.read(), &item) == Ordering::Less {
-                let mut first_n_mut = first_n_mutex.lock();
-                first_n_mut.pop();
-                first_n_mut.push(item);
-                let mut update_smallest_kept = smallest_kept.write();
-                *update_smallest_kept = first_n_mut.peek().unwrap().to_owned();
-            }
-        })
+        self.for_each_concurrent(
+            /* compare up to the number of items we will keep at a time*/ n,
+            |item| async {
+                if sorted_by(&*smallest_kept.read(), &item) == Ordering::Less {
+                    let mut first_n_mut = first_n_mutex.lock();
+                    first_n_mut.pop();
+                    first_n_mut.push(item);
+                    let mut update_smallest_kept = smallest_kept.write();
+                    *update_smallest_kept = first_n_mut.peek().unwrap().to_owned();
+                }
+            },
+        )
         .await;
 
         futures::stream::iter(first_n_mutex.into_inner().into_sorted_vec().into_iter())
