@@ -22,7 +22,7 @@ where
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
 where
     SInput: Stream<Item = T> + Send + Unpin,
-    T: Clone + Send,
+    T: Clone + Send + std::marker::Sync,
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + 'static,
 {
     async fn keep_first_n(
@@ -37,16 +37,37 @@ where
             Ordering::Greater => Ordering::Less,
         });
 
-        while let Some(item) = self.next().await {
-            if first_n.len() < n {
+        while first_n.len() < n {
+            if let Some(item) = self.next().await {
                 first_n.push(item);
-            } else if sorted_by(first_n.peek().unwrap(), &item) == Ordering::Less {
-                first_n.pop();
-                first_n.push(item);
+            } else {
+                break;
             }
         }
 
-        futures::stream::iter(first_n.into_sorted_vec().into_iter())
+        // If we have exhausted the stream before reaching n values, we can exit early.
+        if first_n.len() < n {
+            return futures::stream::iter(first_n.into_sorted_vec().into_iter());
+        }
+
+        // Otherwise, we can check each remaining value in the stream against the smallest
+        // kept value, updating the kept values only when a keepable value is found.
+        let first_n_mutex = parking_lot::Mutex::new(first_n);
+        let smallest_kept =
+            parking_lot::RwLock::new(first_n_mutex.lock().peek().unwrap().to_owned());
+
+        self.for_each(|item| async {
+            if sorted_by(&*smallest_kept.read(), &item) == Ordering::Less {
+                let mut first_n_mut = first_n_mutex.lock();
+                first_n_mut.pop();
+                first_n_mut.push(item);
+                let mut update_smallest_kept = smallest_kept.write();
+                *update_smallest_kept = first_n_mut.peek().unwrap().to_owned();
+            }
+        })
+        .await;
+
+        futures::stream::iter(first_n_mutex.into_inner().into_sorted_vec().into_iter())
     }
 }
 
