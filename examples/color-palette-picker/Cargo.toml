@@ -10,5 +10,5 @@ cute = "0.3.0"
 once_cell = "1.10.0"
 
 [dependencies.marigold]
-path = "../marigold"
+path = "../../marigold"
 version = "=0.1.7"
