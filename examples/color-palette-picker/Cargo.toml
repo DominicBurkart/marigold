@@ -12,3 +12,10 @@ once_cell = "1.10.0"
 [dependencies.marigold]
 path = "../../marigold"
 version = "=0.1.7"
+
+[dev-dependencies]
+criterion = {version="0.3", features=["async_tokio"]}
+
+[[bench]]
+name = "color_picker_bench"
+harness = false
