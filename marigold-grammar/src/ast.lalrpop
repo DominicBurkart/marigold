@@ -50,6 +50,9 @@ StreamFunction: nodes::StreamFunctionNode = {
   "to_vec()" =>  nodes::StreamFunctionNode {
     code: format!("to_vec().await")
   },
+  "map(" <mapping_fn: r"[a-zA-Z_]+"> ")" => nodes::StreamFunctionNode {
+    code: format!("map({mapping_fn})")
+  }
 }
 
 OutputFunction: String = {

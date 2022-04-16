@@ -3,6 +3,19 @@ mod tests {
     use marigold::m;
 
     #[tokio::test]
+    async fn map() {
+        let double = |x| x * 2;
+        let r = m!(
+            range(0, 3)
+                .map(double)
+                .to_vec()
+                .return
+        )
+        .await;
+        assert_eq!(r, vec![0, 2, 4]);
+    }
+
+    #[tokio::test]
     async fn chained_permutations_and_combinations() {
         let r = m!(
             range(0, 2)
