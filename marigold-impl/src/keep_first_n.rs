@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use binary_heap_plus::BinaryHeap;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
+use parallel_stream::ParallelStream;
 use std::cmp::Ordering;
+use std::ops::Deref;
+use std::sync::Arc;
 
 #[async_trait]
 pub trait KeepFirstN<T, F>
@@ -56,19 +59,17 @@ where
         let smallest_kept =
             parking_lot::RwLock::new(first_n_mutex.lock().peek().unwrap().to_owned());
 
-        self.for_each_concurrent(
-            /* arbitrarily set concurrency limit */ 256,
-            |item| async {
-                if sorted_by(&*smallest_kept.read(), &item) == Ordering::Less {
+        parallel_stream::from_stream(self)
+            .for_each(|item| async move {
+                if sorted_by(&smallest_kept.read().deref(), &item) == Ordering::Less {
                     let mut first_n_mut = first_n_mutex.lock();
                     first_n_mut.pop();
                     first_n_mut.push(item);
                     let mut update_smallest_kept = smallest_kept.write();
                     *update_smallest_kept = first_n_mut.peek().unwrap().to_owned();
                 }
-            },
-        )
-        .await;
+            })
+            .await;
 
         futures::stream::iter(first_n_mutex.into_inner().into_sorted_vec().into_iter())
     }
