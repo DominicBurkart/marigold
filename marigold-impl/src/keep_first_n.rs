@@ -2,9 +2,6 @@ use async_trait::async_trait;
 use binary_heap_plus::BinaryHeap;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
-use std::ops::Deref;
-use std::sync::Arc;
-
 use std::cmp::Ordering;
 
 #[async_trait]
@@ -24,9 +21,9 @@ where
 #[async_trait]
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
 where
-    SInput: Stream<Item = T> + Send + Unpin + std::marker::Sync + 'static,
-    T: Clone + Send + std::marker::Sync + 'static,
-    F: Fn(&T, &T) -> Ordering + Copy + std::marker::Send + std::marker::Sync + 'static,
+    SInput: Stream<Item = T> + Send + Unpin,
+    T: Clone + Send + std::marker::Sync,
+    F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + 'static,
 {
     async fn keep_first_n(
         mut self,
@@ -34,7 +31,7 @@ where
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
         // use the reverse ordering so that the smallest value is always the first to pop.
-        let mut first_n = BinaryHeap::with_capacity_by(n, move |a, b| match sorted_by(a, b) {
+        let mut first_n = BinaryHeap::with_capacity_by(n, |a, b| match sorted_by(a, b) {
             Ordering::Less => Ordering::Greater,
             Ordering::Equal => Ordering::Equal,
             Ordering::Greater => Ordering::Less,
@@ -55,24 +52,25 @@ where
 
         // Otherwise, we can check each remaining value in the stream against the smallest
         // kept value, updating the kept values only when a keepable value is found.
-        let first_n_mutex = Arc::new(parking_lot::Mutex::new(first_n));
-        let smallest_kept = Arc::new(parking_lot::RwLock::new(
-            first_n_mutex.lock().peek().unwrap().to_owned(),
-        ));
+        let first_n_mutex = parking_lot::Mutex::new(first_n);
+        let smallest_kept =
+            parking_lot::RwLock::new(first_n_mutex.lock().peek().unwrap().to_owned());
 
-        self.for_each_concurrent(4, |item| async {
-            if sorted_by(smallest_kept.read().deref(), &item) == Ordering::Less {
-                let mut first_n_mut = first_n_mutex.lock();
-                first_n_mut.pop();
-                first_n_mut.push(item);
-                let mut update_smallest_kept = smallest_kept.write();
-                *update_smallest_kept = first_n_mut.peek().unwrap().to_owned();
-            }
-        })
+        self.for_each_concurrent(
+            /* arbitrarily set concurrency limit */ 256,
+            |item| async {
+                if sorted_by(&*smallest_kept.read(), &item) == Ordering::Less {
+                    let mut first_n_mut = first_n_mutex.lock();
+                    first_n_mut.pop();
+                    first_n_mut.push(item);
+                    let mut update_smallest_kept = smallest_kept.write();
+                    *update_smallest_kept = first_n_mut.peek().unwrap().to_owned();
+                }
+            },
+        )
         .await;
 
-        let first_n = first_n_mutex.deref().lock();
-        futures::stream::iter(first_n.to_owned().into_sorted_vec().into_iter())
+        futures::stream::iter(first_n_mutex.into_inner().into_sorted_vec().into_iter())
     }
 }
 
