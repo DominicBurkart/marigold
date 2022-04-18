@@ -34,65 +34,83 @@ where
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
         // use the reverse ordering so that the smallest value is always the first to pop.
-        let mut first_n = BinaryHeap::with_capacity_by(n, move |a, b| match sorted_by(a, b) {
-            Ordering::Less => Ordering::Greater,
-            Ordering::Equal => Ordering::Equal,
-            Ordering::Greater => Ordering::Less,
-        });
-
-        while first_n.len() < n {
-            if let Some(item) = self.next().await {
-                first_n.push(item);
-            } else {
-                break;
-            }
-        }
-
-        // If we have exhausted the stream before reaching n values, we can exit early.
-        if first_n.len() < n {
-            return futures::stream::iter(first_n.into_sorted_vec().into_iter());
-        }
-
-        // Otherwise, we can check each remaining value in the stream against the smallest
-        // kept value, updating the kept values only when a keepable value is found.
-        let first_n_mutex = Arc::new(parking_lot::Mutex::new(first_n));
-        let smallest_kept = Arc::new(parking_lot::RwLock::new(
-            first_n_mutex.lock().peek().unwrap().to_owned(),
-        ));
-        {
-            let smallest_kept_ptr = Arc::as_ptr(&smallest_kept) as usize;
-            let first_n_ptr = Arc::as_ptr(&first_n_mutex) as usize;
-            parallel_stream::from_stream(self)
-                .for_each(move |item| async move {
-                    let smallest_kept_arc = unsafe {
-                        Arc::from_raw(smallest_kept_ptr as *const parking_lot::RwLock<T>)
-                    };
-                    if sorted_by(smallest_kept_arc.read().deref(), &item) == Ordering::Less {
-                        let first_n_arc = unsafe {
-                            Arc::from_raw(
-                                first_n_ptr
-                                    as *const parking_lot::Mutex<
-                                        BinaryHeap<T, binary_heap_plus::FnComparator<F>>,
-                                    >,
-                            )
-                        };
-                        let mut update_first_n = first_n_arc.lock();
-                        update_first_n.pop();
-                        update_first_n.push(item);
-                        let mut update_smallest_kept = smallest_kept_arc.write();
-                        *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
-                    }
-                })
-                .await;
-        }
-        futures::stream::iter(
-            Arc::try_unwrap(first_n_mutex)
-                .unwrap()
-                .into_inner()
-                .into_sorted_vec()
-                .into_iter(),
-        )
+        let first_n = BinaryHeap::with_capacity_by(n, |a, b| sorted_by(a, b).reverse());
+        impl_keep_first_n(self, first_n, n, sorted_by).await
     }
+}
+
+/// Internal logic for keep_first_n. This is in a separate function so that we can get the full
+/// type of the binary heap, which includes a lambda for reversing the ordering fromt the passed
+/// sort_by function. By declaring a new function, we can use generics to describe its type, and
+/// then can use that type while unsafely casting pointers.
+async fn impl_keep_first_n<SInput, T, F, FReversed>(
+    mut sinput: SInput,
+    mut first_n: BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
+    n: usize,
+    sorted_by: F,
+) -> futures::stream::Iter<std::vec::IntoIter<T>>
+where
+    SInput: Stream<Item = T> + Send + Unpin + std::marker::Sync + 'static,
+    T: Clone + Send + std::marker::Sync + std::fmt::Debug + 'static,
+    F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
+    FReversed: Fn(&T, &T) -> std::cmp::Ordering + Clone + Send,
+{
+    // Iterate through values in a single thread until we have seen n values.
+    while first_n.len() < n {
+        if let Some(item) = sinput.next().await {
+            first_n.push(item);
+        } else {
+            break;
+        }
+    }
+
+    // If we have exhausted the stream before reaching n values, we can exit early.
+    if first_n.len() < n {
+        return futures::stream::iter(first_n.into_sorted_vec().into_iter());
+    }
+
+    // Otherwise, we can check each remaining value in the stream against the smallest
+    // kept value, updating the kept values only when a keepable value is found. This
+    // is done in parallel.
+    let first_n_mutex = Arc::new(parking_lot::Mutex::new(first_n));
+    let smallest_kept = Arc::new(parking_lot::RwLock::new(
+        first_n_mutex.lock().peek().unwrap().to_owned(),
+    ));
+    {
+        let smallest_kept_ptr = &smallest_kept as *const Arc<parking_lot::RwLock<T>> as usize;
+        let first_n_ptr = &first_n_mutex
+            as *const Arc<
+                parking_lot::Mutex<BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>>,
+            > as usize;
+        parallel_stream::from_stream(sinput)
+            .for_each(move |item| async move {
+                let smallest_kept_arc =
+                    unsafe { &*(smallest_kept_ptr as *const Arc<parking_lot::RwLock<T>>) };
+                if sorted_by(smallest_kept_arc.read().deref(), &item) == Ordering::Less {
+                    let first_n_arc = unsafe {
+                        &*(first_n_ptr
+                            as *const Arc<
+                                parking_lot::Mutex<
+                                    BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
+                                >,
+                            >)
+                    };
+                    let mut update_first_n = first_n_arc.lock();
+                    update_first_n.pop();
+                    update_first_n.push(item);
+                    let mut update_smallest_kept = smallest_kept_arc.write();
+                    *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
+                }
+            })
+            .await;
+    }
+    futures::stream::iter(
+        Arc::try_unwrap(first_n_mutex)
+            .unwrap()
+            .into_inner()
+            .into_sorted_vec()
+            .into_iter(),
+    )
 }
 
 #[cfg(test)]
