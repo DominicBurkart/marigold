@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use futures::Stream;
 use futures::StreamExt;
+use tracing::instrument;
 
 #[async_trait]
 pub trait Vectable<T> {
@@ -12,8 +13,9 @@ pub trait Vectable<T> {
 impl<T, SInput> Vectable<T> for SInput
 where
     SInput: Stream<Item = T> + Send,
-    T: Clone + Send,
+    T: Clone + Send + std::fmt::Debug,
 {
+    #[instrument(skip(self))]
     async fn to_vec(self) -> Vec<T> {
         self.collect::<Vec<_>>().await
     }

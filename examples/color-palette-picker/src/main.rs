@@ -5,6 +5,7 @@ use lib::compare_contrast;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
     println!(
         "program complete. Best colors: {:?}",
         m!(

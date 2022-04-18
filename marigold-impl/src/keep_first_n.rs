@@ -3,6 +3,7 @@ use binary_heap_plus::BinaryHeap;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use std::cmp::Ordering;
+use tracing::instrument;
 
 #[async_trait]
 pub trait KeepFirstN<T, F>
@@ -26,6 +27,7 @@ where
     T: Clone + Send + std::marker::Sync + std::fmt::Debug + 'static,
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
 {
+    #[instrument(skip(self, sorted_by))]
     async fn keep_first_n(
         mut self,
         n: usize,
@@ -112,6 +114,7 @@ where
     T: Clone + Send + std::marker::Sync,
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + 'static,
 {
+    #[instrument(skip(self, sorted_by))]
     async fn keep_first_n(
         mut self,
         n: usize,
