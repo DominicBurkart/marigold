@@ -9,6 +9,10 @@ prisma = "0.1.1"
 cute = "0.3.0"
 once_cell = "1.10.0"
 
+[features]
+default = ["parallel"]
+parallel = ["marigold/parallel"]
+
 [dependencies.marigold]
 path = "../../marigold"
 version = "=0.1.8"
