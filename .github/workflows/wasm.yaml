@@ -20,4 +20,4 @@ jobs:
         with:
           use-cross: true
           command:   build
-          args:      --target wasm32-unknown-unknown
+          args:      --target wasm32-unknown-unknown --no-default-features
