@@ -3,6 +3,8 @@ use binary_heap_plus::BinaryHeap;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use std::cmp::Ordering;
+#[cfg(feature = "tokio-spawn")]
+use std::ops::Deref;
 use tracing::instrument;
 
 #[async_trait]
@@ -19,7 +21,7 @@ where
     ) -> futures::stream::Iter<std::vec::IntoIter<T>>;
 }
 
-#[cfg(feature = "parallel_stream")]
+#[cfg(feature = "tokio-spawn")]
 #[async_trait]
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
 where
@@ -43,7 +45,7 @@ where
 /// type of the binary heap, which includes a lambda for reversing the ordering fromt the passed
 /// sort_by function. By declaring a new function, we can use generics to describe its type, and
 /// then can use that type while unsafely casting pointers.
-#[cfg(feature = "parallel_stream")]
+#[cfg(feature = "tokio-spawn")]
 async fn impl_keep_first_n<SInput, T, F, FReversed>(
     mut sinput: SInput,
     mut first_n: BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
@@ -80,34 +82,34 @@ where
         let first_n_ptr = &first_n_mutex
             as *const parking_lot::Mutex<BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>>
             as usize;
-        let ongoing_tasks = sinput
-            .map(tokio::spawn(move |item| async move {
-                let smallest_kept_arc =
-                    unsafe { &*(smallest_kept_ptr as *const parking_lot::RwLock<T>) };
-                if sorted_by(smallest_kept_arc.read().deref(), &item) == Ordering::Less {
-                    let first_n_arc = unsafe {
-                        &*(first_n_ptr
-                            as *const Arc<
-                                parking_lot::Mutex<
+        let mut ongoing_tasks = sinput
+            .map(move |item| {
+                tokio::spawn(async move {
+                    let smallest_kept_arc =
+                        unsafe { &*(smallest_kept_ptr as *const parking_lot::RwLock<T>) };
+                    if sorted_by(smallest_kept_arc.read().deref(), &item) == Ordering::Less {
+                        let first_n_arc = unsafe {
+                            &*(first_n_ptr
+                                as *const parking_lot::Mutex<
                                     BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
-                                >,
-                            >)
-                    };
-                    let mut update_first_n = first_n_arc.lock();
-                    update_first_n.pop();
-                    update_first_n.push(item);
-                    let mut update_smallest_kept = smallest_kept_arc.write();
-                    *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
-                }
-            }))
-            .buffer_unordered(num_cpus::get());
-        while let Some(task) = ongoing_tasks.next().await {}
+                                >)
+                        };
+                        let mut update_first_n = first_n_arc.lock();
+                        update_first_n.pop();
+                        update_first_n.push(item);
+                        let mut update_smallest_kept = smallest_kept_arc.write();
+                        *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
+                    }
+                })
+            })
+            .buffer_unordered(num_cpus::get() * 4);
+        while let Some(_task) = ongoing_tasks.next().await {}
     }
     futures::stream::iter(first_n_mutex.into_inner().into_sorted_vec().into_iter())
 }
 
 #[async_trait]
-#[cfg(not(feature = "parallel_stream"))]
+#[cfg(not(feature = "tokio-spawn"))]
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
 where
     SInput: Stream<Item = T> + Send + Unpin,

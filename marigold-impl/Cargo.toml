@@ -8,9 +8,8 @@ license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
 
 [features]
-default = ["tokio"]
-tokio = ["dep:tokio"]
-
+default = ["tokio-spawn"]
+tokio-spawn = ["dep:tokio"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -24,6 +23,7 @@ genawaiter = {version = "0.99.1", features = ["futures03"]}
 parking_lot = "0.12.0"
 tokio = { version = "1", features = ["full", "tracing"], optional=true }
 tracing = "0.1"
+num_cpus = "1.13.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }

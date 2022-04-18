@@ -8,8 +8,8 @@ license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
 
 [features]
-default = ["tokio"]
-tokio = ["marigold-impl/tokio"]
+default = ["tokio-spawn"]
+tokio-spawn = ["marigold-impl/tokio-spawn"]
 
 [dependencies]
 anyhow = "1.0"
