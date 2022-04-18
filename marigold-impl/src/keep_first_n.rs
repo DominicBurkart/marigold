@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use binary_heap_plus::BinaryHeap;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
-use parallel_stream::ParallelStream;
 use std::cmp::Ordering;
+#[cfg(feature = "tokio-spawn")]
 use std::ops::Deref;
-use std::sync::Arc;
+use tracing::instrument;
 
 #[async_trait]
 pub trait KeepFirstN<T, F>
@@ -21,7 +21,7 @@ where
     ) -> futures::stream::Iter<std::vec::IntoIter<T>>;
 }
 
-#[cfg(feature = "parallel_stream")]
+#[cfg(feature = "tokio-spawn")]
 #[async_trait]
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
 where
@@ -29,6 +29,7 @@ where
     T: Clone + Send + std::marker::Sync + std::fmt::Debug + 'static,
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
 {
+    #[instrument(skip(self, sorted_by))]
     async fn keep_first_n(
         mut self,
         n: usize,
@@ -44,7 +45,7 @@ where
 /// type of the binary heap, which includes a lambda for reversing the ordering fromt the passed
 /// sort_by function. By declaring a new function, we can use generics to describe its type, and
 /// then can use that type while unsafely casting pointers.
-#[cfg(feature = "parallel_stream")]
+#[cfg(feature = "tokio-spawn")]
 async fn impl_keep_first_n<SInput, T, F, FReversed>(
     mut sinput: SInput,
     mut first_n: BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
@@ -74,55 +75,48 @@ where
     // Otherwise, we can check each remaining value in the stream against the smallest
     // kept value, updating the kept values only when a keepable value is found. This
     // is done in parallel.
-    let first_n_mutex = Arc::new(parking_lot::Mutex::new(first_n));
-    let smallest_kept = Arc::new(parking_lot::RwLock::new(
-        first_n_mutex.lock().peek().unwrap().to_owned(),
-    ));
+    let first_n_mutex = parking_lot::Mutex::new(first_n);
+    let smallest_kept = parking_lot::RwLock::new(first_n_mutex.lock().peek().unwrap().to_owned());
     {
-        let smallest_kept_ptr = &smallest_kept as *const Arc<parking_lot::RwLock<T>> as usize;
+        let smallest_kept_ptr = &smallest_kept as *const parking_lot::RwLock<T> as usize;
         let first_n_ptr = &first_n_mutex
-            as *const Arc<
-                parking_lot::Mutex<BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>>,
-            > as usize;
-        parallel_stream::from_stream(sinput)
-            .for_each(move |item| async move {
-                let smallest_kept_arc =
-                    unsafe { &*(smallest_kept_ptr as *const Arc<parking_lot::RwLock<T>>) };
-                if sorted_by(smallest_kept_arc.read().deref(), &item) == Ordering::Less {
-                    let first_n_arc = unsafe {
-                        &*(first_n_ptr
-                            as *const Arc<
-                                parking_lot::Mutex<
+            as *const parking_lot::Mutex<BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>>
+            as usize;
+        let mut ongoing_tasks = sinput
+            .map(move |item| {
+                tokio::spawn(async move {
+                    let smallest_kept_arc =
+                        unsafe { &*(smallest_kept_ptr as *const parking_lot::RwLock<T>) };
+                    if sorted_by(smallest_kept_arc.read().deref(), &item) == Ordering::Less {
+                        let first_n_arc = unsafe {
+                            &*(first_n_ptr
+                                as *const parking_lot::Mutex<
                                     BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
-                                >,
-                            >)
-                    };
-                    let mut update_first_n = first_n_arc.lock();
-                    update_first_n.pop();
-                    update_first_n.push(item);
-                    let mut update_smallest_kept = smallest_kept_arc.write();
-                    *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
-                }
+                                >)
+                        };
+                        let mut update_first_n = first_n_arc.lock();
+                        update_first_n.pop();
+                        update_first_n.push(item);
+                        let mut update_smallest_kept = smallest_kept_arc.write();
+                        *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
+                    }
+                })
             })
-            .await;
+            .buffer_unordered(num_cpus::get() * 4);
+        while let Some(_task) = ongoing_tasks.next().await {}
     }
-    futures::stream::iter(
-        Arc::try_unwrap(first_n_mutex)
-            .unwrap()
-            .into_inner()
-            .into_sorted_vec()
-            .into_iter(),
-    )
+    futures::stream::iter(first_n_mutex.into_inner().into_sorted_vec().into_iter())
 }
 
 #[async_trait]
-#[cfg(not(feature = "parallel_stream"))]
+#[cfg(not(feature = "tokio-spawn"))]
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
 where
     SInput: Stream<Item = T> + Send + Unpin,
     T: Clone + Send + std::marker::Sync,
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + 'static,
 {
+    #[instrument(skip(self, sorted_by))]
     async fn keep_first_n(
         mut self,
         n: usize,

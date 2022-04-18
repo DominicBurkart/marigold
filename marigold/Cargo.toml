@@ -8,12 +8,11 @@ license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
 
 [features]
-default = ["parallel"]
-parallel = ["marigold-impl/parallel_stream"]
+default = ["tokio-spawn"]
+tokio-spawn = ["marigold-impl/tokio-spawn"]
 
 [dependencies]
 anyhow = "1.0"
-tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
 
 [dependencies.marigold-grammar]
 path = "../marigold-grammar"
@@ -26,3 +25,6 @@ version = "=0.1.8"
 [dependencies.marigold-impl]
 path = "../marigold-impl"
 version = "=0.1.8"
+
+[dev-dependencies]
+tokio = {version = "1", features = ["full"]}

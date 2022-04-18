@@ -5,6 +5,7 @@ use lib::compare_contrast;
 
 #[tokio::main]
 async fn main() {
+    console_subscriber::init();
     println!(
         "program complete. Best colors: {:?}",
         m!(
