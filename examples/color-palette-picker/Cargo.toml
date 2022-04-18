@@ -10,8 +10,8 @@ cute = "0.3.0"
 once_cell = "1.10.0"
 
 [features]
-default = ["parallel"]
-parallel = ["marigold/parallel"]
+default = ["tokio"]
+tokio = ["marigold/tokio"] # parallelization using the tokio runtime
 
 [dependencies.marigold]
 path = "../../marigold"

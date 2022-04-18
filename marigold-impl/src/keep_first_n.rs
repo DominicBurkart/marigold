@@ -2,10 +2,7 @@ use async_trait::async_trait;
 use binary_heap_plus::BinaryHeap;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
-use parallel_stream::ParallelStream;
 use std::cmp::Ordering;
-use std::ops::Deref;
-use std::sync::Arc;
 
 #[async_trait]
 pub trait KeepFirstN<T, F>
@@ -74,20 +71,17 @@ where
     // Otherwise, we can check each remaining value in the stream against the smallest
     // kept value, updating the kept values only when a keepable value is found. This
     // is done in parallel.
-    let first_n_mutex = Arc::new(parking_lot::Mutex::new(first_n));
-    let smallest_kept = Arc::new(parking_lot::RwLock::new(
-        first_n_mutex.lock().peek().unwrap().to_owned(),
-    ));
+    let first_n_mutex = parking_lot::Mutex::new(first_n);
+    let smallest_kept = parking_lot::RwLock::new(first_n_mutex.lock().peek().unwrap().to_owned());
     {
-        let smallest_kept_ptr = &smallest_kept as *const Arc<parking_lot::RwLock<T>> as usize;
+        let smallest_kept_ptr = &smallest_kept as *const parking_lot::RwLock<T> as usize;
         let first_n_ptr = &first_n_mutex
-            as *const Arc<
-                parking_lot::Mutex<BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>>,
-            > as usize;
-        parallel_stream::from_stream(sinput)
-            .for_each(move |item| async move {
+            as *const parking_lot::Mutex<BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>>
+            as usize;
+        let ongoing_tasks = sinput
+            .map(tokio::spawn(move |item| async move {
                 let smallest_kept_arc =
-                    unsafe { &*(smallest_kept_ptr as *const Arc<parking_lot::RwLock<T>>) };
+                    unsafe { &*(smallest_kept_ptr as *const parking_lot::RwLock<T>) };
                 if sorted_by(smallest_kept_arc.read().deref(), &item) == Ordering::Less {
                     let first_n_arc = unsafe {
                         &*(first_n_ptr
@@ -103,16 +97,11 @@ where
                     let mut update_smallest_kept = smallest_kept_arc.write();
                     *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
                 }
-            })
-            .await;
+            }))
+            .buffer_unordered(num_cpus::get());
+        while let Some(task) = ongoing_tasks.next().await {}
     }
-    futures::stream::iter(
-        Arc::try_unwrap(first_n_mutex)
-            .unwrap()
-            .into_inner()
-            .into_sorted_vec()
-            .into_iter(),
-    )
+    futures::stream::iter(first_n_mutex.into_inner().into_sorted_vec().into_iter())
 }
 
 #[async_trait]
