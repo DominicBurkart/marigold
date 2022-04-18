@@ -7,7 +7,9 @@ description = "The Marigold Programming Language."
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["parallel"]
+parallel = ["marigold-impl/parallel_stream"]
 
 [dependencies]
 anyhow = "1.0"
