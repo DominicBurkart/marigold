@@ -1,24 +1,19 @@
-name:                      wasm
+name:                wasm
 
-on:                        [push]
+on:                  [push]
 
 env:
-  CARGO_TERM_COLOR:        always
-
+  CARGO_TERM_COLOR:  always
 
 jobs:
   wasm:
-    name:                  WASM Example Build
-    runs-on:               ubuntu-latest
-    defaults:
-      run:
-        shell:             bash
-        working-directory: ./examples/color-palette-picker
+    name:            WASM Build
+    runs-on:         ubuntu-latest
     steps:
-      - uses:              actions/checkout@v2
-      - uses:              actions-rs/toolchain@v1
+      - uses:        actions/checkout@v2
+      - uses:        actions-rs/toolchain@v1
         with:
-          toolchain:       stable
-          target:          wasm32-unknown-unknown
-          override:        true
-      - run:               cargo build --target wasm32-unknown-unknown --no-default-features
+          toolchain: stable
+          target:    wasm32-unknown-unknown
+          override:  true
+      - run:         cargo build --target wasm32-unknown-unknown
