@@ -3,8 +3,29 @@ use marigold::m;
 mod lib;
 use lib::compare_contrast;
 
+#[cfg(feature = "tokio-spawn")]
 #[tokio::main]
 async fn main() {
+    #[cfg(feature = "tokio-spawn")]
+    console_subscriber::init();
+    println!(
+        "program complete. Best colors: {:?}",
+        m!(
+            range(0, 255)
+            .permutations_with_replacement(3)
+            .combinations(2)
+            .keep_first_n(20, compare_contrast)
+            .to_vec()
+            .return
+        )
+        .await
+    );
+}
+
+#[cfg(not(feature = "tokio-spawn"))]
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    #[cfg(feature = "tokio-spawn")]
     console_subscriber::init();
     println!(
         "program complete. Best colors: {:?}",
