@@ -12,8 +12,7 @@ tracing = "0.1"
 console-subscriber = {version="0.1.4", optional=true }
 
 [features]
-default = ["tokio-spawn"]
-tokio-spawn = ["marigold/tokio-spawn", "dep:console-subscriber", "tokio/rt-multi-thread", "tokio/tracing"] # parallelization using the tokio runtime
+tokio = ["dep:console-subscriber", "marigold/tokio", "tokio/rt-multi-thread", "tokio/tracing"] # parallelization using the tokio runtime
 
 [dependencies.marigold]
 path = "../../marigold"

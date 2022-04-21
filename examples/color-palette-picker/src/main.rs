@@ -3,10 +3,10 @@ use marigold::m;
 mod lib;
 use lib::compare_contrast;
 
-#[cfg(feature = "tokio-spawn")]
+#[cfg(feature = "tokio")]
 #[tokio::main]
 async fn main() {
-    #[cfg(feature = "tokio-spawn")]
+    #[cfg(feature = "tokio")]
     console_subscriber::init();
     println!(
         "program complete. Best colors: {:?}",
@@ -22,10 +22,10 @@ async fn main() {
     );
 }
 
-#[cfg(not(feature = "tokio-spawn"))]
+#[cfg(not(feature = "tokio"))]
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    #[cfg(feature = "tokio-spawn")]
+    #[cfg(feature = "tokio")]
     console_subscriber::init();
     println!(
         "program complete. Best colors: {:?}",

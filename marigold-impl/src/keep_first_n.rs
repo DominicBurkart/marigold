@@ -3,7 +3,7 @@ use binary_heap_plus::BinaryHeap;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use std::cmp::Ordering;
-#[cfg(feature = "tokio-spawn")]
+#[cfg(feature = "tokio")]
 use std::ops::Deref;
 use tracing::instrument;
 
@@ -21,7 +21,7 @@ where
     ) -> futures::stream::Iter<std::vec::IntoIter<T>>;
 }
 
-#[cfg(feature = "tokio-spawn")]
+#[cfg(feature = "tokio")]
 #[async_trait]
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
 where
@@ -45,7 +45,7 @@ where
 /// type of the binary heap, which includes a lambda for reversing the ordering fromt the passed
 /// sort_by function. By declaring a new function, we can use generics to describe its type, and
 /// then can use that type while unsafely casting pointers.
-#[cfg(feature = "tokio-spawn")]
+#[cfg(feature = "tokio")]
 async fn impl_keep_first_n<SInput, T, F, FReversed>(
     mut sinput: SInput,
     mut first_n: BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
@@ -109,7 +109,7 @@ where
 }
 
 #[async_trait]
-#[cfg(not(feature = "tokio-spawn"))]
+#[cfg(not(feature = "tokio"))]
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
 where
     SInput: Stream<Item = T> + Send + Unpin,
