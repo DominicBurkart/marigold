@@ -20,9 +20,9 @@ impl StreamNode {
 
 pub struct StreamFunctionNode {
     pub code: String,
+    // needs to include values for if the function supports parallelism, is lazy etc.
     // pub computational_complexity: String,
     // pub memory: String,
-    // pub new_era: bool,
 }
 
 /// Number of inputs
