@@ -3,10 +3,10 @@ use marigold::m;
 mod lib;
 use lib::compare_contrast;
 
+/// Uses a multithread tokio runtime and tokio-console.
 #[cfg(feature = "tokio")]
 #[tokio::main]
 async fn main() {
-    #[cfg(feature = "tokio")]
     console_subscriber::init();
     println!(
         "program complete. Best colors: {:?}",
@@ -22,11 +22,28 @@ async fn main() {
     );
 }
 
-#[cfg(not(feature = "tokio"))]
+/// Uses a multithread async-std runtime.
+#[cfg(feature = "async-std")]
+#[async_std::main]
+async fn main() {
+    println!(
+        "program complete. Best colors: {:?}",
+        m!(
+            range(0, 255)
+            .permutations_with_replacement(3)
+            .combinations(2)
+            .keep_first_n(20, compare_contrast)
+            .to_vec()
+            .return
+        )
+        .await
+    );
+}
+/// Returns a single future, where all computation occurs in a single thread.
+/// This allows Marigold programs to compile with a WASM target.
+#[cfg(not(any(feature = "tokio", feature = "async-std")))]
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    #[cfg(feature = "tokio")]
-    console_subscriber::init();
     println!(
         "program complete. Best colors: {:?}",
         m!(

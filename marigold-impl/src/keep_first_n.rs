@@ -3,7 +3,7 @@ use binary_heap_plus::BinaryHeap;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use std::cmp::Ordering;
-#[cfg(feature = "tokio")]
+#[cfg(any(feature = "tokio", feature = "async-std"))]
 use std::ops::Deref;
 use tracing::instrument;
 
@@ -21,7 +21,7 @@ where
     ) -> futures::stream::Iter<std::vec::IntoIter<T>>;
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(any(feature = "tokio", feature = "async-std"))]
 #[async_trait]
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
 where
@@ -45,7 +45,7 @@ where
 /// type of the binary heap, which includes a lambda for reversing the ordering fromt the passed
 /// sort_by function. By declaring a new function, we can use generics to describe its type, and
 /// then can use that type while unsafely casting pointers.
-#[cfg(feature = "tokio")]
+#[cfg(any(feature = "tokio", feature = "async-std"))]
 async fn impl_keep_first_n<SInput, T, F, FReversed>(
     mut sinput: SInput,
     mut first_n: BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
@@ -74,7 +74,7 @@ where
 
     // Otherwise, we can check each remaining value in the stream against the smallest
     // kept value, updating the kept values only when a keepable value is found. This
-    // is done in parallel.
+    // is done by spawning tasks, which can be parallelized by multithreaded runtimes.
     let first_n_mutex = parking_lot::Mutex::new(first_n);
     let smallest_kept = parking_lot::RwLock::new(first_n_mutex.lock().peek().unwrap().to_owned());
     {
@@ -84,7 +84,7 @@ where
             as usize;
         let mut ongoing_tasks = sinput
             .map(move |item| {
-                tokio::spawn(async move {
+                crate::async_runtime::spawn(async move {
                     let smallest_kept_arc =
                         unsafe { &*(smallest_kept_ptr as *const parking_lot::RwLock<T>) };
                     if sorted_by(smallest_kept_arc.read().deref(), &item) == Ordering::Less {
@@ -109,7 +109,7 @@ where
 }
 
 #[async_trait]
-#[cfg(not(feature = "tokio"))]
+#[cfg(not(any(feature = "tokio", feature = "async-std")))]
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
 where
     SInput: Stream<Item = T> + Send + Unpin,

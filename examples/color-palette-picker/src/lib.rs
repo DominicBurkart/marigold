@@ -6,7 +6,7 @@ use prisma::{lms::LmsCam2002, FromColor, Rgb};
 
 static SRGB: Lazy<SRgb<f64>> = Lazy::new(SRgb::new);
 
-/// Returns the minimal contrast across normative triconic vision as
+/// Returns the minimal contrast across normative vision as
 /// well as red-green, blue-yellow, and total color blindness.
 fn min_contrast<T>(_colors: Vec<LmsCam2002<T>>) -> u32 {
     10 // unimplemented

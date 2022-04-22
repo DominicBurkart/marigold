@@ -9,6 +9,7 @@ repository = "https://github.com/DominicBurkart/marigold"
 
 [features]
 tokio = ["marigold-impl/tokio"]
+async-std = ["marigold-impl/async-std"]
 
 [dependencies]
 anyhow = "1.0"
