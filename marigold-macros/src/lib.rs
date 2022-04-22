@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 extern crate proc_macro;
 use marigold_grammar::marigold_parse;
 use proc_macro::TokenStream;

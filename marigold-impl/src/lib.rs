@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 pub use futures;
 mod async_runtime;
 pub mod collect_and_apply;

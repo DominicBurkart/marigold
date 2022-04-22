@@ -20,6 +20,7 @@
 //! assert_eq!(odd_digits, vec![1, 3, 5, 7, 9]);
 //! # }
 //! ```
+#![forbid(unsafe_code)]
 
 pub use crate as marigold; // used so that the tests can reference re-exported values
 pub use marigold_impl;
