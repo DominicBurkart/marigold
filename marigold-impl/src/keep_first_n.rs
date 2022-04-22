@@ -36,7 +36,7 @@ where
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
         // use the reverse ordering so that the smallest value is always the first to pop.
-        let first_n = BinaryHeap::with_capacity_by(n, |a, b| sorted_by(a, b).reverse());
+        let first_n = BinaryHeap::with_capacity_by(n, move |a, b| sorted_by(a, b).reverse());
         impl_keep_first_n(self, first_n, n, sorted_by).await
     }
 }
@@ -56,7 +56,7 @@ where
     SInput: Stream<Item = T> + Send + Unpin + std::marker::Sync + 'static,
     T: Clone + Send + std::marker::Sync + std::fmt::Debug + 'static,
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
-    FReversed: Fn(&T, &T) -> std::cmp::Ordering + Clone + Send,
+    FReversed: Fn(&T, &T) -> std::cmp::Ordering + Clone + Send + 'static,
 {
     // Iterate through values in a single thread until we have seen n values.
     while first_n.len() < n {
@@ -75,25 +75,19 @@ where
     // Otherwise, we can check each remaining value in the stream against the smallest
     // kept value, updating the kept values only when a keepable value is found. This
     // is done by spawning tasks, which can be parallelized by multithreaded runtimes.
-    let first_n_mutex = parking_lot::Mutex::new(first_n);
-    let smallest_kept = parking_lot::RwLock::new(first_n_mutex.lock().peek().unwrap().to_owned());
+    let first_n_mutex = std::sync::Arc::new(parking_lot::Mutex::new(first_n));
+    let smallest_kept = std::sync::Arc::new(parking_lot::RwLock::new(
+        first_n_mutex.lock().peek().unwrap().to_owned(),
+    ));
     {
-        let smallest_kept_ptr = &smallest_kept as *const parking_lot::RwLock<T> as usize;
-        let first_n_ptr = &first_n_mutex
-            as *const parking_lot::Mutex<BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>>
-            as usize;
+        let first_n_arc = first_n_mutex.clone();
+        let smallest_kept_arc = smallest_kept.clone();
         let mut ongoing_tasks = sinput
             .map(move |item| {
+                let first_n_arc = first_n_arc.clone();
+                let smallest_kept_arc = smallest_kept_arc.clone();
                 crate::async_runtime::spawn(async move {
-                    let smallest_kept_arc =
-                        unsafe { &*(smallest_kept_ptr as *const parking_lot::RwLock<T>) };
                     if sorted_by(smallest_kept_arc.read().deref(), &item) == Ordering::Less {
-                        let first_n_arc = unsafe {
-                            &*(first_n_ptr
-                                as *const parking_lot::Mutex<
-                                    BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
-                                >)
-                        };
                         let mut update_first_n = first_n_arc.lock();
                         update_first_n.pop();
                         update_first_n.push(item);
@@ -105,7 +99,13 @@ where
             .buffer_unordered(num_cpus::get() * 4);
         while let Some(_task) = ongoing_tasks.next().await {}
     }
-    futures::stream::iter(first_n_mutex.into_inner().into_sorted_vec().into_iter())
+    futures::stream::iter(
+        std::sync::Arc::try_unwrap(first_n_mutex)
+            .expect("Dangling references to mutex")
+            .into_inner()
+            .into_sorted_vec()
+            .into_iter(),
+    )
 }
 
 #[async_trait]
