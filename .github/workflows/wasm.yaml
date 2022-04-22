@@ -16,8 +16,4 @@ jobs:
           toolchain: stable
           target:    wasm32-unknown-unknown
           override:  true
-      - uses:        actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command:   build
-          args:      --target wasm32-unknown-unknown
+      - run:         cargo build --target wasm32-unknown-unknown

@@ -23,6 +23,14 @@ repos:
             language:       system
             types:          [ rust ]
             pass_filenames: false
+- repo:                     local
+  hooks:
+        -   id:             readmes_synced
+            name:           READMEs synced
+            description:    Confirms the Marigold and repository READMEs have the same content.
+            entry:          bash -c 'cmp -- README.md ./marigold/README.md' --
+            language:       system
+            pass_filenames: false
 - repo:                     https://github.com/pre-commit/pre-commit-hooks
   rev:                      v3.2.0
   hooks:

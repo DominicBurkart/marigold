@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use itertools::Permutations;
+use tracing::instrument;
 
 #[async_trait]
 pub trait Permutable<T> {
@@ -17,8 +18,9 @@ pub trait Permutable<T> {
 impl<T, SInput> Permutable<T> for SInput
 where
     SInput: Stream<Item = T> + Send,
-    T: Clone + Send,
+    T: Clone + Send + std::fmt::Debug,
 {
+    #[instrument(skip(self))]
     async fn permutations(
         self,
         k: usize,

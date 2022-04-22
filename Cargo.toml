@@ -7,3 +7,4 @@ members = [
   "examples/color-palette-picker",
   "tests"
 ]
+resolver = "2"

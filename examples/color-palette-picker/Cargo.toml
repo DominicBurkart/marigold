@@ -4,10 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = {version = "1", features = ["rt", "macros", "rt-multi-thread"]}
+tokio = {version = "1", features = ["rt", "macros"]}
+async-std = {version = "1", features= ["attributes"], optional=true}
 prisma = "0.1.1"
 cute = "0.3.0"
 once_cell = "1.10.0"
+tracing = "0.1"
+console-subscriber = {version="0.1.4", optional=true }
+
+[features]
+tokio = ["dep:console-subscriber", "marigold/tokio", "tokio/rt-multi-thread", "tokio/tracing"] # parallelization using the tokio runtime
+async-std = ["marigold/async-std", "dep:async-std"] # parallelization using async-std
 
 [dependencies.marigold]
 path = "../../marigold"

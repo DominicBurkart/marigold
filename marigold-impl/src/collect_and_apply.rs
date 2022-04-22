@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use futures::stream::Stream;
 use futures::StreamExt;
+use tracing::instrument;
 
 #[async_trait]
 pub trait CollectAndAppliable<T, U, F>
@@ -14,10 +15,11 @@ where
 #[async_trait]
 impl<SInput, T, U, F> CollectAndAppliable<T, U, F> for SInput
 where
-    SInput: Stream<Item = T> + Send + Unpin,
-    T: Clone + Send,
+    SInput: Stream<Item = T> + Send + Unpin + std::fmt::Debug,
+    T: Clone + Send + std::fmt::Debug,
     F: std::marker::Send + Fn(Vec<T>) -> U + 'static,
 {
+    #[instrument(skip(self, f))]
     async fn collect_and_apply(mut self, f: F) -> U {
         let values = self.collect::<Vec<_>>().await;
         f(values)

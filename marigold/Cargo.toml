@@ -7,11 +7,12 @@ description = "The Marigold Programming Language."
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+tokio = ["marigold-impl/tokio"]
+async-std = ["marigold-impl/async-std"]
 
 [dependencies]
 anyhow = "1.0"
-tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
 
 [dependencies.marigold-grammar]
 path = "../marigold-grammar"
@@ -24,3 +25,6 @@ version = "=0.1.8"
 [dependencies.marigold-impl]
 path = "../marigold-impl"
 version = "=0.1.8"
+
+[dev-dependencies]
+tokio = {version = "1", features = ["full"]}
