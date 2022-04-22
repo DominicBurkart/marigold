@@ -1,4 +1,4 @@
-# marigold
+# Marigold
 
 [![crates.io](https://img.shields.io/crates/v/marigold.svg)](https://crates.io/crates/marigold)
 [![docs.rs](https://img.shields.io/docsrs/marigold.svg)](https://docs.rs/marigold)
@@ -8,8 +8,9 @@
 [![wasm](https://github.com/DominicBurkart/marigold/workflows/wasm/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml)
 [![last commit](https://img.shields.io/github/last-commit/dominicburkart/marigold)](https://github.com/DominicBurkart/marigold)
 
-(WIP) Marigold is a domain-specific language for data pipelining and analysis.
-Marigold compiles to asynchronous Rust, and can be accessed in a macro:
+Marigold is a domain-specific language for streaming data pipelining and
+analysis. Marigold compiles to asynchronous Rust, and can be accessed in a
+macro:
 
 ```rust
 use marigold::m;
@@ -25,3 +26,17 @@ let odd_digits = m!(
 
 println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
 ```
+
+## Runtimes
+
+By default, Marigold works in a single future and can work with any runtime.
+
+The `tokio` and `async-std` features allow Marigold to spawn additional tasks,
+enabling parallelism for multithreaded runtimes.
+
+Marigold supports async tracing, e.g. with tokio-console.
+
+## Platforms
+
+Marigold's CI builds against aarch64, arm, WASM, and x86 targets, and builds
+the x86 target in mac and windows environments.
