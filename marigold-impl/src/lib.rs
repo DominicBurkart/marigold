@@ -17,3 +17,8 @@ pub use to_vec::Vectable;
 pub use futures::StreamExt;
 pub use gen_nested_iter_yield;
 pub use genawaiter;
+
+#[cfg(feature = "io")]
+pub use async_std;
+#[cfg(feature = "io")]
+pub use csv_async;

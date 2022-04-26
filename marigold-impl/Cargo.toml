@@ -8,8 +8,10 @@ license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
 
 [features]
+default = ["io"]
 tokio = ["dep:tokio", "dep:num_cpus"]
 async-std = ["dep:async-std", "dep:num_cpus"]
+io = ["dep:async-std", "dep:csv-async"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -25,6 +27,7 @@ tokio = { version = "1", features = ["full", "tracing"], optional=true }
 async-std = { version = "1", optional=true}
 num_cpus = {version="1.13.1", optional=true}
 tracing = "0.1"
+csv-async = {version="1.2", optional=true}
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"]}

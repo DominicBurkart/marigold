@@ -23,6 +23,15 @@ InputFunction: nodes::InputFunctionNode = {
     variability: nodes::InputVariability::Constant,
     input_count: nodes::InputCount::Known((n2.parse::<num_bigint::BigInt>().unwrap() - n1.parse::<num_bigint::BigInt>().unwrap()).to_biguint().unwrap()),
     code: format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})"),
+  },
+  "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv)" => nodes::InputFunctionNode{
+    variability: nodes::InputVariability::Variable,
+    input_count: nodes::InputCount::Unknown,
+    code: format!("::marigold::marigold_impl::csv_async::AsyncReader::from_reader(
+      ::marigold::marigold_impl::async_std::fs::File::open({path})
+        .await
+        .expect(\"Marigold could not open file\")
+    ).into_records()")
   }
 }
 
@@ -46,6 +55,12 @@ StreamFunction: nodes::StreamFunctionNode = {
   },
   "filter(" <filter_fn: r"[a-zA-Z_]+"> ")" => nodes::StreamFunctionNode {
     code: format!("filter(|v| futures::future::ready({filter_fn}(v)))")
+    // filters have a bad type that doesn't allow them to compile if passed
+    // an actual async function, so wrap a sync function in a fake future until
+    // the filter types are updated.
+  },
+  "filter_map(" <filter_map_fn: r"[a-zA-Z_]+"> ")" => nodes::StreamFunctionNode {
+    code: format!("filter_map({filter_map_fn})")
   },
   "to_vec()" =>  nodes::StreamFunctionNode {
     code: format!("to_vec().await")
