@@ -48,8 +48,7 @@ async fn main() {
 }
 
 /// Returns a single future, where all computation occurs in a single thread.
-/// This allows Marigold programs to compile with a WASM target.
-#[cfg(not(any(feature = "async-std", feature = "tokio")))]
+#[cfg(not(any(feature = "async-std", feature = "tokio", target_family = "wasm")))]
 fn main() {
     use futures::executor::LocalPool;
 
@@ -65,6 +64,10 @@ fn main() {
         ))
     );
 }
+
+/// On wasm, file system support does not work out-of-the-box with async-std.
+#[cfg(target_family = "wasm")]
+fn main() {}
 
 #[cfg(test)]
 mod tests {
