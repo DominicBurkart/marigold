@@ -29,6 +29,10 @@ async fn main() {
         )
         .await
     );
+
+    m!(read_file("./data/uncompressed.csv", csv)
+        .filter_map(spherical_hull_class_names)
+        .write_file("./output/uncompressed.csv", csv))
 }
 
 /// Uses a multithread async-std runtime.

@@ -1,7 +1,7 @@
 pub struct StreamNode {
     pub inp: InputFunctionNode,
     pub funs: Vec<StreamFunctionNode>,
-    pub out: String,
+    pub out: OutputFunctionNode,
 }
 
 impl StreamNode {
@@ -13,8 +13,9 @@ impl StreamNode {
             .map(|f| f.code.as_str())
             .collect::<Vec<_>>()
             .join(".");
-        let out = &self.out;
-        format!("async {{use ::marigold::marigold_impl::*; {inp}.{intermediate}{out}}}")
+        let stream_prefix = &self.out.stream_prefix;
+        let stream_postfix = &self.out.stream_postfix;
+        format!("async {{use ::marigold::marigold_impl::*; {stream_prefix}{inp}.{intermediate}{stream_postfix}}}")
     }
 }
 
@@ -42,4 +43,9 @@ pub struct InputFunctionNode {
     pub variability: InputVariability,
     pub input_count: InputCount,
     pub code: String,
+}
+
+pub struct OutputFunctionNode {
+    pub stream_prefix: String,
+    pub stream_postfix: String,
 }

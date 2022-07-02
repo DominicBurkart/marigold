@@ -70,6 +70,20 @@ StreamFunction: nodes::StreamFunctionNode = {
   }
 }
 
-OutputFunction: String = {
-  "return" => "".to_string()
+OutputFunction: nodes::OutputFunctionNode = {
+  "return" => nodes::OutputFunctionNode {
+    stream_prefix: "return".to_string(),
+    stream_postfix: ";".to_string(),
+  },
+  "write_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv)" => nodes::OutputFunctionNode {
+    stream_prefix: format!("{{
+      let output_csv_writer = ::marigold::marigold_impl::csv_async::AsyncWriter::from_writer(
+    ::marigold::marigold_impl::async_std::fs::OpenOptions::new()
+       .write(true)
+       .open(\"{path}\")
+       .await
+       .expect(\"Could not write to file\"));
+     "),
+    stream_postfix: ".for_each(|v| output_csv_writer.write_record(v).await.expect(\"could not write record to CSV\")); }".to_string(),
+  }
 }
