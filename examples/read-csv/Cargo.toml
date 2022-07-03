@@ -16,9 +16,10 @@ marigold = {path = "../../marigold", version = "=0.1.9"}
 csv-async = "1.2"
 anyhow = "1"
 futures = {version="0.3", features=["executor"], optional=true}
-tokio = {version = "1", features = ["rt", "macros"], optional=true}
+tokio = {version = "1", features = ["rt", "rt-multi-thread", "macros"], optional=true}
 async-std = {version = "1", features= ["attributes"], optional=true}
 console-subscriber = {version="0.1.4", optional=true }
+serde = {version="1",  features = ["derive"]}
 
 [dev-dependencies]
 tokio = {version="1", features=["full"]}

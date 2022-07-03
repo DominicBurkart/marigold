@@ -1,4 +1,11 @@
 use marigold::m;
+use serde::Serialize;
+
+#[derive(Serialize)]
+struct Ship {
+    class: String,
+    hull: String,
+}
 
 async fn spherical_hull_class_names(
     rec: csv_async::Result<csv_async::StringRecord>,
@@ -6,6 +13,22 @@ async fn spherical_hull_class_names(
     if let Ok(r) = rec {
         if r.get(1).unwrap() == "spherical" {
             return Some(r.get(0).unwrap().to_owned());
+        }
+    } else {
+        eprintln!("Could not read line of CSV: {:?}", rec);
+    }
+    None
+}
+
+#[cfg(feature = "tokio")]
+async fn only_spherical_hulls(rec: csv_async::Result<csv_async::StringRecord>) -> Option<Ship> {
+    if let Ok(r) = rec {
+        let hull = r.get(1).unwrap();
+        if hull == "spherical" {
+            return Some(Ship {
+                class: r.get(0).unwrap().to_string(),
+                hull: hull.to_string(),
+            });
         }
     } else {
         eprintln!("Could not read line of CSV: {:?}", rec);
@@ -31,8 +54,9 @@ async fn main() {
     );
 
     m!(read_file("./data/uncompressed.csv", csv)
-        .filter_map(spherical_hull_class_names)
+        .filter_map(only_spherical_hulls)
         .write_file("./output/uncompressed.csv", csv))
+    .await;
 }
 
 /// Uses a multithread async-std runtime.
