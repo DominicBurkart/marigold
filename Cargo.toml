@@ -5,7 +5,7 @@ members = [
   "marigold-grammar",
   "marigold-impl",
   "examples/color-palette-picker",
-  "examples/read-csv",
+  "examples/csv",
   "tests"
 ]
 resolver = "2"

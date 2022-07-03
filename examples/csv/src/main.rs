@@ -20,7 +20,7 @@ async fn spherical_hull_class_names(
     None
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(any(feature = "async-std", feature = "tokio"))]
 async fn only_spherical_hulls(rec: csv_async::Result<csv_async::StringRecord>) -> Option<Ship> {
     if let Ok(r) = rec {
         let hull = r.get(1).unwrap();
@@ -73,6 +73,11 @@ async fn main() {
         )
         .await
     );
+
+    m!(read_file("./data/uncompressed.csv", csv)
+        .filter_map(only_spherical_hulls)
+        .write_file("./output/uncompressed.csv", csv))
+    .await;
 }
 
 /// Returns a single future, where all computation occurs in a single thread.
