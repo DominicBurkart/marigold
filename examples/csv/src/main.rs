@@ -1,7 +1,8 @@
 use marigold::m;
+use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Eq, PartialEq, Serialize, Deserialize, Debug)]
 struct Ship {
     class: String,
     hull: String,
@@ -20,18 +21,9 @@ async fn spherical_hull_class_names(
     None
 }
 
-#[cfg(any(feature = "async-std", feature = "tokio"))]
-async fn only_spherical_hulls(rec: csv_async::Result<csv_async::StringRecord>) -> Option<Ship> {
-    if let Ok(r) = rec {
-        let hull = r.get(1).unwrap();
-        if hull == "spherical" {
-            return Some(Ship {
-                class: r.get(0).unwrap().to_string(),
-                hull: hull.to_string(),
-            });
-        }
-    } else {
-        eprintln!("Could not read line of CSV: {:?}", rec);
+async fn only_spherical_hulls(ship: Ship) -> Option<Ship> {
+    if ship.hull == "spherical" {
+        return Some(ship);
     }
     None
 }
@@ -42,6 +34,7 @@ async fn only_spherical_hulls(rec: csv_async::Result<csv_async::StringRecord>) -
 async fn main() {
     console_subscriber::init();
 
+    // read records without passing a schema struct
     println!(
         "Best classes: {:?}",
         m!(
@@ -53,9 +46,23 @@ async fn main() {
         .await
     );
 
-    m!(read_file("./data/uncompressed.csv", csv)
+    // read records by passing a schema struct
+    let ships = m!(
+        read_file("./data/uncompressed.csv", csv, struct=Ship)
+        .ok_or_panic()
         .filter_map(only_spherical_hulls)
-        .write_file("./output/uncompressed.csv", csv))
+        .to_vec()
+        .return
+    )
+    .await;
+    println!("Best classes (deserialized): {:?}", ships);
+
+    // write records to csv
+    m!(read_file("./data/uncompressed.csv", csv, struct=Ship)
+        .ok_or_panic()
+        .filter_map(only_spherical_hulls)
+        .write_file("./output/uncompressed.csv", csv)
+    )
     .await;
 }
 
@@ -63,6 +70,7 @@ async fn main() {
 #[cfg(feature = "async-std")]
 #[async_std::main]
 async fn main() {
+    // read records without passing a schema struct
     println!(
         "Best classes: {:?}",
         m!(
@@ -74,9 +82,24 @@ async fn main() {
         .await
     );
 
-    m!(read_file("./data/uncompressed.csv", csv)
+    // read records by passing a schema struct
+    let ships = m!(
+        read_file("./data/uncompressed.csv", csv, struct=Ship)
+        .ok_or_panic()
         .filter_map(only_spherical_hulls)
-        .write_file("./output/uncompressed.csv", csv))
+        .to_vec()
+        .return
+    )
+    .await;
+    println!("Best classes (deserialized): {:?}", ships);
+
+    // write records to csv
+    m!(
+        read_file("./data/uncompressed.csv", csv, struct=Ship)
+            .ok_or_panic()
+            .filter_map(only_spherical_hulls)
+            .write_file("./output/uncompressed.csv", csv)
+    )
     .await;
 }
 
@@ -96,6 +119,16 @@ fn main() {
             .return
         ))
     );
+
+    // read records by passing a schema struct
+    let ships = pool.run_until(m!(
+        read_file("./data/uncompressed.csv", csv, struct=Ship)
+            .ok_or_panic()
+            .filter_map(only_spherical_hulls)
+            .to_vec()
+            .return
+    ));
+    println!("Best classes (deserialized): {:?}", ships);
 }
 
 /// On wasm, file system support does not work out-of-the-box with async-std.
@@ -117,6 +150,30 @@ mod tests {
             )
             .await,
             vec!["Deadalus", "Olympic"]
+        );
+    }
+
+    #[tokio::test]
+    async fn deserialize_and_filter_map() {
+        assert_eq!(
+            m!(
+                read_file("./data/uncompressed.csv", csv, struct=Ship)
+                .ok_or_panic()
+                .filter_map(only_spherical_hulls)
+                .to_vec()
+                .return
+            )
+            .await,
+            vec![
+                Ship {
+                    class: "Deadalus".to_string(),
+                    hull: "spherical".to_string()
+                },
+                Ship {
+                    class: "Olympic".to_string(),
+                    hull: "spherical".to_string()
+                }
+            ]
         );
     }
 }

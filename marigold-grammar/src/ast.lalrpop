@@ -24,7 +24,7 @@ InputFunction: nodes::InputFunctionNode = {
     input_count: nodes::InputCount::Known((n2.parse::<num_bigint::BigInt>().unwrap() - n1.parse::<num_bigint::BigInt>().unwrap()).to_biguint().unwrap()),
     code: format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})"),
   },
-  "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv)" => nodes::InputFunctionNode{
+  "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Variable,
     input_count: nodes::InputCount::Unknown,
     code: format!("::marigold::marigold_impl::csv_async::AsyncReader::from_reader(
@@ -32,6 +32,18 @@ InputFunction: nodes::InputFunctionNode = {
         .await
         .expect(\"Marigold could not open file\")
     ).into_records()")
+  },
+  "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" "," "struct" "=" <deserialization_struct: r"[a-zA-Z_]+"> ")" => nodes::InputFunctionNode {
+    variability: nodes::InputVariability::Variable,
+    input_count: nodes::InputCount::Unknown,
+    code: format!("
+      ::marigold::marigold_impl::csv_async::AsyncDeserializer::from_reader(
+        ::marigold::marigold_impl::async_std::fs::File::open({path})
+          .await
+          .expect(\"Marigold could not open file\")
+      )
+      .into_deserialize::<{deserialization_struct}>()
+    ")
   }
 }
 
@@ -63,10 +75,17 @@ StreamFunction: nodes::StreamFunctionNode = {
     code: format!("filter_map({filter_map_fn})")
   },
   "to_vec()" =>  nodes::StreamFunctionNode {
-    code: format!("to_vec().await")
+    code: format!("collect::<std::vec::Vec<_>>().await")
   },
   "map(" <mapping_fn: r"[a-zA-Z_]+"> ")" => nodes::StreamFunctionNode {
     code: format!("map({mapping_fn})")
+  },
+  "ok()" => nodes::StreamFunctionNode {
+    code: format!("filter(|r| futures::future::ready(r.is_ok()))
+      .map(|r| r.unwrap())")
+  },
+  "ok_or_panic()" => nodes::StreamFunctionNode {
+    code: "map(|r| r.unwrap())".to_string()
   }
 }
 
@@ -75,7 +94,7 @@ OutputFunction: nodes::OutputFunctionNode = {
     stream_prefix: "return".to_string(),
     stream_postfix: ";".to_string(),
   },
-  "write_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv)" => nodes::OutputFunctionNode {
+  "write_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" ")" => nodes::OutputFunctionNode {
     stream_prefix: format!("{{
 
       if let Some(parent) = ::marigold::marigold_impl::async_std::path::Path::new({path}).parent() {{
@@ -84,23 +103,35 @@ OutputFunction: nodes::OutputFunctionNode = {
           .expect(\"could not create parent directory for output file\");
       }}
 
-      let mut output_csv_writer = Box::pin(
-        ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
-          ::marigold::marigold_impl::async_std::fs::File::create({path})
-             .await
-             .expect(\"Could not write to file\")));
-
-      let mut stream_to_write_to_file = Box::pin(
-     "),
-    stream_postfix: format!("
+      let mut output_csv_writer = std::sync::Arc::new(
+        ::marigold::marigold_impl::async_std::sync::Mutex::new(
+          ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+            ::marigold::marigold_impl::async_std::fs::File::create({path})
+               .await
+               .expect(\"Could not write to file\")
+          )
+        )
       );
 
-      while let Some(v) = stream_to_write_to_file.next().await {{
-        output_csv_writer
-          .serialize(&v)
-          .await
-          .expect(\"could not write record to CSV\");
-      }}
-    }}"),
+      let mut stream_to_write =
+
+     "),
+    stream_postfix: "
+        ;
+        {
+          let cloned_writer = output_csv_writer.clone();
+          stream_to_write.for_each(
+            |v| async {
+              cloned_writer
+                .clone()
+                .lock()
+                .await
+                .serialize(v)
+                .await
+                .expect(\"could not write record to CSV\");
+            }
+          ).await;
+        }
+    }".to_string(),
   }
 }
