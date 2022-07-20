@@ -34,36 +34,47 @@ async fn only_spherical_hulls(ship: Ship) -> Option<Ship> {
 async fn main() {
     console_subscriber::init();
 
-    // read records without passing a schema struct
-    println!(
-        "Best classes: {:?}",
-        m!(
-            read_file("./data/uncompressed.csv", csv)
-            .filter_map(spherical_hull_class_names)
-            .to_vec()
-            .return
-        )
-        .await
-    );
+    // // read records without passing a schema struct
+    // println!(
+    //     "Best classes: {:?}",
+    //     m!(
+    //         read_file("./data/uncompressed.csv", csv)
+    //         .filter_map(spherical_hull_class_names)
+    //         .to_vec()
+    //         .return
+    //     )
+    //     .await
+    // );
+    //
+    // // read records by passing a schema struct
+    // let ships = m!(
+    //     read_file("./data/uncompressed.csv", csv, struct=Ship)
+    //     .ok_or_panic()
+    //     .filter_map(only_spherical_hulls)
+    //     .to_vec()
+    //     .return
+    // )
+    // .await;
+    // println!("Best classes (deserialized): {:?}", ships);
 
     // read records by passing a schema struct
     let ships = m!(
-        read_file("./data/uncompressed.csv", csv, struct=Ship)
-        .ok_or_panic()
-        .filter_map(only_spherical_hulls)
-        .to_vec()
-        .return
+        read_file("./data/compressed.csv.gz", csv, struct=Ship)
+            .ok_or_panic()
+            .filter_map(only_spherical_hulls)
+            .to_vec()
+            .return
     )
     .await;
-    println!("Best classes (deserialized): {:?}", ships);
+    println!("Best classes (deserialized, from compressed): {:?}", ships);
 
-    // write records to csv
-    m!(read_file("./data/uncompressed.csv", csv, struct=Ship)
-        .ok_or_panic()
-        .filter_map(only_spherical_hulls)
-        .write_file("./output/uncompressed.csv", csv)
-    )
-    .await;
+    // // write records to csv
+    // m!(read_file("./data/uncompressed.csv", csv, struct=Ship)
+    //     .ok_or_panic()
+    //     .filter_map(only_spherical_hulls)
+    //     .write_file("./output/uncompressed.csv", csv)
+    // )
+    // .await;
 }
 
 /// Uses a multithread async-std runtime.
@@ -158,6 +169,30 @@ mod tests {
         assert_eq!(
             m!(
                 read_file("./data/uncompressed.csv", csv, struct=Ship)
+                .ok_or_panic()
+                .filter_map(only_spherical_hulls)
+                .to_vec()
+                .return
+            )
+            .await,
+            vec![
+                Ship {
+                    class: "Deadalus".to_string(),
+                    hull: "spherical".to_string()
+                },
+                Ship {
+                    class: "Olympic".to_string(),
+                    hull: "spherical".to_string()
+                }
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn read_compressed() {
+        assert_eq!(
+            m!(
+                read_file("./data/compressed.csv.gz", csv, struct=Ship)
                 .ok_or_panic()
                 .filter_map(only_spherical_hulls)
                 .to_vec()

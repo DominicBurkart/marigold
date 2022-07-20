@@ -27,22 +27,97 @@ InputFunction: nodes::InputFunctionNode = {
   "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Variable,
     input_count: nodes::InputCount::Unknown,
+    code: {
+      match path[1..path.len() - 1].rsplit('.').next() {
+         Some(postfix) => match postfix {
+           "gz" => format!("
+           ::marigold::marigold_impl::csv_async::AsyncReader::from_reader(
+             ::marigold::marigold_impl::async_compression::tokio::bufread::GzipDecoder::new(
+              ::marigold::marigold_impl::tokio::io::BufReader::new(
+                ::marigold::marigold_impl::tokio::fs::File::open({path})
+                  .await
+                  .expect(\"Marigold could not open file\")
+              )
+             ).compat()
+           ).into_records()
+           "),
+           postfix => format!("
+           ::marigold::marigold_impl::csv_async::AsyncReader::from_reader(
+              ::marigold::marigold_impl::tokio::fs::File::open({path})
+               .await
+               .expect(\"Marigold could not open file\")
+               .compat()
+           ).into_records()
+           ")
+         },
+         None => format!("
+         ::marigold::marigold_impl::csv_async::AsyncReader::from_reader(
+          ::marigold::marigold_impl::tokio::fs::File::open({path})
+           .await
+           .expect(\"Marigold could not open file\")
+           .compat()
+         ).into_records()
+         ")
+       }
+     }}
+     ,
+  "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" "," "infer_compression" "=" "false" ")" => nodes::InputFunctionNode {
+    variability: nodes::InputVariability::Variable,
+    input_count: nodes::InputCount::Unknown,
     code: format!("::marigold::marigold_impl::csv_async::AsyncReader::from_reader(
-      ::marigold::marigold_impl::async_std::fs::File::open({path})
+      ::marigold::marigold_impl::tokio::fs::File::open({path})
         .await
         .expect(\"Marigold could not open file\")
+        .compat()
     ).into_records()")
   },
   "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" "," "struct" "=" <deserialization_struct: r"[a-zA-Z_]+"> ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Variable,
     input_count: nodes::InputCount::Unknown,
+    code: {
+      match path[1..path.len() - 1].rsplit('.').next() {
+         Some(postfix) => match postfix {
+           "gz" => format!("
+           ::marigold::marigold_impl::csv_async::AsyncDeserializer::from_reader(
+             ::marigold::marigold_impl::async_compression::tokio::bufread::GzipDecoder::new(
+              ::marigold::marigold_impl::tokio::io::BufReader::new(
+                ::marigold::marigold_impl::tokio::fs::File::open({path})
+                  .await
+                  .expect(\"Marigold could not open file\")
+              )
+             ).compat()
+           ).into_deserialize::<{deserialization_struct}>()
+           "),
+           postfix => format!("
+           ::marigold::marigold_impl::csv_async::AsyncDeserializer::from_reader(
+              ::marigold::marigold_impl::tokio::fs::File::open({path})
+               .await
+               .expect(\"Marigold could not open file\")
+               .compat()
+           ).into_deserialize::<{deserialization_struct}>()
+           ")
+         },
+         None => format!("
+         ::marigold::marigold_impl::csv_async::AsyncDeserializer::from_reader(
+          ::marigold::marigold_impl::tokio::fs::File::open({path})
+           .await
+           .expect(\"Marigold could not open file\")
+           .compat()
+         ).into_deserialize::<{deserialization_struct}>()
+         ")
+       }
+    }
+  },
+  "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" "," "struct" "=" <deserialization_struct: r"[a-zA-Z_]+"> "," "infer_compression" "=" "false" ")" => nodes::InputFunctionNode {
+    variability: nodes::InputVariability::Variable,
+    input_count: nodes::InputCount::Unknown,
     code: format!("
       ::marigold::marigold_impl::csv_async::AsyncDeserializer::from_reader(
-        ::marigold::marigold_impl::async_std::fs::File::open({path})
+         ::marigold::marigold_impl::tokio::fs::File::open({path})
           .await
           .expect(\"Marigold could not open file\")
-      )
-      .into_deserialize::<{deserialization_struct}>()
+          .compat()
+      ).into_deserialize::<{deserialization_struct}>()
     ")
   }
 }
@@ -97,18 +172,63 @@ OutputFunction: nodes::OutputFunctionNode = {
   "write_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" ")" => nodes::OutputFunctionNode {
     stream_prefix: format!("{{
 
-      if let Some(parent) = ::marigold::marigold_impl::async_std::path::Path::new({path}).parent() {{
-        ::marigold::marigold_impl::async_std::fs::create_dir_all(parent)
+      if let Some(parent) = ::std::path::Path::new({path}).parent() {{
+        ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
           .await
           .expect(\"could not create parent directory for output file\");
       }}
 
       let mut output_csv_writer = std::sync::Arc::new(
-        ::marigold::marigold_impl::async_std::sync::Mutex::new(
+        ::marigold::marigold_impl::tokio::sync::Mutex::new(
           ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
-            ::marigold::marigold_impl::async_std::fs::File::create({path})
+            ::marigold::marigold_impl::tokio::fs::File::create({path})
                .await
                .expect(\"Could not write to file\")
+               .compat()
+          )
+        )
+      );
+
+      let mut stream_to_write =
+
+     "),
+    stream_postfix: "
+        ;
+        {
+          let cloned_writer = output_csv_writer.clone();
+          stream_to_write.for_each(
+            |v| async {
+              cloned_writer
+                .clone()
+                .lock()
+                .await
+                .serialize(v)
+                .await
+                .expect(\"could not write record to CSV\");
+            }
+          ).await;
+        }
+    }".to_string(),
+  },
+  "write_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" "," "compression" "=" "gz" ")" => nodes::OutputFunctionNode {
+    stream_prefix: format!("{{
+
+      if let Some(parent) = std::path::Path::new({path}).parent() {{
+        ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
+          .await
+          .expect(\"could not create parent directory for output file\");
+      }}
+
+      let mut output_csv_writer = std::sync::Arc::new(
+        ::marigold::marigold_impl::tokio::sync::Mutex::new(
+          ::marigold::marigold_impl::flate2::write::GzEncoder(
+            ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+              ::marigold::marigold_impl::tokio::fs::File::create({path})
+                 .await
+                 .expect(\"Could not write to file\")
+                 .compat()
+            ),
+            ::marigold::marigold_impl::flate2::Compression::best()
           )
         )
       );
