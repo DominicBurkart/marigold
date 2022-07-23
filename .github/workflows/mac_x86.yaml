@@ -15,5 +15,6 @@ jobs:
         with:
           toolchain: stable
       - run:         cargo build
+      - run:         cargo build --features tokio,io
       - run:         cargo build --features tokio
       - run:         cargo build --features async-std

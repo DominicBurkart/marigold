@@ -1,6 +1,6 @@
 [package]
 name = "marigold"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 authors = ["Dominic <code@dominic.computer>"]
 description = "The Marigold Programming Language."
@@ -10,21 +10,22 @@ repository = "https://github.com/DominicBurkart/marigold"
 [features]
 tokio = ["marigold-impl/tokio"]
 async-std = ["marigold-impl/async-std"]
+io = ["marigold-impl/io"]
 
 [dependencies]
 anyhow = "1.0"
 
 [dependencies.marigold-grammar]
 path = "../marigold-grammar"
-version = "=0.1.8"
+version = "=0.1.9"
 
 [dependencies.marigold-macros]
 path = "../marigold-macros"
-version = "=0.1.8"
+version = "=0.1.9"
 
 [dependencies.marigold-impl]
 path = "../marigold-impl"
-version = "=0.1.8"
+version = "=0.1.9"
 
 [dev-dependencies]
 tokio = {version = "1", features = ["full"]}

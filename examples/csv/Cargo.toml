@@ -1,0 +1,26 @@
+[package]
+name = "csv"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["futures"]
+futures = ["dep:futures"]
+tokio = ["dep:tokio", "dep:console-subscriber", "marigold/tokio"]
+async-std = ["dep:async-std"]
+io = ["marigold/io"]
+
+[dependencies]
+marigold = {path = "../../marigold", version = "=0.1.9"}
+csv-async = "1.2"
+anyhow = "1"
+futures = {version="0.3", features=["executor"], optional=true}
+tokio = {version = "1", features = ["rt", "rt-multi-thread", "macros"], optional=true}
+async-std = {version = "1", features= ["attributes"], optional=true}
+console-subscriber = {version="0.1.4", optional=true }
+serde = {version="1",  features = ["derive"]}
+
+[dev-dependencies]
+tokio = {version="1", features=["full"]}
