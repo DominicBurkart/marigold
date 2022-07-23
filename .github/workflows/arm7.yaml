@@ -30,4 +30,9 @@ jobs:
         with:
           use-cross: true
           command:   build
+          args:      --target armv7-unknown-linux-gnueabihf --features tokio
+      - uses:        actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command:   build
           args:      --target armv7-unknown-linux-gnueabihf --features async-std
