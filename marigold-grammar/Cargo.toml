@@ -10,13 +10,15 @@ repository = "https://github.com/DominicBurkart/marigold"
 
 
 [build-dependencies]
-lalrpop = "0.19.7"
+lalrpop = "0.19.8"
 
 [dependencies]
-lalrpop-util = {version="0.19.7", features=["lexer"]}
+lalrpop-util = {version="0.19.8", features=["lexer"]}
 regex = "1"
 num-traits = "0.2"
 itertools = "0.10.2"
 lazy_static = "1.4"
 rusymbols = "0.1.2"
 num-bigint = "0.4"
+strum = "0.24"
+strum_macros = "0.24"

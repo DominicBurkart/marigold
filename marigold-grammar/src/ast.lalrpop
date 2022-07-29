@@ -1,10 +1,39 @@
 use crate::nodes;
+use std::str::FromStr;
 
 grammar;
 
 pub Expr: String = {
-  Stream
+  Stream,
+  StructDeclaration
   // next up: Declaration
+}
+
+// nonsense struct used to handle terminal ambiguity
+FreeText: String = {
+  <text: r"[0-9A-Za-z/_\-]+"> => text.to_string(),
+  <quoted_text: r#""[0-9A-Za-z/._\-\w]+""#> => quoted_text.to_string()
+}
+
+StructDeclaration: String = {
+  "struct" <struct_name: FreeText> "{" <field_declarations: (StructFieldDeclaration ",")*> "}" => crate::nodes::StructDeclarationNode {
+    name: struct_name,
+    fields: {
+      let mut v = Vec::new();
+      for ((field_name, field_value_str), _comma_str) in field_declarations.into_iter() {
+        let field_value = crate::nodes::Primitive::from_str(field_value_str.as_str())
+          .expect("could not parse type in struct definition");
+        v.push((field_name, field_value));
+      }
+      v
+    }
+  }.code()
+}
+
+StructFieldDeclaration: (String, String) = {
+ <field_name: FreeText> ":" <field_value: FreeText> => {
+  (field_name, field_value)
+ }
 }
 
 Stream: String = {
@@ -19,12 +48,12 @@ Stream: String = {
 }
 
 InputFunction: nodes::InputFunctionNode = {
-  "range(" <n1: r"[0-9]+"> "," <n2: r"[0-9]+"> ")" => nodes::InputFunctionNode{
+  "range(" <n1: FreeText> "," <n2: FreeText> ")" => nodes::InputFunctionNode{
     variability: nodes::InputVariability::Constant,
-    input_count: nodes::InputCount::Known((n2.parse::<num_bigint::BigInt>().unwrap() - n1.parse::<num_bigint::BigInt>().unwrap()).to_biguint().unwrap()),
+    input_count: nodes::InputCount::Known((n2.parse::<num_bigint::BigInt>().expect("could not parse input as integer") - n1.parse::<num_bigint::BigInt>().expect("could not parse input as integer")).to_biguint().unwrap()),
     code: format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})"),
   },
-  "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" ")" => nodes::InputFunctionNode {
+  "read_file(" <path: FreeText> "," "csv" ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Variable,
     input_count: nodes::InputCount::Unknown,
     code: {
@@ -61,7 +90,7 @@ InputFunction: nodes::InputFunctionNode = {
        }
      }}
      ,
-  "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" "," "infer_compression" "=" "false" ")" => nodes::InputFunctionNode {
+  "read_file(" <path: FreeText> "," "csv" "," "infer_compression" "=" "false" ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Variable,
     input_count: nodes::InputCount::Unknown,
     code: format!("::marigold::marigold_impl::csv_async::AsyncReader::from_reader(
@@ -71,7 +100,7 @@ InputFunction: nodes::InputFunctionNode = {
         .compat()
     ).into_records()")
   },
-  "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" "," "struct" "=" <deserialization_struct: r"[a-zA-Z_]+"> ")" => nodes::InputFunctionNode {
+  "read_file(" <path: FreeText> "," "csv" "," "struct" "=" <deserialization_struct: FreeText> ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Variable,
     input_count: nodes::InputCount::Unknown,
     code: {
@@ -108,7 +137,7 @@ InputFunction: nodes::InputFunctionNode = {
        }
     }
   },
-  "read_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" "," "struct" "=" <deserialization_struct: r"[a-zA-Z_]+"> "," "infer_compression" "=" "false" ")" => nodes::InputFunctionNode {
+  "read_file(" <path: FreeText> "," "csv" "," "struct" "=" <deserialization_struct: FreeText> "," "infer_compression" "=" "false" ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Variable,
     input_count: nodes::InputCount::Unknown,
     code: format!("
@@ -123,10 +152,10 @@ InputFunction: nodes::InputFunctionNode = {
 }
 
 StreamFunction: nodes::StreamFunctionNode = {
-  "permutations("<n: r"[0-9]+"> ")" => nodes::StreamFunctionNode {
+  "permutations("<n: FreeText> ")" => nodes::StreamFunctionNode {
     code: format!("permutations({n}).await")
   },
-  "permutations_with_replacement("<n: r"[0-9]+"> ")" => nodes::StreamFunctionNode {
+  "permutations_with_replacement("<n: FreeText> ")" => nodes::StreamFunctionNode {
     code: format!("collect_and_apply(|values| async {{
               ::marigold::marigold_impl::gen_nested_iter_yield::nested_iter_yield!(values.iter(), {n}, .to_owned(), ::marigold::marigold_impl::)
           }})
@@ -134,25 +163,25 @@ StreamFunction: nodes::StreamFunctionNode = {
           .await
     ")
   },
-  "combinations("<n: r"[0-9]+"> ")" =>  nodes::StreamFunctionNode {
+  "combinations("<n: FreeText> ")" =>  nodes::StreamFunctionNode {
     code: format!("combinations({n}).await")
   },
-  "keep_first_n(" <n: r"[0-9]+"> "," <value_fn: r"[a-zA-Z_]+"> ")" =>  nodes::StreamFunctionNode {
+  "keep_first_n(" <n: FreeText> "," <value_fn: FreeText> ")" =>  nodes::StreamFunctionNode {
     code: format!("keep_first_n({n}, {value_fn}).await")
   },
-  "filter(" <filter_fn: r"[a-zA-Z_]+"> ")" => nodes::StreamFunctionNode {
+  "filter(" <filter_fn: FreeText> ")" => nodes::StreamFunctionNode {
     code: format!("filter(|v| futures::future::ready({filter_fn}(v)))")
     // filters have a bad type that doesn't allow them to compile if passed
     // an actual async function, so wrap a sync function in a fake future until
     // the filter types are updated.
   },
-  "filter_map(" <filter_map_fn: r"[a-zA-Z_]+"> ")" => nodes::StreamFunctionNode {
+  "filter_map(" <filter_map_fn: FreeText> ")" => nodes::StreamFunctionNode {
     code: format!("filter_map({filter_map_fn})")
   },
   "to_vec()" =>  nodes::StreamFunctionNode {
     code: format!("collect::<std::vec::Vec<_>>().await")
   },
-  "map(" <mapping_fn: r"[a-zA-Z_]+"> ")" => nodes::StreamFunctionNode {
+  "map(" <mapping_fn: FreeText> ")" => nodes::StreamFunctionNode {
     code: format!("map({mapping_fn})")
   },
   "ok()" => nodes::StreamFunctionNode {
@@ -169,7 +198,7 @@ OutputFunction: nodes::OutputFunctionNode = {
     stream_prefix: "return".to_string(),
     stream_postfix: ";".to_string(),
   },
-  "write_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" ")" => nodes::OutputFunctionNode {
+  "write_file(" <path: FreeText> "," "csv" ")" => nodes::OutputFunctionNode {
     stream_prefix: format!("{{
 
       if let Some(parent) = ::std::path::Path::new({path}).parent() {{
@@ -210,7 +239,7 @@ OutputFunction: nodes::OutputFunctionNode = {
         }
     }".to_string(),
   },
-  "write_file(" <path: r#""[0-9A-Za-z/._\-]+""#> "," "csv" "," "compression" "=" "gz" ")" => nodes::OutputFunctionNode {
+  "write_file(" <path: FreeText> "," "csv" "," "compression" "=" "gz" ")" => nodes::OutputFunctionNode {
     stream_prefix: format!("{{
 
       if let Some(parent) = std::path::Path::new({path}).parent() {{
