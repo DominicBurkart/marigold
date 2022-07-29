@@ -68,6 +68,22 @@ async fn main() {
     .await;
     println!("Best classes (deserialized, from compressed): {:?}", ships);
 
+    // declare the struct inside marigold
+    let ships = m!(
+        struct Vaisseau {
+            class: string(10),
+            hull: string(10),
+        }
+
+        read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
+            .ok_or_panic()
+            .filter(is_spherical)
+            .to_vec()
+            .return
+    )
+    .await;
+    println!("Best classes (deserialized, from compressed): {:?}", ships);
+
     // write records to csv
     m!(read_file("./data/uncompressed.csv", csv, struct=Ship)
         .ok_or_panic()

@@ -60,12 +60,13 @@ pub struct StructDeclarationNode {
 impl StructDeclarationNode {
     pub fn code(&self) -> String {
         #[cfg(not(feature = "io"))]
-        let traits = &["Copy", "Clone", "Debug", "PartialEq"].join(", ");
+        let traits = &["Copy", "Clone", "Debug", "Eq", "PartialEq"].join(", ");
         #[cfg(feature = "io")]
         let traits = &[
             "Copy",
             "Clone",
             "Debug",
+            "Eq",
             "PartialEq",
             "Serialize",
             "Deserialize",
@@ -74,14 +75,14 @@ impl StructDeclarationNode {
         let name = &self.name;
         let mut struct_rep = format!(
             "
-        #[derive({traits})]
-        struct {name} {{
-        "
+            #[derive({traits})]
+            struct {name} {{
+            "
         ); // todo add serde de/serialize iff io feature included
         for (field_name, field_type) in &self.fields {
             struct_rep.push_str(field_name.as_str());
             struct_rep.push(':');
-            struct_rep.push_str(primitive_to_type_str(*field_type));
+            struct_rep.push_str(field_type.primitive_to_type_string().as_str());
             struct_rep.push_str(",\n");
         }
         struct_rep.push('}');
@@ -123,26 +124,31 @@ pub enum Primitive {
     Bool,
     #[strum(serialize = "char")]
     Char,
+    #[strum()]
+    Str(u32),
 }
 
-pub fn primitive_to_type_str(p: Primitive) -> &'static str {
-    match p {
-        Primitive::U8 => "u8",
-        Primitive::U16 => "u16",
-        Primitive::U32 => "u32",
-        Primitive::U64 => "u64",
-        Primitive::U128 => "u128",
-        Primitive::USize => "usize",
-        Primitive::I8 => "i8",
-        Primitive::I16 => "i16",
-        Primitive::I32 => "i32",
-        Primitive::I64 => "i64",
-        Primitive::I128 => "i128",
-        Primitive::ISize => "isize",
-        Primitive::F32 => "f32",
-        Primitive::F64 => "f64",
-        Primitive::Bool => "bool",
-        Primitive::Char => "char",
+impl Primitive {
+    pub fn primitive_to_type_string(&self) -> String {
+        match *self {
+            Primitive::U8 => "u8".to_string(),
+            Primitive::U16 => "u16".to_string(),
+            Primitive::U32 => "u32".to_string(),
+            Primitive::U64 => "u64".to_string(),
+            Primitive::U128 => "u128".to_string(),
+            Primitive::USize => "usize".to_string(),
+            Primitive::I8 => "i8".to_string(),
+            Primitive::I16 => "i16".to_string(),
+            Primitive::I32 => "i32".to_string(),
+            Primitive::I64 => "i64".to_string(),
+            Primitive::I128 => "i128".to_string(),
+            Primitive::ISize => "isize".to_string(),
+            Primitive::F32 => "f32".to_string(),
+            Primitive::F64 => "f64".to_string(),
+            Primitive::Bool => "bool".to_string(),
+            Primitive::Char => "char".to_string(),
+            Primitive::Str(v) => format!("::marigold::marigold_impl::arrayvec::ArrayString<{v}>"),
+        }
     }
 }
 
