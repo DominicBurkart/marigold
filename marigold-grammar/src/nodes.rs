@@ -59,10 +59,22 @@ pub struct StructDeclarationNode {
 
 impl StructDeclarationNode {
     pub fn code(&self) -> String {
+        #[cfg(not(feature = "io"))]
+        let traits = &["Copy", "Clone", "Debug", "PartialEq"].join(", ");
+        #[cfg(feature = "io")]
+        let traits = &[
+            "Copy",
+            "Clone",
+            "Debug",
+            "PartialEq",
+            "Serialize",
+            "Deserialize",
+        ]
+        .join(", ");
         let name = &self.name;
         let mut struct_rep = format!(
             "
-        #[derive(Copy, Clone, Debug, PartialEq)]
+        #[derive({traits})]
         struct {name} {{
         "
         ); // todo add serde de/serialize iff io feature included
