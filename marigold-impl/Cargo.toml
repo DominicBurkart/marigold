@@ -29,9 +29,9 @@ num_cpus = {version="1.13.1", optional=true}
 tracing = "0.1"
 csv-async = {version="1.2", optional=true}
 pin-utils = "0.1.0"
-flate2 = "1.0"
 async-compression = {version="0.3.14", features=["tokio", "gzip"], optional=true}
 tokio-util = { version = "0.7.3", features=["compat"], optional=true }
+arrayvec = "0.7.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"]}

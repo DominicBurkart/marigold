@@ -12,6 +12,7 @@ pub use combinations::Combinable;
 pub use keep_first_n::KeepFirstN;
 pub use permutations::Permutable;
 
+pub use arrayvec;
 pub use futures::StreamExt;
 pub use gen_nested_iter_yield;
 pub use genawaiter;
