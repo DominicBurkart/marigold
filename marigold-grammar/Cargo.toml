@@ -8,12 +8,14 @@ description = "Grammar for the marigold language."
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
 
+[features]
+io = []
 
 [build-dependencies]
-lalrpop = "0.19.7"
+lalrpop = "0.19.8"
 
 [dependencies]
-lalrpop-util = {version="0.19.7", features=["lexer"]}
+lalrpop-util = {version="0.19.8", features=["lexer"]}
 regex = "1"
 num-traits = "0.2"
 itertools = "0.10.2"
