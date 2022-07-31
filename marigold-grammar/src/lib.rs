@@ -17,7 +17,7 @@ pub mod nodes;
 lalrpop_mod!(#[allow(clippy::all)] pub ast);
 
 lazy_static! {
-    static ref PARSER: ast::ExprParser = ast::ExprParser::new();
+    static ref PARSER: ast::ProgramParser = ast::ProgramParser::new();
 }
 
 pub fn marigold_parse<'a>(

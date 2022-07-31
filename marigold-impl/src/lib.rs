@@ -16,7 +16,6 @@ pub use arrayvec;
 pub use futures::StreamExt;
 pub use gen_nested_iter_yield;
 pub use genawaiter;
-pub use pin_utils;
 
 #[cfg(feature = "io")]
 pub use async_compression;
@@ -24,6 +23,8 @@ pub use async_compression;
 pub use csv_async;
 #[cfg(feature = "io")]
 pub use flate2;
+#[cfg(feature = "io")]
+pub use serde;
 #[cfg(feature = "io")]
 pub use tokio;
 #[cfg(feature = "io")]

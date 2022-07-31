@@ -1,4 +1,5 @@
-use strum_macros::EnumString;
+use regex::Regex;
+use std::str::FromStr;
 
 pub struct StreamNode {
     pub inp: InputFunctionNode,
@@ -68,8 +69,8 @@ impl StructDeclarationNode {
             "Debug",
             "Eq",
             "PartialEq",
-            "Serialize",
-            "Deserialize",
+            "::marigold::marigold_impl::serde::Serialize",
+            "::marigold::marigold_impl::serde::Deserialize",
         ]
         .join(", ");
         let name = &self.name;
@@ -81,7 +82,7 @@ impl StructDeclarationNode {
         ); // todo add serde de/serialize iff io feature included
         for (field_name, field_type) in &self.fields {
             struct_rep.push_str(field_name.as_str());
-            struct_rep.push(':');
+            struct_rep.push_str(": ");
             struct_rep.push_str(field_type.primitive_to_type_string().as_str());
             struct_rep.push_str(",\n");
         }
@@ -90,42 +91,64 @@ impl StructDeclarationNode {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, EnumString)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Primitive {
-    #[strum(serialize = "u8")]
     U8,
-    #[strum(serialize = "u16")]
     U16,
-    #[strum(serialize = "u32")]
     U32,
-    #[strum(serialize = "u64")]
     U64,
-    #[strum(serialize = "u128")]
     U128,
-    #[strum(serialize = "usize")]
     USize,
-    #[strum(serialize = "i8")]
     I8,
-    #[strum(serialize = "i16")]
     I16,
-    #[strum(serialize = "i32")]
     I32,
-    #[strum(serialize = "i64")]
     I64,
-    #[strum(serialize = "i128")]
     I128,
-    #[strum(serialize = "isize")]
     ISize,
-    #[strum(serialize = "f32")]
     F32,
-    #[strum(serialize = "f64")]
     F64,
-    #[strum(serialize = "bool")]
     Bool,
-    #[strum(serialize = "char")]
     Char,
-    #[strum()]
     Str(u32),
+}
+
+impl FromStr for Primitive {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Primitive, ()> {
+        match s {
+            "u8" => Ok(Primitive::U8),
+            "u16" => Ok(Primitive::U16),
+            "u32" => Ok(Primitive::U32),
+            "u64" => Ok(Primitive::U64),
+            "u128" => Ok(Primitive::U128),
+            "usize" => Ok(Primitive::USize),
+            "i8" => Ok(Primitive::I8),
+            "i16" => Ok(Primitive::I16),
+            "i32" => Ok(Primitive::I32),
+            "i64" => Ok(Primitive::I64),
+            "i128" => Ok(Primitive::I128),
+            "isize" => Ok(Primitive::ISize),
+            "f32" => Ok(Primitive::F32),
+            "f64" => Ok(Primitive::F64),
+            "bool" => Ok(Primitive::Bool),
+            "char" => Ok(Primitive::Char),
+            _ => {
+                lazy_static! {
+                    static ref STRING: Regex = Regex::new(r"string_([0-9_A-Za-z]+)").unwrap();
+                }
+                if let Some(string_def) = STRING.captures(s) {
+                    let size_str = string_def
+                        .get(1)
+                        .expect("Could not find size definition for string field");
+                    let size = u32::from_str(size_str.as_str())
+                        .expect("Could not parse string size in struct. Must be parsable as U32.");
+                    return Ok(Primitive::Str(size));
+                }
+                panic!("Could not parse type defintion: {}", s);
+            }
+        }
+    }
 }
 
 impl Primitive {

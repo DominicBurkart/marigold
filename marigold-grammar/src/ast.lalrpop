@@ -3,7 +3,11 @@ use std::str::FromStr;
 
 grammar;
 
-pub Expr: String = {
+pub Program: String = {
+  Expr* => <>.join("\n\n")
+}
+
+Expr: String = {
   Stream,
   StructDeclaration
   // next up: Declaration

@@ -71,18 +71,20 @@ async fn main() {
     // declare the struct inside marigold
     let ships = m!(
         struct Vaisseau {
-            class: string(10),
-            hull: string(10),
+            class: string_8,
+            hull: string_10,
         }
 
         read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
             .ok_or_panic()
-            .filter(is_spherical)
             .to_vec()
             .return
     )
     .await;
-    println!("Best classes (deserialized, from compressed): {:?}", ships);
+    println!(
+        "All classes (deserialized, from compressed, using Marigold struc definition): {:?}",
+        ships
+    );
 
     // write records to csv
     m!(read_file("./data/uncompressed.csv", csv, struct=Ship)
@@ -99,11 +101,11 @@ fn main() {
     println!("File I/O is currently only supported while using tokio and io.")
 }
 
+#[cfg(feature = "io")]
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[cfg(feature = "io")]
     #[tokio::test]
     async fn read_csv_and_filter_map() {
         assert_eq!(
@@ -118,7 +120,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "io")]
     #[tokio::test]
     async fn deserialize_and_filter_map() {
         assert_eq!(
@@ -143,7 +144,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "io")]
     #[tokio::test]
     async fn read_compressed() {
         assert_eq!(
@@ -166,5 +166,23 @@ mod tests {
                 }
             ]
         );
+
+        // declare the struct inside marigold
+        assert_eq!(
+            m!(
+                struct Vaisseau {
+                    class: string_8,
+                    hull: string_10,
+                }
+
+                read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
+                    .ok_or_panic()
+                    .to_vec()
+                    .return
+            )
+            .await
+            .len(),
+            3
+        )
     }
 }

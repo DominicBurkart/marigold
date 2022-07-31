@@ -8,6 +8,8 @@ description = "Grammar for the marigold language."
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
 
+[features]
+io = []
 
 [build-dependencies]
 lalrpop = "0.19.8"
@@ -20,5 +22,3 @@ itertools = "0.10.2"
 lazy_static = "1.4"
 rusymbols = "0.1.2"
 num-bigint = "0.4"
-strum = "0.24"
-strum_macros = "0.24"
