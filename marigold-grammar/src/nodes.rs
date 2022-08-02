@@ -79,7 +79,7 @@ impl StructDeclarationNode {
             #[derive({traits})]
             struct {name} {{
             "
-        ); // todo add serde de/serialize iff io feature included
+        );
         for (field_name, field_type) in &self.fields {
             struct_rep.push_str(field_name.as_str());
             struct_rep.push_str(": ");
@@ -192,4 +192,81 @@ pub enum PrimitiveValue {
     F64(f64),
     Bool(bool),
     Char(char),
+}
+
+pub struct EnumDeclarationNode {
+    pub name: String,
+    pub fields: Vec<(String, Option<String>)>,
+}
+
+impl EnumDeclarationNode {
+    fn definition_to_strum(maybe_definition: &Option<String>) -> Option<String> {
+        if let Some(definition) = maybe_definition {
+            return match definition.as_str() {
+                "disabled" => Some("disabled".to_string()),
+                "ascii_case_insensitive" => Some("ascii_case_insensitive".to_string()),
+                _ => {
+                    lazy_static! {
+                        static ref VALUES_ARRAY: Regex =
+                            Regex::new(r#"\[(("(?P<serialization_value>[^"]+)"),?[\W]*)+\]"#)
+                                .unwrap();
+                        static ref QUOTED: Regex =
+                            Regex::new(r#""(?P<serialization_value>[^"])+""#).unwrap();
+                    }
+                    let array_values = VALUES_ARRAY
+                        .captures_iter(definition.as_str())
+                        .map(|c| {
+                            let value = &c["serialization_value"];
+                            format!("serialize = \"{value}\"")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if !array_values.is_empty() {
+                        return Some(array_values);
+                    }
+                    if let Some(quoted_value) = QUOTED.captures(definition.as_str()) {
+                        let value = &quoted_value["serialization_value"];
+                        return Some(format!("serialize = \"{value}\""));
+                    }
+                    panic!("Enum value could not be parsed: {}", definition);
+                }
+            };
+        }
+        None
+    }
+
+    pub fn code(&self) -> String {
+        #[cfg(not(feature = "io"))]
+        let traits = &["Copy", "Clone", "Debug", "Eq", "PartialEq"].join(", ");
+        #[cfg(feature = "io")]
+        let traits = &[
+            "Copy",
+            "Clone",
+            "Debug",
+            "Eq",
+            "PartialEq",
+            "::marigold::marigold_impl::serde::Serialize",
+            "::marigold::marigold_impl::serde::Deserialize",
+            "::marigold::marigold_impl::strum::EnumString",
+        ]
+        .join(", ");
+        let name = &self.name;
+        let mut enum_rep = format!(
+            "
+            use ::marigold::marigold_impl::strum as strum;
+
+            #[derive({traits})]
+            enum {name} {{
+            "
+        );
+        for (field_name, serialization_definition) in &self.fields {
+            if let Some(strum_def) = Self::definition_to_strum(serialization_definition) {
+                enum_rep.push_str(format!("#[strum({strum_def})]").as_str());
+            }
+            enum_rep.push_str(field_name.as_str());
+            enum_rep.push_str(",\n");
+        }
+        enum_rep.push('}');
+        enum_rep
+    }
 }

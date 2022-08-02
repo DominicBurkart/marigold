@@ -9,8 +9,8 @@ pub Program: String = {
 
 Expr: String = {
   Stream,
-  StructDeclaration
-  // next up: Declaration
+  StructDeclaration,
+  EnumDeclaration
 }
 
 // nonsense struct used to handle terminal ambiguity
@@ -37,6 +37,28 @@ StructDeclaration: String = {
 StructFieldDeclaration: (String, String) = {
  <field_name: FreeText> ":" <field_value: FreeText> => {
   (field_name, field_value)
+ }
+}
+
+EnumDeclaration: String = {
+  "enum" <enum_name: FreeText> "{" <field_declarations: (EnumFieldDeclaration ",")*> "}" => crate::nodes::EnumDeclarationNode {
+    name: enum_name,
+    fields: field_declarations
+      .into_iter()
+      .map(
+        |((field_name, field_value_str), _comma_str)|
+          (field_name, field_value_str)
+      )
+      .collect::<Vec<(String, Option<String>)>>()
+  }.code()
+}
+
+EnumFieldDeclaration: (String, Option<String>) = {
+ <field_name: FreeText> "=" <field_value: FreeText> => {
+  (field_name, Some(field_value))
+ },
+ <field_name: FreeText> => {
+  (field_name, None)
  }
 }
 

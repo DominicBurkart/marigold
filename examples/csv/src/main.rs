@@ -170,9 +170,14 @@ mod tests {
         // declare the struct inside marigold
         assert_eq!(
             m!(
+                enum Hull {
+                    Spherical = "spherical",
+                    Split = "split",
+                }
+
                 struct Vaisseau {
                     class: string_8,
-                    hull: string_10,
+                    hull: Hull,
                 }
 
                 read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)

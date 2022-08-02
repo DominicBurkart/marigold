@@ -16,6 +16,7 @@ pub use arrayvec;
 pub use futures::StreamExt;
 pub use gen_nested_iter_yield;
 pub use genawaiter;
+pub use strum;
 
 #[cfg(feature = "io")]
 pub use async_compression;
