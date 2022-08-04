@@ -9,8 +9,8 @@ pub Program: String = {
 
 Expr: String = {
   Stream,
-  StructDeclaration
-  // next up: Declaration
+  StructDeclaration,
+  EnumDeclaration
 }
 
 // nonsense struct used to handle terminal ambiguity
@@ -25,7 +25,7 @@ StructDeclaration: String = {
     fields: {
       let mut v = Vec::new();
       for ((field_name, field_value_str), _comma_str) in field_declarations.into_iter() {
-        let field_value = crate::nodes::Primitive::from_str(field_value_str.as_str())
+        let field_value = crate::nodes::Type::from_str(field_value_str.as_str())
           .expect("could not parse type in struct definition");
         v.push((field_name, field_value));
       }
@@ -37,6 +37,28 @@ StructDeclaration: String = {
 StructFieldDeclaration: (String, String) = {
  <field_name: FreeText> ":" <field_value: FreeText> => {
   (field_name, field_value)
+ }
+}
+
+EnumDeclaration: String = {
+  "enum" <enum_name: FreeText> "{" <field_declarations: (EnumFieldDeclaration ",")*> "}" => crate::nodes::EnumDeclarationNode {
+    name: enum_name,
+    fields: field_declarations
+      .into_iter()
+      .map(
+        |((field_name, field_value_str), _comma_str)|
+          (field_name, field_value_str)
+      )
+      .collect::<Vec<(String, Option<String>)>>()
+  }.code()
+}
+
+EnumFieldDeclaration: (String, Option<String>) = {
+ <field_name: FreeText> "=" <field_value: FreeText> => {
+  (field_name, Some(field_value))
+ },
+ <field_name: FreeText> => {
+  (field_name, None)
  }
 }
 

@@ -1,6 +1,8 @@
 use regex::Regex;
 use std::str::FromStr;
 
+const MAX_CUSTOM_TYPE_SIZE: usize = 9_999;
+
 pub struct StreamNode {
     pub inp: InputFunctionNode,
     pub funs: Vec<StreamFunctionNode>,
@@ -55,7 +57,7 @@ pub struct OutputFunctionNode {
 
 pub struct StructDeclarationNode {
     pub name: String,
-    pub fields: Vec<(String, Primitive)>,
+    pub fields: Vec<(String, Type)>,
 }
 
 impl StructDeclarationNode {
@@ -79,7 +81,7 @@ impl StructDeclarationNode {
             #[derive({traits})]
             struct {name} {{
             "
-        ); // todo add serde de/serialize iff io feature included
+        );
         for (field_name, field_type) in &self.fields {
             struct_rep.push_str(field_name.as_str());
             struct_rep.push_str(": ");
@@ -92,7 +94,8 @@ impl StructDeclarationNode {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Primitive {
+#[allow(clippy::large_enum_variant)]
+pub enum Type {
     U8,
     U16,
     U32,
@@ -110,29 +113,30 @@ pub enum Primitive {
     Bool,
     Char,
     Str(u32),
+    Custom(arrayvec::ArrayString<MAX_CUSTOM_TYPE_SIZE>),
 }
 
-impl FromStr for Primitive {
+impl FromStr for Type {
     type Err = ();
 
-    fn from_str(s: &str) -> Result<Primitive, ()> {
+    fn from_str(s: &str) -> Result<Type, ()> {
         match s {
-            "u8" => Ok(Primitive::U8),
-            "u16" => Ok(Primitive::U16),
-            "u32" => Ok(Primitive::U32),
-            "u64" => Ok(Primitive::U64),
-            "u128" => Ok(Primitive::U128),
-            "usize" => Ok(Primitive::USize),
-            "i8" => Ok(Primitive::I8),
-            "i16" => Ok(Primitive::I16),
-            "i32" => Ok(Primitive::I32),
-            "i64" => Ok(Primitive::I64),
-            "i128" => Ok(Primitive::I128),
-            "isize" => Ok(Primitive::ISize),
-            "f32" => Ok(Primitive::F32),
-            "f64" => Ok(Primitive::F64),
-            "bool" => Ok(Primitive::Bool),
-            "char" => Ok(Primitive::Char),
+            "u8" => Ok(Type::U8),
+            "u16" => Ok(Type::U16),
+            "u32" => Ok(Type::U32),
+            "u64" => Ok(Type::U64),
+            "u128" => Ok(Type::U128),
+            "usize" => Ok(Type::USize),
+            "i8" => Ok(Type::I8),
+            "i16" => Ok(Type::I16),
+            "i32" => Ok(Type::I32),
+            "i64" => Ok(Type::I64),
+            "i128" => Ok(Type::I128),
+            "isize" => Ok(Type::ISize),
+            "f32" => Ok(Type::F32),
+            "f64" => Ok(Type::F64),
+            "bool" => Ok(Type::Bool),
+            "char" => Ok(Type::Char),
             _ => {
                 lazy_static! {
                     static ref STRING: Regex = Regex::new(r"string_([0-9_A-Za-z]+)").unwrap();
@@ -143,53 +147,100 @@ impl FromStr for Primitive {
                         .expect("Could not find size definition for string field");
                     let size = u32::from_str(size_str.as_str())
                         .expect("Could not parse string size in struct. Must be parsable as U32.");
-                    return Ok(Primitive::Str(size));
+                    return Ok(Type::Str(size));
                 }
-                panic!("Could not parse type defintion: {}", s);
+                Ok(Type::Custom(
+                    arrayvec::ArrayString::<MAX_CUSTOM_TYPE_SIZE>::from(s)
+                        .expect("type too big for Marigold"),
+                ))
             }
         }
     }
 }
 
-impl Primitive {
+impl Type {
     pub fn primitive_to_type_string(&self) -> String {
         match *self {
-            Primitive::U8 => "u8".to_string(),
-            Primitive::U16 => "u16".to_string(),
-            Primitive::U32 => "u32".to_string(),
-            Primitive::U64 => "u64".to_string(),
-            Primitive::U128 => "u128".to_string(),
-            Primitive::USize => "usize".to_string(),
-            Primitive::I8 => "i8".to_string(),
-            Primitive::I16 => "i16".to_string(),
-            Primitive::I32 => "i32".to_string(),
-            Primitive::I64 => "i64".to_string(),
-            Primitive::I128 => "i128".to_string(),
-            Primitive::ISize => "isize".to_string(),
-            Primitive::F32 => "f32".to_string(),
-            Primitive::F64 => "f64".to_string(),
-            Primitive::Bool => "bool".to_string(),
-            Primitive::Char => "char".to_string(),
-            Primitive::Str(v) => format!("::marigold::marigold_impl::arrayvec::ArrayString<{v}>"),
+            Type::U8 => "u8".to_string(),
+            Type::U16 => "u16".to_string(),
+            Type::U32 => "u32".to_string(),
+            Type::U64 => "u64".to_string(),
+            Type::U128 => "u128".to_string(),
+            Type::USize => "usize".to_string(),
+            Type::I8 => "i8".to_string(),
+            Type::I16 => "i16".to_string(),
+            Type::I32 => "i32".to_string(),
+            Type::I64 => "i64".to_string(),
+            Type::I128 => "i128".to_string(),
+            Type::ISize => "isize".to_string(),
+            Type::F32 => "f32".to_string(),
+            Type::F64 => "f64".to_string(),
+            Type::Bool => "bool".to_string(),
+            Type::Char => "char".to_string(),
+            Type::Str(v) => format!("::marigold::marigold_impl::arrayvec::ArrayString<{v}>"),
+            Type::Custom(v) => v.to_string(),
         }
     }
 }
 
-pub enum PrimitiveValue {
-    U8(u8),
-    U16(u16),
-    U32(u32),
-    U64(u64),
-    U128(u128),
-    USize(usize),
-    I8(i8),
-    I16(i16),
-    I32(i32),
-    I64(i64),
-    I128(i128),
-    ISize(isize),
-    F32(f32),
-    F64(f64),
-    Bool(bool),
-    Char(char),
+pub struct EnumDeclarationNode {
+    pub name: String,
+    pub fields: Vec<(String, Option<String>)>,
+}
+
+impl EnumDeclarationNode {
+    #[allow(dead_code)] // only used if io/serde enabled
+    fn definition_to_serde(maybe_definition: &Option<String>) -> Option<String> {
+        if let Some(definition) = maybe_definition {
+            return match definition.as_str() {
+                "skip" => Some("skip".to_string()),
+                _ => {
+                    lazy_static! {
+                        static ref QUOTED: Regex =
+                            Regex::new(r#""(?P<serialization_value>[^"]+)+""#).unwrap();
+                    }
+                    if let Some(quoted_value) = QUOTED.captures(definition.as_str()) {
+                        let value = &quoted_value["serialization_value"];
+                        return Some(format!("rename = \"{value}\""));
+                    }
+                    panic!("Enum value could not be parsed: {}", definition);
+                }
+            };
+        }
+        None
+    }
+
+    pub fn code(&self) -> String {
+        #[cfg(not(feature = "io"))]
+        let traits = &["Copy", "Clone", "Debug", "Eq", "PartialEq"].join(", ");
+        #[cfg(feature = "io")]
+        let traits = &[
+            "Copy",
+            "Clone",
+            "Debug",
+            "Eq",
+            "PartialEq",
+            "::marigold::marigold_impl::serde::Serialize",
+            "::marigold::marigold_impl::serde::Deserialize",
+        ]
+        .join(", ");
+        let name = &self.name;
+        let mut enum_rep = format!(
+            "
+            #[derive({traits})]
+            enum {name} {{
+            "
+        );
+        #[allow(unused_variables)] // serialization_definition only used if io/serde enabled
+        for (field_name, serialization_definition) in &self.fields {
+            #[cfg(feature = "io")]
+            if let Some(serde_def) = Self::definition_to_serde(serialization_definition) {
+                enum_rep.push_str(format!("#[serde({serde_def})]").as_str())
+            }
+            enum_rep.push_str(field_name.as_str());
+            enum_rep.push_str(",\n");
+        }
+        enum_rep.push('}');
+        enum_rep
+    }
 }
