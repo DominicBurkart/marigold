@@ -25,7 +25,7 @@ StructDeclaration: String = {
     fields: {
       let mut v = Vec::new();
       for ((field_name, field_value_str), _comma_str) in field_declarations.into_iter() {
-        let field_value = crate::nodes::Primitive::from_str(field_value_str.as_str())
+        let field_value = crate::nodes::Type::from_str(field_value_str.as_str())
           .expect("could not parse type in struct definition");
         v.push((field_name, field_value));
       }
