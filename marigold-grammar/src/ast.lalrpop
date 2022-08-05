@@ -15,8 +15,13 @@ Expr: String = {
 
 // nonsense struct used to handle terminal ambiguity
 FreeText: String = {
-  <text: r"[0-9A-Za-z/_\-]+"> => text.to_string(),
-  <quoted_text: r#""[0-9A-Za-z/._\-\w]+""#> => quoted_text.to_string()
+  <text: r"[0-9A-Za-z/_\-]+"> => text.to_string()
+}
+
+// nonsense struct used to handle terminal ambiguity
+QuotedFreeText: String = {
+  <quoted_text: r#""[0-9A-Za-z/._\-\w]+""#> => quoted_text.to_string(),
+  <variable_name: r"[0-9A-Za-z/_\-]+"> => variable_name.to_string()
 }
 
 StructDeclaration: String = {
@@ -54,7 +59,7 @@ EnumDeclaration: String = {
 }
 
 EnumFieldDeclaration: (String, Option<String>) = {
- <field_name: FreeText> "=" <field_value: FreeText> => {
+ <field_name: FreeText> "=" <field_value: QuotedFreeText> => {
   (field_name, Some(field_value))
  },
  <field_name: FreeText> => {
@@ -79,7 +84,7 @@ InputFunction: nodes::InputFunctionNode = {
     input_count: nodes::InputCount::Known((n2.parse::<num_bigint::BigInt>().expect("could not parse input as integer") - n1.parse::<num_bigint::BigInt>().expect("could not parse input as integer")).to_biguint().unwrap()),
     code: format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})"),
   },
-  "read_file(" <path: FreeText> "," "csv" ")" => nodes::InputFunctionNode {
+  "read_file(" <path: QuotedFreeText> "," "csv" ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Variable,
     input_count: nodes::InputCount::Unknown,
     code: {
@@ -116,7 +121,7 @@ InputFunction: nodes::InputFunctionNode = {
        }
      }}
      ,
-  "read_file(" <path: FreeText> "," "csv" "," "infer_compression" "=" "false" ")" => nodes::InputFunctionNode {
+  "read_file(" <path: QuotedFreeText> "," "csv" "," "infer_compression" "=" "false" ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Variable,
     input_count: nodes::InputCount::Unknown,
     code: format!("::marigold::marigold_impl::csv_async::AsyncReader::from_reader(
@@ -126,7 +131,7 @@ InputFunction: nodes::InputFunctionNode = {
         .compat()
     ).into_records()")
   },
-  "read_file(" <path: FreeText> "," "csv" "," "struct" "=" <deserialization_struct: FreeText> ")" => nodes::InputFunctionNode {
+  "read_file(" <path: QuotedFreeText> "," "csv" "," "struct" "=" <deserialization_struct: FreeText> ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Variable,
     input_count: nodes::InputCount::Unknown,
     code: {
@@ -163,7 +168,7 @@ InputFunction: nodes::InputFunctionNode = {
        }
     }
   },
-  "read_file(" <path: FreeText> "," "csv" "," "struct" "=" <deserialization_struct: FreeText> "," "infer_compression" "=" "false" ")" => nodes::InputFunctionNode {
+  "read_file(" <path: QuotedFreeText> "," "csv" "," "struct" "=" <deserialization_struct: FreeText> "," "infer_compression" "=" "false" ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Variable,
     input_count: nodes::InputCount::Unknown,
     code: format!("
@@ -224,7 +229,7 @@ OutputFunction: nodes::OutputFunctionNode = {
     stream_prefix: "return".to_string(),
     stream_postfix: ";".to_string(),
   },
-  "write_file(" <path: FreeText> "," "csv" ")" => nodes::OutputFunctionNode {
+  "write_file(" <path: QuotedFreeText> "," "csv" ")" => nodes::OutputFunctionNode {
     stream_prefix: format!("{{
 
       if let Some(parent) = ::std::path::Path::new({path}).parent() {{
@@ -265,7 +270,7 @@ OutputFunction: nodes::OutputFunctionNode = {
         }
     }".to_string(),
   },
-  "write_file(" <path: FreeText> "," "csv" "," "compression" "=" "gz" ")" => nodes::OutputFunctionNode {
+  "write_file(" <path: QuotedFreeText> "," "csv" "," "compression" "=" "gz" ")" => nodes::OutputFunctionNode {
     stream_prefix: format!("{{
 
       if let Some(parent) = std::path::Path::new({path}).parent() {{
