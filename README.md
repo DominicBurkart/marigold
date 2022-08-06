@@ -20,9 +20,8 @@ let is_odd = |i: &i32| i % 2 == 1;
 let odd_digits = m!(
   range(0, 10)
     .filter(is_odd)
-    .to_vec()
     .return
-).await;
+).await.collect::<Vec<_>>();
 
 println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
 ```

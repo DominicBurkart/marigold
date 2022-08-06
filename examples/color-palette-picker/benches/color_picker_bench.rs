@@ -18,9 +18,11 @@ pub fn bench_color_picker(c: &mut Criterion) {
                 .permutations_with_replacement(3)
                 .combinations(3)
                 .keep_first_n(2, compare_contrast)
-                .to_vec()
                 .return
             )
+            .await
+            .collect::<Vec<_>>()
+            .await
         })
     });
 }

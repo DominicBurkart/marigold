@@ -1,4 +1,5 @@
 use marigold::m;
+use marigold::marigold_impl::StreamExt;
 
 mod lib;
 use lib::compare_contrast;
@@ -15,9 +16,10 @@ async fn main() {
             .permutations_with_replacement(3)
             .combinations(2)
             .keep_first_n(20, compare_contrast)
-            .to_vec()
             .return
         )
+        .await
+        .collect::<Vec<_>>()
         .await
     );
 }
@@ -33,9 +35,10 @@ async fn main() {
             .permutations_with_replacement(3)
             .combinations(2)
             .keep_first_n(20, compare_contrast)
-            .to_vec()
             .return
         )
+        .await
+        .collect::<Vec<_>>()
         .await
     );
 }
@@ -51,9 +54,10 @@ async fn main() {
             .permutations_with_replacement(3)
             .combinations(2)
             .keep_first_n(20, compare_contrast)
-            .to_vec()
             .return
         )
+        .await
+        .collect::<Vec<_>>()
         .await
     );
 }
@@ -72,9 +76,10 @@ mod tests {
                 .permutations_with_replacement(3)
                 .combinations(2)
                 .keep_first_n(2, compare_contrast)
-                .to_vec()
                 .return
             )
+            .await
+            .collect::<Vec<_>>()
             .await,
             vec![
                 vec![vec![0, 0, 0], vec![0, 0, 100]],
