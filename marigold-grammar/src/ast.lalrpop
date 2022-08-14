@@ -5,6 +5,15 @@ grammar;
 
 pub Program: String = {
   Expr* => {
+    let n_streams = <>
+      .iter()
+      .filter(
+        |exp|
+          exp.placement == nodes::Placement::ReturningStream ||
+          exp.placement == nodes::Placement::StreamWithoutSpecificPlacement
+      )
+      .count();
+
     let mut expressions = std::collections::HashMap::new();
     <>
       .into_iter()
@@ -25,10 +34,6 @@ pub Program: String = {
       .join("\n\n");
 
     output.push_str(&before_streams);
-    output.push_str("
-
-    ::marigold::marigold_impl::futures::stream::select_all(vec![
-    ");
 
     let returning_stream_vec = expressions
       .entry(nodes::Placement::ReturningStream)
@@ -36,24 +41,61 @@ pub Program: String = {
 
     let n_returning_streams = returning_stream_vec.len();
 
-    output.push_str(returning_stream_vec.join(",\n\n").as_str());
+    let mut streams_string = "[\n".to_string();
 
-    if returning_stream_vec.len() > 0 {
-      output.push_str(",\n");
+    streams_string.push_str(
+      returning_stream_vec
+        .iter()
+        .map(|stream_def| format!("Box::pin({stream_def}),\n"))
+        .collect::<Vec<_>>()
+        .join("")
+        .as_str()
+    );
+
+    streams_string.push_str(
+      expressions
+        .entry(nodes::Placement::StreamWithoutSpecificPlacement)
+        .or_insert(Vec::new())
+        .iter()
+        .map(|stream_def| format!("Box::pin({stream_def}),\n"))
+        .collect::<Vec<_>>()
+        .join("")
+        .as_str()
+    );
+
+    streams_string.push_str("]\n");
+
+    if n_returning_streams > 0 {
+      output.push_str(
+        format!("
+        /// silly function that uses generics to infer the output type (StreamItem) of the first returning stream, so that
+        /// we can provide the streams as an array of Pin<Box<Stream<Item=StreamItem>>>.
+        #[inline(always)]
+        async fn typed_stream_array<StreamItem, S: ::marigold::marigold_impl::futures::Stream<Item=StreamItem>>(s: S) -> [std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item=StreamItem>>>; {n_streams}] {{
+        ").as_str()
+      );
+      output.push_str(streams_string.as_str());
+      let example_returning_stream = expressions
+        .entry(nodes::Placement::ReturningStream)
+        .or_insert(Vec::new())
+        .iter()
+        .next()
+        .unwrap();
+      output.push_str(format!("}}\nlet streams_array = typed_stream_array({example_returning_stream}).await;").as_str());
+    } else {
+      output.push_str(format!("let streams_array: [std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item=()>>>; {n_streams}] = {streams_string};").as_str());
     }
 
-    output.push_str(expressions
-      .entry(nodes::Placement::StreamWithoutSpecificPlacement)
-      .or_insert(Vec::new())
-      .join(",\n\n").as_str());
+    output.push_str("let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array.into_iter());");
 
-    output.push_str("])");
 
     if n_returning_streams == 0 {
-      output.push_str(".collect::<Vec<()>>()");
+      output.push_str("all_streams.collect::<Vec<()>>().await;\n");
       // ^ completes the stream; vec will always have a length of 0.
+    } else {
+      output.push_str("all_streams\n");
     }
-    output.push_str("\n}");
+    output.push_str("}\n");
 
     output
   }
@@ -199,7 +241,7 @@ InputFunction: nodes::InputFunctionNode = {
 
 StreamFunction: nodes::StreamFunctionNode = {
   "permutations("<n: FreeText> ")" => nodes::StreamFunctionNode {
-    code: format!("permutations({n}).await")
+    code: format!("permutations({n}).await"),
   },
   "permutations_with_replacement("<n: FreeText> ")" => nodes::StreamFunctionNode {
     code: format!("collect_and_apply(|values| async {{
@@ -207,32 +249,32 @@ StreamFunction: nodes::StreamFunctionNode = {
           }})
           .await
           .await
-    ")
+    "),
   },
   "combinations("<n: FreeText> ")" =>  nodes::StreamFunctionNode {
-    code: format!("combinations({n}).await")
+    code: format!("combinations({n}).await"),
   },
   "keep_first_n(" <n: FreeText> "," <value_fn: FreeText> ")" =>  nodes::StreamFunctionNode {
-    code: format!("keep_first_n({n}, {value_fn}).await")
+    code: format!("keep_first_n({n}, {value_fn}).await"),
   },
   "filter(" <filter_fn: FreeText> ")" => nodes::StreamFunctionNode {
-    code: format!("filter(|v| futures::future::ready({filter_fn}(v)))")
-    // filters have a bad type that doesn't allow them to compile if passed
+    code: format!("filter(|v| futures::future::ready({filter_fn}(v)))"),
+    // todo: filters have a bad type that doesn't allow them to compile if passed
     // an actual async function, so wrap a sync function in a fake future until
     // the filter types are updated.
   },
   "filter_map(" <filter_map_fn: FreeText> ")" => nodes::StreamFunctionNode {
-    code: format!("filter_map({filter_map_fn})")
+    code: format!("filter_map({filter_map_fn})"),
   },
   "map(" <mapping_fn: FreeText> ")" => nodes::StreamFunctionNode {
-    code: format!("map({mapping_fn})")
+    code: format!("map({mapping_fn})"),
   },
   "ok()" => nodes::StreamFunctionNode {
     code: format!("filter(|r| futures::future::ready(r.is_ok()))
-      .map(|r| r.unwrap())")
+      .map(|r| r.unwrap())"),
   },
   "ok_or_panic()" => nodes::StreamFunctionNode {
-    code: "map(|r| r.unwrap())".to_string()
+    code: "map(|r| r.unwrap())".to_string(),
   }
 }
 
@@ -251,7 +293,17 @@ OutputFunction: nodes::OutputFunctionNode = {
           .expect(\"could not create parent directory for output file\");
       }}
 
-      let mut output_csv_writer = std::sync::Arc::new(
+      static WRITER: ::marigold::marigold_impl::once_cell::sync::OnceCell<
+        ::marigold::marigold_impl::tokio::sync::Mutex<
+          ::marigold::marigold_impl::csv_async::AsyncSerializer<
+            ::marigold::marigold_impl::tokio_util::compat::Compat<
+              ::marigold::marigold_impl::tokio::fs::File
+            >
+          >
+        >
+      > = ::marigold::marigold_impl::once_cell::sync::OnceCell::new();
+
+      WRITER.set(
         ::marigold::marigold_impl::tokio::sync::Mutex::new(
           ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
             ::marigold::marigold_impl::tokio::fs::File::create({path})
@@ -260,28 +312,26 @@ OutputFunction: nodes::OutputFunctionNode = {
                .compat()
           )
         )
-      );
+      ).expect(\"Could not put CSV writer into OnceCell\");
 
       let mut stream_to_write =
 
      "),
     stream_postfix: "
         ;
-        {
-          let cloned_writer = output_csv_writer.clone();
-          stream_to_write.filter_map(
-            |v| async {
-              cloned_writer
-                .clone()
-                .lock()
-                .await
-                .serialize(v)
-                .await
-                .expect(\"could not write record to CSV\");
-              None
-            }
-          )
-        }
+        stream_to_write.filter_map(
+          |v| async move {
+            WRITER
+              .get()
+              .expect(\"Could not get CSV writer from OnceCell\")
+              .lock()
+              .await
+              .serialize(v)
+              .await
+              .expect(\"could not write record to CSV\");
+            None
+          }
+        )
     }".to_string(),
     placement: nodes::Placement::StreamWithoutSpecificPlacement,
   },
