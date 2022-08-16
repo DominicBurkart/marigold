@@ -57,28 +57,9 @@ pub enum Placement {
     StreamWithoutSpecificPlacement,
 }
 
-#[derive(Eq)]
 pub struct ExpressionWithPlacement {
     pub placement: Placement,
     pub code: String,
-}
-
-impl PartialEq for ExpressionWithPlacement {
-    fn eq(&self, other: &Self) -> bool {
-        self.placement == other.placement
-    }
-}
-
-impl PartialOrd for ExpressionWithPlacement {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.placement.cmp(&other.placement))
-    }
-}
-
-impl Ord for ExpressionWithPlacement {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.placement.cmp(&other.placement)
-    }
 }
 
 pub struct OutputFunctionNode {

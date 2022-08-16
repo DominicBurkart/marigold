@@ -41,7 +41,7 @@ pub Program: String = {
 
     let n_returning_streams = returning_stream_vec.len();
 
-    let mut streams_string = "[\n".to_string();
+    let mut streams_string = "vec![\n".to_string();
 
     streams_string.push_str(
       returning_stream_vec
@@ -68,25 +68,20 @@ pub Program: String = {
     if n_returning_streams > 0 {
       output.push_str(
         format!("
-        /// silly function that uses generics to infer the output type (StreamItem) of the first returning stream, so that
+        /// silly function that uses generics to infer the output type (StreamItem) via generics, so that
         /// we can provide the streams as an array of Pin<Box<Stream<Item=StreamItem>>>.
         #[inline(always)]
-        async fn typed_stream_array<StreamItem, S: ::marigold::marigold_impl::futures::Stream<Item=StreamItem>>(s: S) -> [std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item=StreamItem>>>; {n_streams}] {{
+        fn typed_stream_vec<StreamItem>(v: Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>>) -> Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>> {{
+         v
+        }}
         ").as_str()
       );
-      output.push_str(streams_string.as_str());
-      let example_returning_stream = expressions
-        .entry(nodes::Placement::ReturningStream)
-        .or_insert(Vec::new())
-        .iter()
-        .next()
-        .unwrap();
-      output.push_str(format!("}}\nlet streams_array = typed_stream_array({example_returning_stream}).await;").as_str());
+      output.push_str(format!("let streams_array = typed_stream_vec({streams_string});").as_str());
     } else {
-      output.push_str(format!("let streams_array: [std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item=()>>>; {n_streams}] = {streams_string};").as_str());
+      output.push_str(format!("let streams_array:  Vec<core::pin::Pin<Box<dyn futures::Stream<Item=()>>>> = {streams_string};").as_str());
     }
 
-    output.push_str("let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array.into_iter());");
+    output.push_str("let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array);");
 
 
     if n_returning_streams == 0 {
@@ -281,7 +276,7 @@ StreamFunction: nodes::StreamFunctionNode = {
 OutputFunction: nodes::OutputFunctionNode = {
   "return" => nodes::OutputFunctionNode {
     stream_prefix: "".to_string(),
-    stream_postfix: "".to_string(),
+    stream_postfix: ".map(|v| v.to_owned())".to_string(),
     placement: nodes::Placement::ReturningStream,
   },
   "write_file(" <path: QuotedFreeText> "," "csv" ")" => nodes::OutputFunctionNode {
