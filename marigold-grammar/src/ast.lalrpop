@@ -66,17 +66,7 @@ pub Program: String = {
     streams_string.push_str("]\n");
 
     if n_returning_streams > 0 {
-      output.push_str(
-        format!("
-        /// silly function that uses generics to infer the output type (StreamItem) via generics, so that
-        /// we can provide the streams as an array of Pin<Box<Stream<Item=StreamItem>>>.
-        #[inline(always)]
-        fn typed_stream_vec<StreamItem>(v: Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>>) -> Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>> {{
-         v
-        }}
-        ").as_str()
-      );
-      output.push_str(format!("let streams_array = typed_stream_vec({streams_string});").as_str());
+      output.push_str(format!("let streams_array: Vec<core::pin::Pin<Box<dyn futures::Stream<Item=_>>>> = {streams_string};").as_str());
     } else {
       output.push_str(format!("let streams_array:  Vec<core::pin::Pin<Box<dyn futures::Stream<Item=()>>>> = {streams_string};").as_str());
     }
