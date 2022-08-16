@@ -5,7 +5,9 @@ mod tests {
 
     #[tokio::test]
     async fn map() {
-        let double = |x| x * 2;
+        fn double(v: i32) -> i32 {
+            v * 2
+        }
         let r = m!(
             range(0, 3)
                 .map(double)
@@ -48,7 +50,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter() {
-        let is_odd_number = |i: &i32| i % 2 == 1;
+        fn is_odd_number(i: &i32) -> bool {
+            i % 2 == 1
+        }
 
         assert_eq!(
             m!(

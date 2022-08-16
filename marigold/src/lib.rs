@@ -9,7 +9,9 @@
 //! use marigold::m;
 //! # use marigold::marigold_impl::StreamExt;
 //!
-//! let is_odd = |i: &i32| i % 2 == 1;
+//! fn is_odd(i: &i32) -> bool {
+//!   i % 2 == 1
+//! }
 //!
 //! let odd_digits = m!(
 //!  range(0, 10)
