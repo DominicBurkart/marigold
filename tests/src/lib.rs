@@ -1,16 +1,20 @@
 #[cfg(test)]
 mod tests {
     use marigold::m;
+    use marigold::marigold_impl::StreamExt;
 
     #[tokio::test]
     async fn map() {
-        let double = |x| x * 2;
+        fn double(v: i32) -> i32 {
+            v * 2
+        }
         let r = m!(
             range(0, 3)
                 .map(double)
-                .to_vec()
                 .return
         )
+        .await
+        .collect::<Vec<_>>()
         .await;
         assert_eq!(r, vec![0, 2, 4]);
     }
@@ -21,9 +25,10 @@ mod tests {
             range(0, 2)
                 .permutations(2)
                 .combinations(2)
-                .to_vec()
                 .return
         )
+        .await
+        .collect::<Vec<_>>()
         .await;
         assert_eq!(r, vec![vec![vec![0, 1], vec![1, 0]]]);
     }
@@ -35,24 +40,28 @@ mod tests {
             range(0, 2)
                 .permutations(2)
                 .keep_first_n(1, sorter)
-                .to_vec()
                 .return
         )
+        .await
+        .collect::<Vec<_>>()
         .await;
         assert_eq!(r, vec![vec![1, 0]]);
     }
 
     #[tokio::test]
     async fn test_filter() {
-        let is_odd_number = |i: &i32| i % 2 == 1;
+        fn is_odd_number(i: &i32) -> bool {
+            i % 2 == 1
+        }
 
         assert_eq!(
             m!(
                 range(0, 10)
                 .filter(is_odd_number)
-                .to_vec()
                 .return
             )
+            .await
+            .collect::<Vec<_>>()
             .await,
             vec![1, 3, 5, 7, 9]
         );
@@ -64,9 +73,10 @@ mod tests {
             m!(
                 range(0, 3)
                     .permutations_with_replacement(2)
-                    .to_vec()
                     .return
             )
+            .await
+            .collect::<Vec<_>>()
             .await,
             vec![
                 vec![0, 0],
