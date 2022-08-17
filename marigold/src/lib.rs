@@ -7,15 +7,17 @@
 //! # #[tokio::main]
 //! # async fn main() {
 //! use marigold::m;
+//! # use marigold::marigold_impl::StreamExt;
 //!
-//! let is_odd = |i: &i32| i % 2 == 1;
+//! fn is_odd(i: &i32) -> bool {
+//!   i % 2 == 1
+//! }
 //!
 //! let odd_digits = m!(
 //!  range(0, 10)
 //!    .filter(is_odd)
-//!    .to_vec()
 //!    .return
-//! ).await;
+//! ).await.collect::<Vec<_>>().await;
 //!
 //! assert_eq!(odd_digits, vec![1, 3, 5, 7, 9]);
 //! # }

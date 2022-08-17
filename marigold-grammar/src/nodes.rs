@@ -20,7 +20,7 @@ impl StreamNode {
             .join(".");
         let stream_prefix = &self.out.stream_prefix;
         let stream_postfix = &self.out.stream_postfix;
-        format!("async {{use ::marigold::marigold_impl::*; {stream_prefix}{inp}.{intermediate}{stream_postfix}}}")
+        format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{inp}.{intermediate}{stream_postfix}}}")
     }
 }
 
@@ -50,9 +50,22 @@ pub struct InputFunctionNode {
     pub code: String,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Placement {
+    BeforeStreams,
+    ReturningStream,
+    StreamWithoutSpecificPlacement,
+}
+
+pub struct ExpressionWithPlacement {
+    pub placement: Placement,
+    pub code: String,
+}
+
 pub struct OutputFunctionNode {
     pub stream_prefix: String,
     pub stream_postfix: String,
+    pub placement: Placement,
 }
 
 pub struct StructDeclarationNode {
@@ -235,7 +248,7 @@ impl EnumDeclarationNode {
         for (field_name, serialization_definition) in &self.fields {
             #[cfg(feature = "io")]
             if let Some(serde_def) = Self::definition_to_serde(serialization_definition) {
-                enum_rep.push_str(format!("#[serde({serde_def})]").as_str())
+                enum_rep.push_str(format!("#[serde({serde_def})]\n").as_str())
             }
             enum_rep.push_str(field_name.as_str());
             enum_rep.push_str(",\n");

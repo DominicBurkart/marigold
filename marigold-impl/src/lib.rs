@@ -16,6 +16,7 @@ pub use arrayvec;
 pub use futures::StreamExt;
 pub use gen_nested_iter_yield;
 pub use genawaiter;
+pub use once_cell;
 
 #[cfg(feature = "io")]
 pub use async_compression;
@@ -27,5 +28,7 @@ pub use flate2;
 pub use serde;
 #[cfg(feature = "io")]
 pub use tokio;
+#[cfg(feature = "io")]
+pub use tokio_util;
 #[cfg(feature = "io")]
 pub use tokio_util::compat::TokioAsyncReadCompatExt;
