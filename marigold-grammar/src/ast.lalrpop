@@ -276,7 +276,7 @@ StreamFunction: nodes::StreamFunctionNode = {
 OutputFunction: nodes::OutputFunctionNode = {
   "return" => nodes::OutputFunctionNode {
     stream_prefix: "".to_string(),
-    stream_postfix: ".map(|v| v.to_owned())".to_string(),
+    stream_postfix: "".to_string(),
     placement: nodes::Placement::ReturningStream,
   },
   "write_file(" <path: QuotedFreeText> "," "csv" ")" => nodes::OutputFunctionNode {
