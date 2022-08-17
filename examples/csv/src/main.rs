@@ -12,14 +12,6 @@ struct Ship {
 }
 
 #[allow(dead_code)]
-async fn spherical_hull_class_names(rec: csv_async::StringRecord) -> Option<String> {
-    if rec.get(1).unwrap() == "spherical" {
-        return Some(rec.get(0).unwrap().to_owned());
-    }
-    None
-}
-
-#[allow(dead_code)]
 fn is_spherical(ship: &Ship) -> bool {
     ship.hull == "spherical"
 }
