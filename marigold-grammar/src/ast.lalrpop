@@ -278,8 +278,25 @@ StreamFunction: nodes::StreamFunctionNode = {
       .filter_map(|v| v)"),
     };
   },
-  "filter_map(" <filter_map_fn: FreeText> ")" => nodes::StreamFunctionNode {
-    code: format!("filter_map({filter_map_fn})"),
+  "filter_map(" <filter_map_fn: FreeText> ")" => {
+    #[cfg(not(any(feature = "tokio", feature = "async-std")))]
+    return nodes::StreamFunctionNode {
+      code: format!("filter_map({filter_map_fn})")
+    };
+
+    #[cfg(any(feature = "tokio", feature = "async-std"))]
+    return nodes::StreamFunctionNode {
+      code: format!("
+      map({filter_map_fn})
+      .buffered(
+        std::cmp::max(
+          2 * (::marigold::marigold_impl::num_cpus::get() - 1),
+          2
+        )
+      )
+      .filter_map(|v| v)
+      ")
+    };
   },
   "map(" <mapping_fn: FreeText> ")" => {
     #[cfg(any(feature = "tokio", feature = "async-std"))]
