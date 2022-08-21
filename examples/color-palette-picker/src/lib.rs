@@ -6,10 +6,44 @@ use prisma::{lms::LmsCam2002, FromColor, Rgb};
 
 static SRGB: Lazy<SRgb<f64>> = Lazy::new(SRgb::new);
 
-/// Returns the minimal contrast across normative vision as
-/// well as red-green, blue-yellow, and total color blindness.
-fn min_contrast<T>(_colors: Vec<LmsCam2002<T>>) -> u32 {
-    10 // unimplemented
+/// Returns the minimal contrast across normative vision, deuteranomaly, protanomaly, and
+/// tritanomaly.
+fn min_contrast(colors: Vec<LmsCam2002<f64>>) -> f64 {
+    let mut min = f64::MAX;
+    for i1 in 0..colors.len() {
+        for i2 in 0..colors.len() {
+            if i1 != i2 {
+                let color1 = colors[i1];
+                let color2 = colors[i2];
+
+                let rgb_contrast = (color1.l() - color2.l()).abs()
+                    + (color1.m() - color2.m()).abs()
+                    + (color1.s() - color2.s()).abs();
+                if rgb_contrast < min {
+                    min = rgb_contrast;
+                }
+
+                let deuteranomaly_contrast =
+                    (color1.l() - color2.l()).abs() + (color1.s() - color2.s()).abs();
+                if deuteranomaly_contrast < min {
+                    min = deuteranomaly_contrast;
+                }
+
+                let protanomaly_contrast =
+                    (color1.m() - color2.m()).abs() + (color1.s() - color2.s()).abs();
+                if protanomaly_contrast < min {
+                    min = protanomaly_contrast;
+                }
+
+                let tritanomaly_contrast =
+                    (color1.l() - color2.l()).abs() + (color1.m() - color2.m()).abs();
+                if tritanomaly_contrast < min {
+                    min = tritanomaly_contrast;
+                }
+            }
+        }
+    }
+    min
 }
 
 /// Uses [prisma](https://crates.io/crates/prisma) to convert u8 RGBs into
@@ -33,5 +67,5 @@ pub fn compare_contrast(palette1: &Vec<Vec<u8>>, palette2: &Vec<Vec<u8>>) -> std
         to_lms(v),
         for v in palette2.iter()
     ]);
-    palette_1_min_contrast.cmp(&palette_2_min_contrast)
+    palette_1_min_contrast.total_cmp(&palette_2_min_contrast)
 }

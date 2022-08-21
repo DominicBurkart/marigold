@@ -82,8 +82,8 @@ mod tests {
             .collect::<Vec<_>>()
             .await,
             vec![
-                vec![vec![0, 0, 0], vec![0, 0, 100]],
-                vec![vec![0, 0, 0], vec![0, 0, 50]]
+                vec![vec![0, 0, 0], vec![250, 250, 250]],
+                vec![vec![0, 0, 50], vec![250, 250, 250]]
             ]
         );
     }
