@@ -18,6 +18,9 @@ pub use gen_nested_iter_yield;
 pub use genawaiter;
 pub use once_cell;
 
+#[cfg(any(feature = "tokio", feature = "async-std"))]
+pub use num_cpus;
+
 #[cfg(feature = "io")]
 pub use async_compression;
 #[cfg(feature = "io")]
