@@ -252,11 +252,31 @@ StreamFunction: nodes::StreamFunctionNode = {
   "keep_first_n(" <n: FreeText> "," <value_fn: FreeText> ")" =>  nodes::StreamFunctionNode {
     code: format!("keep_first_n({n}, {value_fn}).await"),
   },
-  "filter(" <filter_fn: FreeText> ")" => nodes::StreamFunctionNode {
-    code: format!("filter(|v| ::marigold::marigold_impl::futures::future::ready({filter_fn}(v)))"),
-    // todo: filters have a bad type that doesn't allow them to compile if passed
-    // an actual async function, so wrap a sync function in a fake future until
-    // the filter types are updated.
+  "filter(" <filter_fn: FreeText> ")" => {
+    #[cfg(not(any(feature = "tokio", feature = "async-std")))]
+    return nodes::StreamFunctionNode {
+      code: format!("filter(|v| futures::future::ready({filter_fn}(v)))"),
+      // todo: filters have a bad type that doesn't allow them to compile if passed
+      // an actual async function, so wrap a sync function in a fake future until
+      // the filter types are updated.
+    };
+
+    #[cfg(any(feature = "tokio", feature = "async-std"))]
+    return nodes::StreamFunctionNode {
+      code: format!("map(|v| async move {{
+        if {filter_fn}(&v) {
+          Some(v)
+        }
+        None
+      }})
+      .buffered(
+        std::cmp::max(
+          2 * (::marigold::marigold_impl::num_cpus::get() - 1),
+          2
+        )
+      )
+      .filter_map(|v| v)"),
+    };
   },
   "filter_map(" <filter_map_fn: FreeText> ")" => nodes::StreamFunctionNode {
     code: format!("filter_map({filter_map_fn})"),
