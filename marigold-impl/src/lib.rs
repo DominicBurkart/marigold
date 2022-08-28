@@ -32,6 +32,12 @@ pub use serde;
 #[cfg(feature = "io")]
 pub use tokio;
 #[cfg(feature = "io")]
+pub use tokio::io::AsyncWriteExt;
+#[cfg(feature = "io")]
 pub use tokio_util;
 #[cfg(feature = "io")]
 pub use tokio_util::compat::TokioAsyncReadCompatExt;
+#[cfg(feature = "io")]
+pub use tokio_util::compat::TokioAsyncWriteCompatExt;
+#[cfg(feature = "io")]
+pub mod writer;

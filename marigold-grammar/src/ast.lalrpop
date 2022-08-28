@@ -252,14 +252,51 @@ StreamFunction: nodes::StreamFunctionNode = {
   "keep_first_n(" <n: FreeText> "," <value_fn: FreeText> ")" =>  nodes::StreamFunctionNode {
     code: format!("keep_first_n({n}, {value_fn}).await"),
   },
-  "filter(" <filter_fn: FreeText> ")" => nodes::StreamFunctionNode {
-    code: format!("filter(|v| ::marigold::marigold_impl::futures::future::ready({filter_fn}(v)))"),
-    // todo: filters have a bad type that doesn't allow them to compile if passed
-    // an actual async function, so wrap a sync function in a fake future until
-    // the filter types are updated.
+  "filter(" <filter_fn: FreeText> ")" => {
+    #[cfg(not(any(feature = "tokio", feature = "async-std")))]
+    return nodes::StreamFunctionNode {
+      code: format!("filter(|v| futures::future::ready({filter_fn}(v)))"),
+      // todo: filters have a bad type that doesn't allow them to compile if passed
+      // an actual async function, so wrap a sync function in a fake future until
+      // the filter types are updated.
+    };
+
+    #[cfg(any(feature = "tokio", feature = "async-std"))]
+    return nodes::StreamFunctionNode {
+      code: format!("map(|v| async move {{
+        if {filter_fn}(&v) {
+          Some(v)
+        }
+        None
+      }})
+      .buffered(
+        std::cmp::max(
+          2 * (::marigold::marigold_impl::num_cpus::get() - 1),
+          2
+        )
+      )
+      .filter_map(|v| v)"),
+    };
   },
-  "filter_map(" <filter_map_fn: FreeText> ")" => nodes::StreamFunctionNode {
-    code: format!("filter_map({filter_map_fn})"),
+  "filter_map(" <filter_map_fn: FreeText> ")" => {
+    #[cfg(not(any(feature = "tokio", feature = "async-std")))]
+    return nodes::StreamFunctionNode {
+      code: format!("filter_map({filter_map_fn})")
+    };
+
+    #[cfg(any(feature = "tokio", feature = "async-std"))]
+    return nodes::StreamFunctionNode {
+      code: format!("
+      map({filter_map_fn})
+      .buffered(
+        std::cmp::max(
+          2 * (::marigold::marigold_impl::num_cpus::get() - 1),
+          2
+        )
+      )
+      .filter_map(|v| v)
+      ")
+    };
   },
   "map(" <mapping_fn: FreeText> ")" => {
     #[cfg(any(feature = "tokio", feature = "async-std"))]
@@ -288,101 +325,332 @@ OutputFunction: nodes::OutputFunctionNode = {
     stream_postfix: "".to_string(),
     placement: nodes::Placement::ReturningStream,
   },
-  "write_file(" <path: QuotedFreeText> "," "csv" ")" => nodes::OutputFunctionNode {
+  "write_file(" <path: QuotedFreeText> "," "csv" ")" => {
+    if path.ends_with(".gz\"") {
+      return nodes::OutputFunctionNode {
+        stream_prefix: format!("{{
+          if let Some(parent) = ::std::path::Path::new({path}).parent() {{
+            ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
+              .await
+              .expect(\"could not create parent directory for output file\");
+          }}
+
+          static WRITER: ::marigold::marigold_impl::once_cell::sync::OnceCell<
+            ::marigold::marigold_impl::tokio::sync::Mutex<
+              ::marigold::marigold_impl::csv_async::AsyncSerializer<
+                  ::marigold::marigold_impl::tokio_util::compat::Compat<
+                    ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder<
+                        ::marigold::marigold_impl::writer::Writer
+                    >
+                  >
+              >
+            >
+          > = ::marigold::marigold_impl::once_cell::sync::OnceCell::new();
+
+          WRITER.set(
+            ::marigold::marigold_impl::tokio::sync::Mutex::new(
+              ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder::new(
+                  ::marigold::marigold_impl::writer::Writer::file(
+                    ::marigold::marigold_impl::tokio::fs::File::create({path})
+                       .await
+                       .expect(\"Could not write to file\")
+                  )
+                )
+                .compat_write()
+              )
+            )
+          ).expect(\"Could not put CSV writer into OnceCell\");
+
+          let mut stream_to_write =
+
+         "),
+        stream_postfix: "
+            ;
+            stream_to_write.filter_map(
+              |v| async move {
+                WRITER
+                  .get()
+                  .expect(\"Could not get CSV writer from OnceCell\")
+                  .lock()
+                  .await
+                  .serialize(v)
+                  .await
+                  .expect(\"could not write record to CSV\");
+                None
+              }
+            ).chain(
+              // after the stream is complete, flush the writer.
+              ::marigold::marigold_impl::futures::stream::iter(0..1)
+                .filter_map(|_v| async {
+                  let mut serializer_guard = WRITER
+                    .get() // gets Mutex<...>
+                    .expect(\"Could not get CSV writer from OnceCell\")
+                    .lock()
+                    .await;
+                  let mut serializer = std::mem::replace(
+                    &mut *serializer_guard,
+                    ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                      ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder::new(
+                        ::marigold::marigold_impl::writer::Writer::vector()
+                      )
+                      .compat_write()
+                    )
+                  );
+                  serializer
+                    .into_inner()
+                    .await
+                    .expect(\"Could not get underlying writer from serializer\")
+                    .get_mut()
+                    .shutdown()
+                    .await
+                    .expect(\"Could not shut down underlying writer\");
+                  None
+                })
+            )
+        }".to_string(),
+        placement: nodes::Placement::StreamWithoutSpecificPlacement,
+      };
+    } else {
+      return nodes::OutputFunctionNode {
+        stream_prefix: format!("{{
+            if let Some(parent) = ::std::path::Path::new({path}).parent() {{
+              ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
+                .await
+                .expect(\"could not create parent directory for output file\");
+            }}
+
+            static WRITER: ::marigold::marigold_impl::once_cell::sync::OnceCell<
+              ::marigold::marigold_impl::tokio::sync::Mutex<
+                ::marigold::marigold_impl::csv_async::AsyncSerializer<
+                  ::marigold::marigold_impl::tokio_util::compat::Compat<
+                    ::marigold::marigold_impl::writer::Writer
+                  >
+                >
+              >
+            > = ::marigold::marigold_impl::once_cell::sync::OnceCell::new();
+
+            WRITER.set(
+              ::marigold::marigold_impl::tokio::sync::Mutex::new(
+                ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                  ::marigold::marigold_impl::writer::Writer::file(
+                    ::marigold::marigold_impl::tokio::fs::File::create({path})
+                       .await
+                       .expect(\"Could not write to file\")
+                  )
+                  .compat_write()
+                )
+              )
+            ).expect(\"Could not put CSV writer into OnceCell\");
+
+            let mut stream_to_write =
+
+           "),
+          stream_postfix: "
+              ;
+              stream_to_write.filter_map(
+                |v| async move {
+                  WRITER
+                    .get()
+                    .expect(\"Could not get CSV writer from OnceCell\")
+                    .lock()
+                    .await
+                    .serialize(v)
+                    .await
+                    .expect(\"could not write record to CSV\");
+                  None
+                }
+              ).chain(
+                // after the stream is complete, flush the writer.
+                ::marigold::marigold_impl::futures::stream::iter(0..1)
+                  .filter_map(|_v| async {
+                      let mut serializer_guard = WRITER
+                        .get() // gets Mutex<...>
+                        .expect(\"Could not get CSV writer from OnceCell\")
+                        .lock()
+                        .await;
+                      let mut serializer = std::mem::replace(
+                        &mut *serializer_guard,
+                        ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                            ::marigold::marigold_impl::writer::Writer::vector()
+                              .compat_write()
+                        )
+                      );
+                      serializer
+                        .into_inner()
+                        .await
+                        .expect(\"Could not get underlying writer from serializer\")
+                        .get_mut()
+                        .shutdown()
+                        .await
+                        .expect(\"Could not shut down underlying writer\");
+                      None
+                  })
+              )
+          }".to_string(),
+          placement: nodes::Placement::StreamWithoutSpecificPlacement,
+        }
+      };
+  },
+  "write_file(" <path: QuotedFreeText> "," "csv" "," "compression" "=" "none" ")" => nodes::OutputFunctionNode {
     stream_prefix: format!("{{
+        if let Some(parent) = ::std::path::Path::new({path}).parent() {{
+          ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
+            .await
+            .expect(\"could not create parent directory for output file\");
+        }}
 
-      if let Some(parent) = ::std::path::Path::new({path}).parent() {{
-        ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
-          .await
-          .expect(\"could not create parent directory for output file\");
-      }}
-
-      static WRITER: ::marigold::marigold_impl::once_cell::sync::OnceCell<
-        ::marigold::marigold_impl::tokio::sync::Mutex<
-          ::marigold::marigold_impl::csv_async::AsyncSerializer<
-            ::marigold::marigold_impl::tokio_util::compat::Compat<
-              ::marigold::marigold_impl::tokio::fs::File
+        static WRITER: ::marigold::marigold_impl::once_cell::sync::OnceCell<
+          ::marigold::marigold_impl::tokio::sync::Mutex<
+            ::marigold::marigold_impl::csv_async::AsyncSerializer<
+              ::marigold::marigold_impl::tokio_util::compat::Compat<
+                ::marigold::marigold_impl::writer::Writer
+              >
             >
           >
-        >
-      > = ::marigold::marigold_impl::once_cell::sync::OnceCell::new();
+        > = ::marigold::marigold_impl::once_cell::sync::OnceCell::new();
 
-      WRITER.set(
-        ::marigold::marigold_impl::tokio::sync::Mutex::new(
-          ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
-            ::marigold::marigold_impl::tokio::fs::File::create({path})
-               .await
-               .expect(\"Could not write to file\")
-               .compat()
-          )
-        )
-      ).expect(\"Could not put CSV writer into OnceCell\");
-
-      let mut stream_to_write =
-
-     "),
-    stream_postfix: "
-        ;
-        stream_to_write.filter_map(
-          |v| async move {
-            WRITER
-              .get()
-              .expect(\"Could not get CSV writer from OnceCell\")
-              .lock()
-              .await
-              .serialize(v)
-              .await
-              .expect(\"could not write record to CSV\");
-            None
-          }
-        )
-    }".to_string(),
-    placement: nodes::Placement::StreamWithoutSpecificPlacement,
-  },
-  "write_file(" <path: QuotedFreeText> "," "csv" "," "compression" "=" "gz" ")" => nodes::OutputFunctionNode {
-    stream_prefix: format!("{{
-
-      if let Some(parent) = std::path::Path::new({path}).parent() {{
-        ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
-          .await
-          .expect(\"could not create parent directory for output file\");
-      }}
-
-      let mut output_csv_writer = std::sync::Arc::new(
-        ::marigold::marigold_impl::tokio::sync::Mutex::new(
-          ::marigold::marigold_impl::flate2::write::GzEncoder(
+        WRITER.set(
+          ::marigold::marigold_impl::tokio::sync::Mutex::new(
             ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
-              ::marigold::marigold_impl::tokio::fs::File::create({path})
-                 .await
-                 .expect(\"Could not write to file\")
-                 .compat()
-            ),
-            ::marigold::marigold_impl::flate2::Compression::best()
+              ::marigold::marigold_impl::writer::Writer::file(
+                ::marigold::marigold_impl::tokio::fs::File::create({path})
+                   .await
+                   .expect(\"Could not write to file\")
+              ).compat_write()
+            )
           )
-        )
-      );
+        ).expect(\"Could not put CSV writer into OnceCell\");
 
-      let mut stream_to_write =
+        let mut stream_to_write =
 
-     "),
-    stream_postfix: "
-        ;
-        {
-          let cloned_writer = output_csv_writer.clone();
+       "),
+      stream_postfix: "
+          ;
           stream_to_write.filter_map(
-            |v| async {
-              cloned_writer
-                .clone()
+            |v| async move {
+              WRITER
+                .get()
+                .expect(\"Could not get CSV writer from OnceCell\")
                 .lock()
                 .await
                 .serialize(v)
                 .await
                 .expect(\"could not write record to CSV\");
-                None
+              None
             }
+          ).chain(
+            // after the stream is complete, flush the writer.
+            ::marigold::marigold_impl::futures::stream::iter(0..1)
+              .filter_map(|_v| async {
+                let mut serializer_guard = WRITER
+                  .get() // gets Mutex<...>
+                  .expect(\"Could not get CSV writer from OnceCell\")
+                  .lock()
+                  .await;
+                let mut serializer = std::mem::replace(
+                  &mut *serializer_guard,
+                  ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                    ::marigold::marigold_impl::writer::Writer::vector()
+                      .compat_write()
+                  )
+                );
+                serializer
+                  .into_inner()
+                  .await
+                  .expect(\"Could not get underlying writer from serializer\")
+                  .get_mut()
+                  .shutdown()
+                  .await
+                  .expect(\"Could not shut down underlying writer\");
+                None
+              })
           )
-        }
-    }".to_string(),
-    placement: nodes::Placement::StreamWithoutSpecificPlacement,
-  }
+      }".to_string(),
+      placement: nodes::Placement::StreamWithoutSpecificPlacement,
+    },
+    "write_file(" <path: QuotedFreeText> "," "csv" "," "compression" "=" "gz" ")" => nodes::OutputFunctionNode {
+      stream_prefix: format!("{{
+          if let Some(parent) = ::std::path::Path::new({path}).parent() {{
+            ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
+              .await
+              .expect(\"could not create parent directory for output file\");
+          }}
+
+          static WRITER: ::marigold::marigold_impl::once_cell::sync::OnceCell<
+            ::marigold::marigold_impl::tokio::sync::Mutex<
+              ::marigold::marigold_impl::csv_async::AsyncSerializer<
+                  ::marigold::marigold_impl::tokio_util::compat::Compat<
+                    ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder<
+                        ::marigold::marigold_impl::writer::Writer
+                    >
+                  >
+              >
+            >
+          > = ::marigold::marigold_impl::once_cell::sync::OnceCell::new();
+
+          WRITER.set(
+            ::marigold::marigold_impl::tokio::sync::Mutex::new(
+              ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder::new(
+                  ::marigold::marigold_impl::writer::Writer::file(
+                    ::marigold::marigold_impl::tokio::fs::File::create({path})
+                       .await
+                       .expect(\"Could not write to file\")
+                  )
+                )
+                .compat_write()
+              )
+            )
+          ).expect(\"Could not put CSV writer into OnceCell\");
+
+          let mut stream_to_write =
+
+         "),
+        stream_postfix: "
+            ;
+            stream_to_write.filter_map(
+              |v| async move {
+                WRITER
+                  .get()
+                  .expect(\"Could not get CSV writer from OnceCell\")
+                  .lock()
+                  .await
+                  .serialize(v)
+                  .await
+                  .expect(\"could not write record to CSV\");
+                None
+              }
+            ).chain(
+              // after the stream is complete, flush the writer.
+              ::marigold::marigold_impl::futures::stream::iter(0..1)
+                .filter_map(|_v| async {
+                  let mut serializer_guard = WRITER
+                    .get() // gets Mutex<...>
+                    .expect(\"Could not get CSV writer from OnceCell\")
+                    .lock()
+                    .await;
+                  let mut serializer = std::mem::replace(
+                    &mut *serializer_guard,
+                    ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                      ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder::new(
+                        ::marigold::marigold_impl::writer::Writer::vector()
+                      )
+                      .compat_write()
+                    )
+                  );
+                  serializer
+                    .into_inner()
+                    .await
+                    .expect(\"Could not get underlying writer from serializer\")
+                    .get_mut()
+                    .shutdown()
+                    .await
+                    .expect(\"Could not shut down underlying writer\");
+                  None
+                })
+            )
+        }".to_string(),
+        placement: nodes::Placement::StreamWithoutSpecificPlacement,
+      }
 }
