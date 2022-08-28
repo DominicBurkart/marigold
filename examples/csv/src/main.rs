@@ -222,4 +222,78 @@ mod tests {
             3
         );
     }
+
+    #[tokio::test]
+    async fn write_compressed() {
+        // compress
+        m!(
+            enum Hull {
+                Spherical = "spherical",
+                Split = "split",
+            }
+
+            struct Vaisseau {
+                class: string_8,
+                hull: Hull,
+            }
+
+            read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
+                .ok_or_panic()
+                .write_file("./output/compressed.csv.gz", csv, compression=gz)
+
+            read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
+                .ok_or_panic()
+                .write_file("./output/also_compressed.csv.gz", csv)
+        )
+        .await;
+
+        // decompress
+        m!(
+            enum Hull {
+                Spherical = "spherical",
+                Split = "split",
+            }
+
+            struct Vaisseau {
+                class: string_8,
+                hull: Hull,
+            }
+
+            read_file("./output/compressed.csv.gz", csv, struct=Vaisseau)
+                .ok_or_panic()
+                .write_file("./output/decompressed.csv", csv, compression=none)
+
+            read_file("./output/also_compressed.csv.gz", csv, struct=Vaisseau)
+                .ok_or_panic()
+                .write_file("./output/also_decompressed.csv", csv)
+        )
+        .await;
+
+        async fn read_csv(path: &str) -> Vec<csv_async::StringRecord> {
+            use marigold::marigold_impl::TokioAsyncReadCompatExt;
+
+            csv_async::AsyncReader::from_reader(
+                tokio::fs::File::open(path)
+                    .await
+                    .expect("Could not read CSV file")
+                    .compat(),
+            )
+            .into_records()
+            .map(|r| r.expect("could not deserialize row"))
+            .collect::<Vec<_>>()
+            .await
+        }
+
+        // compare round-trip from both write paths
+        assert_eq!(
+            read_csv("./output/decompressed.csv").await,
+            read_csv("./output/also_decompressed.csv").await
+        );
+
+        // compare round-trip to source data
+        assert_eq!(
+            read_csv("./data/uncompressed.csv").await,
+            read_csv("./output/decompressed.csv").await
+        );
+    }
 }
