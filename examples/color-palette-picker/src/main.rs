@@ -14,7 +14,7 @@ async fn main() {
         m!(
             range(0, 255)
             .permutations_with_replacement(3)
-            .combinations(2)
+            .combinations(5)
             .keep_first_n(20, compare_contrast)
             .return
         )
@@ -33,7 +33,7 @@ async fn main() {
         m!(
             range(0, 255)
             .permutations_with_replacement(3)
-            .combinations(2)
+            .combinations(5)
             .keep_first_n(20, compare_contrast)
             .return
         )
@@ -52,7 +52,7 @@ async fn main() {
         m!(
             range(0, 255)
             .permutations_with_replacement(3)
-            .combinations(2)
+            .combinations(5)
             .keep_first_n(20, compare_contrast)
             .return
         )
