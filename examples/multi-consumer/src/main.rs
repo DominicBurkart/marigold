@@ -65,7 +65,7 @@ async fn main() {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "tokio")]
+    #[cfg(not(feature = "async-std"))]
     #[tokio::test]
     async fn multi_consumer() {
         run().await;
