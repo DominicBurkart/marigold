@@ -1,0 +1,13 @@
+[package]
+name = "multi-consumer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.tokio]
+version = "1"
+features = ["rt", "rt-multi-thread", "macros"]
+
+[dependencies.marigold]
+path = "../../marigold"
+version = "=0.1.11"
+features = ["tokio"]

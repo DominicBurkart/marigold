@@ -3,13 +3,66 @@ use std::str::FromStr;
 
 const MAX_CUSTOM_TYPE_SIZE: usize = 9_999;
 
-pub struct StreamNode {
+pub enum TypedExpression {
+    UnnamedReturningStream(UnnamedStreamNode), // like `range(0, 10).return`
+    UnnamedNonReturningStream(UnnamedStreamNode), // like `range(0, 10).write_file("boop.csv", csv)`
+    StreamVariable(StreamVariableNode),        // like `digits = range(0, 10)`
+    StreamVariableFromPriorStreamVariable(StreamVariableFromPriorStreamVariableNode), // like `odds = digits.filter(is_odd)`
+    NamedReturningStream(NamedStreamNode), // like `digits.return`
+    NamedNonReturningStream(NamedStreamNode), // like `digits.write_file("boop.csv", csv)`
+    StructDeclaration(StructDeclarationNode), // like `struct Cat { meowing: bool }`
+    EnumDeclaration(EnumDeclarationNode),  // like `enum Sound { meow = "meow" }`
+}
+
+impl From<UnnamedStreamNode> for TypedExpression {
+    fn from(node: UnnamedStreamNode) -> Self {
+        if node.out.returning {
+            return TypedExpression::UnnamedReturningStream(node);
+        }
+        TypedExpression::UnnamedNonReturningStream(node)
+    }
+}
+
+impl From<NamedStreamNode> for TypedExpression {
+    fn from(node: NamedStreamNode) -> Self {
+        if node.out.returning {
+            return TypedExpression::NamedReturningStream(node);
+        }
+        TypedExpression::NamedNonReturningStream(node)
+    }
+}
+
+impl From<StructDeclarationNode> for TypedExpression {
+    fn from(node: StructDeclarationNode) -> Self {
+        TypedExpression::StructDeclaration(node)
+    }
+}
+
+impl From<EnumDeclarationNode> for TypedExpression {
+    fn from(node: EnumDeclarationNode) -> Self {
+        TypedExpression::EnumDeclaration(node)
+    }
+}
+
+impl From<StreamVariableNode> for TypedExpression {
+    fn from(node: StreamVariableNode) -> Self {
+        TypedExpression::StreamVariable(node)
+    }
+}
+
+impl From<StreamVariableFromPriorStreamVariableNode> for TypedExpression {
+    fn from(node: StreamVariableFromPriorStreamVariableNode) -> Self {
+        TypedExpression::StreamVariableFromPriorStreamVariable(node)
+    }
+}
+
+pub struct UnnamedStreamNode {
     pub inp: InputFunctionNode,
     pub funs: Vec<StreamFunctionNode>,
     pub out: OutputFunctionNode,
 }
 
-impl StreamNode {
+impl UnnamedStreamNode {
     pub fn code(&self) -> String {
         let inp = &self.inp.code;
         let intermediate = self
@@ -21,6 +74,106 @@ impl StreamNode {
         let stream_prefix = &self.out.stream_prefix;
         let stream_postfix = &self.out.stream_postfix;
         format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{inp}.{intermediate}{stream_postfix}}}")
+    }
+}
+
+pub struct NamedStreamNode {
+    pub stream_variable: String,
+    pub funs: Vec<StreamFunctionNode>,
+    pub out: OutputFunctionNode,
+}
+
+impl NamedStreamNode {
+    pub fn code(&self) -> String {
+        let stream_variable = &self.stream_variable;
+        let intermediate = match self.funs.len() {
+            0 => "".to_string(),
+            _ => format!(
+                ".{}",
+                self.funs
+                    .iter()
+                    .map(|f| f.code.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".")
+            ),
+        };
+        let stream_prefix = &self.out.stream_prefix;
+        let stream_postfix = &self.out.stream_postfix;
+        format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{stream_variable}.get(){intermediate}{stream_postfix}}}")
+    }
+}
+
+pub struct StreamVariableNode {
+    pub variable_name: String,
+    pub inp: InputFunctionNode,
+    pub funs: Vec<StreamFunctionNode>,
+}
+
+impl StreamVariableNode {
+    pub fn declaration_code(&self) -> String {
+        let variable_name = &self.variable_name;
+        let inp = &self.inp.code;
+        let intermediate = match self.funs.len() {
+            0 => "".to_string(),
+            _ => {
+                format!(
+                    ".{}",
+                    self.funs
+                        .iter()
+                        .map(|f| f.code.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".")
+                )
+            }
+        };
+        format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({inp}{intermediate})}};")
+    }
+
+    pub fn runner_code(&self) -> String {
+        let variable_name = &self.variable_name;
+        format!(
+            "{{
+                let runner_future = Box::pin({variable_name}.run());
+                ::marigold::marigold_impl::multi_consumer_stream::RunFutureAsStream::new(runner_future)
+            }}"
+        )
+    }
+}
+
+pub struct StreamVariableFromPriorStreamVariableNode {
+    pub variable_name: String,
+    pub prior_stream_variable: String,
+    pub funs: Vec<StreamFunctionNode>,
+}
+
+impl StreamVariableFromPriorStreamVariableNode {
+    pub fn declaration_code(&self) -> String {
+        let variable_name = &self.variable_name;
+        let prior_stream_variable = &self.prior_stream_variable;
+        let intermediate = match self.funs.len() {
+            0 => "".to_string(),
+            _ => {
+                format!(
+                    ".{}",
+                    self.funs
+                        .iter()
+                        .map(|f| f.code.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".")
+                )
+            }
+        };
+        format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({prior_stream_variable}.get(){intermediate})}};")
+    }
+
+    pub fn runner_code(&self) -> String {
+        let variable_name = &self.variable_name;
+        format!(
+            "{{
+                let runner_future = Box::pin({variable_name}.run());
+                ::marigold::marigold_impl::multi_consumer_stream::RunFutureAsStream::new(runner_future)
+            }}"
+        )
     }
 }
 
@@ -50,22 +203,10 @@ pub struct InputFunctionNode {
     pub code: String,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Placement {
-    BeforeStreams,
-    ReturningStream,
-    StreamWithoutSpecificPlacement,
-}
-
-pub struct ExpressionWithPlacement {
-    pub placement: Placement,
-    pub code: String,
-}
-
 pub struct OutputFunctionNode {
     pub stream_prefix: String,
     pub stream_postfix: String,
-    pub placement: Placement,
+    pub returning: bool,
 }
 
 pub struct StructDeclarationNode {

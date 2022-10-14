@@ -1,63 +1,147 @@
 use crate::nodes;
 use std::str::FromStr;
+use itertools::Itertools;
 
 grammar;
 
 pub Program: String = {
   Expr* => {
-    let n_streams = <>
-      .iter()
-      .filter(
-        |exp|
-          exp.placement == nodes::Placement::ReturningStream ||
-          exp.placement == nodes::Placement::StreamWithoutSpecificPlacement
-      )
-      .count();
-
-    let mut expressions = std::collections::HashMap::new();
-    <>
-      .into_iter()
-      .for_each(
-        |expression|
-          expressions
-            .entry(expression.placement)
-            .or_insert(Vec::new())
-            .push(expression.code)
-      );
     let mut output = "async {
     use ::marigold::marigold_impl::*;
     ".to_string();
 
-    let before_streams = expressions
-      .entry(nodes::Placement::BeforeStreams)
-      .or_insert(Vec::new())
+    // Before we can start streaming, we need to declare the helpers:
+    // the enums and structs, and then the stream variable declarations.
+    let enums_and_structs = <>
+      .iter()
+      .filter_map(|expr| match expr {
+        crate::nodes::TypedExpression::UnnamedReturningStream(_) => None,
+        crate::nodes::TypedExpression::UnnamedNonReturningStream(_) => None,
+        crate::nodes::TypedExpression::NamedReturningStream(_) => None,
+        crate::nodes::TypedExpression::NamedNonReturningStream(_) => None,
+        crate::nodes::TypedExpression::StructDeclaration(s) => Some(s.code()),
+        crate::nodes::TypedExpression::EnumDeclaration(e) => Some(e.code()),
+        crate::nodes::TypedExpression::StreamVariable(v) => None,
+        crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => None,
+      })
       .join("\n\n");
 
-    output.push_str(&before_streams);
+    output.push_str(&enums_and_structs);
 
-    let returning_stream_vec = expressions
-      .entry(nodes::Placement::ReturningStream)
-      .or_insert(Vec::new());
+    let stream_variable_declarations = <>
+      .iter()
+      .filter_map(|expr| match expr {
+        crate::nodes::TypedExpression::UnnamedReturningStream(_) => None,
+        crate::nodes::TypedExpression::UnnamedNonReturningStream(_) => None,
+        crate::nodes::TypedExpression::NamedReturningStream(_) => None,
+        crate::nodes::TypedExpression::NamedNonReturningStream(_) => None,
+        crate::nodes::TypedExpression::StructDeclaration(s) => None,
+        crate::nodes::TypedExpression::EnumDeclaration(e) => None,
+        crate::nodes::TypedExpression::StreamVariable(v) => Some(v.declaration_code()),
+        crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => Some(v.declaration_code()),
+      })
+      .join("\n\n");
+
+    output.push_str(&stream_variable_declarations);
+
+    let returning_stream_vec = <>
+      .iter()
+      .filter_map(
+        |expr| match expr {
+          crate::nodes::TypedExpression::UnnamedReturningStream(s) => Some(s.code()),
+          crate::nodes::TypedExpression::UnnamedNonReturningStream(_) => None,
+          crate::nodes::TypedExpression::NamedReturningStream(s) => Some(s.code()),
+          crate::nodes::TypedExpression::NamedNonReturningStream(_) => None,
+          crate::nodes::TypedExpression::StructDeclaration(_) => None,
+          crate::nodes::TypedExpression::EnumDeclaration(_) => None,
+          crate::nodes::TypedExpression::StreamVariable(_) => None,
+          crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(_) => None,
+      })
+      .collect::<Vec<_>>();
 
     let n_returning_streams = returning_stream_vec.len();
+
+    output.push_str(
+      returning_stream_vec
+        .iter()
+        .zip(0..n_returning_streams)
+        .map(|(stream_def, i)| format!("let returning_stream_{i} = Box::pin({stream_def});\n"))
+        .collect::<Vec<_>>()
+        .join("")
+        .as_str()
+    );
+
+    let non_returning_streams = <>
+      .iter()
+      .filter_map(
+        |expr| match expr {
+          crate::nodes::TypedExpression::UnnamedReturningStream(_) => None,
+          crate::nodes::TypedExpression::UnnamedNonReturningStream(s) => Some(s.code()),
+          crate::nodes::TypedExpression::NamedReturningStream(_) => None,
+          crate::nodes::TypedExpression::NamedNonReturningStream(s) => Some(s.code()),
+          crate::nodes::TypedExpression::StructDeclaration(_) => None,
+          crate::nodes::TypedExpression::EnumDeclaration(_) => None,
+          crate::nodes::TypedExpression::StreamVariable(v) => None,
+          crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => None,
+      })
+      .collect::<Vec<_>>();
+
+    output.push_str(
+      non_returning_streams
+        .iter()
+        .zip(0..non_returning_streams.len())
+        .map(|(stream_def, i)| format!("let non_returning_stream_{i} = Box::pin({stream_def});\n"))
+        .collect::<Vec<_>>()
+        .join("")
+        .as_str()
+    );
+
+    let stream_variable_runners = <>
+      .iter()
+      .filter_map(
+        |expr| match expr {
+          crate::nodes::TypedExpression::UnnamedReturningStream(_) => None,
+          crate::nodes::TypedExpression::UnnamedNonReturningStream(s) => None,
+          crate::nodes::TypedExpression::NamedReturningStream(_) => None,
+          crate::nodes::TypedExpression::NamedNonReturningStream(s) => None,
+          crate::nodes::TypedExpression::StructDeclaration(_) => None,
+          crate::nodes::TypedExpression::EnumDeclaration(_) => None,
+          crate::nodes::TypedExpression::StreamVariable(v) => Some(v.runner_code()),
+          crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => Some(v.runner_code()),
+      })
+      .collect::<Vec<_>>();
+
+    output.push_str(
+      stream_variable_runners
+        .iter()
+        .zip(0..stream_variable_runners.len())
+        .map(|(stream_def, i)| format!("let stream_variable_runners_{i} = Box::pin({stream_def});\n"))
+        .collect::<Vec<_>>()
+        .join("")
+        .as_str()
+    );
 
     let mut streams_string = "vec![\n".to_string();
 
     streams_string.push_str(
-      returning_stream_vec
-        .iter()
-        .map(|stream_def| format!("Box::pin({stream_def}),\n"))
+      (0..n_returning_streams)
+        .map(|i| format!("returning_stream_{i},\n"))
         .collect::<Vec<_>>()
         .join("")
         .as_str()
     );
 
     streams_string.push_str(
-      expressions
-        .entry(nodes::Placement::StreamWithoutSpecificPlacement)
-        .or_insert(Vec::new())
-        .iter()
-        .map(|stream_def| format!("Box::pin({stream_def}),\n"))
+      (0..non_returning_streams.len())
+        .map(|i| format!("non_returning_stream_{i},\n"))
+        .collect::<Vec<_>>()
+        .join("")
+        .as_str()
+    );
+
+    streams_string.push_str(
+      (0..stream_variable_runners.len())
+        .map(|i| format!("stream_variable_runners_{i},\n"))
         .collect::<Vec<_>>()
         .join("")
         .as_str()
@@ -69,7 +153,7 @@ pub Program: String = {
       output.push_str(
         format!("
         /// silly function that uses generics to infer the output type (StreamItem) via generics, so that
-        /// we can provide the streams as an array of Pin<Box<Stream<Item=StreamItem>>>.
+        /// we can provide the streams as an array of Pin<Box<dyn Stream<Item=StreamItem>>>.
         #[inline(always)]
         fn typed_stream_vec<StreamItem>(v: Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>>) -> Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>> {{
          v
@@ -78,11 +162,10 @@ pub Program: String = {
       );
       output.push_str(format!("let streams_array = typed_stream_vec({streams_string});").as_str());
     } else {
-      output.push_str(format!("let streams_array:  Vec<core::pin::Pin<Box<dyn futures::Stream<Item=()>>>> = {streams_string};").as_str());
+      output.push_str(format!("let streams_array:  Vec<core::pin::Pin<dyn futures::Stream<Item=()>>> = {streams_string};").as_str());
     }
 
     output.push_str("let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array);");
-
 
     if n_returning_streams == 0 {
       output.push_str("all_streams.collect::<Vec<()>>().await;\n");
@@ -96,8 +179,9 @@ pub Program: String = {
   }
 }
 
-Expr: nodes::ExpressionWithPlacement = {
+Expr: nodes::TypedExpression = {
   Stream,
+  StreamVariableDeclaration,
   StructDeclaration,
   EnumDeclaration
 }
@@ -113,22 +197,22 @@ QuotedFreeText: String = {
   <variable_name: r"[0-9A-Za-z/_\-]+"> => variable_name.to_string()
 }
 
-StructDeclaration: nodes::ExpressionWithPlacement = {
-  "struct" <struct_name: FreeText> "{" <field_declarations: (StructFieldDeclaration ",")*> "}" => nodes::ExpressionWithPlacement {
-    placement: nodes::Placement::BeforeStreams,
-    code: crate::nodes::StructDeclarationNode {
-      name: struct_name,
-      fields: {
-        let mut v = Vec::new();
-        for ((field_name, field_value_str), _comma_str) in field_declarations.into_iter() {
-          let field_value = crate::nodes::Type::from_str(field_value_str.as_str())
-            .expect("could not parse type in struct definition");
-          v.push((field_name, field_value));
+StructDeclaration: nodes::TypedExpression = {
+  "struct" <struct_name: FreeText> "{" <field_declarations: (StructFieldDeclaration ",")*> "}" =>
+    nodes::TypedExpression::from(
+      crate::nodes::StructDeclarationNode {
+        name: struct_name,
+        fields: {
+          let mut v = Vec::new();
+          for ((field_name, field_value_str), _comma_str) in field_declarations.into_iter() {
+            let field_value = crate::nodes::Type::from_str(field_value_str.as_str())
+              .expect("could not parse type in struct definition");
+            v.push((field_name, field_value));
+          }
+          v
         }
-        v
       }
-    }.code(),
-  }
+    )
 }
 
 StructFieldDeclaration: (String, String) = {
@@ -137,20 +221,20 @@ StructFieldDeclaration: (String, String) = {
  }
 }
 
-EnumDeclaration: nodes::ExpressionWithPlacement = {
-  "enum" <enum_name: FreeText> "{" <field_declarations: (EnumFieldDeclaration ",")*> "}" => nodes::ExpressionWithPlacement {
-    placement: nodes::Placement::BeforeStreams,
-    code: crate::nodes::EnumDeclarationNode {
-      name: enum_name,
-      fields: field_declarations
-        .into_iter()
-        .map(
-          |((field_name, field_value_str), _comma_str)|
-            (field_name, field_value_str)
-        )
-        .collect::<Vec<(String, Option<String>)>>()
-    }.code(),
-  }
+EnumDeclaration: nodes::TypedExpression = {
+  "enum" <enum_name: FreeText> "{" <field_declarations: (EnumFieldDeclaration ",")*> "}" =>
+    nodes::TypedExpression::from(
+      crate::nodes::EnumDeclarationNode {
+        name: enum_name,
+        fields: field_declarations
+          .into_iter()
+          .map(
+            |((field_name, field_value_str), _comma_str)|
+              (field_name, field_value_str)
+          )
+          .collect::<Vec<(String, Option<String>)>>()
+      }
+    )
 }
 
 EnumFieldDeclaration: (String, Option<String>) = {
@@ -162,19 +246,42 @@ EnumFieldDeclaration: (String, Option<String>) = {
  }
 }
 
-Stream: nodes::ExpressionWithPlacement = {
-  <inp: InputFunction> <funs:("." <StreamFunction>)*> "." <out: OutputFunction> => {
-      let placement = out.placement;
-      let exp = nodes::StreamNode {
+Stream: nodes::TypedExpression = {
+  <inp: InputFunction> <funs:("." <StreamFunction>)*> "." <out: OutputFunction> =>
+    nodes::TypedExpression::from(
+      nodes::UnnamedStreamNode{
         inp,
         funs,
         out
-      };
-      nodes::ExpressionWithPlacement {
-        placement: placement,
-        code: exp.code(),
       }
-    },
+    ),
+  <stream_variable: FreeText> <funs:("." <StreamFunction>)*> "." <out: OutputFunction> =>
+    nodes::TypedExpression::from(
+      nodes::NamedStreamNode {
+        stream_variable,
+        funs,
+        out
+      }
+    )
+}
+
+StreamVariableDeclaration: nodes::TypedExpression = {
+  <field_name: FreeText> "=" <inp: InputFunction> <funs:("." <StreamFunction>)*>  =>
+    nodes::TypedExpression::from(
+      nodes::StreamVariableNode {
+        variable_name: field_name,
+        inp: inp,
+        funs: funs
+      }
+    ),
+  <field_name: FreeText> "=" <stream_variable: FreeText> <funs:("." <StreamFunction>)*>  =>
+    nodes::TypedExpression::from(
+      nodes::StreamVariableFromPriorStreamVariableNode {
+        variable_name: field_name,
+        prior_stream_variable: stream_variable,
+        funs: funs
+      }
+    )
 }
 
 InputFunction: nodes::InputFunctionNode = {
@@ -264,9 +371,9 @@ StreamFunction: nodes::StreamFunctionNode = {
     #[cfg(any(feature = "tokio", feature = "async-std"))]
     return nodes::StreamFunctionNode {
       code: format!("map(|v| async move {{
-        if {filter_fn}(&v) {
+        if {filter_fn}(&v) {{
           Some(v)
-        }
+        }}
         None
       }})
       .buffered(
@@ -301,8 +408,7 @@ StreamFunction: nodes::StreamFunctionNode = {
   "map(" <mapping_fn: FreeText> ")" => {
     #[cfg(any(feature = "tokio", feature = "async-std"))]
     return nodes::StreamFunctionNode {
-      code: format!("map(|v| async move {{{mapping_fn}(v)}})
-      .buffered(std::cmp::max(2 * (::marigold::marigold_impl::num_cpus::get() - 1), 2))"),
+      code: format!("map(|v| async move {{{mapping_fn}(v)}}).buffered(std::cmp::max(2 * (::marigold::marigold_impl::num_cpus::get() - 1), 2))"),
     };
 
     #[cfg(not(any(feature = "tokio", feature = "async-std")))]
@@ -323,7 +429,7 @@ OutputFunction: nodes::OutputFunctionNode = {
   "return" => nodes::OutputFunctionNode {
     stream_prefix: "".to_string(),
     stream_postfix: "".to_string(),
-    placement: nodes::Placement::ReturningStream,
+    returning: true
   },
   "write_file(" <path: QuotedFreeText> "," "csv" ")" => {
     if path.ends_with(".gz\"") {
@@ -409,7 +515,7 @@ OutputFunction: nodes::OutputFunctionNode = {
                 })
             )
         }".to_string(),
-        placement: nodes::Placement::StreamWithoutSpecificPlacement,
+        returning: false
       };
     } else {
       return nodes::OutputFunctionNode {
@@ -488,7 +594,7 @@ OutputFunction: nodes::OutputFunctionNode = {
                   })
               )
           }".to_string(),
-          placement: nodes::Placement::StreamWithoutSpecificPlacement,
+          returning: false
         }
       };
   },
@@ -567,7 +673,7 @@ OutputFunction: nodes::OutputFunctionNode = {
               })
           )
       }".to_string(),
-      placement: nodes::Placement::StreamWithoutSpecificPlacement,
+      returning: false,
     },
     "write_file(" <path: QuotedFreeText> "," "csv" "," "compression" "=" "gz" ")" => nodes::OutputFunctionNode {
       stream_prefix: format!("{{
@@ -651,6 +757,6 @@ OutputFunction: nodes::OutputFunctionNode = {
                 })
             )
         }".to_string(),
-        placement: nodes::Placement::StreamWithoutSpecificPlacement,
+        returning: false,
       }
 }
