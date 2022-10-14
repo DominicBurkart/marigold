@@ -17,5 +17,5 @@ jobs:
           git config user.name dominicburkart
           git config user.email code@dominic.computer
           git add .github/badges/lines_of_code.svg
-          git commit -m "update lines of code badge"
-          git push
+          git commit -m "update lines of code badge" || true
+          git push || true
