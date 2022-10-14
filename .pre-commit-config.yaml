@@ -37,6 +37,9 @@ repos:
     - id:                   trailing-whitespace
       exclude_types:        ["svg"]
     - id:                   mixed-line-ending
+      exclude_types:        ["svg"]
+    - id:                   end-of-file-fixer
+      exclude_types:        ["svg"]
     - id:                   check-merge-conflict
     - id:                   check-toml
     - id:                   check-yaml
