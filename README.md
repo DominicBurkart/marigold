@@ -2,6 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/marigold.svg)](https://crates.io/crates/marigold)
 [![docs.rs](https://img.shields.io/docsrs/marigold.svg)](https://docs.rs/marigold)
+[![lines of code](https://raw.githubusercontent.com/DominicBurkart/marigold/main/.github/badges/lines_of_code.svg)](https://github.com/DominicBurkart/marigold)
 [![tests](https://github.com/DominicBurkart/marigold/workflows/tests/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/tests.yaml)
 [![bench](https://github.com/DominicBurkart/marigold/workflows/bench/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/bench.yaml)
 [![style](https://github.com/DominicBurkart/marigold/workflows/style/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/style.yaml)
