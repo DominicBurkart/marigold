@@ -162,7 +162,7 @@ pub Program: String = {
       );
       output.push_str(format!("let streams_array = typed_stream_vec({streams_string});").as_str());
     } else {
-      output.push_str(format!("let streams_array:  Vec<core::pin::Pin<dyn futures::Stream<Item=()>>> = {streams_string};").as_str());
+      output.push_str(format!("let streams_array:  Vec<core::pin::Pin<Box<dyn futures::Stream<Item=()>>>> = {streams_string};").as_str());
     }
 
     output.push_str("let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array);");
