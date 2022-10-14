@@ -1,0 +1,21 @@
+name:               badges
+
+on:                 [push]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lines_of_code:
+    runs-on:        ubuntu-latest
+    steps:
+      - uses:       actions/checkout@v3
+      - name:       "Make lines of code badge"
+        run:        |
+          touch .github/badges/lines_of_code.svg
+          curl "https://img.shields.io/badge/Lines%20of%20Code-$(git ls-files | grep '\.rs' | xargs wc -l | tail -n 1 | awk '{$1=$1};1' | cut -d " " -f1)-informational" >> .github/badges/lines_of_code.svg
+          git config user.name dominicburkart
+          git config user.email code@dominic.computer
+          git add .github/badges/lines_of_code.svg
+          git commit -m "update lines of code badge"
+          git push
