@@ -64,7 +64,7 @@ impl<
                     .collect::<FuturesUnordered<_>>();
                 while let Some(_result) = futures.next().await {}
             }
-            self.senders.iter_mut().for_each(|mut s| s.disconnect());
+            self.senders.iter_mut().for_each(|s| s.disconnect());
         }
     }
 }

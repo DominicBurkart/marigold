@@ -3,11 +3,14 @@ name = "multi-consumer"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies.tokio]
-version = "1"
-features = ["rt", "rt-multi-thread", "macros"]
+[features]
+tokio = ["marigold/tokio"]
+async-std = ["dep:async-std", "marigold/async-std"]
+
+[dependencies]
+async-std = {version = "1", features= ["attributes"], optional=true}
+tokio = {version = "1", features = ["rt", "rt-multi-thread", "macros"]}
 
 [dependencies.marigold]
 path = "../../marigold"
 version = "=0.1.11"
-features = ["tokio"]

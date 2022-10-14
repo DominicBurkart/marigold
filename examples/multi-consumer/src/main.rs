@@ -43,7 +43,20 @@ async fn run() {
     println!("result: {:?}", small_even_number_set);
 }
 
+#[cfg(feature = "tokio")]
 #[tokio::main]
+async fn main() {
+    run().await
+}
+
+#[cfg(feature = "async-std")]
+#[async_std::main]
+async fn main() {
+    run().await
+}
+
+#[cfg(not(any(feature = "async-std", feature = "tokio")))]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     run().await
 }
@@ -52,7 +65,14 @@ async fn main() {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "tokio")]
     #[tokio::test]
+    async fn multi_consumer() {
+        run().await;
+    }
+
+    #[cfg(feature = "async-std")]
+    #[async_std::test]
     async fn multi_consumer() {
         run().await;
     }
