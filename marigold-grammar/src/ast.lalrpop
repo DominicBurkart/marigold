@@ -81,8 +81,8 @@ pub Program: String = {
           crate::nodes::TypedExpression::NamedNonReturningStream(s) => Some(s.code()),
           crate::nodes::TypedExpression::StructDeclaration(_) => None,
           crate::nodes::TypedExpression::EnumDeclaration(_) => None,
-          crate::nodes::TypedExpression::StreamVariable(v) => None,
-          crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => None,
+          crate::nodes::TypedExpression::StreamVariable(_) => None,
+          crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(_) => None,
       })
       .collect::<Vec<_>>();
 
@@ -101,9 +101,9 @@ pub Program: String = {
       .filter_map(
         |expr| match expr {
           crate::nodes::TypedExpression::UnnamedReturningStream(_) => None,
-          crate::nodes::TypedExpression::UnnamedNonReturningStream(s) => None,
+          crate::nodes::TypedExpression::UnnamedNonReturningStream(_) => None,
           crate::nodes::TypedExpression::NamedReturningStream(_) => None,
-          crate::nodes::TypedExpression::NamedNonReturningStream(s) => None,
+          crate::nodes::TypedExpression::NamedNonReturningStream(_) => None,
           crate::nodes::TypedExpression::StructDeclaration(_) => None,
           crate::nodes::TypedExpression::EnumDeclaration(_) => None,
           crate::nodes::TypedExpression::StreamVariable(v) => Some(v.runner_code()),
