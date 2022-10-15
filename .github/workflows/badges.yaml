@@ -14,8 +14,9 @@ jobs:
         run:        |
           rm -f .github/badges/lines_of_code.svg
           curl "https://img.shields.io/badge/lines%20of%20code-$(git ls-files | grep -e '\.rs' -e '\.lalrpop' | xargs wc -l | tail -n 1 | awk '{$1=$1};1' | cut -d " " -f1)-informational" >> .github/badges/lines_of_code.svg
+          curl "https://img.shields.io/badge/lines%20of%20code-$(git ls-files | grep -e '\.rs' -e '\.lalrpop' | xargs wc -l | tail -n 1 | awk '{$1=$1};1' | cut -d " " -f1)-informational?style=for-the-badge" >> .github/badges/lines_of_code_ftb.svg
           git config user.name dominicburkart
           git config user.email code@dominic.computer
-          git add .github/badges/lines_of_code.svg
+          git add .github/badges/lines_of_code.svg .github/badges/lines_of_code_ftb.svg
           git commit -m "update lines of code badge" || true
           git push || true
