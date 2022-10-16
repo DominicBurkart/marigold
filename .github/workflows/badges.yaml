@@ -12,9 +12,28 @@ jobs:
       - uses:       actions/checkout@v3
       - name:       "Make lines of code badge"
         run:        |
+          format_number () {
+            if (( $# == 0 )) ; then
+                if ! command -v numfmt &> /dev/null
+                  then
+                      gnumfmt --to=si < /dev/stdin
+                  else
+                      numfmt --to=si < /dev/stdin
+                fi
+            else
+                if ! command -v numfmt &> /dev/null
+                  then
+                      gnumfmt --to=si "$1"
+                  else
+                      numfmt --to=si "$1"
+                fi
+            fi
+          }
+
           rm -f .github/badges/lines_of_code.svg .github/badges/lines_of_code_ftb.svg || true
-          curl "https://img.shields.io/badge/lines%20of%20code-$(git ls-files | grep -e '\.rs' -e '\.lalrpop' | xargs wc -l | tail -n 1 | awk '{$1=$1};1' | cut -d " " -f1)-informational" >> .github/badges/lines_of_code.svg
-          curl "https://img.shields.io/badge/lines%20of%20code-$(git ls-files | grep -e '\.rs' -e '\.lalrpop' | xargs wc -l | tail -n 1 | awk '{$1=$1};1' | cut -d " " -f1)-informational?style=for-the-badge" >> .github/badges/lines_of_code_ftb.svg
+          lines="$(git ls-files | grep -e '\.rs' -e '\.lalrpop' | xargs wc -l | tail -n 1 | awk '{$1=$1};1' | cut -d " " -f1 | format_number)"
+          curl "https://img.shields.io/badge/lines%20of%20code-$lines-informational" >> .github/badges/lines_of_code.svg
+          curl "https://img.shields.io/badge/lines%20of%20code-$lines-informational?style=for-the-badge" >> .github/badges/lines_of_code_ftb.svg
           git config user.name dominicburkart
           git config user.email code@dominic.computer
           git add .github/badges/lines_of_code.svg .github/badges/lines_of_code_ftb.svg
