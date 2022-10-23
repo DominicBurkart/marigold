@@ -220,7 +220,7 @@ FreeText: String = {
 }
 
 FnBody: String = {
-  <text: r#"\{[\w}{><\[\])\(\-;:"\.']+\}"#> => text.to_string()
+  <text: r#"\{[\s\w}{><\[\])\(\-;:"\.']+\}"#> => text.to_string()
 }
 
 // nonsense struct used to handle terminal ambiguity. Allowed: variable name,
