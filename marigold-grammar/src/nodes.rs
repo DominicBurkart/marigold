@@ -12,6 +12,7 @@ pub enum TypedExpression {
     NamedNonReturningStream(NamedStreamNode), // like `digits.write_file("boop.csv", csv)`
     StructDeclaration(StructDeclarationNode), // like `struct Cat { meowing: bool }`
     EnumDeclaration(EnumDeclarationNode),  // like `enum Sound { meow = "meow" }`
+    FnDeclaration(FnDeclarationNode),      // like `fn foo(i: i32) -> i32 { i }`
 }
 
 impl From<UnnamedStreamNode> for TypedExpression {
@@ -53,6 +54,12 @@ impl From<StreamVariableNode> for TypedExpression {
 impl From<StreamVariableFromPriorStreamVariableNode> for TypedExpression {
     fn from(node: StreamVariableFromPriorStreamVariableNode) -> Self {
         TypedExpression::StreamVariableFromPriorStreamVariable(node)
+    }
+}
+
+impl From<FnDeclarationNode> for TypedExpression {
+    fn from(node: FnDeclarationNode) -> Self {
+        TypedExpression::FnDeclaration(node)
     }
 }
 
@@ -397,4 +404,33 @@ impl EnumDeclarationNode {
         enum_rep.push('}');
         enum_rep
     }
+}
+
+pub struct FnDeclarationNode {
+    pub name: String,
+    pub parameters: Vec<(String, String)>,
+    pub output_type: String,
+    pub body: String,
+}
+
+impl FnDeclarationNode {
+    pub fn code(&self) -> String {
+        let name = &self.name;
+        let parameters_string = self
+            .parameters
+            .iter()
+            .map(|(param_name, param_type)| format!("{param_name}: {param_type}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let output_type = &self.name;
+        let body = &self.name;
+        format!("const fn {name}({parameters_string}) -> {output_type} {body}")
+    }
+}
+
+#[derive(Clone)]
+pub struct FunctionSignature {
+    pub name: String,
+    pub parameters: Vec<(String, String)>,
+    pub output_type: String,
 }
