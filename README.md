@@ -7,7 +7,8 @@
 [![bench](https://github.com/DominicBurkart/marigold/workflows/bench/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/bench.yaml)
 [![style](https://github.com/DominicBurkart/marigold/workflows/style/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/style.yaml)
 [![wasm](https://github.com/DominicBurkart/marigold/workflows/wasm/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml)
-[![last commit](https://img.shields.io/github/last-commit/dominicburkart/marigold)](https://github.com/DominicBurkart/marigold)
+[![last commit](https://github.com/DominicBurkart/marigold/commits/main)](https://github.com/DominicBurkart/marigold)
+[![contributors](https://raw.githubusercontent.com/DominicBurkart/marigold/main/.github/badges/contributors.svg)](https://github.com/DominicBurkart/marigold/graphs/contributors)
 
 Marigold is a domain-specific language for streaming data pipelining and
 analysis. Marigold compiles to asynchronous Rust, and can be accessed in a
