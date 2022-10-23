@@ -6,7 +6,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  lines_of_code:
+  badges:
     runs-on:        ubuntu-latest
     steps:
       - uses:       actions/checkout@v3
@@ -30,8 +30,8 @@ jobs:
             fi
           }
 
-          rm -f .github/badges/lines_of_code.svg .github/badges/lines_of_code_ftb.svg .github/badges/contributors.svg .github/badges/contributors_ftb.svg || true
-
+          rm -rf .github/badges
+          mkdir .github/badges
           lines="$(git ls-files | grep -e '\.rs' -e '\.lalrpop' | xargs wc -l | tail -n 1 | awk '{$1=$1};1' | cut -d " " -f1 | format_number)"
           curl "https://img.shields.io/badge/lines%20of%20code-$lines-informational" >> .github/badges/lines_of_code.svg
           curl "https://img.shields.io/badge/lines%20of%20code-$lines-informational?style=for-the-badge" >> .github/badges/lines_of_code_ftb.svg
@@ -42,6 +42,6 @@ jobs:
 
           git config user.name dominicburkart
           git config user.email code@dominic.computer
-          git add .github/badges/lines_of_code.svg .github/badges/lines_of_code_ftb.svg .github/badges/contributors.svg .github/badges/contributors_ftb.svg
-          git commit -m "update lines of code badge" || true
+          git add .github/badges/*
+          git commit -m "update badges" || true
           git push || true
