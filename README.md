@@ -16,11 +16,11 @@ macro:
 ```rust
 use marigold::m;
 
-fn is_odd(i: &i32) -> bool {
-  i % 2 == 1
-}
-
 let odd_digits = m!(
+  fn is_odd(i: &i32) -> bool {
+    i % 2 == 1
+  }
+
   range(0, 10)
     .filter(is_odd)
     .return

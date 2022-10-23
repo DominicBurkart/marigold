@@ -5,10 +5,11 @@ mod tests {
 
     #[tokio::test]
     async fn map() {
-        fn double(v: i32) -> i32 {
-            v * 2
-        }
         let r = m!(
+            fn double(v: i32) -> i32 {
+                v * 2
+            }
+
             range(0, 3)
                 .map(double)
                 .return

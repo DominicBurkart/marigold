@@ -16,11 +16,11 @@ macro:
 ```rust
 use marigold::m;
 
-fn is_odd(i: &i32) -> bool {
-  i % 2 == 1
-}
-
 let odd_digits = m!(
+  fn is_odd(i: &i32) -> bool {
+    i % 2 == 1
+  }
+
   range(0, 10)
     .filter(is_odd)
     .return
@@ -29,16 +29,18 @@ let odd_digits = m!(
 println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
 ```
 
-## Runtimes
+println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
 
-By default, Marigold works in a single future and can work with any runtime.
+    ## Runtimes
 
-The `tokio` and `async-std` features allow Marigold to spawn additional tasks,
-enabling parallelism for multithreaded runtimes.
+    By default, Marigold works in a single future and can work with any runtime.
 
-Marigold supports async tracing, e.g. with tokio-console.
+    The `tokio` and `async-std` features allow Marigold to spawn additional tasks,
+    enabling parallelism for multithreaded runtimes.
 
-## Platforms
+    Marigold supports async tracing, e.g. with tokio-console.
 
-Marigold's CI builds against aarch64, arm, WASM, and x86 targets, and builds
-the x86 target in mac and windows environments.
+    ## Platforms
+
+    Marigold's CI builds against aarch64, arm, WASM, and x86 targets, and builds
+    the x86 target in mac and windows environments.
