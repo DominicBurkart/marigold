@@ -220,7 +220,7 @@ FreeText: String = {
 }
 
 FnBody: String = {
-  <text: r#"\{[\s\w}{><\[\])\(\-;:"\.']+\}"#> => text.to_string()
+  <text: r#"\{.*}"#> => text.to_string()
 }
 
 // nonsense struct used to handle terminal ambiguity. Allowed: variable name,
@@ -280,8 +280,13 @@ EnumFieldDeclaration: (String, Option<String>) = {
 }
 
 FnParameter: (String, String) = {
-  <parameter_name: FreeText> ":" <parameter_type: FreeText> =>
-    (parameter_name, parameter_type)
+  <parameter_name: FreeText> ":" <amp: "&"?> <parameter_type: FreeText> =>
+    (parameter_name,
+      match amp {
+        Some(_) => format!("&{}", parameter_type),
+        None => parameter_type
+      }
+    )
 }
 
 FnSignature: nodes::FunctionSignature = {

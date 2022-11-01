@@ -422,8 +422,8 @@ impl FnDeclarationNode {
             .map(|(param_name, param_type)| format!("{param_name}: {param_type}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let output_type = &self.name;
-        let body = &self.name;
+        let output_type = &self.output_type;
+        let body = &self.body;
         format!("const fn {name}({parameters_string}) -> {output_type} {body}")
     }
 }

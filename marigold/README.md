@@ -18,7 +18,7 @@ use marigold::m;
 
 let odd_digits = m!(
   fn is_odd(i: &i32) -> bool {
-    i % 2 == 1
+    i.wrapping_rem(2) == 1
   }
 
   range(0, 10)
@@ -29,18 +29,16 @@ let odd_digits = m!(
 println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
 ```
 
-println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
+## Runtimes
 
-    ## Runtimes
+By default, Marigold works in a single future and can work with any runtime.
 
-    By default, Marigold works in a single future and can work with any runtime.
+The `tokio` and `async-std` features allow Marigold to spawn additional tasks,
+enabling parallelism for multithreaded runtimes.
 
-    The `tokio` and `async-std` features allow Marigold to spawn additional tasks,
-    enabling parallelism for multithreaded runtimes.
+Marigold supports async tracing, e.g. with tokio-console.
 
-    Marigold supports async tracing, e.g. with tokio-console.
+## Platforms
 
-    ## Platforms
-
-    Marigold's CI builds against aarch64, arm, WASM, and x86 targets, and builds
-    the x86 target in mac and windows environments.
+Marigold's CI builds against aarch64, arm, WASM, and x86 targets, and builds
+the x86 target in mac and windows environments.

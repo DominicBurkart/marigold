@@ -11,7 +11,7 @@
 //!
 //! let odd_digits = m!(
 //!  fn is_odd(i: &i32) -> bool {
-//!    i % 2 == 1
+//!    i.wrapping_rem(2) == 1
 //!  }
 //!
 //!  range(0, 10)
