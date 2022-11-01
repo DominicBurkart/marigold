@@ -2,9 +2,10 @@
 
 [![crates.io](https://img.shields.io/crates/v/marigold.svg)](https://crates.io/crates/marigold)
 [![docs.rs](https://img.shields.io/docsrs/marigold.svg)](https://docs.rs/marigold)
-[![lines of code](https://raw.githubusercontent.com/DominicBurkart/marigold/main/.github/badges/lines_of_code.svg)](https://github.com/DominicBurkart/marigold)
-[![tests](https://github.com/DominicBurkart/marigold/workflows/tests/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/tests.yaml)
+[![lines of code](https://raw.githubusercontent.com/DominicBurkart/marigold/main/development_metadata/badges/lines_of_code.svg)](https://github.com/DominicBurkart/marigold)
+[![contributors](https://raw.githubusercontent.com/DominicBurkart/marigold/main/development_metadata/badges/contributors.svg)](https://github.com/DominicBurkart/marigold/graphs/contributors)
 [![bench](https://github.com/DominicBurkart/marigold/workflows/bench/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/bench.yaml)
+[![tests](https://github.com/DominicBurkart/marigold/workflows/tests/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/tests.yaml)
 [![style](https://github.com/DominicBurkart/marigold/workflows/style/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/style.yaml)
 [![wasm](https://github.com/DominicBurkart/marigold/workflows/wasm/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml)
 [![last commit](https://img.shields.io/github/last-commit/dominicburkart/marigold)](https://github.com/DominicBurkart/marigold)
