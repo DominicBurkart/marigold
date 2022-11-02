@@ -1,5 +1,6 @@
 use crate::nodes;
 use std::str::FromStr;
+use regex::Regex;
 
 grammar;
 
@@ -219,7 +220,7 @@ FreeText: String = {
   <text: r"[\w\-]+"> => text.to_string()
 }
 
-FnBody: String = {
+BracedText: String = {
   <text: r#"\{.*}"#> => text.to_string()
 }
 
@@ -231,18 +232,33 @@ QuotedFreeText: String = {
 }
 
 StructDeclaration: nodes::TypedExpression = {
-  "struct" <struct_name: FreeText> "{" <field_declarations: (StructFieldDeclaration ",")*> "}" =>
+  "struct" <struct_name: FreeText> <field_declarations: BracedText> =>
     nodes::TypedExpression::from(
       crate::nodes::StructDeclarationNode {
         name: struct_name,
         fields: {
-          let mut v = Vec::new();
-          for ((field_name, field_value_str), _comma_str) in field_declarations.into_iter() {
-            let field_value = crate::nodes::Type::from_str(field_value_str.as_str())
-              .expect("could not parse type in struct definition");
-            v.push((field_name, field_value));
+          lazy_static! {
+              static ref WHITESPACE: Regex =
+                  Regex::new(r#"[\s]+"#).unwrap();
+
+              static ref FIELD_DECLARATION: Regex =
+                  Regex::new(r#"([\S]+)[\s]*:[\s]*"([\S]+)""#).unwrap();
           }
-          v
+
+          let cleaned = WHITESPACE
+            .replace_all(&field_declarations, " ");
+
+          cleaned[1..cleaned.len() - 1] // remove surrounding braces
+            .split(",")
+            .filter_map(|t| FIELD_DECLARATION
+              .captures(t)
+              .map(|c| (
+                c[1].to_string(),
+                crate::nodes::Type::from_str(&c[2])
+                  .expect("could not parse type in struct definition")
+              ))
+            )
+            .collect::<Vec<_>>()
         }
       }
     )
@@ -255,17 +271,30 @@ StructFieldDeclaration: (String, String) = {
 }
 
 EnumDeclaration: nodes::TypedExpression = {
-  "enum" <enum_name: FreeText> "{" <field_declarations: (EnumFieldDeclaration ",")*> "}" =>
+  "enum" <enum_name: FreeText> <field_declarations: BracedText> =>
     nodes::TypedExpression::from(
       crate::nodes::EnumDeclarationNode {
         name: enum_name,
-        fields: field_declarations
-          .into_iter()
-          .map(
-            |((field_name, field_value_str), _comma_str)|
-              (field_name, field_value_str)
-          )
-          .collect::<Vec<(String, Option<String>)>>()
+        fields: {
+          lazy_static! {
+              static ref WHITESPACE: Regex =
+                  Regex::new(r#"[\s]+"#).unwrap();
+
+              static ref FIELD_DECLARATION: Regex =
+                  Regex::new(r#"([\S]+)[\s]*=[\s]*("[\S]+")"#).unwrap();
+          }
+
+          let cleaned = WHITESPACE
+            .replace_all(&field_declarations, " ");
+
+          cleaned[1..cleaned.len() - 1] // remove surrounding braces
+            .split(",")
+            .filter_map(|t| FIELD_DECLARATION
+              .captures(t)
+              .map(|c| (c[1].to_string(), Some(c[2].to_string())))
+            )
+            .collect::<Vec<_>>()
+        }
       }
     )
 }
@@ -311,7 +340,7 @@ FnSignature: nodes::FunctionSignature = {
 }
 
 FnDeclaration: nodes::TypedExpression = {
-  <signature: FnSignature> <body: FnBody> => nodes::TypedExpression::from(
+  <signature: FnSignature> <body: BracedText> => nodes::TypedExpression::from(
     nodes::FnDeclarationNode {
       name: signature.name.clone(),
       parameters: signature.parameters.clone(),
