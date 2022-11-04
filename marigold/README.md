@@ -1,5 +1,6 @@
 # Marigold
 
+[![website](https://img.shields.io/badge/-website-blue)](https://dominic.computer/marigold)
 [![crates.io](https://img.shields.io/crates/v/marigold.svg)](https://crates.io/crates/marigold)
 [![docs.rs](https://img.shields.io/docsrs/marigold.svg)](https://docs.rs/marigold)
 [![lines of code](https://raw.githubusercontent.com/DominicBurkart/marigold/main/development_metadata/badges/lines_of_code.svg)](https://github.com/DominicBurkart/marigold)
