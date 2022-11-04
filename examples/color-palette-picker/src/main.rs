@@ -1,8 +1,7 @@
 use marigold::m;
 use marigold::marigold_impl::StreamExt;
 
-mod lib;
-use lib::compare_contrast;
+use color_palette_picker::compare_contrast;
 
 /// Uses a multithread tokio runtime and tokio-console.
 #[cfg(feature = "tokio")]
