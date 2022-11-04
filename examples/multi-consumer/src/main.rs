@@ -10,12 +10,12 @@ fn is_even(i: &i32) -> bool {
     i % 2 == 0
 }
 
-fn doubled_plus_ten(i: i32) -> i32 {
-    (i * 2) + 10
-}
-
 async fn run() {
     let some_small_even_numbers = m!(
+        fn doubled_plus_ten(i: i32) -> i32 {
+            (i * 2) + 10
+        }
+
         digits = range(0, 10)
 
         digits

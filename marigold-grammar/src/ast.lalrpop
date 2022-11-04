@@ -1,6 +1,6 @@
 use crate::nodes;
 use std::str::FromStr;
-use itertools::Itertools;
+use regex::Regex;
 
 grammar;
 
@@ -11,7 +11,7 @@ pub Program: String = {
     ".to_string();
 
     // Before we can start streaming, we need to declare the helpers:
-    // the enums and structs, and then the stream variable declarations.
+    // the enums and structs, functions, and then the stream variable declarations.
     let enums_and_structs = <>
       .iter()
       .filter_map(|expr| match expr {
@@ -23,10 +23,32 @@ pub Program: String = {
         crate::nodes::TypedExpression::EnumDeclaration(e) => Some(e.code()),
         crate::nodes::TypedExpression::StreamVariable(v) => None,
         crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => None,
+        crate::nodes::TypedExpression::FnDeclaration(f) => None,
       })
-      .join("\n\n");
+      .map(|s| format!("{s}\n\n"))
+      .collect::<Vec<_>>()
+      .join("");
 
     output.push_str(&enums_and_structs);
+
+    let functions = <>
+      .iter()
+      .filter_map(|expr| match expr {
+        crate::nodes::TypedExpression::UnnamedReturningStream(_) => None,
+        crate::nodes::TypedExpression::UnnamedNonReturningStream(_) => None,
+        crate::nodes::TypedExpression::NamedReturningStream(_) => None,
+        crate::nodes::TypedExpression::NamedNonReturningStream(_) => None,
+        crate::nodes::TypedExpression::StructDeclaration(_) => None,
+        crate::nodes::TypedExpression::EnumDeclaration(_) => None,
+        crate::nodes::TypedExpression::StreamVariable(_) => None,
+        crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(_) => None,
+        crate::nodes::TypedExpression::FnDeclaration(f) => Some(f.code()),
+      })
+      .map(|s| format!("{s}\n\n"))
+      .collect::<Vec<_>>()
+      .join("");
+
+    output.push_str(&functions);
 
     let stream_variable_declarations = <>
       .iter()
@@ -39,8 +61,11 @@ pub Program: String = {
         crate::nodes::TypedExpression::EnumDeclaration(e) => None,
         crate::nodes::TypedExpression::StreamVariable(v) => Some(v.declaration_code()),
         crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => Some(v.declaration_code()),
+        crate::nodes::TypedExpression::FnDeclaration(f) => None
       })
-      .join("\n\n");
+      .map(|s| format!("{s}\n\n"))
+      .collect::<Vec<_>>()
+      .join("");
 
     output.push_str(&stream_variable_declarations);
 
@@ -56,6 +81,7 @@ pub Program: String = {
           crate::nodes::TypedExpression::EnumDeclaration(_) => None,
           crate::nodes::TypedExpression::StreamVariable(_) => None,
           crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(_) => None,
+          crate::nodes::TypedExpression::FnDeclaration(f) => None,
       })
       .collect::<Vec<_>>();
 
@@ -83,6 +109,7 @@ pub Program: String = {
           crate::nodes::TypedExpression::EnumDeclaration(_) => None,
           crate::nodes::TypedExpression::StreamVariable(_) => None,
           crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(_) => None,
+          crate::nodes::TypedExpression::FnDeclaration(f) => None,
       })
       .collect::<Vec<_>>();
 
@@ -108,6 +135,7 @@ pub Program: String = {
           crate::nodes::TypedExpression::EnumDeclaration(_) => None,
           crate::nodes::TypedExpression::StreamVariable(v) => Some(v.runner_code()),
           crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => Some(v.runner_code()),
+          crate::nodes::TypedExpression::FnDeclaration(f) => None,
       })
       .collect::<Vec<_>>();
 
@@ -183,33 +211,54 @@ Expr: nodes::TypedExpression = {
   Stream,
   StreamVariableDeclaration,
   StructDeclaration,
-  EnumDeclaration
+  EnumDeclaration,
+  FnDeclaration
 }
 
-// nonsense struct used to handle terminal ambiguity
+/// Nonsense nonterminal used to handle terminal ambiguity. Used for e.g. valid variable names.
 FreeText: String = {
-  <text: r"[0-9A-Za-z/_\-]+"> => text.to_string()
+  <text: r"[\w\-]+"> => text.to_string()
 }
 
-// nonsense struct used to handle terminal ambiguity
+BracedText: String = {
+  <text: r#"\{.*}"#> => text.to_string()
+}
+
+// nonsense struct used to handle terminal ambiguity. Allowed: variable name,
+// or quoted string (string literal like: "hello").
 QuotedFreeText: String = {
   <quoted_text: r#""[0-9A-Za-z/._\-\w]+""#> => quoted_text.to_string(),
-  <variable_name: r"[0-9A-Za-z/_\-]+"> => variable_name.to_string()
+  <variable_name: FreeText> => variable_name.to_string()
 }
 
 StructDeclaration: nodes::TypedExpression = {
-  "struct" <struct_name: FreeText> "{" <field_declarations: (StructFieldDeclaration ",")*> "}" =>
+  "struct" <struct_name: FreeText> <field_declarations: BracedText> =>
     nodes::TypedExpression::from(
       crate::nodes::StructDeclarationNode {
         name: struct_name,
         fields: {
-          let mut v = Vec::new();
-          for ((field_name, field_value_str), _comma_str) in field_declarations.into_iter() {
-            let field_value = crate::nodes::Type::from_str(field_value_str.as_str())
-              .expect("could not parse type in struct definition");
-            v.push((field_name, field_value));
+          lazy_static! {
+              static ref WHITESPACE: Regex =
+                  Regex::new(r#"[\s]+"#).unwrap();
+
+              static ref FIELD_DECLARATION: Regex =
+                  Regex::new(r#"([\S]+)[\s]*:[\s]*([\S]+)"#).unwrap();
           }
-          v
+
+          let cleaned = WHITESPACE
+            .replace_all(&field_declarations, " ");
+
+          cleaned[1..cleaned.len() - 1] // remove surrounding braces
+            .split(",")
+            .filter_map(|t| FIELD_DECLARATION
+              .captures(t)
+              .map(|c| (
+                c[1].to_string(),
+                crate::nodes::Type::from_str(&c[2])
+                  .expect("could not parse type in struct definition")
+              ))
+            )
+            .collect::<Vec<_>>()
         }
       }
     )
@@ -222,17 +271,30 @@ StructFieldDeclaration: (String, String) = {
 }
 
 EnumDeclaration: nodes::TypedExpression = {
-  "enum" <enum_name: FreeText> "{" <field_declarations: (EnumFieldDeclaration ",")*> "}" =>
+  "enum" <enum_name: FreeText> <field_declarations: BracedText> =>
     nodes::TypedExpression::from(
       crate::nodes::EnumDeclarationNode {
         name: enum_name,
-        fields: field_declarations
-          .into_iter()
-          .map(
-            |((field_name, field_value_str), _comma_str)|
-              (field_name, field_value_str)
-          )
-          .collect::<Vec<(String, Option<String>)>>()
+        fields: {
+          lazy_static! {
+              static ref WHITESPACE: Regex =
+                  Regex::new(r#"[\s]+"#).unwrap();
+
+              static ref FIELD_DECLARATION: Regex =
+                  Regex::new(r#"([\S]+)[\s]*=[\s]*("[\S]+")"#).unwrap();
+          }
+
+          let cleaned = WHITESPACE
+            .replace_all(&field_declarations, " ");
+
+          cleaned[1..cleaned.len() - 1] // remove surrounding braces
+            .split(",")
+            .filter_map(|t| FIELD_DECLARATION
+              .captures(t)
+              .map(|c| (c[1].to_string(), Some(c[2].to_string())))
+            )
+            .collect::<Vec<_>>()
+        }
       }
     )
 }
@@ -244,6 +306,48 @@ EnumFieldDeclaration: (String, Option<String>) = {
  <field_name: FreeText> => {
   (field_name, None)
  }
+}
+
+FnParameter: (String, String) = {
+  <parameter_name: FreeText> ":" <amp: "&"?> <parameter_type: FreeText> =>
+    (parameter_name,
+      match amp {
+        Some(_) => format!("&{}", parameter_type),
+        None => parameter_type
+      }
+    )
+}
+
+FnSignature: nodes::FunctionSignature = {
+  "fn" <name: FreeText> "("
+    <parameters: (FnParameter ",")*>
+    <maybe_trailing_parameter: FnParameter?>
+  ")" "->" <output_type: FreeText> => nodes::FunctionSignature {
+    name: name,
+    parameters: {
+      let mut cleaned_parameters = parameters
+        .iter()
+        .map(|(param, _comma_literal)| param.clone())
+        .collect::<Vec<_>>();
+      match maybe_trailing_parameter {
+        Some(p) => cleaned_parameters.push(p),
+        None => (),
+      }
+      cleaned_parameters
+    },
+    output_type: output_type
+  }
+}
+
+FnDeclaration: nodes::TypedExpression = {
+  <signature: FnSignature> <body: BracedText> => nodes::TypedExpression::from(
+    nodes::FnDeclarationNode {
+      name: signature.name.clone(),
+      parameters: signature.parameters.clone(),
+      output_type: signature.output_type.clone(),
+      body: body
+    }
+  )
 }
 
 Stream: nodes::TypedExpression = {
@@ -285,7 +389,7 @@ StreamVariableDeclaration: nodes::TypedExpression = {
 }
 
 InputFunction: nodes::InputFunctionNode = {
-  "range(" <n1: FreeText> "," <n2: FreeText> ")" => nodes::InputFunctionNode{
+  "range(" <n1: FreeText> "," <n2: FreeText> ")" => nodes::InputFunctionNode {
     variability: nodes::InputVariability::Constant,
     input_count: nodes::InputCount::Known((n2.parse::<num_bigint::BigInt>().expect("could not parse input as integer") - n1.parse::<num_bigint::BigInt>().expect("could not parse input as integer")).to_biguint().unwrap()),
     code: format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})"),
