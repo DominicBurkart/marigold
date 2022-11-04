@@ -242,7 +242,7 @@ StructDeclaration: nodes::TypedExpression = {
                   Regex::new(r#"[\s]+"#).unwrap();
 
               static ref FIELD_DECLARATION: Regex =
-                  Regex::new(r#"([\S]+)[\s]*:[\s]*"([\S]+)""#).unwrap();
+                  Regex::new(r#"([\S]+)[\s]*:[\s]*([\S]+)"#).unwrap();
           }
 
           let cleaned = WHITESPACE
