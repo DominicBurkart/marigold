@@ -7,6 +7,7 @@ members = [
   "examples/color-palette-picker",
   "examples/csv",
   "examples/multi-consumer",
+  "examples/select-all",
   "tests"
 ]
 resolver = "2"
