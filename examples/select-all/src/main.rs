@@ -18,11 +18,10 @@ async fn run() {
     assert_eq!(ints_with_duplicates.len(), 40);
 
     assert_eq!(
-        ints_with_duplicates.iter().collect::<HashSet<i32>>().await,
+        ints_with_duplicates.into_iter().collect::<HashSet<i32>>(),
         (0..30).collect::<HashSet<i32>>()
     );
-
-    println!("result: {:?}", ints_with_duplicates);
+    println!("run complete");
 }
 
 #[cfg(feature = "tokio")]
