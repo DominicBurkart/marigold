@@ -7,6 +7,7 @@ pub mod combinations;
 pub mod keep_first_n;
 pub mod multi_consumer_stream;
 pub mod permutations;
+pub mod run_stream;
 
 pub use collect_and_apply::CollectAndAppliable;
 pub use combinations::Combinable;

@@ -454,14 +454,14 @@ InputFunction: nodes::InputFunctionNode = {
           .into_iter()
           .map(|(stream, _string_literal)| {
             let code = stream.code();
-            format!("Box::pin({code})")
+            format!("::marigold::marigold_impl::run_stream::run_stream({code})")
           })
           .collect::<Vec<_>>();
 
         let stream_code = {
           if let Some(trailing_stream) = last_selected_stream {
             let code = trailing_stream.code();
-            streams.push(format!("Box::pin({code})"));
+            streams.push(format!("::marigold::marigold_impl::run_stream::run_stream({code})"));
           }
           streams.join(",\n")
         };
