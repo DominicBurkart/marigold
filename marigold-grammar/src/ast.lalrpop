@@ -1,4 +1,5 @@
 use crate::nodes;
+use crate::type_aggregation;
 use std::str::FromStr;
 use regex::Regex;
 
@@ -354,9 +355,11 @@ Stream: nodes::TypedExpression = {
   <inp: InputFunction> <funs:("." <StreamFunction>)*> "." <out: OutputFunction> =>
     nodes::TypedExpression::from(
       nodes::UnnamedStreamNode{
-        inp,
-        funs,
-        out
+        inp_and_funs: nodes::InputAndMaybeStreamFunctions {
+          inp,
+          funs,
+        },
+        out: out
       }
     ),
   <stream_variable: FreeText> <funs:("." <StreamFunction>)*> "." <out: OutputFunction> =>
@@ -442,6 +445,42 @@ InputFunction: nodes::InputFunctionNode = {
           .compat()
       ).into_deserialize::<{deserialization_struct}>()
     ")
+  },
+  "select_all" "(" <selected_streams: (InputAndMaybeStreamFunctions ",")*> <last_selected_stream: InputAndMaybeStreamFunctions?> ")" => {
+    let streams = {
+      let mut streams = selected_streams
+        .into_iter()
+        .map(|(stream, _string_literal)| stream)
+        .collect::<Vec<_>>();
+      if let Some(trailing_stream) = last_selected_stream {
+        streams.push(trailing_stream);
+      }
+      streams
+    };
+
+
+    nodes::InputFunctionNode {
+      variability: type_aggregation::aggregate_input_variability(streams.iter().map(|s| s.inp.variability.clone())),
+      input_count: type_aggregation::aggregate_input_count(streams.iter().map(|s| s.inp.input_count.clone())),
+      code: {
+        let stream_code = streams
+          .iter()
+          .map(|stream| {
+            let code = stream.code();
+            format!("::marigold::marigold_impl::run_stream::run_stream({code})")
+          })
+          .collect::<Vec<_>>()
+          .join(",\n");
+        format!("::marigold::marigold_impl::futures::prelude::stream::select_all::select_all([{stream_code}])")
+      }
+    }
+  }
+}
+
+InputAndMaybeStreamFunctions: nodes::InputAndMaybeStreamFunctions = {
+  <inp: InputFunction> <funs:("." <StreamFunction>)*> => nodes::InputAndMaybeStreamFunctions {
+    inp: inp,
+    funs: funs
   }
 }
 

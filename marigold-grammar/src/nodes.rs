@@ -64,23 +64,39 @@ impl From<FnDeclarationNode> for TypedExpression {
 }
 
 pub struct UnnamedStreamNode {
-    pub inp: InputFunctionNode,
-    pub funs: Vec<StreamFunctionNode>,
+    pub inp_and_funs: InputAndMaybeStreamFunctions,
     pub out: OutputFunctionNode,
 }
 
 impl UnnamedStreamNode {
     pub fn code(&self) -> String {
-        let inp = &self.inp.code;
-        let intermediate = self
-            .funs
-            .iter()
-            .map(|f| f.code.as_str())
-            .collect::<Vec<_>>()
-            .join(".");
+        let inp_and_funs_code = self.inp_and_funs.code();
         let stream_prefix = &self.out.stream_prefix;
         let stream_postfix = &self.out.stream_postfix;
-        format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{inp}.{intermediate}{stream_postfix}}}")
+        format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{inp_and_funs_code}{stream_postfix}}}")
+    }
+}
+
+pub struct InputAndMaybeStreamFunctions {
+    pub inp: InputFunctionNode,
+    pub funs: Vec<StreamFunctionNode>,
+}
+
+impl InputAndMaybeStreamFunctions {
+    pub fn code(&self) -> String {
+        let inp = &self.inp.code;
+        match self.funs.len() {
+            0 => inp.to_string(),
+            _ => {
+                let intermediate = self
+                    .funs
+                    .iter()
+                    .map(|f| f.code.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                format!("{inp}.{intermediate}")
+            }
+        }
     }
 }
 
@@ -192,6 +208,7 @@ pub struct StreamFunctionNode {
 }
 
 /// Number of inputs
+#[derive(PartialEq, Eq, Clone)]
 pub enum InputCount {
     Known(num_bigint::BigUint),
     Unknown,
@@ -199,6 +216,7 @@ pub enum InputCount {
 
 /// Whether the input is known at compile time (constant),
 /// or whether it is not available until runtime (variable).
+#[derive(PartialEq, Eq, Clone)]
 pub enum InputVariability {
     Constant,
     Variable,
