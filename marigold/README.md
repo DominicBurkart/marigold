@@ -1,8 +1,8 @@
 # Marigold
 
-[![website](https://img.shields.io/badge/-website-blue)](https://dominic.computer/marigold)
 [![crates.io](https://img.shields.io/crates/v/marigold.svg)](https://crates.io/crates/marigold)
 [![docs.rs](https://img.shields.io/docsrs/marigold.svg)](https://docs.rs/marigold)
+[![website](https://img.shields.io/badge/-website-blue)](https://dominic.computer/marigold)
 [![lines of code](https://raw.githubusercontent.com/DominicBurkart/marigold/main/development_metadata/badges/lines_of_code.svg)](https://github.com/DominicBurkart/marigold)
 [![contributors](https://raw.githubusercontent.com/DominicBurkart/marigold/main/development_metadata/badges/contributors.svg)](https://github.com/DominicBurkart/marigold/graphs/contributors)
 [![bench](https://github.com/DominicBurkart/marigold/workflows/bench/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/bench.yaml)
