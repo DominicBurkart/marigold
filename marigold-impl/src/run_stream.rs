@@ -12,8 +12,7 @@ pub fn run_stream<
 >(
     s: S,
 ) -> Pin<Box<dyn Stream<Item = T>>> {
-    let (sender, receiver) =
-        futures::channel::mpsc::channel(std::cmp::max(2 * (num_cpus::get() - 1), 2));
+    let (sender, receiver) = futures::channel::mpsc::channel(std::cmp::max(num_cpus::get() - 1, 2));
     crate::async_runtime::spawn(async move {
         let mut moved_sender = sender;
         s.map(Ok)
