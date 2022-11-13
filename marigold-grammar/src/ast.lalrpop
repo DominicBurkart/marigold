@@ -1,4 +1,5 @@
 use crate::nodes;
+use crate::type_aggregation;
 use std::str::FromStr;
 use regex::Regex;
 
@@ -446,25 +447,30 @@ InputFunction: nodes::InputFunctionNode = {
     ")
   },
   "select_all" "(" <selected_streams: (InputAndMaybeStreamFunctions ",")*> <last_selected_stream: InputAndMaybeStreamFunctions?> ")" => {
+    let streams = {
+      let mut streams = selected_streams
+        .into_iter()
+        .map(|(stream, _string_literal)| stream)
+        .collect::<Vec<_>>();
+      if let Some(trailing_stream) = last_selected_stream {
+        streams.push(trailing_stream);
+      }
+      streams
+    };
+
+
     nodes::InputFunctionNode {
-      variability: nodes::InputVariability::Variable, // todo check all inputs
-      input_count: nodes::InputCount::Unknown, // todo check all inputs
+      variability: type_aggregation::aggregate_input_variability(streams.iter().map(|s| s.inp.variability.clone())),
+      input_count: type_aggregation::aggregate_input_count(streams.iter().map(|s| s.inp.input_count.clone())),
       code: {
-        let mut streams = selected_streams
-          .into_iter()
-          .map(|(stream, _string_literal)| {
+        let stream_code = streams
+          .iter()
+          .map(|stream| {
             let code = stream.code();
             format!("::marigold::marigold_impl::run_stream::run_stream({code})")
           })
-          .collect::<Vec<_>>();
-
-        let stream_code = {
-          if let Some(trailing_stream) = last_selected_stream {
-            let code = trailing_stream.code();
-            streams.push(format!("::marigold::marigold_impl::run_stream::run_stream({code})"));
-          }
-          streams.join(",\n")
-        };
+          .collect::<Vec<_>>()
+          .join(",\n");
         format!("::marigold::marigold_impl::futures::prelude::stream::select_all::select_all([{stream_code}])")
       }
     }
