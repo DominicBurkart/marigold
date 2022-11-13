@@ -11,9 +11,9 @@
 [![wasm](https://github.com/DominicBurkart/marigold/workflows/wasm/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml)
 [![last commit](https://img.shields.io/github/last-commit/dominicburkart/marigold)](https://github.com/DominicBurkart/marigold)
 
-Marigold is a domain-specific language for streaming data pipelining and
-analysis. Marigold compiles to asynchronous Rust, and can be accessed in a
-macro:
+Marigold is an imperative, domain-specific language for data pipelining and
+analysis using async streams. It can be used as a standalone language or within
+Rust programs.
 
 ```rust
 use marigold::m;
