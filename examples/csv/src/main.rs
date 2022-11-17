@@ -296,4 +296,34 @@ mod tests {
             read_csv("./output/decompressed.csv").await
         );
     }
+
+    #![feature(const_cmp)] // https://github.com/rust-lang/rust/issues/92391
+    #[tokio::test]
+    async fn filter_on_enum() {
+        let split_hull_ships = m!(
+            enum Hull {
+                Spherical = "spherical",
+                Split = "split",
+            }
+
+            struct Vaisseau {
+                class: string_8,
+                hull: Hull,
+            }
+
+            fn is_split(ship: &Vaisseau) -> bool {
+                ship.hull == Hull::Split
+            }
+
+            read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
+                .ok_or_panic()
+                .filter(is_split)
+                .return
+        )
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(split_hull_ships.len(), 1);
+        assert_eq!(split_hull_ships[0].class.as_str(), "Oberth");
+    }
 }
