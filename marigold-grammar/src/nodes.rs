@@ -1,3 +1,4 @@
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::str::FromStr;
 
@@ -364,7 +365,19 @@ impl Type {
 
 pub struct EnumDeclarationNode {
     pub name: String,
-    pub fields: Vec<(String, Option<String>)>,
+    pub variants: Vec<(String, Option<String>)>,
+    pub default_variant: Option<DefaultEnumVariant>,
+}
+
+pub enum DefaultEnumVariant {
+    Sized(
+        String, // name
+        u32,    // size
+    ),
+    WithDefaultValue(
+        String, // name
+        String, // serialized value
+    ),
 }
 
 impl EnumDeclarationNode {
@@ -373,17 +386,7 @@ impl EnumDeclarationNode {
         if let Some(definition) = maybe_definition {
             return match definition.as_str() {
                 "skip" => Some("skip".to_string()),
-                _ => {
-                    lazy_static! {
-                        static ref QUOTED: Regex =
-                            Regex::new(r#""(?P<serialization_value>[^"]+)+""#).unwrap();
-                    }
-                    if let Some(quoted_value) = QUOTED.captures(definition.as_str()) {
-                        let value = &quoted_value["serialization_value"];
-                        return Some(format!("rename = \"{value}\""));
-                    }
-                    panic!("Enum value could not be parsed: {}", definition);
-                }
+                value => Some(format!("rename = \"{value}\"")),
             };
         }
         None
@@ -404,23 +407,201 @@ impl EnumDeclarationNode {
         ]
         .join(", ");
         let name = &self.name;
-        let mut enum_rep = format!(
-            "
-            #[derive({traits})]
-            enum {name} {{
-            "
-        );
-        #[allow(unused_variables)] // serialization_definition only used if io/serde enabled
-        for (field_name, serialization_definition) in &self.fields {
+        let mut enum_rep = format!("#[derive({traits})]");
+        if let Some(default_variant) = &self.default_variant {
             #[cfg(feature = "io")]
-            if let Some(serde_def) = Self::definition_to_serde(serialization_definition) {
-                enum_rep.push_str(format!("#[serde({serde_def})]\n").as_str())
+            {
+                // todo: when https://github.com/serde-rs/serde/issues/912 is resolved,
+                // we will no longer have to allocate a String and provide a conversion
+                // to this enum from a String.
+                enum_rep.push_str(format!("\n#[serde(try_from=\"String\")]").as_str());
+                enum_rep.push_str(format!("\nenum {name} {{\n").as_str());
+
+                // add normal variants.
+                let mut serialized_to_name_mapping = String::new();
+                for (field_name, serialization_definition) in &self.variants {
+                    // use the serde definition for deserialization
+                    Self::definition_to_serde(serialization_definition)
+                        .map(|s| enum_rep.push_str(format!("#[serde({s})]\n").as_str()));
+                    enum_rep.push_str(format!("{},\n", field_name.as_str()).as_str());
+
+                    // For serialization, we'll use this string in the From<String> implementation.
+                    let serialized = serialization_definition
+                        .as_ref()
+                        .unwrap_or_else(|| field_name)
+                        .clone();
+                    serialized_to_name_mapping
+                        .push_str(format!("\"{serialized}\" => {field_name},\n").as_str());
+                }
+
+                // add default variant definition
+                #[allow(unused_assignments)] // actually used in a `format!`
+                let mut default_serialized_mapping = String::new();
+                match default_variant {
+                    DefaultEnumVariant::Sized(default_name, size) => {
+                        enum_rep.push_str(format!("#[serde(skip_deserializing)]\n").as_str());
+                        enum_rep.push_str(format!("{default_name}(::marigold::marigold_impl::arrayvec::ArrayString<{size}>),\n").as_str());
+
+                        default_serialized_mapping =
+                            "unknown_value => Other({{
+                                let mut contents = ::marigold::marigold_impl::arrayvec::ArrayString::new();
+                                for c in unknown_value.chars() {{
+                                    contents.try_push(c)?;
+                                }}
+                                contents
+                            }})".to_string();
+                    }
+                    DefaultEnumVariant::WithDefaultValue(default_name, serialized_value) => {
+                        enum_rep.push_str(format!("#[serde(skip_deserializing, rename = \"{serialized_value}\")]\n{default_name},\n").as_str());
+
+                        default_serialized_mapping = format!("_ => {default_name}");
+                    }
+                }
+                enum_rep.push('}');
+                enum_rep.push_str(
+                    format!(
+                        r#"
+
+                impl TryFrom<String> for {name} {{
+                    type Error = ::marigold::marigold_impl::arrayvec::CapacityError<char>;
+
+                    fn try_from(s: String) -> Result<Self, Self::Error> {{
+                        use {name}::*;
+
+                        Ok(match s.as_str() {{
+                            {serialized_to_name_mapping}
+                            {default_serialized_mapping}
+                        }})
+                    }}
+                }}
+
+                "#
+                    )
+                    .as_str(),
+                );
             }
-            enum_rep.push_str(field_name.as_str());
-            enum_rep.push_str(",\n");
+            #[cfg(not(feature = "io"))]
+            {
+                enum_rep.push_str(format!("enum {name} {{\n").as_str());
+
+                for (field_name, _) in &self.variants {
+                    enum_rep.push_str(field_name.as_str());
+                    enum_rep.push_str(",\n");
+                }
+                let default_variant_name = match default_variant {
+                    DefaultEnumVariant::Sized(name, _) => name,
+                    DefaultEnumVariant::WithDefaultValue(name, _) => name,
+                };
+                enum_rep.push_str(format!("{default_variant_name},\n").as_str());
+                enum_rep.push('}');
+            }
+        } else {
+            enum_rep.push_str(format!("enum {name} {{\n").as_str());
+
+            #[allow(unused_variables)] // serialization_definition only used if io/serde enabled
+            for (field_name, serialization_definition) in &self.variants {
+                #[cfg(feature = "io")]
+                if let Some(serde_def) = Self::definition_to_serde(serialization_definition) {
+                    enum_rep.push_str(format!("#[serde({serde_def})]\n").as_str());
+                }
+                enum_rep.push_str(field_name.as_str());
+                enum_rep.push_str(",\n");
+            }
+
+            enum_rep.push('}');
         }
-        enum_rep.push('}');
         enum_rep
+    }
+}
+
+pub fn parse_enum(enum_name: String, enum_contents: String) -> TypedExpression {
+    lazy_static! {
+        static ref ENUM_RE: Regex = Regex::new(r#"\{[\s]*(?P<variant>(?P<variant_name>[\w]+)[\s]*=[\s]*("(?P<serialized_value>[^"]+)"),?[\s]*)*(?P<default_variant>default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,?[\s]*)?\}"#).unwrap();
+        static ref VARIANT_RE: Regex = Regex::new(r#"(?P<variant_name>[\w]+)[\s]*=[\s]*("(?P<serialized_value>[^"]+)"),?"#).unwrap();
+        static ref DEFAULT_VARIANT_RE: Regex = Regex::new(r#"default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,?[\s]*"#).unwrap();
+    }
+
+    fn get_variants(enum_str: &str) -> Vec<(String, Option<String>)> {
+        VARIANT_RE
+            .captures_iter(enum_str)
+            .map(|c| {
+                (
+                    c.name("variant_name").unwrap().as_str().to_string(),
+                    c.name("serialized_value").map(|v| v.as_str().to_string()),
+                )
+            })
+            .collect::<Vec<_>>()
+    }
+
+    // first, validate that the enum matches the expected format
+    let cap = ENUM_RE.captures(&enum_contents);
+    if cap.is_none() {
+        panic!("syntax error while parsing enum {}", enum_name);
+    }
+
+    // find if there is a default variant, checking if there are multiple
+    // defaults declared.
+    if let Some((default_variant_name, maybe_string_size, maybe_serialized_value)) = {
+        let mut default_variants = DEFAULT_VARIANT_RE
+            .captures_iter(&enum_contents)
+            .filter(|v| v.name("default_variant_name").is_some());
+
+        let mut name = None;
+        let mut maybe_string_size = None;
+        let mut maybe_serialized_value = None;
+        if let Some(default_variant) = default_variants.next() {
+            name = Some(
+                default_variant
+                    .name("default_variant_name")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+            );
+            maybe_string_size = default_variant
+                .name("default_variant_string_size")
+                .map(|m| {
+                    u32::from_str(m.as_str()).expect("could not parse default enum size as usize")
+                });
+            maybe_serialized_value = default_variant
+                .name("default_variant_serialized_value")
+                .map(|m| m.as_str().to_string());
+        }
+
+        if default_variants.next().is_some() {
+            panic!("Multiple default variants declared in enum {}", enum_name);
+        }
+
+        name.map(|n| (n, maybe_string_size, maybe_serialized_value))
+    } {
+        if maybe_string_size.is_some() && maybe_serialized_value.is_some() {
+            panic!("Error while parsing enum {}: default enum value can contain a serialized value or a string size, but not both", enum_name);
+        }
+
+        TypedExpression::from(EnumDeclarationNode {
+            name: enum_name,
+            variants: get_variants(
+                &enum_contents[0..DEFAULT_VARIANT_RE.find(&enum_contents).unwrap().start()],
+            ),
+            default_variant: Some({
+                if let Some(string_size) = maybe_string_size {
+                    DefaultEnumVariant::Sized(default_variant_name, string_size)
+                } else if let Some(serialized_value) = maybe_serialized_value {
+                    DefaultEnumVariant::WithDefaultValue(default_variant_name, serialized_value)
+                } else {
+                    DefaultEnumVariant::WithDefaultValue(
+                        default_variant_name.clone(),
+                        default_variant_name,
+                    )
+                }
+            }),
+        })
+    } else {
+        // no default variant, this is simpler :)
+        TypedExpression::from(EnumDeclarationNode {
+            name: enum_name,
+            variants: get_variants(&enum_contents),
+            default_variant: None,
+        })
     }
 }
 
@@ -433,6 +614,11 @@ pub struct FnDeclarationNode {
 
 impl FnDeclarationNode {
     pub fn code(&self) -> String {
+        static FUNCTION_BODY: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"%%%MARIGOLD_FUNCTION_START%%%([\s\S]*)%%%MARIGOLD_FUNCTION_END%%%")
+                .unwrap()
+        });
+
         let name = &self.name;
         let parameters_string = self
             .parameters
@@ -441,8 +627,14 @@ impl FnDeclarationNode {
             .collect::<Vec<_>>()
             .join(", ");
         let output_type = &self.output_type;
-        let body = &self.body;
-        format!("const fn {name}({parameters_string}) -> {output_type} {body}")
+        let body = FUNCTION_BODY
+            .captures(&self.body)
+            .expect("function body not parseable")
+            .get(1)
+            .expect("could not get function body")
+            .as_str();
+
+        format!("const fn {name}({parameters_string}) -> {output_type} {{{body}}}")
     }
 }
 

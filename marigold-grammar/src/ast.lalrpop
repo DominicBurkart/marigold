@@ -218,7 +218,7 @@ Expr: nodes::TypedExpression = {
 
 /// Nonsense nonterminal used to handle terminal ambiguity. Used for e.g. valid variable names.
 FreeText: String = {
-  <text: r"[\w\-]+"> => text.to_string()
+  <text: r"[><\w\-]+"> => text.to_string()
 }
 
 BracedText: String = {
@@ -272,32 +272,7 @@ StructFieldDeclaration: (String, String) = {
 }
 
 EnumDeclaration: nodes::TypedExpression = {
-  "enum" <enum_name: FreeText> <field_declarations: BracedText> =>
-    nodes::TypedExpression::from(
-      crate::nodes::EnumDeclarationNode {
-        name: enum_name,
-        fields: {
-          lazy_static! {
-              static ref WHITESPACE: Regex =
-                  Regex::new(r#"[\s]+"#).unwrap();
-
-              static ref FIELD_DECLARATION: Regex =
-                  Regex::new(r#"([\S]+)[\s]*=[\s]*("[\S]+")"#).unwrap();
-          }
-
-          let cleaned = WHITESPACE
-            .replace_all(&field_declarations, " ");
-
-          cleaned[1..cleaned.len() - 1] // remove surrounding braces
-            .split(",")
-            .filter_map(|t| FIELD_DECLARATION
-              .captures(t)
-              .map(|c| (c[1].to_string(), Some(c[2].to_string())))
-            )
-            .collect::<Vec<_>>()
-        }
-      }
-    )
+  "enum" <enum_name: FreeText> <enum_contents: BracedText> => nodes::parse_enum(enum_name, enum_contents),
 }
 
 EnumFieldDeclaration: (String, Option<String>) = {
@@ -323,7 +298,7 @@ FnSignature: nodes::FunctionSignature = {
   "fn" <name: FreeText> "("
     <parameters: (FnParameter ",")*>
     <maybe_trailing_parameter: FnParameter?>
-  ")" "->" <output_type: FreeText> => nodes::FunctionSignature {
+  ")" "->" <output_type: FreeText*> => nodes::FunctionSignature {
     name: name,
     parameters: {
       let mut cleaned_parameters = parameters
@@ -336,17 +311,34 @@ FnSignature: nodes::FunctionSignature = {
       }
       cleaned_parameters
     },
-    output_type: output_type
+    output_type: output_type.into_iter().map(
+      |typ| {
+        lazy_static! {
+            static ref STRING: Regex = Regex::new(r"string_([0-9_A-Za-z]+)").unwrap();
+        }
+        if let Some(string_def) = STRING.captures(&typ) {
+            let size_str = string_def
+                .get(1)
+                .expect("Could not find size definition for string field");
+            let size = u32::from_str(size_str.as_str())
+                .expect("Could not parse string size in struct. Must be parsable as U32.");
+            return format!("::marigold::marigold_impl::arrayvec::ArrayString<{size}>");
+        }
+        typ
+      }
+    )
+    .collect::<Vec<_>>()
+    .join(" ")
   }
 }
 
 FnDeclaration: nodes::TypedExpression = {
-  <signature: FnSignature> <body: BracedText> => nodes::TypedExpression::from(
+  <signature: FnSignature> <body: r"%%%MARIGOLD_FUNCTION_START%%%[\s\S]*%%%MARIGOLD_FUNCTION_END%%%"> => nodes::TypedExpression::from(
     nodes::FnDeclarationNode {
       name: signature.name.clone(),
       parameters: signature.parameters.clone(),
       output_type: signature.output_type.clone(),
-      body: body
+      body: body.to_string()
     }
   )
 }
@@ -505,7 +497,7 @@ StreamFunction: nodes::StreamFunctionNode = {
   "filter(" <filter_fn: FreeText> ")" => {
     #[cfg(not(any(feature = "tokio", feature = "async-std")))]
     return nodes::StreamFunctionNode {
-      code: format!("filter(|v| futures::future::ready({filter_fn}(v)))"),
+      code: format!("filter(|v| ::marigold::marigold_impl::futures::future::ready({filter_fn}(v)))"),
       // todo: filters have a bad type that doesn't allow them to compile if passed
       // an actual async function, so wrap a sync function in a fake future until
       // the filter types are updated.
@@ -531,13 +523,13 @@ StreamFunction: nodes::StreamFunctionNode = {
   "filter_map(" <filter_map_fn: FreeText> ")" => {
     #[cfg(not(any(feature = "tokio", feature = "async-std")))]
     return nodes::StreamFunctionNode {
-      code: format!("filter_map({filter_map_fn})")
+      code: format!("filter_map(|v| ::marigold::marigold_impl::futures::future::ready({filter_map_fn}(v)))")
     };
 
     #[cfg(any(feature = "tokio", feature = "async-std"))]
     return nodes::StreamFunctionNode {
       code: format!("
-      map({filter_map_fn})
+      map(|v| ::marigold::marigold_impl::futures::future::ready({filter_map_fn}(v)))
       .buffered(
         std::cmp::max(
           2 * (::marigold::marigold_impl::num_cpus::get() - 1),

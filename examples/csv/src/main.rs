@@ -296,4 +296,135 @@ mod tests {
             read_csv("./output/decompressed.csv").await
         );
     }
+
+    /// Here, we test that the `default` variant in enums operates as expected.
+    #[tokio::test]
+    async fn default_deserialize() {
+        // declaration does not error or cause other variants to deserialize incorrectly
+        assert_eq!(
+            m!(
+                enum Hull {
+                    Spherical = "spherical",
+                    default Other,
+                }
+
+                struct Vaisseau {
+                    class: string_8,
+                    hull: Hull,
+                }
+
+                fn is_spherical(v: &Vaisseau) -> bool {
+                    match v.hull {
+                        Hull::Spherical => true,
+                        _ => false
+                    }
+                }
+
+                read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
+                    .ok_or_panic()
+                    .filter(is_spherical)
+                    .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await
+            .len(),
+            2
+        );
+
+        // same declaration with a default serialization value
+        assert_eq!(
+            m!(
+                enum Hull {
+                    Spherical = "spherical",
+                    default Other = "other"
+                }
+
+                struct Vaisseau {
+                    class: string_8,
+                    hull: Hull,
+                }
+
+                fn is_spherical(v: &Vaisseau) -> bool {
+                    match v.hull {
+                        Hull::Spherical => true,
+                        _ => false
+                    }
+                }
+
+                read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
+                    .ok_or_panic()
+                    .filter(is_spherical)
+                    .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await
+            .len(),
+            2
+        );
+
+        // we can retain the content that we deserialized as the default variant
+        assert_eq!(
+            m!(
+                enum Hull {
+                    Spherical = "spherical",
+                    default Other(string_10),
+                }
+
+                struct Vaisseau {
+                    class: string_8,
+                    hull: Hull,
+                }
+
+                fn unknown_hull_values(v: Vaisseau) -> Option<string_10> {
+                    match v.hull {
+                        Hull::Spherical => None,
+                        Hull::Other(hull_value) => Some(hull_value)
+                    }
+                }
+
+                read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
+                    .ok_or_panic()
+                    .filter_map(unknown_hull_values)
+                    .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![marigold::marigold_impl::arrayvec::ArrayString::<10>::from("split").unwrap()]
+        );
+
+        // errors due to input being smaller than the default max value size don't break everything
+        assert_eq!(
+            m!(
+                enum Hull {
+                    Spherical = "spherical",
+                    default Other(string_1),
+                }
+
+                struct Vaisseau {
+                    class: string_8,
+                    hull: Hull,
+                }
+
+                fn is_spherical(v: &Vaisseau) -> bool {
+                    match v.hull {
+                        Hull::Spherical => true,
+                        _ => false
+                    }
+                }
+
+                read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
+                    .ok()
+                    .filter(is_spherical)
+                    .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await
+            .len(),
+            2
+        );
+    }
 }
