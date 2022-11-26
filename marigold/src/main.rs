@@ -38,7 +38,7 @@ fn main() -> Result<()> {
         //!
         //! [dependencies]
         //! tokio = {{ version = "1", features = ["full"] }}
-        //! marigold = {{ version="{MARIGOLD_VERSION}", features=["tokio"] }}
+        //! marigold = {{ version="={MARIGOLD_VERSION}", features=["tokio"] }}
         //! ```
 
         use marigold::m;
