@@ -1,6 +1,6 @@
 [package]
 name = "marigold-impl"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2021"
 authors = ["Dominic <code@dominic.computer>"]
 description = "Internal logic for the marigold language."
