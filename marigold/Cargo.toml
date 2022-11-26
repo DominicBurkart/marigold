@@ -11,11 +11,12 @@ repository = "https://github.com/DominicBurkart/marigold"
 tokio = ["marigold-impl/tokio"]
 async-std = ["marigold-impl/async-std"]
 io = ["marigold-impl/io", "marigold-grammar/io", "marigold-macros/io"]
+cli = ["tempfile"]
 
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.0.27", features = ["derive"] }
-tempfile = "3"
+tempfile = { version="3", optional = true }
 
 [dependencies.marigold-grammar]
 path = "../marigold-grammar"

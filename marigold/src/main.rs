@@ -1,22 +1,32 @@
+#[cfg(feature = "cli")]
 use anyhow::Result;
+#[cfg(feature = "cli")]
 use clap::Parser;
-use std::io;
-use std::io::Read;
-use std::io::Write;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
 
+#[cfg(feature = "cli")]
 const MARIGOLD_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[cfg(feature = "cli")]
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path of the marigold file to read
     #[arg(short, long)]
-    file: Option<PathBuf>,
+    file: Option<String>,
 }
 
+#[cfg(not(feature = "cli"))]
+fn main() {
+    eprintln!("marigold needs to be installed with the cli feature (`cargo install --force marigold -F cli`)");
+}
+
+#[cfg(feature = "cli")]
 fn main() -> Result<()> {
+    use std::io;
+    use std::io::Read;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
     let args = Args::parse();
 
     let program_contents = match args.file {
@@ -38,7 +48,7 @@ fn main() -> Result<()> {
         //!
         //! [dependencies]
         //! tokio = {{ version = "1", features = ["full"] }}
-        //! marigold = {{ version="={MARIGOLD_VERSION}", features=["tokio"] }}
+        //! marigold = {{ version="={MARIGOLD_VERSION}", features=["tokio", "io"] }}
         //! ```
 
         use marigold::m;
