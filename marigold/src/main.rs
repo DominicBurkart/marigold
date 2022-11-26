@@ -86,19 +86,36 @@ async fn main() {{ marigold::m!({program_contents}).await }}
 "#
     )?;
 
-    let exit_status = Command::new("cargo")
-        .args([
-            "play",
-            "--release",
-            "--edition",
-            "2021",
-            file.path()
-                .as_os_str()
-                .to_str()
-                .expect("marigold failure: generated non-utf8 file descriptor"),
-        ])
-        .spawn()?
-        .wait()?;
+    let exit_status = {
+        if args.release {
+            Command::new("cargo")
+                .args([
+                    "play",
+                    "--release",
+                    "--edition",
+                    "2021",
+                    file.path()
+                        .as_os_str()
+                        .to_str()
+                        .expect("marigold failure: generated non-utf8 file descriptor"),
+                ])
+                .spawn()?
+                .wait()?
+        } else {
+            Command::new("cargo")
+                .args([
+                    "play",
+                    "--edition",
+                    "2021",
+                    file.path()
+                        .as_os_str()
+                        .to_str()
+                        .expect("marigold failure: generated non-utf8 file descriptor"),
+                ])
+                .spawn()?
+                .wait()?
+        }
+    };
 
     file.close()?;
 
