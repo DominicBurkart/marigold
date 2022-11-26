@@ -100,5 +100,7 @@ async fn main() {{ marigold::m!({program_contents}).await }}
         .spawn()?
         .wait()?;
 
+    file.close()?;
+
     std::process::exit(exit_status.code().unwrap_or(0));
 }
