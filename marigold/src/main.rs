@@ -197,8 +197,8 @@ marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}
                 Command::new("cargo")
                     .args([
                         command,
-                        "--manifest-path",
-                        manifest_path
+                        "--path",
+                        program_project_dir
                             .to_str()
                             .expect("Marigold could not parse cache manifest path as utf-8"),
                     ])
