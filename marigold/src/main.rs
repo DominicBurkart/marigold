@@ -40,7 +40,7 @@ struct Args {
 
     /// Disables optimizations to speed up compilation.
     #[arg(short, long, default_value_t = false)]
-    fast: bool,
+    unoptimized: bool,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -175,7 +175,7 @@ marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}
     )?;
 
     let exit_status = {
-        if args.fast {
+        if args.unoptimized {
             if command == "install" {
                 eprintln!("`install` and `fast` are not compatible.");
                 std::process::exit(1);
