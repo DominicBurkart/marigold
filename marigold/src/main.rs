@@ -256,7 +256,7 @@ mod tests {
             .success());
         assert_eq!(
             fs::read_to_string("from_run.csv").expect("could not read CSV"),
-            "1\n2\n3\n"
+            "0\n1\n2\n"
         );
         assert!(Command::new("marigold")
             .args(["clean", "test_run.marigold"])
@@ -363,7 +363,7 @@ mod tests {
             .success());
         assert_eq!(
             fs::read_to_string("from_clean.csv").expect("could not read CSV"),
-            "1\n2\n3\n"
+            "0\n1\n2\n"
         );
         assert!(Command::new("marigold")
             .args(["clean", "test_clean.marigold"])
@@ -391,7 +391,7 @@ mod tests {
             .success());
         assert_eq!(
             fs::read_to_string("from_clean_all.csv").expect("could not read CSV"),
-            "1\n2\n3\n"
+            "0\n1\n2\n"
         );
         assert!(Command::new("marigold")
             .args(["clean-all", "test_clean_all.marigold"])
