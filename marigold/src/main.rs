@@ -12,7 +12,7 @@ struct Args {
     file: Option<String>,
 
     /// Weather to enable compiler optimizations
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short, long, default_value_t = true)]
     release: bool,
 }
 
