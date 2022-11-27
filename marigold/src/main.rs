@@ -80,12 +80,7 @@ fn main() -> Result<()> {
 
     write!(
         file,
-        r#"//#tokio={{ version="1", features=["full"] }}
-//# marigold={{ version="={MARIGOLD_VERSION}", features=["tokio", "io"] }}
-
-#[tokio::main]
-async fn main() {{ marigold::m!({program_contents}).await }}
-"#
+        "#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}"
     )?;
 
     let exit_status = {
