@@ -394,7 +394,7 @@ mod tests {
             "0\n1\n2\n"
         );
         assert!(Command::new("marigold")
-            .args(["clean-all", "test_clean_all.marigold"])
+            .args(["clean-all"])
             .spawn()
             .expect("could not run marigold command")
             .wait()
