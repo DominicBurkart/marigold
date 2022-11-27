@@ -29,6 +29,8 @@ fn main() -> Result<()> {
     use std::io::Write;
     use std::process::Command;
 
+    const RUST_EDITION: &str = "2021";
+
     let args = Args::parse();
 
     let program_name = {
@@ -93,7 +95,7 @@ async fn main() {{ marigold::m!({program_contents}).await }}
                     "play",
                     "--release",
                     "--edition",
-                    "2021",
+                    RUST_EDITION,
                     file.path()
                         .as_os_str()
                         .to_str()
@@ -106,7 +108,7 @@ async fn main() {{ marigold::m!({program_contents}).await }}
                 .args([
                     "play",
                     "--edition",
-                    "2021",
+                    RUST_EDITION,
                     file.path()
                         .as_os_str()
                         .to_str()
