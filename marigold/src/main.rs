@@ -310,13 +310,13 @@ mod tests {
         install_marigold_cli();
 
         fs::write(
-            "meow.marigold",
-            r#"range(4, 6).write_file("beep.csv", csv)"#,
+            "test_uninstall.marigold",
+            r#"range(4, 6).write_file("test_uninstall.csv", csv)"#,
         )
         .expect("could not write test file");
 
         assert!(Command::new("marigold")
-            .args(["install", "meow.marigold"])
+            .args(["install", "test_uninstall.marigold"])
             .spawn()
             .expect("could not run marigold command")
             .wait()
@@ -331,14 +331,14 @@ mod tests {
             .success());
 
         assert!(Command::new("marigold")
-            .args(["uninstall", "meow.marigold"])
+            .args(["uninstall", "test_uninstall.marigold"])
             .spawn()
             .expect("could not run marigold command")
             .wait()
             .expect("marigold command lost")
             .success());
 
-        assert!(!Command::new("meow")
+        assert!(!Command::new("test_uninstall")
             .spawn()
             .expect("could not run marigold command")
             .wait()
@@ -350,23 +350,23 @@ mod tests {
     fn test_clean() {
         install_marigold_cli();
         fs::write(
-            "test_run.marigold",
-            r#"range(0, 3).write_file("from_run.csv", csv)"#,
+            "test_clean.marigold",
+            r#"range(0, 3).write_file("from_clean.csv", csv)"#,
         )
         .expect("could not write test file");
         assert!(Command::new("marigold")
-            .args(["run", "test_run.marigold"])
+            .args(["run", "test_clean.marigold"])
             .spawn()
             .expect("could not run marigold command")
             .wait()
             .expect("marigold command lost")
             .success());
         assert_eq!(
-            fs::read_to_string("from_run.csv").expect("could not read CSV"),
+            fs::read_to_string("from_clean.csv").expect("could not read CSV"),
             "1\n2\n3\n"
         );
         assert!(Command::new("marigold")
-            .args(["clean", "test_run.marigold"])
+            .args(["clean", "test_clean.marigold"])
             .spawn()
             .expect("could not run marigold command")
             .wait()
@@ -378,23 +378,23 @@ mod tests {
     fn test_clean_all() {
         install_marigold_cli();
         fs::write(
-            "test_run.marigold",
-            r#"range(0, 3).write_file("from_run.csv", csv)"#,
+            "test_clean_all.marigold",
+            r#"range(0, 3).write_file("from_clean_all.csv", csv)"#,
         )
         .expect("could not write test file");
         assert!(Command::new("marigold")
-            .args(["run", "test_run.marigold"])
+            .args(["run", "test_clean_all.marigold"])
             .spawn()
             .expect("could not run marigold command")
             .wait()
             .expect("marigold command lost")
             .success());
         assert_eq!(
-            fs::read_to_string("from_run.csv").expect("could not read CSV"),
+            fs::read_to_string("from_clean_all.csv").expect("could not read CSV"),
             "1\n2\n3\n"
         );
         assert!(Command::new("marigold")
-            .args(["clean-all", "test_run.marigold"])
+            .args(["clean-all", "test_clean_all.marigold"])
             .spawn()
             .expect("could not run marigold command")
             .wait()
