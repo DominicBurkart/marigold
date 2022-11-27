@@ -1,19 +1,38 @@
 #[cfg(feature = "cli")]
 use anyhow::Result;
 #[cfg(feature = "cli")]
-use clap::Parser;
+use clap::{Parser, Subcommand};
+
+#[cfg(feature = "cli")]
+#[derive(Subcommand, Debug)]
+enum MarigoldCommand {
+    /// Run the program. Default program.
+    Run,
+    /// Install a Marigold program as an executable using Cargo.
+    Install,
+    /// Uninstall a Marigold program as an executable using Cargo.
+    Uninstall,
+    /// Clean the cache for the passed file.
+    Clean,
+    /// Clean all Marigold caches for this user.
+    CleanAll,
+}
 
 #[cfg(feature = "cli")]
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path of the marigold file to read
+    /// Command to run
+    #[command(subcommand)]
+    command: Option<MarigoldCommand>,
+
+    /// Path of the Marigold file to read
     #[arg(short, long)]
     file: Option<String>,
 
-    /// Weather to enable compiler optimizations
-    #[arg(short, long, default_value_t = true)]
-    release: bool,
+    /// Disables optimizations to speed up compilation.
+    #[arg(short, long, default_value_t = false)]
+    fast: bool,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -26,12 +45,15 @@ fn main() -> Result<()> {
     use convert_case::{Case, Casing};
     use std::io;
     use std::io::Read;
-    use std::io::Write;
     use std::process::Command;
 
     const RUST_EDITION: &str = "2021";
 
     let args = Args::parse();
+
+    let marigold_cache_directory = home::home_dir()
+        .expect("could not locate user's home directory for marigold cache")
+        .join(".marigold");
 
     let program_name = {
         let mut file_name = match &args.file {
@@ -59,8 +81,38 @@ fn main() -> Result<()> {
             .strip_suffix("_")
             .map(|s| s.to_string())
             .unwrap_or(file_name);
-        format!("{file_name}_")
+        file_name
     };
+
+    let program_project_dir = marigold_cache_directory.join(&program_name);
+
+    let command = match args.command {
+        Some(command) => match command {
+            MarigoldCommand::Run => "run",
+            MarigoldCommand::Install => "install",
+            MarigoldCommand::Uninstall => std::process::exit(
+                Command::new("cargo")
+                    .args(["uninstall", &program_name])
+                    .spawn()?
+                    .wait()?
+                    .code()
+                    .unwrap_or(0),
+            ),
+            MarigoldCommand::Clean => {
+                std::fs::remove_dir_all(&program_project_dir)?;
+                std::process::exit(0);
+            }
+            MarigoldCommand::CleanAll => {
+                std::fs::remove_dir_all(&marigold_cache_directory)?;
+                std::process::exit(0);
+            }
+        },
+        None => "run", // default is run.
+    };
+
+    let program_src_dir = program_project_dir.join("src");
+
+    std::fs::create_dir_all(&program_src_dir)?;
 
     let program_contents = match args.file {
         Some(path) => std::fs::read_to_string(&path)?.trim().to_string(),
@@ -71,50 +123,76 @@ fn main() -> Result<()> {
         }
     };
 
+    std::fs::write(
+        program_src_dir.join("main.rs"),
+        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}")
+            .as_str(),
+    )?;
+
     const MARIGOLD_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-    let mut file = tempfile::Builder::new()
-        .prefix(&program_name)
-        .suffix(".rs")
-        .tempfile()?;
+    let manifest_path = program_project_dir.join("Cargo.toml");
 
-    write!(
-        file,
-        "#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}"
+    std::fs::write(
+        &manifest_path,
+        format!(
+            r#"[package]
+name = "{program_name}"
+edition = "{RUST_EDITION}"
+version = "0.0.1"
+
+[dependencies]
+tokio = {{ version = "1", features = ["full"]}}
+marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}
+        "#
+        ),
     )?;
 
     let exit_status = {
-        if args.release {
+        if args.fast {
+            if command == "install" {
+                eprintln!("`install` and `fast` are not compatible.");
+                std::process::exit(1);
+            }
+
             Command::new("cargo")
                 .args([
-                    "play",
-                    "--release",
-                    "--edition",
-                    RUST_EDITION,
-                    file.path()
-                        .as_os_str()
+                    command,
+                    "--manifest_path",
+                    manifest_path
                         .to_str()
-                        .expect("marigold failure: generated non-utf8 file descriptor"),
+                        .expect("Marigold could not parse cache manifest path as utf-8"),
                 ])
                 .spawn()?
                 .wait()?
         } else {
-            Command::new("cargo")
-                .args([
-                    "play",
-                    "--edition",
-                    RUST_EDITION,
-                    file.path()
-                        .as_os_str()
-                        .to_str()
-                        .expect("marigold failure: generated non-utf8 file descriptor"),
-                ])
-                .spawn()?
-                .wait()?
+            if command == "install" {
+                // `--release` is not accepted with install
+                Command::new("cargo")
+                    .args([
+                        command,
+                        "--manifest-path",
+                        manifest_path
+                            .to_str()
+                            .expect("Marigold could not parse cache manifest path as utf-8"),
+                    ])
+                    .spawn()?
+                    .wait()?
+            } else {
+                Command::new("cargo")
+                    .args([
+                        command,
+                        "--release",
+                        "--manifest-path",
+                        manifest_path
+                            .to_str()
+                            .expect("Marigold could not parse cache manifest path as utf-8"),
+                    ])
+                    .spawn()?
+                    .wait()?
+            }
         }
     };
-
-    file.close()?;
 
     std::process::exit(exit_status.code().unwrap_or(0));
 }
