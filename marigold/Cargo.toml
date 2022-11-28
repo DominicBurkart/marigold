@@ -33,4 +33,3 @@ version = "=0.1.14"
 
 [dev-dependencies]
 tokio = {version = "1", features = ["full"]}
-cached = "0.40.0"

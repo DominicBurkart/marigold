@@ -225,12 +225,21 @@ marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}
 
 #[cfg(test)]
 mod tests {
-    use cached::proc_macro::once;
     use std::fs;
     use std::path::Path;
     use std::process::Command;
 
-    #[once(sync_writes = true)]
+    #[test]
+    fn test_cli() {
+        install_marigold_cli();
+        test_run();
+        test_install();
+        test_uninstall();
+        test_clean();
+        test_clean_all();
+        cleanup();
+    }
+
     fn install_marigold_cli() {
         assert!(Command::new("cargo")
             .args(["install", "--force", "--path", ".", "-F", "cli"])
@@ -241,18 +250,7 @@ mod tests {
             .success())
     }
 
-    #[test]
-    fn test_cli() {
-        test_run();
-        test_install();
-        test_uninstall();
-        test_clean();
-        test_clean_all();
-        cleanup();
-    }
-
     fn test_run() {
-        install_marigold_cli();
         fs::write(
             "test_run.marigold",
             r#"range(0, 3).write_file("test_run.csv", csv)"#,
@@ -272,8 +270,6 @@ mod tests {
     }
 
     fn test_install() {
-        install_marigold_cli();
-
         fs::write(
             "test_install.marigold",
             r#"range(0, 3).write_file("test_install.csv", csv)"#,
@@ -301,7 +297,6 @@ mod tests {
     }
 
     fn test_uninstall() {
-        install_marigold_cli();
         assert!(Command::new("marigold")
             .args(["uninstall", "test_install.marigold"])
             .spawn()
@@ -312,7 +307,6 @@ mod tests {
     }
 
     fn test_clean() {
-        install_marigold_cli();
         assert!(Command::new("marigold")
             .args(["clean", "test_run.marigold"])
             .spawn()
@@ -323,7 +317,6 @@ mod tests {
     }
 
     fn test_clean_all() {
-        install_marigold_cli();
         assert!(Command::new("marigold")
             .args(["clean-all"])
             .spawn()
