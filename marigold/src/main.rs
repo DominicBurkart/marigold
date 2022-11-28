@@ -129,7 +129,9 @@ fn main() -> Result<()> {
                 std::process::exit(0);
             }
             CleanAll => {
-                std::fs::remove_dir_all(&marigold_cache_directory)?;
+                if marigold_cache_directory.exists() {
+                    std::fs::remove_dir_all(&marigold_cache_directory)?;
+                }
                 std::process::exit(0);
             }
         },
