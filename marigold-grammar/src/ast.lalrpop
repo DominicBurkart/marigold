@@ -551,8 +551,13 @@ StreamFunction: nodes::StreamFunctionNode = {
       code: format!("map({mapping_fn})"),
     };
   },
+  "reduce(" <reducing_fn: FreeText> ")" => {
+    return nodes::StreamFunctionNode {
+      code: format!("reduce(|acc, v| ::marigold::marigold_impl::futures::future::ready({reducing_fn}(acc, v)))"),
+    };
+  },
   "ok()" => nodes::StreamFunctionNode {
-    code: format!("filter(|r| futures::future::ready(r.is_ok()))
+    code: format!("filter(|r| ::marigold::marigold_impl::futures::future::ready(r.is_ok()))
       .map(|r| r.unwrap())"),
   },
   "ok_or_panic()" => nodes::StreamFunctionNode {

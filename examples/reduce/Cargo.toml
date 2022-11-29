@@ -1,0 +1,16 @@
+[package]
+name = "reduce"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+tokio = ["marigold/tokio", "tokio/rt-multi-thread"]
+async-std = ["dep:async-std", "marigold/async-std"]
+
+[dependencies]
+async-std = {version = "1", features= ["attributes"], optional=true}
+tokio = {version = "1", features = ["rt", "macros"]}
+
+[dependencies.marigold]
+path = "../../marigold"
+version = "=0.1.14"
