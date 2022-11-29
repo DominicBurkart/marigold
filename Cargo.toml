@@ -8,6 +8,7 @@ members = [
   "examples/csv",
   "examples/multi-consumer",
   "examples/select-all",
+  "examples/reduce",
   "tests"
 ]
 resolver = "2"
