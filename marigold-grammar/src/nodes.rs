@@ -243,12 +243,13 @@ pub struct StructDeclarationNode {
 impl StructDeclarationNode {
     pub fn code(&self) -> String {
         #[cfg(not(feature = "io"))]
-        let traits = &["Copy", "Clone", "Debug", "Eq", "PartialEq"].join(", ");
+        let traits = &["Copy", "Clone", "Debug", "Default", "Eq", "PartialEq"].join(", ");
         #[cfg(feature = "io")]
         let traits = &[
             "Copy",
             "Clone",
             "Debug",
+            "Default",
             "Eq",
             "PartialEq",
             "::marigold::marigold_impl::serde::Serialize",
@@ -394,12 +395,13 @@ impl EnumDeclarationNode {
 
     pub fn code(&self) -> String {
         #[cfg(not(feature = "io"))]
-        let traits = &["Copy", "Clone", "Debug", "Eq", "PartialEq"].join(", ");
+        let traits = &["Copy", "Clone", "Debug", "Default", "Eq", "PartialEq"].join(", ");
         #[cfg(feature = "io")]
         let traits = &[
             "Copy",
             "Clone",
             "Debug",
+            "Default",
             "Eq",
             "PartialEq",
             "::marigold::marigold_impl::serde::Serialize",
