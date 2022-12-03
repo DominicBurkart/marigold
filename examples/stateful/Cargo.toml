@@ -15,4 +15,4 @@ serde = {version = "1", optional=true}
 
 [dependencies.marigold]
 path = "../../marigold"
-version = "=0.1.14"
+version = "=0.1.15"

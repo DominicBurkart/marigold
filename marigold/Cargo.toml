@@ -1,6 +1,6 @@
 [package]
 name = "marigold"
-version = "0.1.14"
+version = "0.1.15"
 edition = "2021"
 authors = ["Dominic <code@dominic.computer>"]
 description = "The Marigold Programming Language."
@@ -21,15 +21,15 @@ home = { version = "0.5.4", optional = true }
 
 [dependencies.marigold-grammar]
 path = "../marigold-grammar"
-version = "=0.1.14"
+version = "=0.1.15"
 
 [dependencies.marigold-macros]
 path = "../marigold-macros"
-version = "=0.1.14"
+version = "=0.1.15"
 
 [dependencies.marigold-impl]
 path = "../marigold-impl"
-version = "=0.1.14"
+version = "=0.1.15"
 
 [dev-dependencies]
 tokio = {version = "1", features = ["full"]}
