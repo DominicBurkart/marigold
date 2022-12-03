@@ -438,6 +438,26 @@ InputFunction: nodes::InputFunctionNode = {
       ).into_deserialize::<{deserialization_struct}>()
     ")
   },
+  "read_file(" <path: QuotedFreeText> "," "split" "=" <split_by: QuotedFreeText>, "max_chunk_length" "=" <max_length: r"[0-9]+"> ")" =>  nodes::InputFunctionNode {
+      variability: nodes::InputVariability::Variable,
+      input_count: nodes::InputCount::Unknown,
+      code: format!(r#"
+      {{
+        use ::marigold::marigold_impl::tokio::io::AsyncBufReadExt;
+        use ::marigold::marigold_impl::tokio::io::BufReader;
+        use ::marigold::marigold_impl::tokio::fs::File;
+
+        BufReader::new(
+          File::open({path})
+            .await
+            .expect("Marigold could not open file")
+        )
+          .split(b{split_by})
+          .map(|chunk| async {{ chunk.and_then(
+            ::marigold::marigold_impl::array_vec::ArrayString::<{max_length}>::from(chunk)) }})
+      }}
+      "#)
+  },
   "select_all" "(" <selected_streams: (InputAndMaybeStreamFunctions ",")*> <last_selected_stream: InputAndMaybeStreamFunctions?> ")" => {
     let streams = {
       let mut streams = selected_streams
