@@ -216,7 +216,7 @@ Expr: nodes::TypedExpression = {
   FnDeclaration
 }
 
-/// Nonsense nonterminal used to handle terminal ambiguity. Used for e.g. valid variable names.
+/// Nonsense nonterminal used to handle terminal ambiguity. Used for e.g. variable names.
 FreeText: String = {
   <text: r"[><\w\-]+"> => text.to_string()
 }
