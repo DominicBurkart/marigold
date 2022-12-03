@@ -427,4 +427,40 @@ mod tests {
             2
         );
     }
+
+    #[tokio::test]
+    async fn missing_values() {
+        assert_eq!(
+            m!(
+                enum Hull {
+                    Spherical = "spherical",
+                    default Other = "other"
+                }
+
+                struct Vaisseau {
+                    class: Option<string_8>,
+                    hull: Hull,
+                }
+
+                fn class(v: Vaisseau) -> Option<string_8> {
+                    v.class
+                }
+
+                read_file("./data/with_missing_values.csv", csv, struct=Vaisseau)
+                    .ok_or_panic()
+                    .map(class)
+                    .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![
+                Some(
+                    marigold::marigold_impl::arrayvec::ArrayString::<8>::from("Deadalus").unwrap()
+                ),
+                Some(marigold::marigold_impl::arrayvec::ArrayString::<8>::from("Oberth").unwrap()),
+                None
+            ]
+        )
+    }
 }
