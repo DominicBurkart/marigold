@@ -15,4 +15,5 @@ jobs:
     - uses:          actions-rs/toolchain@v1
       with:
           toolchain: stable
+    - run:           pip install virtualenv==20.0.33
     - uses:          pre-commit/action@v3.0.0
