@@ -273,7 +273,7 @@ impl StructDeclarationNode {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[allow(clippy::large_enum_variant)]
 pub enum Type {
     U8,
@@ -294,6 +294,7 @@ pub enum Type {
     Char,
     Str(u32),
     Custom(arrayvec::ArrayString<MAX_CUSTOM_TYPE_SIZE>),
+    Option(Box<Type>),
 }
 
 impl FromStr for Type {
@@ -319,9 +320,21 @@ impl FromStr for Type {
             "char" => Ok(Type::Char),
             _ => {
                 lazy_static! {
+                    static ref OPTIONAL: Regex =
+                        Regex::new(r"Option[\s]*<[\s]*(.+?)[\s]*>").unwrap();
                     static ref STRING: Regex = Regex::new(r"string_([0-9_A-Za-z]+)").unwrap();
                 }
-                if let Some(string_def) = STRING.captures(s) {
+
+                if let Some(optional_def) = OPTIONAL.captures(s) {
+                    if let Ok(internal_type) = Type::from_str(
+                        optional_def
+                            .get(1)
+                            .expect("Could not get internal type from Option")
+                            .as_str(),
+                    ) {
+                        return Ok(Type::Option(Box::new(internal_type)));
+                    }
+                } else if let Some(string_def) = STRING.captures(s) {
                     let size_str = string_def
                         .get(1)
                         .expect("Could not find size definition for string field");
@@ -340,7 +353,7 @@ impl FromStr for Type {
 
 impl Type {
     pub fn primitive_to_type_string(&self) -> String {
-        match *self {
+        match &self {
             Type::U8 => "u8".to_string(),
             Type::U16 => "u16".to_string(),
             Type::U32 => "u32".to_string(),
@@ -358,6 +371,10 @@ impl Type {
             Type::Bool => "bool".to_string(),
             Type::Char => "char".to_string(),
             Type::Str(v) => format!("::marigold::marigold_impl::arrayvec::ArrayString<{v}>"),
+            Type::Option(internal_type) => {
+                let internal_type_string = internal_type.primitive_to_type_string();
+                format!("Option<{internal_type_string}>")
+            }
             Type::Custom(v) => v.to_string(),
         }
     }
