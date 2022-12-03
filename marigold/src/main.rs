@@ -170,6 +170,7 @@ edition = "{RUST_EDITION}"
 version = "0.0.1"
 
 [dependencies]
+serde = "1"
 tokio = {{ version = "1", features = ["full"]}}
 marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}
         "#
