@@ -551,14 +551,15 @@ StreamFunction: nodes::StreamFunctionNode = {
       code: format!("map({mapping_fn})"),
     };
   },
-  "fold(" <state_name: FreeText> <state_initialization_contents: BracedText> "," <fun: FreeText> ")" => {
-    nodes::StreamFunctionNode {
-      code: format!("marifold({state_name} {state_initialization_contents}, |acc, x| futures::future::ready({fun}(acc, x))).await"),
-    }
-  },
   "fold(" <state: FreeText> "," <fun: FreeText> ")" => {
+
+    let number_or_constructor = match state.trim().parse::<f64>() {
+      Ok(_) => state,
+      Err(_) => format!("{state}()")
+    };
+
     nodes::StreamFunctionNode {
-      code: format!("marifold({state}, |acc, x| futures::future::ready({fun}(acc, x))).await"),
+      code: format!("marifold({number_or_constructor}, |acc, x| futures::future::ready({fun}(acc, x))).await"),
     }
   },
   "ok()" => nodes::StreamFunctionNode {
