@@ -329,7 +329,7 @@ impl FromStr for Type {
                     if let Ok(internal_type) = Type::from_str(
                         optional_def
                             .get(1)
-                            .expect("Could not get internal type from Optional")
+                            .expect("Could not get internal type from Option")
                             .as_str(),
                     ) {
                         return Ok(Type::Option(Box::new(internal_type)));
