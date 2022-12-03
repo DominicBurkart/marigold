@@ -8,6 +8,10 @@ use clap::{Parser, Subcommand};
 enum MarigoldCommand {
     /// Run the program.
     Run {
+        /// Disables optimizations to speed up compilation.
+        #[arg(short, long, default_value_t = false)]
+        unoptimized: bool,
+
         /// Path of the Marigold file to read
         file: Option<String>,
     },
@@ -37,10 +41,6 @@ struct Args {
     /// Command to run
     #[command(subcommand)]
     command: Option<MarigoldCommand>,
-
-    /// Disables optimizations to speed up compilation.
-    #[arg(short, long, default_value_t = false)]
-    unoptimized: bool,
 }
 
 #[cfg(not(feature = "cli"))]
@@ -53,7 +53,10 @@ fn get_file_name_argument(args: &Args) -> Option<String> {
     use MarigoldCommand::*;
 
     match &args.command {
-        Some(Run { file }) => file.clone(),
+        Some(Run {
+            unoptimized: _,
+            file,
+        }) => file.clone(),
         Some(Install { file }) => file.clone(),
         Some(Uninstall { file }) => file.clone(),
         Some(Clean { file }) => file.clone(),
@@ -113,8 +116,11 @@ fn main() -> Result<()> {
     let program_project_dir = marigold_cache_directory.join(&program_name);
 
     let command = match args.command {
-        Some(command) => match command {
-            Run { file: _ } => "run",
+        Some(ref command) => match command {
+            Run {
+                unoptimized: _,
+                file: _,
+            } => "run",
             Install { file: _ } => "install",
             Uninstall { file: _ } => std::process::exit(
                 Command::new("cargo")
@@ -178,30 +184,24 @@ marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}
     )?;
 
     let exit_status = {
-        if args.unoptimized {
-            if command == "install" {
-                eprintln!("`install` and `fast` are not compatible.");
-                std::process::exit(1);
-            }
-
-            Command::new("cargo")
-                .args([
-                    command,
-                    "--manifest-path",
-                    manifest_path
-                        .to_str()
-                        .expect("Marigold could not parse cache manifest path as utf-8"),
-                ])
-                .spawn()?
-                .wait()?
-        } else {
-            if command == "install" {
-                // `--release` is not accepted with install
+        if command == "run" {
+            let unoptimized = {
+                if let Some(Run {
+                    unoptimized,
+                    file: _,
+                }) = &args.command
+                {
+                    *unoptimized
+                } else {
+                    false
+                }
+            };
+            if unoptimized {
                 Command::new("cargo")
                     .args([
                         command,
-                        "--path",
-                        program_project_dir
+                        "--manifest-path",
+                        manifest_path
                             .to_str()
                             .expect("Marigold could not parse cache manifest path as utf-8"),
                     ])
@@ -220,6 +220,17 @@ marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}
                     .spawn()?
                     .wait()?
             }
+        } else {
+            Command::new("cargo")
+                .args([
+                    command,
+                    "--path",
+                    program_project_dir
+                        .to_str()
+                        .expect("Marigold could not parse cache manifest path as utf-8"),
+                ])
+                .spawn()?
+                .wait()?
         }
     };
 
