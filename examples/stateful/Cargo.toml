@@ -6,10 +6,12 @@ edition = "2021"
 [features]
 tokio = ["marigold/tokio", "tokio/rt-multi-thread"]
 async-std = ["dep:async-std", "marigold/async-std"]
+io = ["marigold/io", "serde"]
 
 [dependencies]
 async-std = {version = "1", features= ["attributes"], optional=true}
 tokio = {version = "1", features = ["rt", "macros"]}
+serde = {version = "1", optional=true}
 
 [dependencies.marigold]
 path = "../../marigold"
