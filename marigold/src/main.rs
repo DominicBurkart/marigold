@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 #[cfg(feature = "cli")]
 #[derive(Subcommand, Debug)]
 enum MarigoldCommand {
-    /// Run the program. Default command.
+    /// Run the program.
     Run {
         /// Path of the Marigold file to read
         file: Option<String>,
