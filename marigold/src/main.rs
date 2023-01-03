@@ -159,14 +159,18 @@ fn main() -> Result<()> {
 
     std::fs::write(
         program_src_dir.join("main.rs"),
-        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}")
-            .as_str(),
+        format!(
+            "#![feature(const_trait_impl)]
+            #![feature(const_ops)]
+            #[tokio::main]
+            async fn main() {{ marigold::m!({program_contents}).await }}"
+        )
+        .as_str(),
     )?;
 
     const MARIGOLD_VERSION: &str = env!("CARGO_PKG_VERSION");
 
     let manifest_path = program_project_dir.join("Cargo.toml");
-
     std::fs::write(
         &manifest_path,
         format!(
@@ -178,7 +182,7 @@ version = "0.0.1"
 [dependencies]
 serde = "1"
 tokio = {{ version = "1", features = ["full"]}}
-marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}
+marigold = {{ path = "/Users/dominicburkart/Documents/cute_coding/marigold/marigold", features = ["tokio", "io"]}}
         "#
         ),
     )?;
@@ -199,17 +203,20 @@ marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}
             if unoptimized {
                 Command::new("cargo")
                     .args([
+                        "+nightly",
                         command,
                         "--manifest-path",
                         manifest_path
                             .to_str()
                             .expect("Marigold could not parse cache manifest path as utf-8"),
                     ])
+                    .env("RUSTFLAGS", "-Zmacro-backtrace")
                     .spawn()?
                     .wait()?
             } else {
                 Command::new("cargo")
                     .args([
+                        "+nightly",
                         command,
                         "--release",
                         "--manifest-path",
@@ -217,18 +224,21 @@ marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}
                             .to_str()
                             .expect("Marigold could not parse cache manifest path as utf-8"),
                     ])
+                    .env("RUSTFLAGS", "-Zmacro-backtrace")
                     .spawn()?
                     .wait()?
             }
         } else {
             Command::new("cargo")
                 .args([
+                    "+nightly",
                     command,
                     "--path",
                     program_project_dir
                         .to_str()
                         .expect("Marigold could not parse cache manifest path as utf-8"),
                 ])
+                .env("RUSTFLAGS", "-Zmacro-backtrace")
                 .spawn()?
                 .wait()?
         }
