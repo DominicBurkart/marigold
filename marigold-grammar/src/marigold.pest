@@ -1,0 +1,31 @@
+// shared fields
+valid_ident = { (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")+ }
+valid_file_path_character = {(ASCII_ALPHANUMERIC | "~" | "." | "_" | "/" | "-" | "\\" )}
+file_path = ${ "\"" ~ (valid_file_path_character)+ ~ "\""}
+csv_data_stream_format = {"csv"}
+data_stream_format = { csv_data_stream_format }
+
+// define stream inputs
+input_format = { data_stream_format }
+input_struct = { valid_ident }
+read_file = { "read_file" ~ "(" ~ file_path ~ ("," ~ input_format)? ~ ("," ~ "struct" ~ "=" ~ input_struct )? ~ ")" }
+input = { read_file }
+
+// define stream transformations
+ok_or_panic = { "ok_or_panic()" }
+transformation = { ok_or_panic }
+
+// define stream outputs
+output_format = { data_stream_format }
+write_file = { "write_file" ~ "(" ~ file_path ~ "," ~ output_format ~ ")" }
+output = { write_file }
+
+// define stream
+stream = { input ~ ("." ~ transformation)* ~ "." ~output }
+
+// TODO: stream variables (impl: use `r#`-prefixed variable to avoid collisions with Rust reserved names)
+
+// programs are composed of streams
+program = {stream+}
+
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
