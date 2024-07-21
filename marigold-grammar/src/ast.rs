@@ -2,6 +2,9 @@ use core::fmt::Debug;
 use core::hash::Hash;
 use std::{collections::HashSet, ops::Deref};
 
+#[cfg(feature = "static_analysis")]
+use crate::static_analysis::{self, Cardinal, Cardinality, DerivedCardinal};
+
 #[derive(Debug)]
 pub struct MarigoldProgram {
     pub streams: Vec<Stream>,
@@ -122,18 +125,58 @@ pub enum DataStreamFormat {
     INFER,
 }
 
+#[cfg(not(feature = "static_analysis"))]
 pub trait TransportOrStorageSite: Debug {}
 
+#[cfg(feature = "static_analysis")]
+pub trait TransportOrStorageSite: Debug + Cardinal {}
+
+impl Cardinal for RuntimeFile {
+    fn get_output_cardinality(&self) -> Cardinality {
+        Cardinality::Unknown
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct File {
+pub struct RuntimeFile {
     pub path: String,
 }
 
-impl TransportOrStorageSite for File {}
+#[cfg(feature = "static_analysis")]
+impl static_analysis::Cardinal for StreamInput {
+    fn get_output_cardinality(&self) -> static_analysis::Cardinality {
+        self.source.as_ref().get_output_cardinality()
+    }
+}
 
+#[cfg(not(feature = "static_analysis"))]
 pub trait StreamTransformation: Debug {}
+
+#[cfg(feature = "static_analysis")]
+pub trait StreamTransformation: Debug + DerivedCardinal {}
+
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct OkOrPanic {}
 
 impl StreamTransformation for OkOrPanic {}
+
+
+#[cfg(feature = "static_analysis")]
+impl static_analysis::DerivedCardinal for OkOrPanic {
+    fn get_output_cardinality(&self, input_cardinality: Cardinality) -> Cardinality {
+        return input_cardinality;
+    }
+}
+
+
+#[cfg(feature = "static_analysis")]
+impl static_analysis::Cardinal for Stream {
+    fn get_output_cardinality(&self) -> Cardinality {
+        let mut cardinality = self.input.get_output_cardinality();
+        for transformation in self.transformations {
+            cardinality = transformation.as_ref().get_output_cardinality(cardinality);
+        }
+        cardinality
+    }
+}

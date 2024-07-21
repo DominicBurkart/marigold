@@ -10,6 +10,8 @@ use thiserror::Error;
 
 pub use itertools;
 pub mod ast;
+#[cfg(feature = "static_analysis")]
+pub mod static_analysis;
 
 #[derive(Error, Debug)]
 pub enum GrammarError {
@@ -113,7 +115,7 @@ fn parse_read_file(
                 ast::DataStreamFormat::INFER
             }
         },
-        source: Box::new(ast::File {
+        source: Box::new(ast::RuntimeFile {
             path: params
                 .remove(&Rule::file_path)
                 .expect("file_path not found")
@@ -205,7 +207,7 @@ fn parse_write_file(
         }
     };
 
-    let target = Box::new(ast::File {
+    let target = Box::new(ast::RuntimeFile {
         path: params
             .remove(&Rule::file_path)
             .expect("file_path not found")
@@ -284,7 +286,7 @@ mod tests {
                     Stream {
                         input: StreamInput {
                             format: DataStreamFormat::CSV,
-                            source: Box::new(File {
+                            source: Box::new(RuntimeFile {
                                 path: "./woof.csv".to_string()
                             }),
                             type_ident: Option::Some("woof".to_string())
@@ -292,7 +294,7 @@ mod tests {
                         transformations: vec![Box::new(OkOrPanic {})],
                         output: StreamOutput {
                             format: DataStreamFormat::CSV,
-                            target: Box::new(File {
+                            target: Box::new(RuntimeFile {
                                 path: "miaow.csv".to_string()
                             }),
                         }
@@ -300,7 +302,7 @@ mod tests {
                     Stream {
                         input: StreamInput {
                             format: DataStreamFormat::INFER,
-                            source: Box::new(File {
+                            source: Box::new(RuntimeFile {
                                 path: "poof.csv".to_string()
                             }),
                             type_ident: None
@@ -308,7 +310,7 @@ mod tests {
                         transformations: Vec::new(),
                         output: StreamOutput {
                             format: DataStreamFormat::CSV,
-                            target: Box::new(File {
+                            target: Box::new(RuntimeFile {
                                 path: "doof.csv".to_string()
                             }),
                         }

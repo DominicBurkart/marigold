@@ -25,6 +25,8 @@ stream = { input ~ ("." ~ transformation)* ~ "." ~output }
 
 // TODO: stream variables (impl: use `r#`-prefixed variable to avoid collisions with Rust reserved names)
 
+// TODO: structs and enums
+
 // programs are composed of streams
 program = {stream+}
 
