@@ -35,6 +35,7 @@ fn parse_program(
     let pairs = program.into_inner().into_iter();
     let mut streams = Vec::new();
     let mut functions = Vec::new();
+    let mut structs = Vec::new();
     let mut variables = Vec::new();
     
     for pair in pairs {
@@ -44,6 +45,7 @@ fn parse_program(
                 match statement.as_rule() {
                     Rule::stream => streams.push(parse_stream(statement)?),
                     Rule::function_def => functions.push(parse_function_def(statement)?),
+                    Rule::struct_def => structs.push(parse_struct_def(statement)?),
                     Rule::stream_variable => variables.push(parse_stream_variable(statement)?),
                     _ => unimplemented!("unknown statement type: {:?}", statement.as_rule()),
                 }
@@ -52,7 +54,7 @@ fn parse_program(
         }
     }
 
-    Ok(ast::MarigoldProgram { streams, functions, variables })
+    Ok(ast::MarigoldProgram { streams, functions, structs, variables })
 }
 
 fn parse_stream(stream: pest::iterators::Pair<Rule>) -> Result<ast::Stream, GrammarError> {
@@ -84,6 +86,7 @@ fn parse_input(input: pest::iterators::Pair<Rule>) -> Result<ast::StreamInput, G
     match specific_input.as_rule() {
         Rule::read_file => parse_read_file(specific_input),
         Rule::range_input => parse_range_input(specific_input),
+        Rule::select_all_input => parse_select_all_input(specific_input),
         Rule::variable_ref => parse_variable_ref(specific_input),
         _ => unimplemented!("no parser for input type {:?}", specific_input.as_rule()),
     }
@@ -315,6 +318,30 @@ fn parse_transformation(
             let function_name = specific_transformation.into_inner().next().unwrap().as_str().to_string();
             Ok(Box::new(ast::FilterTransformation { function_name }))
         },
+        Rule::fold_transform => {
+            let mut inner = specific_transformation.into_inner();
+            let initial_value = inner.next().unwrap().as_str().to_string();
+            let accumulator_function = inner.next().unwrap().as_str().to_string();
+            Ok(Box::new(ast::FoldTransformation { initial_value, accumulator_function }))
+        },
+        Rule::permutations_transform => {
+            let size: i32 = specific_transformation.into_inner().next().unwrap().as_str().parse().unwrap();
+            Ok(Box::new(ast::PermutationsTransformation { size }))
+        },
+        Rule::combinations_transform => {
+            let size: i32 = specific_transformation.into_inner().next().unwrap().as_str().parse().unwrap();
+            Ok(Box::new(ast::CombinationsTransformation { size }))
+        },
+        Rule::keep_first_n_transform => {
+            let mut inner = specific_transformation.into_inner();
+            let n: i32 = inner.next().unwrap().as_str().parse().unwrap();
+            let comparator_function = inner.next().unwrap().as_str().to_string();
+            Ok(Box::new(ast::KeepFirstNTransformation { n, comparator_function }))
+        },
+        Rule::permutations_with_replacement_transform => {
+            let size: i32 = specific_transformation.into_inner().next().unwrap().as_str().parse().unwrap();
+            Ok(Box::new(ast::PermutationsWithReplacementTransformation { size }))
+        },
         _ => unimplemented!(
             "no parser for transformation type {:?}",
             specific_transformation.as_rule()
@@ -371,6 +398,46 @@ fn parse_stream_variable(
     let input = parse_input(inner.next().unwrap())?;
     
     Ok(ast::StreamVariable { name, input })
+}
+
+fn parse_struct_def(
+    struct_def: pest::iterators::Pair<Rule>,
+) -> Result<ast::StructDefinition, GrammarError> {
+    assert_eq!(struct_def.as_rule(), Rule::struct_def);
+    
+    let mut inner = struct_def.into_inner();
+    let name = inner.next().unwrap().as_str().to_string();
+    let struct_body = inner.next().unwrap(); // struct_body
+    
+    let mut fields = Vec::new();
+    if let Some(struct_fields) = struct_body.into_inner().next() {
+        // struct_fields exists
+        for field in struct_fields.into_inner() {
+            let mut field_inner = field.into_inner();
+            let field_name = field_inner.next().unwrap().as_str().to_string();
+            let field_type = field_inner.next().unwrap().as_str().to_string();
+            fields.push((field_name, field_type));
+        }
+    }
+    
+    Ok(ast::StructDefinition { name, fields })
+}
+
+fn parse_select_all_input(
+    specific_input: pest::iterators::Pair<Rule>,
+) -> Result<ast::StreamInput, GrammarError> {
+    assert_eq!(specific_input.as_rule(), Rule::select_all_input);
+    
+    let mut inputs = Vec::new();
+    for input_pair in specific_input.into_inner() {
+        inputs.push(parse_input(input_pair)?);
+    }
+    
+    Ok(ast::StreamInput {
+        format: ast::DataStreamFormat::INFER,
+        source: Box::new(ast::SelectAllInput { inputs }),
+        type_ident: None,
+    })
 }
 
 #[derive(Parser)]
@@ -434,6 +501,7 @@ mod tests {
                     },
                 ],
                 functions: vec![],
+                structs: vec![],
                 variables: vec![],
             }
         )
@@ -566,6 +634,7 @@ mod tests {
         // Should parse function definition and stream
         assert_eq!(parsed.streams.len(), 1);
         assert_eq!(parsed.functions.len(), 1);
+        assert_eq!(parsed.structs.len(), 0);
         assert_eq!(parsed.variables.len(), 0);
         
         let function = &parsed.functions[0];
@@ -606,6 +675,7 @@ mod tests {
         // Should parse variable assignment and usage
         assert_eq!(parsed.streams.len(), 1);
         assert_eq!(parsed.functions.len(), 0);
+        assert_eq!(parsed.structs.len(), 0);
         assert_eq!(parsed.variables.len(), 1);
         
         let variable = &parsed.variables[0];
