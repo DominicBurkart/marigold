@@ -11,14 +11,20 @@ input_format = { data_stream_format }
 input_struct = { valid_ident }
 read_file = { "read_file" ~ "(" ~ file_path ~ ("," ~ input_format)? ~ ("," ~ "struct" ~ "=" ~ input_struct )? ~ ")" }
 range_input = { "range" ~ "(" ~ integer ~ "," ~ integer ~ ")" }
+select_all_input = { "select_all" ~ "(" ~ input ~ ("," ~ input)* ~ ")" }
 variable_ref = { valid_ident }
-input = { read_file | range_input | variable_ref }
+input = { read_file | range_input | select_all_input | variable_ref }
 
 // define stream transformations
 ok_or_panic = { "ok_or_panic()" }
 map_transform = { "map" ~ "(" ~ valid_ident ~ ")" }
 filter_transform = { "filter" ~ "(" ~ valid_ident ~ ")" }
-transformation = { ok_or_panic | map_transform | filter_transform }
+fold_transform = { "fold" ~ "(" ~ (valid_ident | integer) ~ "," ~ valid_ident ~ ")" }
+permutations_transform = { "permutations" ~ "(" ~ integer ~ ")" }
+combinations_transform = { "combinations" ~ "(" ~ integer ~ ")" }
+keep_first_n_transform = { "keep_first_n" ~ "(" ~ integer ~ "," ~ valid_ident ~ ")" }
+permutations_with_replacement_transform = { "permutations_with_replacement" ~ "(" ~ integer ~ ")" }
+transformation = { ok_or_panic | map_transform | filter_transform | fold_transform | permutations_transform | combinations_transform | keep_first_n_transform | permutations_with_replacement_transform }
 
 // define stream outputs
 output_format = { data_stream_format }
@@ -41,8 +47,14 @@ function_def_with_params = { "fn" ~ valid_ident ~ "(" ~ function_params ~ ")" ~ 
 function_def_no_params = { "fn" ~ valid_ident ~ "(" ~ ")" ~ "->" ~ rust_type ~ function_body }
 function_def = { function_def_with_params | function_def_no_params }
 
+// struct definitions
+struct_field = { valid_ident ~ ":" ~ rust_type }
+struct_fields = { struct_field ~ ("," ~ struct_field)* }
+struct_body = { "{" ~ struct_fields? ~ "}" }
+struct_def = { "struct" ~ valid_ident ~ struct_body }
+
 // program statements
-statement = { function_def | stream_variable | stream }
+statement = { function_def | struct_def | stream_variable | stream }
 
 // programs are composed of statements
 program = { statement+ }

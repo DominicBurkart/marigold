@@ -9,6 +9,7 @@ use crate::static_analysis::{self, Cardinal, Cardinality, DerivedCardinal, Spann
 pub struct MarigoldProgram {
     pub streams: Vec<Stream>,
     pub functions: Vec<FunctionDefinition>,
+    pub structs: Vec<StructDefinition>,
     pub variables: Vec<StreamVariable>,
 }
 
@@ -21,16 +22,23 @@ pub struct FunctionDefinition {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
+pub struct StructDefinition {
+    pub name: String,
+    pub fields: Vec<(String, String)>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct StreamVariable {
     pub name: String,
     pub input: StreamInput,
 }
 
 impl PartialEq for MarigoldProgram {
-    /// unordered comparison of streams, functions, and variables
+    /// unordered comparison of streams, functions, structs, and variables
     fn eq(&self, other: &Self) -> bool {
         self.streams.iter().collect::<HashSet<_>>() == other.streams.iter().collect::<HashSet<_>>()
             && self.functions == other.functions
+            && self.structs == other.structs
             && self.variables == other.variables
     }
 }
@@ -119,6 +127,8 @@ impl Clone for StreamInput {
             Box::new(ret.clone()) as Box<dyn TransportOrStorageSite>
         } else if let Some(var) = self.source.as_any().downcast_ref::<VariableReference>() {
             Box::new(var.clone()) as Box<dyn TransportOrStorageSite>
+        } else if let Some(select) = self.source.as_any().downcast_ref::<SelectAllInput>() {
+            Box::new(select.clone()) as Box<dyn TransportOrStorageSite>
         } else {
             panic!("Unknown TransportOrStorageSite type for cloning")
         };
@@ -195,6 +205,11 @@ pub struct ReturnTarget {}
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct VariableReference {
     pub name: String,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct SelectAllInput {
+    pub inputs: Vec<StreamInput>,
 }
 
 #[cfg(feature = "static_analysis")]
@@ -437,6 +452,43 @@ pub struct FilterTransformation {
 
 impl StreamTransformation for FilterTransformation {}
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct FoldTransformation {
+    pub initial_value: String, // could be function name or literal value
+    pub accumulator_function: String,
+}
+
+impl StreamTransformation for FoldTransformation {}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct PermutationsTransformation {
+    pub size: i32,
+}
+
+impl StreamTransformation for PermutationsTransformation {}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct CombinationsTransformation {
+    pub size: i32,
+}
+
+impl StreamTransformation for CombinationsTransformation {}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct KeepFirstNTransformation {
+    pub n: i32,
+    pub comparator_function: String,
+}
+
+impl StreamTransformation for KeepFirstNTransformation {}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct PermutationsWithReplacementTransformation {
+    pub size: i32,
+}
+
+impl StreamTransformation for PermutationsWithReplacementTransformation {}
+
 #[cfg(feature = "static_analysis")]
 impl DerivedCardinal for OkOrPanic {
     fn get_output_cardinality(&self, input_cardinality: Cardinality) -> Cardinality {
@@ -518,6 +570,28 @@ impl TransportOrStorageSite for VariableReference {
 
 #[cfg(not(feature = "static_analysis"))]
 impl TransportOrStorageSite for VariableReference {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[cfg(feature = "static_analysis")]
+impl Cardinal for SelectAllInput {
+    fn get_output_cardinality(&self) -> Cardinality {
+        // Select all combines multiple inputs
+        Cardinality::Unknown
+    }
+}
+
+#[cfg(feature = "static_analysis")]
+impl TransportOrStorageSite for SelectAllInput {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[cfg(not(feature = "static_analysis"))]
+impl TransportOrStorageSite for SelectAllInput {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
