@@ -8,12 +8,30 @@ use crate::static_analysis::{self, Cardinal, Cardinality, DerivedCardinal, Spann
 #[derive(Debug)]
 pub struct MarigoldProgram {
     pub streams: Vec<Stream>,
+    pub functions: Vec<FunctionDefinition>,
+    pub variables: Vec<StreamVariable>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct FunctionDefinition {
+    pub name: String,
+    pub parameters: Vec<(String, String)>,
+    pub return_type: String,
+    pub body: String,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct StreamVariable {
+    pub name: String,
+    pub input: StreamInput,
 }
 
 impl PartialEq for MarigoldProgram {
-    /// unordered comparison of streams
+    /// unordered comparison of streams, functions, and variables
     fn eq(&self, other: &Self) -> bool {
         self.streams.iter().collect::<HashSet<_>>() == other.streams.iter().collect::<HashSet<_>>()
+            && self.functions == other.functions
+            && self.variables == other.variables
     }
 }
 
@@ -88,6 +106,31 @@ impl Hash for StreamInput {
     }
 }
 
+impl Eq for StreamInput {}
+
+impl Clone for StreamInput {
+    fn clone(&self) -> Self {
+        // Manual clone since we need to handle the trait object
+        let source = if let Some(file) = self.source.as_any().downcast_ref::<RuntimeAccessibleFile>() {
+            Box::new(file.clone()) as Box<dyn TransportOrStorageSite>
+        } else if let Some(range) = self.source.as_any().downcast_ref::<RangeInput>() {
+            Box::new(range.clone()) as Box<dyn TransportOrStorageSite>
+        } else if let Some(ret) = self.source.as_any().downcast_ref::<ReturnTarget>() {
+            Box::new(ret.clone()) as Box<dyn TransportOrStorageSite>
+        } else if let Some(var) = self.source.as_any().downcast_ref::<VariableReference>() {
+            Box::new(var.clone()) as Box<dyn TransportOrStorageSite>
+        } else {
+            panic!("Unknown TransportOrStorageSite type for cloning")
+        };
+        
+        StreamInput {
+            format: self.format.clone(),
+            source,
+            type_ident: self.type_ident.clone(),
+        }
+    }
+}
+
 impl PartialEq for dyn TransportOrStorageSite {
     fn eq(&self, other: &Self) -> bool {
         format!("{:?}", self) == format!("{:?}", other) // hack to handle trait cycle with Box<dyn T>
@@ -126,14 +169,32 @@ pub enum DataStreamFormat {
 }
 
 #[cfg(not(feature = "static_analysis"))]
-pub trait TransportOrStorageSite: Debug {}
+pub trait TransportOrStorageSite: Debug {
+    fn as_any(&self) -> &dyn std::any::Any;
+}
 
 #[cfg(feature = "static_analysis")]
-pub trait TransportOrStorageSite: Debug + Cardinal {}
+pub trait TransportOrStorageSite: Debug + Cardinal {
+    fn as_any(&self) -> &dyn std::any::Any;
+}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct RuntimeAccessibleFile {
     pub path: String,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct RangeInput {
+    pub start: i32,
+    pub end: i32,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct ReturnTarget {}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct VariableReference {
+    pub name: String,
 }
 
 #[cfg(feature = "static_analysis")]
@@ -144,7 +205,62 @@ impl Cardinal for RuntimeAccessibleFile {
 }
 
 #[cfg(feature = "static_analysis")]
-impl TransportOrStorageSite for RuntimeAccessibleFile {}
+impl TransportOrStorageSite for RuntimeAccessibleFile {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[cfg(feature = "static_analysis")]
+impl Cardinal for RangeInput {
+    fn get_output_cardinality(&self) -> Cardinality {
+        let count = (self.end - self.start).max(0) as u64;
+        Cardinality::Known(count.into())
+    }
+}
+
+#[cfg(feature = "static_analysis")]
+impl TransportOrStorageSite for RangeInput {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[cfg(not(feature = "static_analysis"))]
+impl TransportOrStorageSite for RuntimeAccessibleFile {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[cfg(not(feature = "static_analysis"))]
+impl TransportOrStorageSite for RangeInput {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[cfg(feature = "static_analysis")]
+impl Cardinal for ReturnTarget {
+    fn get_output_cardinality(&self) -> Cardinality {
+        // Return doesn't change cardinality
+        Cardinality::Unknown
+    }
+}
+
+#[cfg(feature = "static_analysis")]
+impl TransportOrStorageSite for ReturnTarget {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[cfg(not(feature = "static_analysis"))]
+impl TransportOrStorageSite for ReturnTarget {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
 
 #[cfg(feature = "static_analysis")]
 impl Cardinal for StreamInput {
@@ -307,11 +423,39 @@ pub struct OkOrPanic {}
 
 impl StreamTransformation for OkOrPanic {}
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct MapTransformation {
+    pub function_name: String,
+}
+
+impl StreamTransformation for MapTransformation {}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct FilterTransformation {
+    pub function_name: String,
+}
+
+impl StreamTransformation for FilterTransformation {}
 
 #[cfg(feature = "static_analysis")]
 impl DerivedCardinal for OkOrPanic {
     fn get_output_cardinality(&self, input_cardinality: Cardinality) -> Cardinality {
         return input_cardinality;
+    }
+}
+
+#[cfg(feature = "static_analysis")]
+impl DerivedCardinal for MapTransformation {
+    fn get_output_cardinality(&self, input_cardinality: Cardinality) -> Cardinality {
+        return input_cardinality;
+    }
+}
+
+#[cfg(feature = "static_analysis")]
+impl DerivedCardinal for FilterTransformation {
+    fn get_output_cardinality(&self, input_cardinality: Cardinality) -> Cardinality {
+        // Filter could reduce cardinality, but we don't know by how much
+        return Cardinality::Unknown;
     }
 }
 
@@ -354,5 +498,27 @@ impl std::fmt::Display for MarigoldProgram {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // TODO: Generate actual Rust code for the streams
         write!(f, "// TODO: Implement code generation for MarigoldProgram\n// {} streams found", self.streams.len())
+    }
+}
+
+#[cfg(feature = "static_analysis")]
+impl Cardinal for VariableReference {
+    fn get_output_cardinality(&self) -> Cardinality {
+        // Variable cardinality depends on the referenced variable
+        Cardinality::Unknown
+    }
+}
+
+#[cfg(feature = "static_analysis")]
+impl TransportOrStorageSite for VariableReference {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[cfg(not(feature = "static_analysis"))]
+impl TransportOrStorageSite for VariableReference {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
