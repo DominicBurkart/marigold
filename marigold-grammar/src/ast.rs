@@ -159,10 +159,6 @@ pub trait StreamTransformation: Debug {}
 #[cfg(feature = "static_analysis")]
 pub trait StreamTransformation: Debug + DerivedCardinal {}
 
-#[cfg(feature = "static_analysis")]
-pub trait Implementable {
-    fn get_code<'a>(&'a self) -> &'a str;
-}
 
 #[cfg(feature = "static_analysis")]
 struct ExponentialBackoffParameters {
@@ -351,5 +347,12 @@ impl Implementable for Stream {
 impl Sourceable for Stream {
     fn get_source<'a>(&'a self) -> &'a str {
         todo!()
+    }
+}
+
+impl std::fmt::Display for MarigoldProgram {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // TODO: Generate actual Rust code for the streams
+        write!(f, "// TODO: Implement code generation for MarigoldProgram\n// {} streams found", self.streams.len())
     }
 }
