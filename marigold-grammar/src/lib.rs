@@ -115,7 +115,7 @@ fn parse_read_file(
                 ast::DataStreamFormat::INFER
             }
         },
-        source: Box::new(ast::RuntimeFile {
+        source: Box::new(ast::RuntimeAccessibleFile {
             path: params
                 .remove(&Rule::file_path)
                 .expect("file_path not found")
@@ -207,7 +207,7 @@ fn parse_write_file(
         }
     };
 
-    let target = Box::new(ast::RuntimeFile {
+    let target = Box::new(ast::RuntimeAccessibleFile {
         path: params
             .remove(&Rule::file_path)
             .expect("file_path not found")
@@ -286,7 +286,7 @@ mod tests {
                     Stream {
                         input: StreamInput {
                             format: DataStreamFormat::CSV,
-                            source: Box::new(RuntimeFile {
+                            source: Box::new(RuntimeAccessibleFile {
                                 path: "./woof.csv".to_string()
                             }),
                             type_ident: Option::Some("woof".to_string())
@@ -294,7 +294,7 @@ mod tests {
                         transformations: vec![Box::new(OkOrPanic {})],
                         output: StreamOutput {
                             format: DataStreamFormat::CSV,
-                            target: Box::new(RuntimeFile {
+                            target: Box::new(RuntimeAccessibleFile {
                                 path: "miaow.csv".to_string()
                             }),
                         }
@@ -302,7 +302,7 @@ mod tests {
                     Stream {
                         input: StreamInput {
                             format: DataStreamFormat::INFER,
-                            source: Box::new(RuntimeFile {
+                            source: Box::new(RuntimeAccessibleFile {
                                 path: "poof.csv".to_string()
                             }),
                             type_ident: None
@@ -310,7 +310,7 @@ mod tests {
                         transformations: Vec::new(),
                         output: StreamOutput {
                             format: DataStreamFormat::CSV,
-                            target: Box::new(RuntimeFile {
+                            target: Box::new(RuntimeAccessibleFile {
                                 path: "doof.csv".to_string()
                             }),
                         }
