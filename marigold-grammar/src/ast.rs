@@ -211,7 +211,6 @@ pub struct VariableReference {
 pub struct SelectAllInput {
     pub inputs: Vec<StreamInput>,
 }
-
 #[cfg(feature = "static_analysis")]
 impl Cardinal for RuntimeAccessibleFile {
     fn get_output_cardinality(&self) -> Cardinality {
@@ -510,7 +509,6 @@ impl DerivedCardinal for FilterTransformation {
         return Cardinality::Unknown;
     }
 }
-
 
 #[cfg(feature = "static_analysis")]
 impl Cardinal for Stream {
