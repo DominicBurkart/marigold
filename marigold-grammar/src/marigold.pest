@@ -1,33 +1,62 @@
 // shared fields
-valid_ident = { (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")+ }
+valid_ident = { (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
 valid_file_path_character = {(ASCII_ALPHANUMERIC | "~" | "." | "_" | "/" | "-" | "\\" )}
 file_path = ${ "\"" ~ (valid_file_path_character)+ ~ "\""}
+integer = { ASCII_DIGIT+ }
 csv_data_stream_format = {"csv"}
 data_stream_format = { csv_data_stream_format }
 
-// define stream inputs
+// define stream inputs  
 input_format = { data_stream_format }
 input_struct = { valid_ident }
 read_file = { "read_file" ~ "(" ~ file_path ~ ("," ~ input_format)? ~ ("," ~ "struct" ~ "=" ~ input_struct )? ~ ")" }
-input = { read_file }
+range_input = { "range" ~ "(" ~ integer ~ "," ~ integer ~ ")" }
+select_all_input = { "select_all" ~ "(" ~ input ~ ("," ~ input)* ~ ")" }
+variable_ref = { valid_ident }
+input = { read_file | range_input | select_all_input | variable_ref }
 
 // define stream transformations
 ok_or_panic = { "ok_or_panic()" }
-transformation = { ok_or_panic }
+map_transform = { "map" ~ "(" ~ valid_ident ~ ")" }
+filter_transform = { "filter" ~ "(" ~ valid_ident ~ ")" }
+fold_transform = { "fold" ~ "(" ~ (valid_ident | integer) ~ "," ~ valid_ident ~ ")" }
+permutations_transform = { "permutations" ~ "(" ~ integer ~ ")" }
+combinations_transform = { "combinations" ~ "(" ~ integer ~ ")" }
+keep_first_n_transform = { "keep_first_n" ~ "(" ~ integer ~ "," ~ valid_ident ~ ")" }
+permutations_with_replacement_transform = { "permutations_with_replacement" ~ "(" ~ integer ~ ")" }
+transformation = { ok_or_panic | map_transform | filter_transform | fold_transform | permutations_transform | combinations_transform | keep_first_n_transform | permutations_with_replacement_transform }
 
 // define stream outputs
 output_format = { data_stream_format }
 write_file = { "write_file" ~ "(" ~ file_path ~ "," ~ output_format ~ ")" }
-output = { write_file }
+return_output = { "return" }
+output = { write_file | return_output }
 
 // define stream
-stream = { input ~ ("." ~ transformation)* ~ "." ~output }
+stream = { input ~ ("." ~ transformation)* ~ "." ~ output }
 
-// TODO: stream variables (impl: use `r#`-prefixed variable to avoid collisions with Rust reserved names)
+// stream variable assignment
+stream_variable = { valid_ident ~ "=" ~ input }
 
-// TODO: structs and enums
+// function definitions
+rust_type = { (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+function_param = { valid_ident ~ ":" ~ rust_type }
+function_params = { function_param ~ ("," ~ function_param)* }
+function_body = { "{" ~ (!"}" ~ ANY)* ~ "}" }
+function_def_with_params = { "fn" ~ valid_ident ~ "(" ~ function_params ~ ")" ~ "->" ~ rust_type ~ function_body }
+function_def_no_params = { "fn" ~ valid_ident ~ "(" ~ ")" ~ "->" ~ rust_type ~ function_body }
+function_def = { function_def_with_params | function_def_no_params }
 
-// programs are composed of streams
-program = {stream+}
+// struct definitions
+struct_field = { valid_ident ~ ":" ~ rust_type }
+struct_fields = { struct_field ~ ("," ~ struct_field)* }
+struct_body = { "{" ~ struct_fields? ~ "}" }
+struct_def = { "struct" ~ valid_ident ~ struct_body }
+
+// program statements
+statement = { function_def | struct_def | stream_variable | stream }
+
+// programs are composed of statements
+program = { statement+ }
 
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
