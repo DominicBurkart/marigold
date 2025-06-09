@@ -278,25 +278,23 @@ mod tests {
     
     // These tests are expected to fail until we fix post-fold transformations
     #[tokio::test]
-    #[should_panic] 
     async fn edge_case_post_fold_single() {
         test_fold_with_post_transformation().await;
     }
     
     #[tokio::test]
-    #[should_panic]
     async fn edge_case_post_fold_multiple() {
         test_fold_with_multiple_post_transformations().await;
     }
     
-    #[tokio::test]
-    #[should_panic]
-    async fn edge_case_complex_types() {
-        test_fold_complex_types().await;
-    }
+    // Complex types test is commented out in main
+    // #[tokio::test]
+    // #[should_panic]
+    // async fn edge_case_complex_types() {
+    //     test_fold_complex_types().await;
+    // }
     
-    #[tokio::test] 
-    #[should_panic]
+    #[tokio::test]
     async fn edge_case_variables() {
         test_fold_with_variables().await;
     }
