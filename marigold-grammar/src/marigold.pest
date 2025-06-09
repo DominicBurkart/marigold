@@ -39,10 +39,14 @@ stream = { input ~ ("." ~ transformation)* ~ "." ~ output }
 stream_variable = { valid_ident ~ "=" ~ input }
 
 // function definitions
-rust_type = { (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
-function_param = { valid_ident ~ ":" ~ rust_type }
+rust_type = { "&"* ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "::")* }
+function_param = { ("mut" ~ WHITESPACE+)? ~ valid_ident ~ ":" ~ rust_type }
 function_params = { function_param ~ ("," ~ function_param)* }
-function_body = { "{" ~ (!"}" ~ ANY)* ~ "}" }
+function_body = { marigold_function_body | rust_function_body }
+marigold_function_body = { "%%%MARIGOLD_FUNCTION_START%%%" ~ (!("%%%MARIGOLD_FUNCTION_END%%%") ~ ANY)* ~ "%%%MARIGOLD_FUNCTION_END%%%" }
+rust_function_body = { "{" ~ rust_body_content ~ "}" }
+rust_body_content = { (rust_nested_braces | (!"}" ~ ANY))* }
+rust_nested_braces = { "{" ~ rust_body_content ~ "}" }
 function_def_with_params = { "fn" ~ valid_ident ~ "(" ~ function_params ~ ")" ~ "->" ~ rust_type ~ function_body }
 function_def_no_params = { "fn" ~ valid_ident ~ "(" ~ ")" ~ "->" ~ rust_type ~ function_body }
 function_def = { function_def_with_params | function_def_no_params }
@@ -57,6 +61,7 @@ struct_def = { "struct" ~ valid_ident ~ struct_body }
 statement = { function_def | struct_def | stream_variable | stream }
 
 // programs are composed of statements
-program = { statement+ }
+program = { SOI ~ statement_list ~ EOI }
+statement_list = { WHITESPACE* ~ statement ~ (WHITESPACE* ~ statement)* ~ WHITESPACE* }
 
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }

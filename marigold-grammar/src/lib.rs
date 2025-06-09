@@ -34,7 +34,10 @@ fn parse_program(
 ) -> Result<ast::MarigoldProgram, GrammarError> {
     assert_eq!(program.as_rule(), Rule::program);
 
-    let pairs = program.into_inner().into_iter();
+    let statement_list = program.into_inner().next().unwrap();
+    assert_eq!(statement_list.as_rule(), Rule::statement_list);
+    
+    let pairs = statement_list.into_inner().into_iter();
     let mut streams = Vec::new();
     let mut functions = Vec::new();
     let mut structs = Vec::new();
@@ -52,7 +55,10 @@ fn parse_program(
                     _ => unimplemented!("unknown statement type: {:?}", statement.as_rule()),
                 }
             },
-            _ => unimplemented!("unknown program element: {:?}", pair.as_rule()),
+            _ => {
+                // Skip whitespace and other non-statement elements
+                // Note: WHITESPACE is marked as silent (_) so it shouldn't appear here
+            }
         }
     }
 
@@ -108,8 +114,8 @@ fn parse_read_file(
     // Extract the filepath
     let filepath = rules.remove(0).as_str();
 
-    let type_ident: Option<String>;
-    let format: ast::DataStreamFormat;
+    let mut type_ident: Option<String> = None;
+    let mut format: ast::DataStreamFormat = ast::DataStreamFormat::INFER;
 
     // Check the rest, handling in any order
     let mut unhandled_rules = Vec::new();
@@ -117,6 +123,15 @@ fn parse_read_file(
         match rule.as_rule() {
             Rule::data_stream_format => {
                 let format_str = rule.as_str();
+                format = match format_str {
+                    "csv" => ast::DataStreamFormat::CSV,
+                    _ => ast::DataStreamFormat::INFER,
+                };
+            }
+            Rule::input_format => {
+                // Handle wrapper rule - extract the inner data_stream_format
+                let inner_rule = rule.into_inner().next().unwrap();
+                let format_str = inner_rule.as_str();
                 format = match format_str {
                     "csv" => ast::DataStreamFormat::CSV,
                     _ => ast::DataStreamFormat::INFER,
@@ -222,6 +237,15 @@ fn parse_write_file(
         match rule.as_rule() {
             Rule::data_stream_format => {
                 let format_str = rule.as_str();
+                output_format = match format_str {
+                    "csv" => ast::DataStreamFormat::CSV,
+                    _ => ast::DataStreamFormat::INFER,
+                };
+            }
+            Rule::output_format => {
+                // Handle wrapper rule - extract the inner data_stream_format
+                let inner_rule = rule.into_inner().next().unwrap();
+                let format_str = inner_rule.as_str();
                 output_format = match format_str {
                     "csv" => ast::DataStreamFormat::CSV,
                     _ => ast::DataStreamFormat::INFER,
@@ -391,6 +415,7 @@ fn parse_select_all_input(
         inputs.push(parse_input(input_pair)?);
     }
     
+    
     Ok(ast::StreamInput {
         format: ast::DataStreamFormat::INFER,
         source: Box::new(ast::SelectAllInput { inputs }),
@@ -398,9 +423,6 @@ fn parse_select_all_input(
     })
 }
 
-#[derive(Parser)]
-#[grammar = "marigold.pest"]
-pub struct PARSER;
 
 #[cfg(test)]
 mod tests {
@@ -578,9 +600,9 @@ mod tests {
     fn function_definition_simple() {
         let parsed = marigold_parse(
             r#"
-            fn double(x: i32) -> i32 {
+            fn double(x: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%%
                 x * 2
-            }
+            %%%MARIGOLD_FUNCTION_END%%%
 
             range(0, 3)
                 .map(double)
