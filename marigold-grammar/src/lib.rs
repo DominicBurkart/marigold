@@ -32,7 +32,10 @@ fn parse_program(
 ) -> Result<ast::MarigoldProgram, GrammarError> {
     assert_eq!(program.as_rule(), Rule::program);
 
-    let pairs = program.into_inner().into_iter();
+    let statement_list = program.into_inner().next().unwrap();
+    assert_eq!(statement_list.as_rule(), Rule::statement_list);
+    
+    let pairs = statement_list.into_inner().into_iter();
     let mut streams = Vec::new();
     let mut functions = Vec::new();
     let mut structs = Vec::new();
@@ -50,7 +53,10 @@ fn parse_program(
                     _ => unimplemented!("unknown statement type: {:?}", statement.as_rule()),
                 }
             },
-            _ => unimplemented!("unknown program element: {:?}", pair.as_rule()),
+            _ => {
+                // Skip whitespace and other non-statement elements
+                // Note: WHITESPACE is marked as silent (_) so it shouldn't appear here
+            }
         }
     }
 
@@ -96,81 +102,62 @@ fn parse_read_file(
     specific_input: pest::iterators::Pair<Rule>,
 ) -> Result<ast::StreamInput, GrammarError> {
     assert_eq!(specific_input.as_rule(), Rule::read_file);
-    let specific_input_rule: Rule = specific_input.as_rule();
-    let fields = specific_input.into_inner();
-    let mut params = HashMap::with_capacity(fields.len());
-    fields.into_iter().for_each(|field| {
-        let field_rule = field.as_rule();
-        params.insert(field.as_rule(), field).map(|_| {
-            unimplemented!(
-                "duplicate entry for rule {:?} while parsing {:?}",
-                field_rule,
-                specific_input_rule
-            )
-        });
-    });
 
-    // generate stream input
-    let out = ast::StreamInput {
-        format: {
-            if params.contains_key(&Rule::input_format) {
-                let specific_format = params
-                    .remove(&Rule::input_format)
-                    .unwrap()
-                    .into_inner()
-                    .into_iter()
-                    .next()
-                    .unwrap()
-                    .into_inner()
-                    .into_iter()
-                    .next()
-                    .unwrap()
-                    .as_rule();
-                match specific_format {
-                    Rule::csv_data_stream_format => ast::DataStreamFormat::CSV,
-                    _ => unimplemented!("unknown data stream format {:?}", specific_format),
-                }
-            } else {
-                ast::DataStreamFormat::INFER
+    // read_file path_string
+    let mut rules = specific_input
+        .into_inner()
+        .into_iter()
+        .collect::<Vec<pest::iterators::Pair<Rule>>>();
+
+    // Extract the filepath
+    let filepath = rules.remove(0).as_str();
+
+    let mut type_ident: Option<String> = None;
+    let mut format: ast::DataStreamFormat = ast::DataStreamFormat::INFER;
+
+    // Check the rest, handling in any order
+    let mut unhandled_rules = Vec::new();
+    for rule in rules {
+        match rule.as_rule() {
+            Rule::data_stream_format => {
+                let format_str = rule.as_str();
+                format = match format_str {
+                    "csv" => ast::DataStreamFormat::CSV,
+                    _ => ast::DataStreamFormat::INFER,
+                };
             }
-        },
-        source: Box::new(ast::RuntimeAccessibleFile {
-            path: params
-                .remove(&Rule::file_path)
-                .expect("file_path not found")
-                .into_inner()
-                .map(|character| character.as_str().chars().collect_vec())
-                .into_iter()
-                .flatten()
-                .collect(),
-        }),
-        type_ident: params.remove(&Rule::input_struct).map(|input_struct| {
-            input_struct
-                .into_inner()
-                .into_iter()
-                .map(|character| character.as_str().chars().collect_vec())
-                .flatten()
-                .collect()
-        }),
-    };
-
-    // check we didn't miss any parsed rules
-    if !params.is_empty() {
-        let unhandled_rules = params.keys().collect_vec();
-        if unhandled_rules.len().is_one() {
-            unimplemented!(
-                "rule not accounted for while parsing {:?}: {:?}",
-                specific_input_rule,
-                unhandled_rules.get(0).unwrap()
-            )
+            Rule::input_format => {
+                // Handle wrapper rule - extract the inner data_stream_format
+                let inner_rule = rule.into_inner().next().unwrap();
+                let format_str = inner_rule.as_str();
+                format = match format_str {
+                    "csv" => ast::DataStreamFormat::CSV,
+                    _ => ast::DataStreamFormat::INFER,
+                };
+            }
+            Rule::input_struct => {
+                type_ident = Some(rule.as_str().to_string());
+            }
+            _ => unhandled_rules.push(rule.as_rule()),
         }
-        unimplemented!(
-            "{} rules not accounted for while parsing {:?}: {:?}",
-            params.len(),
-            specific_input_rule,
-            unhandled_rules
-        )
     }
+
+    if !unhandled_rules.is_empty() {
+        return Err(GrammarError::ParseError(pest::error::Error::new_from_pos(
+            pest::error::ErrorVariant::CustomError {
+                message: format!("unhandled rule: {:?}", unhandled_rules),
+            },
+            pest::Position::from_start(""),
+        )));
+    }
+
+    let out = ast::StreamInput {
+        format,
+        source: Box::new(ast::RuntimeAccessibleFile {
+            path: filepath.trim_matches('"').to_string(),
+        }),
+        type_ident,
+    };
 
     // if all rules were processed, return
     Ok(out)
@@ -221,69 +208,51 @@ fn parse_write_file(
 ) -> Result<ast::StreamOutput, GrammarError> {
     assert_eq!(specific_output.as_rule(), Rule::write_file);
     let specific_output_rule: Rule = specific_output.as_rule();
-    let fields = specific_output.into_inner();
-    let mut params = HashMap::with_capacity(fields.len());
-    fields.into_iter().for_each(|field| {
-        let field_rule = field.as_rule();
-        params.insert(field.as_rule(), field).map(|_| {
-            unimplemented!(
-                "duplicate entry for rule {:?} while parsing {:?}",
-                field_rule,
-                specific_output_rule
-            )
-        });
-    });
+    let mut rules = specific_output
+        .into_inner()
+        .into_iter()
+        .collect::<Vec<pest::iterators::Pair<Rule>>>();
 
-    let output_format = {
-        let output_rule = params
-            .remove(&Rule::output_format)
-            .expect("output format is mandatory")
-            .into_inner()
-            .into_iter()
-            .next()
-            .unwrap()
-            .into_inner()
-            .into_iter()
-            .next()
-            .unwrap()
-            .as_rule();
-        match output_rule {
-            Rule::csv_data_stream_format => ast::DataStreamFormat::CSV,
-            _ => unimplemented!(
-                "unimplemented format for {:?}: {:?}",
-                specific_output_rule,
-                output_rule
-            ),
+    // Extract the filepath
+    let filepath = rules.remove(0).as_str();
+
+    let mut output_format = ast::DataStreamFormat::INFER;
+
+    // Check the rest, handling in any order
+    let mut unhandled_rules = Vec::new();
+    for rule in rules {
+        match rule.as_rule() {
+            Rule::data_stream_format => {
+                let format_str = rule.as_str();
+                output_format = match format_str {
+                    "csv" => ast::DataStreamFormat::CSV,
+                    _ => ast::DataStreamFormat::INFER,
+                };
+            }
+            Rule::output_format => {
+                // Handle wrapper rule - extract the inner data_stream_format
+                let inner_rule = rule.into_inner().next().unwrap();
+                let format_str = inner_rule.as_str();
+                output_format = match format_str {
+                    "csv" => ast::DataStreamFormat::CSV,
+                    _ => ast::DataStreamFormat::INFER,
+                };
+            }
+            _ => unhandled_rules.push(rule.as_rule()),
         }
-    };
+    }
 
     let target = Box::new(ast::RuntimeAccessibleFile {
-        path: params
-            .remove(&Rule::file_path)
-            .expect("file_path not found")
-            .into_inner()
-            .map(|character| character.as_str().chars().collect_vec())
-            .into_iter()
-            .flatten()
-            .collect(),
+        path: filepath.trim_matches('"').to_string(),
     });
 
-    // check we didn't miss any parsed rules
-    if !params.is_empty() {
-        let unhandled_rules = params.keys().collect_vec();
-        if unhandled_rules.len().is_one() {
-            unimplemented!(
-                "rule not accounted for while parsing {:?}: {:?}",
-                specific_output_rule,
-                unhandled_rules.get(0).unwrap()
-            )
-        }
-        unimplemented!(
-            "{} rules not accounted for while parsing {:?}: {:?}",
-            params.len(),
-            specific_output_rule,
-            unhandled_rules
-        )
+    if !unhandled_rules.is_empty() {
+        return Err(GrammarError::ParseError(pest::error::Error::new_from_pos(
+            pest::error::ErrorVariant::CustomError {
+                message: format!("unhandled rule: {:?}", unhandled_rules),
+            },
+            pest::Position::from_start(""),
+        )));
     }
 
     Ok(ast::StreamOutput {
@@ -433,6 +402,7 @@ fn parse_select_all_input(
         inputs.push(parse_input(input_pair)?);
     }
     
+    
     Ok(ast::StreamInput {
         format: ast::DataStreamFormat::INFER,
         source: Box::new(ast::SelectAllInput { inputs }),
@@ -440,9 +410,6 @@ fn parse_select_all_input(
     })
 }
 
-#[derive(Parser)]
-#[grammar = "marigold.pest"]
-pub struct PARSER;
 
 #[cfg(test)]
 mod tests {
@@ -620,9 +587,9 @@ mod tests {
     fn function_definition_simple() {
         let parsed = marigold_parse(
             r#"
-            fn double(x: i32) -> i32 {
+            fn double(x: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%%
                 x * 2
-            }
+            %%%MARIGOLD_FUNCTION_END%%%
 
             range(0, 3)
                 .map(double)
