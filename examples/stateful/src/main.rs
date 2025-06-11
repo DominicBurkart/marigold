@@ -3,9 +3,9 @@ use marigold::marigold_impl::StreamExt;
 
 async fn fold_u8() {
     let sum_of_ints = m!(
-        fn add(acc: u8, item: u8) -> u8 %%%MARIGOLD_FUNCTION_START%%%
+        fn add(acc: u8, item: u8) -> u8 {
             acc + item
-        %%%MARIGOLD_FUNCTION_END%%%
+        }
 
         range(0, 5)
             .fold(0, add)

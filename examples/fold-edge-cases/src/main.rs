@@ -6,9 +6,9 @@ async fn test_fold_literal_init() {
     println!("Testing: Fold with literal initial value");
     
     let result = m!(
-        fn add(acc: u32, item: u32) -> u32 %%%MARIGOLD_FUNCTION_START%%%
+        fn add(acc: u32, item: u32) -> u32 {
             acc + item
-        %%%MARIGOLD_FUNCTION_END%%%
+        }
         
         range(1, 4)  // [1, 2, 3] -> should sum to 6 + 0 = 6
             .fold(0, add)
@@ -24,13 +24,13 @@ async fn test_fold_function_init() {
     println!("Testing: Fold with function initial value");
     
     let result = m!(
-        fn get_initial() -> u32 %%%MARIGOLD_FUNCTION_START%%%
+        fn get_initial() -> u32 {
             10
-        %%%MARIGOLD_FUNCTION_END%%%
+        }
         
-        fn multiply(acc: u32, item: u32) -> u32 %%%MARIGOLD_FUNCTION_START%%%
+        fn multiply(acc: u32, item: u32) -> u32 {
             acc * item
-        %%%MARIGOLD_FUNCTION_END%%%
+        }
         
         range(1, 4)  // [1, 2, 3] -> should be 10 * 1 * 2 * 3 = 60
             .fold(get_initial, multiply)
@@ -64,17 +64,17 @@ async fn test_fold_with_pre_transformations() {
     println!("Testing: Fold with pre-processing transformations");
     
     let result = m!(
-        fn double(x: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%%
+        fn double(x: i32) -> i32 {
             x * 2
-        %%%MARIGOLD_FUNCTION_END%%%
+        }
         
-        fn is_even(x: &i32) -> bool %%%MARIGOLD_FUNCTION_START%%%
+        fn is_even(x: &i32) -> bool {
             x % 2 == 0
-        %%%MARIGOLD_FUNCTION_END%%%
+        }
         
-        fn sum(acc: i32, item: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%%
+        fn sum(acc: i32, item: i32) -> i32 {
             acc + item
-        %%%MARIGOLD_FUNCTION_END%%%
+        }
         
         range(1, 6)  // [1, 2, 3, 4, 5]
             .map(double)     // [2, 4, 6, 8, 10]
@@ -225,9 +225,9 @@ async fn test_fold_with_variables() {
     // Now test with variables
     println!("Debug: Testing variable-based fold...");
     let result = m!(
-        fn multiply2(acc: i32, item: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%%
+        fn multiply2(acc: i32, item: i32) -> i32 {
             acc * item
-        %%%MARIGOLD_FUNCTION_END%%%
+        }
         
         numbers = range(1, 4)  // [1, 2, 3]
         

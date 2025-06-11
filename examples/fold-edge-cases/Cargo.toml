@@ -9,12 +9,8 @@ tokio = {version = "1", features = ["full"]}
 
 [dependencies.marigold]
 path = "../../marigold"
-version = "=0.1.16"
+version = "=0.1.17"
 
-# Parser test has known issues with multi-function parsing
-# [[bin]]
-# name = "simple-parser-test" 
-# path = "src/simple_parser_test.rs"
 
 [[bin]]
 name = "minimal-test"
