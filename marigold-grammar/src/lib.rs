@@ -1,30 +1,28 @@
 #![forbid(unsafe_code)]
 
-#[macro_use]
-extern crate lalrpop_util;
-
-#[macro_use]
-extern crate lazy_static;
-
-use lalrpop_util::ParseError;
-extern crate proc_macro;
-use crate::ast::Token;
+use pest::Parser;
+use pest_derive::Parser;
+use thiserror::Error;
 
 pub use itertools;
 
-pub mod nodes;
+pub mod ast;
+
+#[cfg(feature = "static_analysis")]
+pub mod static_analysis;
+
 mod type_aggregation;
 
-lalrpop_mod!(#[allow(clippy::all)] pub ast);
-
-lazy_static! {
-    static ref PARSER: ast::ProgramParser = ast::ProgramParser::new();
+#[derive(Error, Debug)]
+pub enum GrammarError {
+    #[error("Parse error: {0}")]
+    ParseError(#[from] pest::error::Error<Rule>),
 }
 
-pub fn marigold_parse<'a>(
-    s: &'a str,
-) -> Result<String, ParseError<usize, Token<'a>, &'static str>> {
-    PARSER.parse(s)
+pub fn marigold_parse(s: &str) -> Result<ast::MarigoldProgram, GrammarError> {
+    let mut pairs = PARSER::parse(Rule::program, s)?;
+    let program = pairs.next().unwrap();
+    parse_program(program)
 }
 
 fn parse_program(
@@ -410,6 +408,9 @@ fn parse_select_all_input(
     })
 }
 
+#[derive(Parser)]
+#[grammar = "marigold.pest"]
+pub struct PARSER;
 
 #[cfg(test)]
 mod tests {
