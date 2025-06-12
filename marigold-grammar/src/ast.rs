@@ -696,7 +696,7 @@ impl std::fmt::Display for MarigoldProgram {
                 
                 // For fold operations, use futures fold and wrap result in a stream
                 write!(f, "    marigold::marigold_impl::run_stream::run_stream(")?;
-                write!(f, "marigold::marigold_impl::futures::stream::once(")?;
+                write!(f, "Box::pin(marigold::marigold_impl::futures::stream::once(")?;
                 write!(f, "{}", stream.input)?;
                 for transformation in pre_fold {
                     write!(f, ".{}", transformation)?;
@@ -714,7 +714,7 @@ impl std::fmt::Display for MarigoldProgram {
                         }
                     }
                 }
-                write!(f, ")")?;
+                write!(f, "))")?;
             } else {
                 write!(f, "    marigold::marigold_impl::run_stream::run_stream(Box::pin(")?;
                 
