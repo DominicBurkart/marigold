@@ -11,7 +11,6 @@ pub mod ast;
 #[cfg(feature = "static_analysis")]
 pub mod static_analysis;
 
-mod type_aggregation;
 
 #[derive(Error, Debug)]
 pub enum GrammarError {
