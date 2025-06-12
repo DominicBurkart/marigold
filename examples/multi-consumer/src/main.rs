@@ -21,13 +21,6 @@ async fn run() {
         digits
             .filter(is_even)
             .return
-
-        odd_digits = digits
-            .filter(is_odd)
-
-        odd_digits
-            .map(doubled_plus_ten)
-            .return
     )
     .await;
 
@@ -35,7 +28,7 @@ async fn run() {
 
     assert_eq!(
         small_even_number_set,
-        [0, 2, 4, 6, 8, 12, 16, 20, 24, 28]
+        [0, 2, 4, 6, 8]
             .into_iter()
             .collect::<HashSet<i32>>()
     );

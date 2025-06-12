@@ -18,7 +18,7 @@ async-std = ["marigold/async-std", "dep:async-std"] # parallelization using asyn
 
 [dependencies.marigold]
 path = "../../marigold"
-version = "=0.1.16"
+version = "=0.1.17"
 
 [dev-dependencies]
 criterion = {version="0.3", features=["async_tokio"]}
