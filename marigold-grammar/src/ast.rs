@@ -695,7 +695,7 @@ impl std::fmt::Display for MarigoldProgram {
                 };
                 
                 // For fold operations, use futures fold and wrap result in a stream
-                write!(f, "    marigold::marigold_impl::run_stream(")?;
+                write!(f, "    marigold::marigold_impl::run_stream::run_stream(")?;
                 write!(f, "marigold::marigold_impl::futures::stream::once(")?;
                 write!(f, "{}", stream.input)?;
                 for transformation in pre_fold {
@@ -716,7 +716,7 @@ impl std::fmt::Display for MarigoldProgram {
                 }
                 write!(f, ")")?;
             } else {
-                write!(f, "    marigold::marigold_impl::run_stream(")?;
+                write!(f, "    marigold::marigold_impl::run_stream::run_stream(Box::pin(")?;
                 
                 // Generate input
                 write!(f, "{}", stream.input)?;
@@ -725,6 +725,7 @@ impl std::fmt::Display for MarigoldProgram {
                 for transformation in &stream.transformations {
                     write!(f, ".{}", transformation)?;
                 }
+                write!(f, ")")?;
                 
                 // Handle output - for .return we don't need additional chaining
                 if let Some(file) = stream.output.target.as_any().downcast_ref::<RuntimeAccessibleFile>() {
