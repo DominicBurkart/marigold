@@ -298,6 +298,7 @@ mod tests {
     }
 
     /// Here, we test that the `default` variant in enums operates as expected.
+    #[cfg(not(feature = "io"))]
     #[tokio::test]
     async fn default_deserialize() {
         // declaration does not error or cause other variants to deserialize incorrectly
@@ -377,16 +378,24 @@ mod tests {
                     hull: Hull,
                 }
 
-                fn unknown_hull_values(v: Vaisseau) -> Option<string_10> {
+                fn is_other_hull(v: &Vaisseau) -> bool {
                     match v.hull {
-                        Hull::Spherical => None,
-                        Hull::Other(hull_value) => Some(hull_value)
+                        Hull::Spherical => false,
+                        Hull::Other(_) => true
+                    }
+                }
+
+                fn get_hull_value(v: Vaisseau) -> string_10 {
+                    match v.hull {
+                        Hull::Spherical => panic!("Should not call get_hull_value on Spherical"),
+                        Hull::Other(hull_value) => hull_value
                     }
                 }
 
                 read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
                     .ok_or_panic()
-                    .filter_map(unknown_hull_values)
+                    .filter(is_other_hull)
+                    .map(get_hull_value)
                     .return
             )
             .await
@@ -428,6 +437,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "io"))]
     #[tokio::test]
     async fn missing_values() {
         assert_eq!(
