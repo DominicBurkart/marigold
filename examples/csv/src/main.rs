@@ -378,24 +378,16 @@ mod tests {
                     hull: Hull,
                 }
 
-                fn is_other_hull(v: &Vaisseau) -> bool {
+                fn unknown_hull_values(v: Vaisseau) -> Option<string_10> {
                     match v.hull {
-                        Hull::Spherical => false,
-                        Hull::Other(_) => true
-                    }
-                }
-
-                fn get_hull_value(v: Vaisseau) -> string_10 {
-                    match v.hull {
-                        Hull::Spherical => panic!("Should not call get_hull_value on Spherical"),
-                        Hull::Other(hull_value) => hull_value
+                        Hull::Spherical => None,
+                        Hull::Other(hull_value) => Some(hull_value)
                     }
                 }
 
                 read_file("./data/compressed.csv.gz", csv, struct=Vaisseau)
                     .ok_or_panic()
-                    .filter(is_other_hull)
-                    .map(get_hull_value)
+                    .filter_map(unknown_hull_values)
                     .return
             )
             .await
