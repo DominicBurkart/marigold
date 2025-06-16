@@ -529,14 +529,14 @@ StreamFunction: nodes::StreamFunctionNode = {
     #[cfg(any(feature = "tokio", feature = "async-std"))]
     return nodes::StreamFunctionNode {
       code: format!("
-      map(|v| ::marigold::marigold_impl::futures::future::ready({filter_map_fn}(v)))
+      map(|v| async move {{ {filter_map_fn}(v) }})
       .buffered(
         std::cmp::max(
           2 * (::marigold::marigold_impl::num_cpus::get() - 1),
           2
         )
       )
-      .filter_map(|v| v)
+      .filter_map(|v| ::marigold::marigold_impl::futures::future::ready(v))
       ")
     };
   },
