@@ -10,6 +10,8 @@ repository = "https://github.com/DominicBurkart/marigold"
 
 [features]
 io = []
+tokio = []
+async-std = []
 
 [build-dependencies]
 lalrpop = "0.19.8"
