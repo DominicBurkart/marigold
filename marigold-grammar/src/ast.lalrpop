@@ -481,12 +481,7 @@ StreamFunction: nodes::StreamFunctionNode = {
     code: format!("permutations({n}).await"),
   },
   "permutations_with_replacement("<n: FreeText> ")" => nodes::StreamFunctionNode {
-    code: format!("collect_and_apply(|values| async {{
-                ::marigold::marigold_impl::gen_nested_iter_yield::nested_iter_yield!(values.iter(), {n}, .to_owned(), ::marigold::marigold_impl::)
-          }})
-          .await
-          .await
-    "),
+    code: format!("permutations_with_replacement({n}).await"),
   },
   "combinations("<n: FreeText> ")" =>  nodes::StreamFunctionNode {
     code: format!("combinations({n}).await"),
