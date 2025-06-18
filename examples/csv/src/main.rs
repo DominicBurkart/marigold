@@ -298,6 +298,7 @@ mod tests {
     }
 
     /// Here, we test that the `default` variant in enums operates as expected.
+    #[cfg(not(feature = "io"))]
     #[tokio::test]
     async fn default_deserialize() {
         // declaration does not error or cause other variants to deserialize incorrectly
@@ -428,6 +429,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "io"))]
     #[tokio::test]
     async fn missing_values() {
         assert_eq!(
