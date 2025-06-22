@@ -26,7 +26,7 @@ impl std::error::Error for MarigoldParseError {}
 pub trait MarigoldParser {
     /// Parse a Marigold program string and return the generated Rust code
     fn parse(&self, input: &str) -> Result<String, MarigoldParseError>;
-    
+
     /// Get the name of this parser (for debugging/logging purposes)
     fn name(&self) -> &'static str;
 }
@@ -56,7 +56,7 @@ impl MarigoldParser for LalrpopParser {
             .parse(input)
             .map_err(|e| MarigoldParseError::LalrpopError(format!("{:?}", e)))
     }
-    
+
     fn name(&self) -> &'static str {
         "LALRPOP"
     }
@@ -79,7 +79,7 @@ impl PestParser {
     pub fn new() -> Self {
         Self
     }
-    
+
     fn parse_input(_input: &str) -> Result<(), String> {
         // TODO: Fix Pest Rule access issue
         // For now, return an error to indicate Pest is not implemented
@@ -104,17 +104,14 @@ impl MarigoldParser for PestParser {
                 // If parsing succeeds, return a basic async block
                 Ok("async {\n    use ::marigold::marigold_impl::*;\n    // Parsed successfully with Pest\n}".to_string())
             }
-            Err(e) => {
-                Err(MarigoldParseError::PestError(e))
-            }
+            Err(e) => Err(MarigoldParseError::PestError(e)),
         }
     }
-    
+
     fn name(&self) -> &'static str {
         "Pest"
     }
 }
-
 
 /// Factory function that returns the appropriate parser based on feature flags
 pub fn get_parser() -> Box<dyn MarigoldParser> {
@@ -122,7 +119,7 @@ pub fn get_parser() -> Box<dyn MarigoldParser> {
     {
         Box::new(PestParser::new())
     }
-    
+
     #[cfg(not(feature = "pest-parser"))]
     {
         Box::new(LalrpopParser::new())
@@ -148,10 +145,10 @@ mod tests {
     #[test]
     fn test_default_parser_selection() {
         let parser = get_parser();
-        
+
         #[cfg(feature = "pest-parser")]
         assert_eq!(parser.name(), "Pest");
-        
+
         #[cfg(not(feature = "pest-parser"))]
         assert_eq!(parser.name(), "LALRPOP");
     }
@@ -160,11 +157,11 @@ mod tests {
     fn test_parse_marigold_function() {
         // Test with a minimal valid program - just empty for now
         let result = parse_marigold("");
-        
+
         // Should succeed with LALRPOP, may fail with unimplemented Pest
         #[cfg(not(feature = "pest-parser"))]
         assert!(result.is_ok());
-        
+
         #[cfg(feature = "pest-parser")]
         assert!(result.is_err()); // Expected until Pest is implemented
     }
@@ -172,11 +169,11 @@ mod tests {
     #[test]
     fn test_lalrpop_parser_basic_functionality() {
         let parser = LalrpopParser::new();
-        
+
         // Test with empty input - should generate basic async block
         let result = parser.parse("");
         assert!(result.is_ok());
-        
+
         let output = result.unwrap();
         assert!(output.contains("async"));
     }
@@ -193,7 +190,7 @@ mod tests {
     fn test_pest_parser_not_implemented() {
         let parser = PestParser::new();
         let result = parser.parse("");
-        
+
         assert!(result.is_err());
         if let Err(MarigoldParseError::PestError(msg)) = result {
             assert!(msg.contains("not fully implemented"));
@@ -207,44 +204,45 @@ mod tests {
     fn test_parser_compatibility_empty_input() {
         let lalrpop_parser = LalrpopParser::new();
         let lalrpop_result = lalrpop_parser.parse("");
-        
+
         // Empty input should succeed with LALRPOP
         assert!(lalrpop_result.is_ok());
         let lalrpop_output = lalrpop_result.unwrap();
         assert!(lalrpop_output.contains("async"));
-        
+
         #[cfg(feature = "pest-parser")]
         {
             let pest_parser = PestParser::new();
             let pest_result = pest_parser.parse("");
-            
+
             // For now, Pest parser is expected to fail
             // When fully implemented, this should succeed and produce equivalent output
             assert!(pest_result.is_err());
         }
     }
 
-    #[test] 
+    #[test]
     fn test_factory_function_consistency() {
         // Test that the factory function returns the expected parser type
         let parser = get_parser();
-        
+
         #[cfg(feature = "pest-parser")]
         assert_eq!(parser.name(), "Pest");
-        
+
         #[cfg(not(feature = "pest-parser"))]
         assert_eq!(parser.name(), "LALRPOP");
     }
-    
+
     #[test]
     fn test_parse_marigold_function_works() {
         // Test the convenience function
         let result = parse_marigold("");
-        
+
         #[cfg(not(feature = "pest-parser"))]
         assert!(result.is_ok());
-        
+
         #[cfg(feature = "pest-parser")]
         assert!(result.is_err()); // Expected until Pest is fully implemented
     }
 }
+

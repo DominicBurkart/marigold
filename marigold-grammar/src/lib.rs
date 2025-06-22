@@ -13,8 +13,8 @@ use crate::ast::Token;
 pub use itertools;
 
 pub mod nodes;
-mod type_aggregation;
 pub mod parser;
+mod type_aggregation;
 
 lalrpop_mod!(#[allow(clippy::all)] pub ast);
 
