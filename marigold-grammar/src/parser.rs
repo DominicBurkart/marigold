@@ -199,12 +199,12 @@ mod tests {
     }
 
     #[cfg(feature = "pest-parser")]
-    #[test] 
+    #[test]
     fn test_pest_grammar_basic_parsing() {
         // TODO: Fix Pest Rule enum access pattern to enable this test
         // This test validates that the basic Pest grammar works correctly
         // Currently blocked by Rust's associated type access limitations
-        
+
         // When working, this should test:
         // - MarigoldPestParser::parse(Rule::program, "hello") -> Ok
         // - MarigoldPestParser::parse(Rule::program, "goodbye") -> Err
