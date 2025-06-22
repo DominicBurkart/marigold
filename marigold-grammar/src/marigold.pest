@@ -1,0 +1,6 @@
+// Simplified Marigold Pest Grammar
+// Test implementation for basic functionality
+
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+
+program = { SOI ~ "hello" ~ EOI }

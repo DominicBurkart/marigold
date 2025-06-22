@@ -9,6 +9,8 @@ license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
 
 [features]
+default = []
+pest-parser = ["pest", "pest_derive"]
 io = []
 tokio = []
 async-std = []
@@ -26,3 +28,5 @@ rusymbols = "0.1.2"
 num-bigint = "0.4"
 arrayvec = "0.7"
 once_cell = "1.15.0"
+pest = { version = "2.7", optional = true }
+pest_derive = { version = "2.7", optional = true }
