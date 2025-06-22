@@ -14,16 +14,22 @@ pub use itertools;
 
 pub mod nodes;
 mod type_aggregation;
+pub mod parser;
 
 lalrpop_mod!(#[allow(clippy::all)] pub ast);
 
-lazy_static! {
-    static ref PARSER: ast::ProgramParser = ast::ProgramParser::new();
+pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
+    parser::parse_marigold(s)
 }
 
-pub fn marigold_parse<'a>(
+// Legacy function name for backwards compatibility
+pub fn marigold_parse_legacy<'a>(
     s: &'a str,
 ) -> Result<String, ParseError<usize, Token<'a>, &'static str>> {
+    // Use LALRPOP directly for legacy compatibility
+    lazy_static! {
+        static ref PARSER: ast::ProgramParser = ast::ProgramParser::new();
+    }
     PARSER.parse(s)
 }
 
