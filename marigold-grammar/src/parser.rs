@@ -208,7 +208,7 @@ mod tests {
         // When working, this should test:
         // - MarigoldPestParser::parse(Rule::program, "hello") -> Ok
         // - MarigoldPestParser::parse(Rule::program, "goodbye") -> Err
-        
+
         // For now, we test that the parser structure exists
         let _parser = MarigoldPestParser;
         // Test passes as a placeholder until Pest Rule access is resolved
