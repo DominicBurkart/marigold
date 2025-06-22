@@ -1,6 +1,31 @@
-// Simplified Marigold Pest Grammar
-// Test implementation for basic functionality
+// Marigold Pest Grammar
+// Phase 2A: Basic parsing infrastructure with core rules
 
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 
-program = { SOI ~ "hello" ~ EOI }
+// Program is a sequence of expressions
+program = { SOI ~ expr* ~ EOI }
+
+// Expression types - basic foundation
+expr = { stream | stream_variable | struct_decl | enum_decl | fn_decl }
+
+// Basic tokens
+number = @{ ASCII_DIGIT+ }
+identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
+quoted_string = @{ "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
+
+// Basic stream structure for range().return pattern
+stream = { range_input ~ ("." ~ stream_function)* ~ "." ~ output_function }
+
+// Simple range input function
+range_input = { "range(" ~ number ~ "," ~ number ~ ")" }
+
+// Basic output function
+output_function = { "return" }
+
+// Placeholder rules for future implementation
+stream_function = { "map(" ~ identifier ~ ")" | "filter(" ~ identifier ~ ")" }
+stream_variable = { identifier ~ "=" ~ range_input ~ ("." ~ stream_function)* }
+struct_decl = { "struct" ~ identifier ~ "{" ~ "}" }
+enum_decl = { "enum" ~ identifier ~ "{" ~ "}" }
+fn_decl = { "fn" ~ identifier ~ "(" ~ ")" ~ "->" ~ identifier ~ "{" ~ "}" }
