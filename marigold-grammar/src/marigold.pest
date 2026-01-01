@@ -1,31 +1,154 @@
 // Marigold Pest Grammar
-// Phase 2A: Basic parsing infrastructure with core rules
+// Phase 2: Comprehensive grammar for core language constructs
 
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 
 // Program is a sequence of expressions
 program = { SOI ~ expr* ~ EOI }
 
-// Expression types - basic foundation
-expr = { stream | stream_variable | struct_decl | enum_decl | fn_decl }
+// Expression types
+expr = {
+    stream |
+    stream_variable_declaration |
+    struct_decl |
+    enum_decl |
+    fn_decl
+}
 
-// Basic tokens
+// === Basic Tokens ===
+
 number = @{ ASCII_DIGIT+ }
 identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
 quoted_string = @{ "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
 
-// Basic stream structure for range().return pattern
-stream = { range_input ~ ("." ~ stream_function)* ~ "." ~ output_function }
+// Type annotations for struct fields and function parameters
+type_annotation = @{
+    (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "<" | ">" | "[" | "]" | ",")*
+}
 
-// Simple range input function
-range_input = { "range(" ~ number ~ "," ~ number ~ ")" }
+// FreeText equivalent - allows more characters for variable names and types
+free_text = @{ (ASCII_ALPHA | "_" | ">" | "<") ~ (ASCII_ALPHANUMERIC | "_" | "-" | ">" | "<")* }
 
-// Basic output function
-output_function = { "return" }
+// Braced content (for struct/enum bodies)
+braced_content = @{ "{" ~ (!"}" ~ ANY)* ~ "}" }
 
-// Placeholder rules for future implementation
-stream_function = { "map(" ~ identifier ~ ")" | "filter(" ~ identifier ~ ")" }
-stream_variable = { identifier ~ "=" ~ range_input ~ ("." ~ stream_function)* }
-struct_decl = { "struct" ~ identifier ~ "{" ~ "}" }
-enum_decl = { "enum" ~ identifier ~ "{" ~ "}" }
-fn_decl = { "fn" ~ identifier ~ "(" ~ ")" ~ "->" ~ identifier ~ "{" ~ "}" }
+// Function body markers
+fn_body = @{ "%%%MARIGOLD_FUNCTION_START%%%" ~ (!"%%%MARIGOLD_FUNCTION_END%%%" ~ ANY)* ~ "%%%MARIGOLD_FUNCTION_END%%%" }
+
+// === Stream Syntax ===
+
+// Unnamed stream: InputFunction.StreamFunction*.OutputFunction
+// Named stream: variable_name.StreamFunction*.OutputFunction
+stream = {
+    (input_function ~ ("." ~ stream_function)* ~ "." ~ output_function) |
+    (identifier ~ ("." ~ stream_function)* ~ "." ~ output_function)
+}
+
+// Stream variable declaration: var = InputFunction.StreamFunction*
+//                            or: var = other_var.StreamFunction*
+stream_variable_declaration = {
+    identifier ~ "=" ~ input_function ~ ("." ~ stream_function)* |
+    identifier ~ "=" ~ identifier ~ ("." ~ stream_function)*
+}
+
+// === Input Functions ===
+
+input_function = {
+    range_input |
+    read_file_csv_input |
+    select_all_input
+}
+
+range_input = {
+    "range(" ~ free_text ~ "," ~ free_text ~ ")"
+}
+
+read_file_csv_input = {
+    "read_file(" ~ quoted_string ~ "," ~ "csv" ~ "," ~ "struct" ~ "=" ~ free_text ~
+    ("," ~ "infer_compression" ~ "=" ~ ("true" | "false"))? ~ ")"
+}
+
+select_all_input = {
+    "select_all(" ~
+    input_and_maybe_stream_functions ~ ("," ~ input_and_maybe_stream_functions)* ~
+    ")"
+}
+
+input_and_maybe_stream_functions = {
+    input_function ~ ("." ~ stream_function)*
+}
+
+// === Stream Functions ===
+
+stream_function = {
+    permutations_fn |
+    permutations_with_replacement_fn |
+    combinations_fn |
+    keep_first_n_fn |
+    filter_fn |
+    filter_map_fn |
+    map_fn |
+    fold_fn |
+    ok_fn |
+    ok_or_panic_fn
+}
+
+map_fn = { "map(" ~ free_text ~ ")" }
+filter_fn = { "filter(" ~ free_text ~ ")" }
+filter_map_fn = { "filter_map(" ~ free_text ~ ")" }
+permutations_fn = { "permutations(" ~ free_text ~ ")" }
+permutations_with_replacement_fn = { "permutations_with_replacement(" ~ free_text ~ ")" }
+combinations_fn = { "combinations(" ~ free_text ~ ")" }
+keep_first_n_fn = { "keep_first_n(" ~ free_text ~ "," ~ free_text ~ ")" }
+fold_fn = { "fold(" ~ free_text ~ "," ~ free_text ~ ")" }
+ok_fn = { "ok()" }
+ok_or_panic_fn = { "ok_or_panic()" }
+
+// === Output Functions ===
+
+output_function = {
+    return_fn |
+    write_file_fn
+}
+
+return_fn = { "return" }
+write_file_fn = {
+    "write_file(" ~ quoted_string ~ "," ~ ("csv" | free_text) ~ ")"
+}
+
+// === Struct Declarations ===
+
+struct_decl = {
+    "struct" ~ free_text ~ braced_content
+}
+
+// Note: Field parsing will be done in AST builder using regex
+// to match LALRPOP's approach
+
+// === Enum Declarations ===
+
+enum_decl = {
+    "enum" ~ free_text ~ braced_content
+}
+
+// Note: Variant parsing (including default variants) will be done
+// in AST builder using regex to match LALRPOP's approach
+
+// === Function Declarations ===
+
+fn_decl = {
+    "fn" ~ free_text ~ "(" ~ fn_param_list? ~ ")" ~
+    "->" ~ fn_return_type ~ fn_body
+}
+
+fn_param_list = {
+    fn_param ~ ("," ~ fn_param)*
+}
+
+fn_param = {
+    free_text ~ ":" ~ "&"? ~ free_text
+}
+
+fn_return_type = {
+    free_text+
+}
