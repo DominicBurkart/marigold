@@ -80,36 +80,195 @@ impl PestParser {
     }
 
     fn parse_input(input: &str) -> Result<String, String> {
-        // Try to parse with the Pest grammar
-        // TODO: Implement proper Pest parsing with Rule enum
-        // For now, validate input manually while developing proper parsing
-        if input.trim().is_empty() {
-            // Empty input is valid
-        } else if input.trim() == "range(0, 1).return" {
-            // Basic stream is valid
+        use pest::Parser;
+
+        // Parse with Pest grammar
+        let pairs = MarigoldPestParser::parse(Rule::program, input)
+            .map_err(|e| format!("Pest parse error: {}", e))?;
+
+        // Build AST from parse tree
+        let expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)?;
+
+        // Generate Rust code (replicating LALRPOP logic)
+        Self::generate_rust_code(expressions)
+    }
+
+    /// Generate Rust code from AST expressions (matches LALRPOP's Program rule)
+    fn generate_rust_code(
+        expressions: Vec<crate::nodes::TypedExpression>,
+    ) -> Result<String, String> {
+        let mut output = "async {\n    use ::marigold::marigold_impl::*;\n    ".to_string();
+
+        // 1. Generate enums and structs
+        let enums_and_structs = expressions
+            .iter()
+            .filter_map(|expr| match expr {
+                crate::nodes::TypedExpression::StructDeclaration(s) => Some(s.code()),
+                crate::nodes::TypedExpression::EnumDeclaration(e) => Some(e.code()),
+                _ => None,
+            })
+            .map(|s| format!("{s}\n\n"))
+            .collect::<Vec<_>>()
+            .join("");
+
+        output.push_str(&enums_and_structs);
+
+        // 2. Generate functions
+        let functions = expressions
+            .iter()
+            .filter_map(|expr| match expr {
+                crate::nodes::TypedExpression::FnDeclaration(f) => Some(f.code()),
+                _ => None,
+            })
+            .map(|s| format!("{s}\n\n"))
+            .collect::<Vec<_>>()
+            .join("");
+
+        output.push_str(&functions);
+
+        // 3. Generate stream variable declarations
+        let stream_variable_declarations = expressions
+            .iter()
+            .filter_map(|expr| match expr {
+                crate::nodes::TypedExpression::StreamVariable(v) => Some(v.declaration_code()),
+                crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
+                    Some(v.declaration_code())
+                }
+                _ => None,
+            })
+            .map(|s| format!("{s}\n\n"))
+            .collect::<Vec<_>>()
+            .join("");
+
+        output.push_str(&stream_variable_declarations);
+
+        // 4. Collect returning streams
+        let returning_stream_vec = expressions
+            .iter()
+            .filter_map(|expr| match expr {
+                crate::nodes::TypedExpression::UnnamedReturningStream(s) => Some(s.code()),
+                crate::nodes::TypedExpression::NamedReturningStream(s) => Some(s.code()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        let n_returning_streams = returning_stream_vec.len();
+
+        // Generate returning stream variables
+        output.push_str(
+            &returning_stream_vec
+                .iter()
+                .zip(0..n_returning_streams)
+                .map(|(stream_def, i)| {
+                    format!("let returning_stream_{i} = Box::pin({stream_def});\n")
+                })
+                .collect::<Vec<_>>()
+                .join(""),
+        );
+
+        // 5. Collect non-returning streams
+        let non_returning_streams = expressions
+            .iter()
+            .filter_map(|expr| match expr {
+                crate::nodes::TypedExpression::UnnamedNonReturningStream(s) => Some(s.code()),
+                crate::nodes::TypedExpression::NamedNonReturningStream(s) => Some(s.code()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        output.push_str(
+            &non_returning_streams
+                .iter()
+                .zip(0..non_returning_streams.len())
+                .map(|(stream_def, i)| {
+                    format!("let non_returning_stream_{i} = Box::pin({stream_def});\n")
+                })
+                .collect::<Vec<_>>()
+                .join(""),
+        );
+
+        // 6. Collect stream variable runners
+        let stream_variable_runners = expressions
+            .iter()
+            .filter_map(|expr| match expr {
+                crate::nodes::TypedExpression::StreamVariable(v) => Some(v.runner_code()),
+                crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
+                    Some(v.runner_code())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        output.push_str(
+            &stream_variable_runners
+                .iter()
+                .zip(0..stream_variable_runners.len())
+                .map(|(stream_def, i)| {
+                    format!("let stream_variable_runners_{i} = Box::pin({stream_def});\n")
+                })
+                .collect::<Vec<_>>()
+                .join(""),
+        );
+
+        // 7. Build streams array
+        let mut streams_string = "vec![\n".to_string();
+
+        streams_string.push_str(
+            &(0..n_returning_streams)
+                .map(|i| format!("returning_stream_{i},\n"))
+                .collect::<Vec<_>>()
+                .join(""),
+        );
+
+        streams_string.push_str(
+            &(0..non_returning_streams.len())
+                .map(|i| format!("non_returning_stream_{i},\n"))
+                .collect::<Vec<_>>()
+                .join(""),
+        );
+
+        streams_string.push_str(
+            &(0..stream_variable_runners.len())
+                .map(|i| format!("stream_variable_runners_{i},\n"))
+                .collect::<Vec<_>>()
+                .join(""),
+        );
+
+        streams_string.push_str("]\n");
+
+        // 8. Generate stream array with type inference helper if needed
+        if n_returning_streams > 0 {
+            output.push_str(&format!(
+                "
+        /// silly function that uses generics to infer the output type (StreamItem) via generics, so that
+        /// we can provide the streams as an array of Pin<Box<dyn Stream<Item=StreamItem>>>.
+        #[inline(always)]
+        fn typed_stream_vec<StreamItem>(v: Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>>) -> Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>> {{
+         v
+        }}
+        "
+            ));
+            output.push_str(&format!(
+                "let streams_array = typed_stream_vec({streams_string});"
+            ));
         } else {
-            return Err("Pest parser: input validation failed - unsupported syntax".to_string());
+            output.push_str(&format!(
+                "let streams_array:  Vec<core::pin::Pin<Box<dyn futures::Stream<Item=()>>>> = {streams_string};"
+            ));
         }
 
-        // For now, return basic structure for valid parses
-        // This will be expanded to proper AST generation
-        if input.trim().is_empty() {
-            // Empty program should generate empty async block
-            Ok("async {
-    use ::marigold::marigold_impl::*;
-    let streams_array:  Vec<core::pin::Pin<Box<dyn futures::Stream<Item=()>>>> = vec![];
-    let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array);
-    all_streams.collect::<Vec<()>>().await;
-}"
-            .to_string())
+        // 9. Generate select_all and collect/return
+        output.push_str("let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array);");
+
+        if n_returning_streams == 0 {
+            output.push_str("all_streams.collect::<Vec<()>>().await;\n");
         } else {
-            // Non-empty valid program
-            Ok("async {
-    use ::marigold::marigold_impl::*;
-    // Parsed successfully with Pest - basic implementation
-}"
-            .to_string())
+            output.push_str("all_streams\n");
         }
+
+        output.push_str("}\n");
+
+        Ok(output)
     }
 }
 

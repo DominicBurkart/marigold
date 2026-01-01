@@ -27,7 +27,8 @@ type_annotation = @{
 }
 
 // FreeText equivalent - allows more characters for variable names and types
-free_text = @{ (ASCII_ALPHA | "_" | ">" | "<") ~ (ASCII_ALPHANUMERIC | "_" | "-" | ">" | "<")* }
+// Matches LALRPOP's FreeText: r"[><\w\-]+" which allows digits, letters, underscore, angle brackets, and hyphens
+free_text = @{ (ASCII_ALPHANUMERIC | "_" | ">" | "<" | "-")+ }
 
 // Braced content (for struct/enum bodies)
 braced_content = @{ "{" ~ (!"}" ~ ANY)* ~ "}" }

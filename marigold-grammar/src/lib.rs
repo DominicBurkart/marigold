@@ -16,6 +16,9 @@ pub mod nodes;
 pub mod parser;
 mod type_aggregation;
 
+#[cfg(feature = "pest-parser")]
+pub mod pest_ast_builder;
+
 lalrpop_mod!(#[allow(clippy::all)] pub ast);
 
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
