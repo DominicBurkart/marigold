@@ -910,3 +910,351 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod negative_tests {
+    use super::*;
+
+    // ===== Incomplete streams tests =====
+
+    #[test]
+    fn test_reject_incomplete_stream_no_output() {
+        let result = parse_marigold("range(0, 100)");
+        assert!(
+            result.is_err(),
+            "Should reject stream without output function (missing .return)"
+        );
+    }
+
+    #[test]
+    fn test_reject_incomplete_stream_output_only() {
+        let result = parse_marigold(".return");
+        assert!(
+            result.is_err(),
+            "Should reject output function without input stream"
+        );
+    }
+
+    #[test]
+    fn test_reject_incomplete_stream_function_only() {
+        let result = parse_marigold(".map(x)");
+        assert!(
+            result.is_err(),
+            "Should reject stream function without input or output"
+        );
+    }
+
+    #[test]
+    fn test_reject_incomplete_stream_map_without_return() {
+        let result = parse_marigold("range(0, 10).map(double)");
+        assert!(
+            result.is_err(),
+            "Should reject stream with map but no output function"
+        );
+    }
+
+    #[test]
+    fn test_reject_incomplete_stream_filter_without_return() {
+        let result = parse_marigold("range(0, 10).filter(is_even)");
+        assert!(
+            result.is_err(),
+            "Should reject stream with filter but no output function"
+        );
+    }
+
+    // ===== Invalid struct/enum declarations tests =====
+
+    #[test]
+    fn test_reject_struct_without_name() {
+        let result = parse_marigold("struct { x: i32 }");
+        assert!(
+            result.is_err(),
+            "Should reject struct declaration without name"
+        );
+    }
+
+    #[test]
+    fn test_reject_enum_without_name() {
+        let result = parse_marigold("enum { A, B }");
+        assert!(result.is_err(), "Should reject enum declaration without name");
+    }
+
+    #[test]
+    fn test_reject_empty_struct() {
+        let result = parse_marigold("struct Foo");
+        assert!(
+            result.is_err(),
+            "Should reject struct without body (missing braces)"
+        );
+    }
+
+    #[test]
+    fn test_reject_empty_enum() {
+        let result = parse_marigold("enum Bar");
+        assert!(
+            result.is_err(),
+            "Should reject enum without body (missing braces)"
+        );
+    }
+
+    // ===== Invalid function declarations tests =====
+
+    #[test]
+    fn test_reject_function_without_name() {
+        let result = parse_marigold("fn (x: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%% x %%%MARIGOLD_FUNCTION_END%%%");
+        assert!(
+            result.is_err(),
+            "Should reject function declaration without name"
+        );
+    }
+
+    #[test]
+    fn test_reject_function_without_body() {
+        let result = parse_marigold("fn foo(x: i32) -> i32");
+        assert!(
+            result.is_err(),
+            "Should reject function declaration without body"
+        );
+    }
+
+    // ===== Invalid stream operations tests =====
+
+    #[test]
+    fn test_reject_map_without_argument() {
+        let result = parse_marigold("range(0, 10).map().return");
+        assert!(
+            result.is_err(),
+            "Should reject .map() without transformation function argument"
+        );
+    }
+
+    #[test]
+    fn test_reject_filter_without_argument() {
+        let result = parse_marigold("range(0, 10).filter().return");
+        assert!(
+            result.is_err(),
+            "Should reject .filter() without predicate function argument"
+        );
+    }
+
+    #[test]
+    fn test_reject_multiple_consecutive_dots() {
+        let result = parse_marigold("range(0, 10)..return");
+        assert!(
+            result.is_err(),
+            "Should reject multiple consecutive dots (..)"
+        );
+    }
+
+    #[test]
+    fn test_reject_stream_ending_with_dot() {
+        let result = parse_marigold("range(0, 10).");
+        assert!(
+            result.is_err(),
+            "Should reject stream expression ending with dot"
+        );
+    }
+
+    // ===== Malformed syntax tests =====
+
+    #[test]
+    fn test_reject_unclosed_parentheses() {
+        let result = parse_marigold("range(0, 100.return");
+        assert!(
+            result.is_err(),
+            "Should reject unclosed parentheses in function call"
+        );
+    }
+
+    #[test]
+    fn test_reject_missing_comma_in_arguments() {
+        let result = parse_marigold("range(0 100).return");
+        assert!(
+            result.is_err(),
+            "Should reject function arguments without comma separator"
+        );
+    }
+
+    #[test]
+    fn test_reject_triple_dot() {
+        let result = parse_marigold("range(0, 100)...return");
+        assert!(
+            result.is_err(),
+            "Should reject triple dot (...) as invalid syntax"
+        );
+    }
+
+    #[test]
+    fn test_reject_mismatched_parentheses() {
+        let result = parse_marigold("range(0, 100)).return");
+        assert!(
+            result.is_err(),
+            "Should reject mismatched closing parentheses"
+        );
+    }
+
+    #[test]
+    fn test_reject_invalid_characters_at_start() {
+        let result = parse_marigold("@range(0, 100).return");
+        assert!(
+            result.is_err(),
+            "Should reject invalid character (@) at start of expression"
+        );
+    }
+
+    #[test]
+    fn test_reject_invalid_characters_in_middle() {
+        let result = parse_marigold("range(0, 100).#map(double).return");
+        assert!(
+            result.is_err(),
+            "Should reject invalid character (#) in stream chain"
+        );
+    }
+
+    // ===== Edge cases and boundary conditions =====
+
+    #[test]
+    fn test_reject_incomplete_range_single_arg() {
+        let result = parse_marigold("range(10).return");
+        assert!(
+            result.is_err(),
+            "Should reject range() with single argument (grammar requires two)"
+        );
+    }
+
+    #[test]
+    fn test_reject_range_no_args() {
+        let result = parse_marigold("range().return");
+        assert!(
+            result.is_err(),
+            "Should reject range() with no arguments"
+        );
+    }
+
+    #[test]
+    fn test_reject_return_with_args() {
+        let result = parse_marigold("range(0, 10).return(123)");
+        assert!(
+            result.is_err(),
+            "Should reject .return with arguments (not supported)"
+        );
+    }
+
+    #[test]
+    fn test_reject_stream_starting_with_operation() {
+        let result = parse_marigold(".map(double).return");
+        assert!(
+            result.is_err(),
+            "Should reject stream starting with operation instead of input"
+        );
+    }
+
+    #[test]
+    fn test_reject_semicolon_in_stream_chain() {
+        let result = parse_marigold("range(0, 10); .return");
+        assert!(
+            result.is_err(),
+            "Should reject semicolon separating stream chain"
+        );
+    }
+
+    // ===== Invalid identifier tests (validates free_text_identifier split) =====
+    // These tests are Pest-only because LALRPOP's FreeText rule is overly permissive
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_reject_function_name_starting_with_digit() {
+        let result = parse_marigold("fn 123func(x: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%% x %%%MARIGOLD_FUNCTION_END%%%");
+        assert!(
+            result.is_err(),
+            "Should reject function name starting with digit (free_text_identifier validation)"
+        );
+    }
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_reject_struct_name_starting_with_digit() {
+        let result = parse_marigold("struct 123Point { x: i32 }");
+        assert!(
+            result.is_err(),
+            "Should reject struct name starting with digit"
+        );
+    }
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_reject_enum_name_starting_with_digit() {
+        let result = parse_marigold("enum 456Color { Red, Green }");
+        assert!(
+            result.is_err(),
+            "Should reject enum name starting with digit"
+        );
+    }
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_reject_map_function_name_starting_with_digit() {
+        let result = parse_marigold("range(0, 10).map(123transform).return");
+        assert!(
+            result.is_err(),
+            "Should reject map() function name starting with digit"
+        );
+    }
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_reject_filter_function_name_starting_with_digit() {
+        let result = parse_marigold("range(0, 10).filter(789predicate).return");
+        assert!(
+            result.is_err(),
+            "Should reject filter() function name starting with digit"
+        );
+    }
+
+    // ===== Valid cases that should pass (regression tests) =====
+
+    #[test]
+    fn test_accept_numeric_range_arguments() {
+        let result = parse_marigold("range(0, 100).return");
+        assert!(
+            result.is_ok(),
+            "Should accept numeric arguments in range() (free_text_literal validation)"
+        );
+    }
+
+    #[test]
+    fn test_accept_numeric_permutations_argument() {
+        let result = parse_marigold("range(0, 10).permutations(3).return");
+        assert!(
+            result.is_ok(),
+            "Should accept numeric argument in permutations()"
+        );
+    }
+
+    #[test]
+    fn test_accept_numeric_combinations_argument() {
+        let result = parse_marigold("range(0, 10).combinations(2).return");
+        assert!(
+            result.is_ok(),
+            "Should accept numeric argument in combinations()"
+        );
+    }
+
+    #[test]
+    fn test_accept_valid_function_names() {
+        let result = parse_marigold("range(0, 10).map(transform).filter(is_even).return");
+        assert!(
+            result.is_ok(),
+            "Should accept valid identifier function names"
+        );
+    }
+
+    #[test]
+    fn test_accept_underscore_prefix() {
+        let result = parse_marigold("range(0, 10).map(_private_func).return");
+        assert!(
+            result.is_ok(),
+            "Should accept identifiers starting with underscore"
+        );
+    }
+}

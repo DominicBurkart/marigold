@@ -102,10 +102,18 @@ type_annotation = @{
     (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "<" | ">" | "[" | "]" | ",")*
 }
 
-// FreeText equivalent - allows more characters for variable names and types
-// Matches LALRPOP's FreeText: r"[><\w\-]+" which allows digits, letters, underscore, angle brackets, and hyphens
-// This is used for function names, type parameters, and other flexible identifiers
-free_text = @{ (ASCII_ALPHANUMERIC | "_" | ">" | "<" | "-")+ }
+// FreeText split into two rules for better type safety:
+//
+// 1. free_text_identifier - Must start with letter or underscore (for identifiers, function names, type names)
+// 2. free_text_literal - Can start with digit (for numeric literals and identifiers)
+//
+// This prevents accepting invalid identifiers like "123abc" while still allowing numeric arguments
+
+// Identifier form: must start with letter or underscore
+free_text_identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ">" | "<" | "-")* }
+
+// Literal form: can be a pure number or an identifier
+free_text_literal = @{ ASCII_DIGIT+ | free_text_identifier }
 
 // Braced content (for struct/enum bodies)
 // These are raw strings captured for the AST builder to parse more carefully
@@ -188,7 +196,7 @@ input_function = {
 // Returns: Stream<Item = i32>
 // Example: range(0, 100)
 range_input = {
-    "range(" ~ free_text ~ "," ~ free_text ~ ")"
+    "range(" ~ free_text_literal ~ "," ~ free_text_literal ~ ")"
 }
 
 // read_file(path, csv, struct=Type, infer_compression=true/false)
@@ -201,7 +209,7 @@ range_input = {
 // Example: read_file("data.csv", csv, struct=MyData)
 // Example with compression: read_file("data.csv.gz", csv, struct=MyData, infer_compression=true)
 read_file_csv_input = {
-    "read_file(" ~ quoted_string ~ "," ~ "csv" ~ "," ~ "struct" ~ "=" ~ free_text ~
+    "read_file(" ~ quoted_string ~ "," ~ "csv" ~ "," ~ "struct" ~ "=" ~ free_text_identifier ~
     ("," ~ "infer_compression" ~ "=" ~ ("true" | "false"))? ~ ")"
 }
 
@@ -264,41 +272,41 @@ stream_function = {
 // map(closure) - Transform each item with a closure
 // Transforms Stream<T> -> Stream<U> where U = closure(T)
 // Argument: Rust closure expression (e.g., "x -> x + 1" or "x -> x.to_uppercase()")
-map_fn = { "map(" ~ free_text ~ ")" }
+map_fn = { "map(" ~ free_text_identifier ~ ")" }
 
 // filter(closure) - Keep items where closure returns true
 // Transforms Stream<T> -> Stream<T>, keeping only matching items
 // Argument: Rust closure that returns bool
-filter_fn = { "filter(" ~ free_text ~ ")" }
+filter_fn = { "filter(" ~ free_text_identifier ~ ")" }
 
 // filter_map(closure) - Filter and map combined
 // Transforms Stream<T> -> Stream<U> where closure returns Option<U>
 // Argument: Rust closure returning Option<U>
-filter_map_fn = { "filter_map(" ~ free_text ~ ")" }
+filter_map_fn = { "filter_map(" ~ free_text_identifier ~ ")" }
 
 // permutations(n) - Generate all ordered n-length permutations
 // Useful for combinatorial search spaces
 // Argument: n (usize) - length of permutations
-permutations_fn = { "permutations(" ~ free_text ~ ")" }
+permutations_fn = { "permutations(" ~ free_text_literal ~ ")" }
 
 // permutations_with_replacement(n) - Generate n-length permutations allowing duplicates
 // Argument: n (usize) - length of permutations
-permutations_with_replacement_fn = { "permutations_with_replacement(" ~ free_text ~ ")" }
+permutations_with_replacement_fn = { "permutations_with_replacement(" ~ free_text_literal ~ ")" }
 
 // combinations(n) - Generate all unordered n-item combinations
 // Argument: n (usize) - size of combinations
-combinations_fn = { "combinations(" ~ free_text ~ ")" }
+combinations_fn = { "combinations(" ~ free_text_literal ~ ")" }
 
 // keep_first_n(stream, n) - Keep only first n items from a stream variable
 // Argument 1: stream variable name
 // Argument 2: n (usize) - number of items to keep
-keep_first_n_fn = { "keep_first_n(" ~ free_text ~ "," ~ free_text ~ ")" }
+keep_first_n_fn = { "keep_first_n(" ~ free_text_literal ~ "," ~ free_text_identifier ~ ")" }
 
 // fold(init, closure) - Reduce stream to single value
 // Transforms Stream<T> -> Stream<Acc> where Acc = closure(Acc, T)
 // Argument 1: Initial accumulator value
 // Argument 2: Rust closure(acc, item) -> new_acc
-fold_fn = { "fold(" ~ free_text ~ "," ~ free_text ~ ")" }
+fold_fn = { "fold(" ~ free_text_literal ~ "," ~ free_text_identifier ~ ")" }
 
 // ok() - Extract value from Result, skip errors
 // Transforms Stream<Result<T, E>> -> Stream<T>
@@ -337,7 +345,7 @@ return_fn = { "return" }
 //   format (csv or other): Output format
 // Example: write_file("output.csv", csv)
 write_file_fn = {
-    "write_file(" ~ quoted_string ~ "," ~ ("csv" | free_text) ~ ")"
+    "write_file(" ~ quoted_string ~ "," ~ ("csv" | free_text_identifier) ~ ")"
 }
 
 // === Struct Declarations ===
@@ -364,7 +372,7 @@ write_file_fn = {
 // These structs must implement `serde::Deserialize` when used with `read_file`.
 
 struct_decl = {
-    "struct" ~ free_text ~ braced_content
+    "struct" ~ free_text_identifier ~ braced_content
 }
 
 // Note: Field parsing will be done in AST builder using regex
@@ -403,7 +411,7 @@ struct_decl = {
 // on unexpected enum values.
 
 enum_decl = {
-    "enum" ~ free_text ~ braced_content
+    "enum" ~ free_text_identifier ~ braced_content
 }
 
 // Note: Variant parsing (including default variants) will be done
@@ -442,7 +450,7 @@ enum_decl = {
 // Functions are inserted directly into the generated Rust code, so they must be valid Rust.
 
 fn_decl = {
-    "fn" ~ free_text ~ "(" ~ fn_param_list? ~ ")" ~
+    "fn" ~ free_text_identifier ~ "(" ~ fn_param_list? ~ ")" ~
     "->" ~ fn_return_type ~ fn_body
 }
 
@@ -454,11 +462,11 @@ fn_param_list = {
 // Single parameter: name: Type or name: &Type
 // The & is optional for reference parameters
 fn_param = {
-    free_text ~ ":" ~ "&"? ~ free_text
+    free_text_identifier ~ ":" ~ "&"? ~ free_text_identifier
 }
 
 // Return type: can be complex Rust types like Vec<String>, Option<T>, etc.
-// Uses free_text+ to allow generic parameters and other syntax
+// Uses free_text_identifier+ to allow generic parameters and other syntax
 fn_return_type = {
-    free_text+
+    free_text_identifier+
 }
