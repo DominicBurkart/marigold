@@ -32,16 +32,6 @@
 //!
 //! ## Architecture
 //!
-//! ### Phase 2A: Dual Parser Migration
-//!
-//! This crate is part of Phase 2A of the Marigold project, which introduces a new Pest-based
-//! parser as an alternative to the original LALRPOP parser. Both parsers:
-//!
-//! - Accept identical syntax (defined in grammar files)
-//! - Produce identical Rust code (through shared code generation)
-//! - Are validated for equivalence through comprehensive test suite
-//! - Can be selected via feature flags
-//!
 //! ### Parser Abstraction
 //!
 //! The [`parser`] module provides a trait-based abstraction that allows both parsers to be
@@ -68,9 +58,6 @@
 //! - **Unit tests** in each module covering specific functionality
 //! - **Equivalence tests** comparing Pest and LALRPOP output for identical inputs
 //! - **Integration tests** using real-world example programs
-//! - **Property-based tests** validating grammar coverage
-//!
-//! See the test modules in [`parser`] for detailed validation strategies.
 //!
 //! ## Feature Flags
 //!
@@ -87,14 +74,10 @@
 //!
 //! ## Migration Guide
 //!
-//! To migrate from LALRPOP to Pest:
+//! To use the Pest parser:
 //!
 //! 1. Add `features = ["pest-parser"]` to your `marigold-grammar` dependency
 //! 2. Your code continues to work unchanged (trait-based abstraction handles it)
-//! 3. If you explicitly use `LalrpopParser`, switch to `get_parser()` for flexibility
-//!
-//! For backward compatibility, code explicitly constructing `LalrpopParser` will continue to work
-//! even with the Pest feature enabled.
 
 #[macro_use]
 extern crate lalrpop_util;

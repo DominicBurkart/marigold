@@ -61,14 +61,21 @@ async fn run_all() {
     println!("all ran");
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(all(feature = "tokio", not(feature = "async-std")))]
 #[tokio::main]
 async fn main() {
     run_all().await;
 }
 
-#[cfg(feature = "async-std")]
+#[cfg(all(feature = "async-std", not(feature = "tokio")))]
 #[async_std::main]
+async fn main() {
+    run_all().await;
+}
+
+// When both features are enabled, tokio takes precedence
+#[cfg(all(feature = "tokio", feature = "async-std"))]
+#[tokio::main]
 async fn main() {
     run_all().await;
 }

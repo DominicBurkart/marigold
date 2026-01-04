@@ -4,7 +4,7 @@ use marigold::marigold_impl::StreamExt;
 use color_palette_picker::compare_contrast;
 
 /// Uses a multithread tokio runtime and tokio-console.
-#[cfg(feature = "tokio")]
+#[cfg(all(feature = "tokio", not(feature = "async-std")))]
 #[tokio::main]
 async fn main() {
     console_subscriber::init();
@@ -24,7 +24,7 @@ async fn main() {
 }
 
 /// Uses a multithread async-std runtime.
-#[cfg(feature = "async-std")]
+#[cfg(all(feature = "async-std", not(feature = "tokio")))]
 #[async_std::main]
 async fn main() {
     println!(
@@ -41,6 +41,27 @@ async fn main() {
         .await
     );
 }
+
+// When both features are enabled, tokio takes precedence
+#[cfg(all(feature = "tokio", feature = "async-std"))]
+#[tokio::main]
+async fn main() {
+    console_subscriber::init();
+    println!(
+        "program complete. Best colors: {:?}",
+        m!(
+            range(0, 255)
+            .permutations_with_replacement(3)
+            .combinations(5)
+            .keep_first_n(20, compare_contrast)
+            .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await
+    );
+}
+
 /// Returns a single future, where all computation occurs in a single thread.
 /// This allows Marigold programs to compile with a WASM target.
 #[cfg(not(any(feature = "tokio", feature = "async-std")))]

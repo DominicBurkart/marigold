@@ -57,7 +57,7 @@ impl PestAstBuilder {
             Rule::struct_decl => Self::build_struct_decl(inner),
             Rule::enum_decl => Self::build_enum_decl(inner),
             Rule::fn_decl => Self::build_fn_decl(inner),
-            _ => Err(format!("Unknown expression type: {:?}", inner.as_rule())),
+            rule => unreachable!("expr should only contain expression types, got: {:?}", rule),
         }
     }
 
@@ -234,9 +234,8 @@ impl PestAstBuilder {
             .to_string();
 
         // Use the existing parse_enum function from nodes.rs
-        match crate::nodes::parse_enum(enum_name, braced_content) {
-            expr => Ok(expr),
-        }
+        let expr = crate::nodes::parse_enum(enum_name, braced_content);
+        Ok(expr)
     }
 
     /// Build function declaration

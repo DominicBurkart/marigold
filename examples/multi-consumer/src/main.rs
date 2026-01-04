@@ -43,14 +43,21 @@ async fn run() {
     println!("result: {:?}", small_even_number_set);
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(all(feature = "tokio", not(feature = "async-std")))]
 #[tokio::main]
 async fn main() {
     run().await
 }
 
-#[cfg(feature = "async-std")]
+#[cfg(all(feature = "async-std", not(feature = "tokio")))]
 #[async_std::main]
+async fn main() {
+    run().await
+}
+
+// When both features are enabled, tokio takes precedence
+#[cfg(all(feature = "tokio", feature = "async-std"))]
+#[tokio::main]
 async fn main() {
     run().await
 }

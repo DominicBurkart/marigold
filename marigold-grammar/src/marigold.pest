@@ -1,9 +1,6 @@
-// Marigold Pest Grammar - Phase 2A: Complete Grammar Implementation
+// Marigold Pest Grammar
 //
 // This grammar file defines the complete syntax for the Marigold language using Pest PEG syntax.
-// It is part of Phase 2A of the dual-parser migration effort.
-//
-// # Overview
 //
 // The Marigold language is a domain-specific language for expressing stream processing programs
 // in Rust. This grammar defines all core language constructs:
@@ -12,43 +9,6 @@
 // - **Stream Variables**: Named intermediate streams for composition and reuse
 // - **Type Declarations**: Struct and enum definitions for data transformation
 // - **Function Declarations**: User-defined functions for custom stream processing logic
-//
-// # Design Philosophy
-//
-// This grammar is intentionally aligned with the LALRPOP grammar (`ast.lalrpop`) to ensure
-// that both parsers accept the same language and produce identical code. By matching the LALRPOP
-// design, we can validate equivalence through property-based testing and ensure a smooth migration.
-//
-// Key design principles:
-// 1. **Backward compatibility**: All syntax valid in LALRPOP is valid here
-// 2. **Clear structure**: Grammar rules closely match the AST structure
-// 3. **PEG simplicity**: Pest PEG rules are simpler than LALRPOP LR(1) rules
-// 4. **Type safety**: Grammar enforces type-correct stream operations
-//
-// # Grammar Structure
-//
-// The grammar is organized into logical sections:
-// 1. Whitespace handling
-// 2. Top-level program structure
-// 3. Expression types
-// 4. Basic tokens (identifiers, numbers, strings)
-// 5. Stream syntax (unnamed and named streams)
-// 6. Input functions (range, read_file, select_all)
-// 7. Stream functions (map, filter, permutations, etc.)
-// 8. Output functions (return, write_file)
-// 9. Type declarations (struct, enum)
-// 10. Function declarations
-//
-// # Testing & Validation
-//
-// The grammar is validated through:
-// - Unit tests in `parser.rs` covering all grammar rules
-// - Equivalence tests comparing Pest and LALRPOP output
-// - Property-based tests with random inputs
-// - Real-world example programs
-//
-// See `pest_ast_builder.rs` for the AST construction logic that transforms
-// Pest parse trees into Marigold AST nodes compatible with the LALRPOP AST.
 
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 
