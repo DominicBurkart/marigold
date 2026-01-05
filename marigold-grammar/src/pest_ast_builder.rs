@@ -547,9 +547,9 @@ impl PestAstBuilder {
 
                 // Generate stream_prefix and stream_postfix based on compression
                 if use_gzip {
-                    Self::generate_write_file_with_gzip(&path)
+                    Self::generate_write_file_with_gzip(path)
                 } else {
-                    Self::generate_write_file_no_compression(&path)
+                    Self::generate_write_file_no_compression(path)
                 }
             }
             _ => Err(format!("Unknown output function: {:?}", inner.as_rule())),
