@@ -3,8 +3,6 @@ use binary_heap_plus::BinaryHeap;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use std::cmp::Ordering;
-#[cfg(any(feature = "tokio", feature = "async-std"))]
-use std::ops::Deref;
 use tracing::instrument;
 
 #[async_trait]
@@ -45,10 +43,14 @@ where
 /// type of the binary heap, which includes a lambda for reversing the ordering fromt the passed
 /// sort_by function. By declaring a new function, we can use generics to describe its type, and
 /// then can use that type while unsafely casting pointers.
+///
+/// This implementation wraps items with their stream index to provide deterministic tie-breaking
+/// when the user's comparison function returns Equal. Lower indices (earlier in stream) are
+/// preferred to ensure consistent results even with parallel processing.
 #[cfg(any(feature = "tokio", feature = "async-std"))]
 async fn impl_keep_first_n<SInput, T, F, FReversed>(
-    mut sinput: SInput,
-    mut first_n: BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
+    sinput: SInput,
+    _first_n: BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
     n: usize,
     sorted_by: F,
 ) -> futures::stream::Iter<std::vec::IntoIter<T>>
@@ -58,10 +60,25 @@ where
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
     FReversed: Fn(&T, &T) -> std::cmp::Ordering + Clone + Send + 'static,
 {
+    // Add indices to items for deterministic tie-breaking
+    let mut indexed_stream = sinput.enumerate();
+
+    // Create a heap that stores (index, item) tuples with tie-breaking comparator
+    let indexed_comparator = move |a: &(usize, T), b: &(usize, T)| {
+        match sorted_by(&a.1, &b.1) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
+            // When equal, prefer lower index (earlier in stream)
+            Ordering::Equal => a.0.cmp(&b.0),
+        }
+    };
+    let mut first_n =
+        BinaryHeap::with_capacity_by(n, move |a, b| indexed_comparator(a, b).reverse());
+
     // Iterate through values in a single thread until we have seen n values.
     while first_n.len() < n {
-        if let Some(item) = sinput.next().await {
-            first_n.push(item);
+        if let Some(indexed_item) = indexed_stream.next().await {
+            first_n.push(indexed_item);
         } else {
             break;
         }
@@ -69,7 +86,14 @@ where
 
     // If we have exhausted the stream before reaching n values, we can exit early.
     if first_n.len() < n {
-        return futures::stream::iter(first_n.into_sorted_vec().into_iter());
+        return futures::stream::iter(
+            first_n
+                .into_sorted_vec()
+                .into_iter()
+                .map(|(_idx, item)| item) // Unwrap indices
+                .collect::<Vec<_>>()
+                .into_iter(),
+        );
     }
 
     // Otherwise, we can check each remaining value in the stream against the smallest
@@ -82,15 +106,25 @@ where
     {
         let first_n_arc = first_n_mutex.clone();
         let smallest_kept_arc = smallest_kept.clone();
-        let mut ongoing_tasks = sinput
-            .map(move |item| {
+        let mut ongoing_tasks = indexed_stream
+            .map(move |indexed_item| {
                 let first_n_arc = first_n_arc.clone();
                 let smallest_kept_arc = smallest_kept_arc.clone();
                 crate::async_runtime::spawn(async move {
-                    if sorted_by(smallest_kept_arc.read().deref(), &item) == Ordering::Less {
+                    let smallest = smallest_kept_arc.read();
+                    // Compare items, using index as tie-breaker
+                    let should_keep = match sorted_by(&smallest.1, &indexed_item.1) {
+                        Ordering::Less => true,
+                        Ordering::Greater => false,
+                        // When equal, prefer item with lower index (earlier in stream)
+                        Ordering::Equal => indexed_item.0 < smallest.0,
+                    };
+                    drop(smallest);
+
+                    if should_keep {
                         let mut update_first_n = first_n_arc.lock();
                         update_first_n.pop();
-                        update_first_n.push(item);
+                        update_first_n.push(indexed_item);
                         let mut update_smallest_kept = smallest_kept_arc.write();
                         *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
                     }
@@ -104,6 +138,9 @@ where
             .expect("Dangling references to mutex")
             .into_inner()
             .into_sorted_vec()
+            .into_iter()
+            .map(|(_idx, item)| item) // Unwrap indices
+            .collect::<Vec<_>>()
             .into_iter(),
     )
 }
