@@ -503,11 +503,233 @@ impl PestAstBuilder {
                 returning: true,
             }),
             Rule::write_file_fn => {
-                // TODO: Implement full write_file parsing with compression detection
-                Err("write_file output not yet implemented in Pest parser".to_string())
+                // Parse write_file(path, format[, compression=none|gz])
+                let mut inner_pairs = inner.into_inner();
+
+                // Extract path (quoted_string) - keep quotes for LALRPOP compatibility
+                let path_pair = inner_pairs
+                    .next()
+                    .ok_or_else(|| "Missing path in write_file".to_string())?;
+                let path = path_pair.as_str();
+
+                // Extract format (write_file_format)
+                let format_pair = inner_pairs
+                    .next()
+                    .ok_or_else(|| "Missing format in write_file".to_string())?;
+                let format = format_pair.as_str();
+
+                // Only "csv" format is currently supported
+                if format != "csv" {
+                    return Err(format!("Unsupported write_file format: {}", format));
+                }
+
+                // Extract optional compression (write_file_compression)
+                let compression = if let Some(compression_pair) = inner_pairs.next() {
+                    // compression_pair is write_file_compression, get its inner compression_type
+                    let compression_type = compression_pair
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| "Missing compression type".to_string())?;
+                    Some(compression_type.as_str())
+                } else {
+                    None
+                };
+
+                // Determine whether to use gzip based on compression parameter or .gz extension
+                let use_gzip = match compression {
+                    Some("gz") => true,
+                    Some("none") => false,
+                    None => path.ends_with(".gz\""), // Auto-detect from extension
+                    Some(other) => {
+                        return Err(format!("Invalid compression type: {}", other));
+                    }
+                };
+
+                // Generate stream_prefix and stream_postfix based on compression
+                if use_gzip {
+                    Self::generate_write_file_with_gzip(&path)
+                } else {
+                    Self::generate_write_file_no_compression(&path)
+                }
             }
             _ => Err(format!("Unknown output function: {:?}", inner.as_rule())),
         }
+    }
+
+    /// Generate write_file output node with gzip compression
+    fn generate_write_file_with_gzip(path: &str) -> Result<OutputFunctionNode, String> {
+        Ok(OutputFunctionNode {
+            stream_prefix: format!(
+                "{{
+          if let Some(parent) = ::std::path::Path::new({path}).parent() {{
+            ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
+              .await
+              .expect(\"could not create parent directory for output file\");
+          }}
+
+          static WRITER: ::marigold::marigold_impl::once_cell::sync::OnceCell<
+            ::marigold::marigold_impl::tokio::sync::Mutex<
+              ::marigold::marigold_impl::csv_async::AsyncSerializer<
+                  ::marigold::marigold_impl::tokio_util::compat::Compat<
+                    ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder<
+                        ::marigold::marigold_impl::writer::Writer
+                    >
+                  >
+              >
+            >
+          > = ::marigold::marigold_impl::once_cell::sync::OnceCell::new();
+
+          WRITER.set(
+            ::marigold::marigold_impl::tokio::sync::Mutex::new(
+              ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder::new(
+                  ::marigold::marigold_impl::writer::Writer::file(
+                    ::marigold::marigold_impl::tokio::fs::File::create({path})
+                       .await
+                       .expect(\"Could not write to file\")
+                  )
+                )
+                .compat_write()
+              )
+            )
+          ).expect(\"Could not put CSV writer into OnceCell\");
+
+          let mut stream_to_write =
+
+         "
+            ),
+            stream_postfix: "
+            ;
+            stream_to_write.filter_map(
+              |v| async move {
+                WRITER
+                  .get()
+                  .expect(\"Could not get CSV writer from OnceCell\")
+                  .lock()
+                  .await
+                  .serialize(v)
+                  .await
+                  .expect(\"could not write record to CSV\");
+                None
+              }
+            ).chain(
+              // after the stream is complete, flush the writer.
+              ::marigold::marigold_impl::futures::stream::iter(0..1)
+                .filter_map(|_v| async {
+                  let mut serializer_guard = WRITER
+                    .get() // gets Mutex<...>
+                    .expect(\"Could not get CSV writer from OnceCell\")
+                    .lock()
+                    .await;
+                  let mut serializer = std::mem::replace(
+                    &mut *serializer_guard,
+                    ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                      ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder::new(
+                        ::marigold::marigold_impl::writer::Writer::vector()
+                      )
+                      .compat_write()
+                    )
+                  );
+                  serializer
+                    .into_inner()
+                    .await
+                    .expect(\"Could not get underlying writer from serializer\")
+                    .get_mut()
+                    .shutdown()
+                    .await
+                    .expect(\"Could not shut down underlying writer\");
+                  None
+                })
+            )
+        }"
+            .to_string(),
+            returning: false,
+        })
+    }
+
+    /// Generate write_file output node without compression
+    fn generate_write_file_no_compression(path: &str) -> Result<OutputFunctionNode, String> {
+        Ok(OutputFunctionNode {
+            stream_prefix: format!(
+                "{{
+            if let Some(parent) = ::std::path::Path::new({path}).parent() {{
+              ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
+                .await
+                .expect(\"could not create parent directory for output file\");
+            }}
+
+            static WRITER: ::marigold::marigold_impl::once_cell::sync::OnceCell<
+              ::marigold::marigold_impl::tokio::sync::Mutex<
+                ::marigold::marigold_impl::csv_async::AsyncSerializer<
+                  ::marigold::marigold_impl::tokio_util::compat::Compat<
+                    ::marigold::marigold_impl::writer::Writer
+                  >
+                >
+              >
+            > = ::marigold::marigold_impl::once_cell::sync::OnceCell::new();
+
+            WRITER.set(
+              ::marigold::marigold_impl::tokio::sync::Mutex::new(
+                ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                  ::marigold::marigold_impl::writer::Writer::file(
+                    ::marigold::marigold_impl::tokio::fs::File::create({path})
+                       .await
+                       .expect(\"Could not write to file\")
+                  )
+                  .compat_write()
+                )
+              )
+            ).expect(\"Could not put CSV writer into OnceCell\");
+
+            let mut stream_to_write =
+
+           "
+            ),
+            stream_postfix: "
+              ;
+              stream_to_write.filter_map(
+                |v| async move {
+                  WRITER
+                    .get()
+                    .expect(\"Could not get CSV writer from OnceCell\")
+                    .lock()
+                    .await
+                    .serialize(v)
+                    .await
+                    .expect(\"could not write record to CSV\");
+                  None
+                }
+              ).chain(
+                // after the stream is complete, flush the writer.
+                ::marigold::marigold_impl::futures::stream::iter(0..1)
+                  .filter_map(|_v| async {
+                      let mut serializer_guard = WRITER
+                        .get() // gets Mutex<...>
+                        .expect(\"Could not get CSV writer from OnceCell\")
+                        .lock()
+                        .await;
+                      let mut serializer = std::mem::replace(
+                        &mut *serializer_guard,
+                        ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                            ::marigold::marigold_impl::writer::Writer::vector()
+                              .compat_write()
+                        )
+                      );
+                      serializer
+                        .into_inner()
+                        .await
+                        .expect(\"Could not get underlying writer from serializer\")
+                        .get_mut()
+                        .shutdown()
+                        .await
+                        .expect(\"Could not shut down underlying writer\");
+                      None
+                  })
+              )
+          }"
+            .to_string(),
+            returning: false,
+        })
     }
 
     /// Parse struct fields from braced content (matching LALRPOP regex approach)
