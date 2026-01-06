@@ -4,6 +4,7 @@ use std::pin::Pin;
 #[derive(Debug)]
 enum WriteTarget {
     File(Pin<Box<tokio::fs::File>>),
+    #[allow(clippy::box_collection)]
     Vector(Pin<Box<Vec<u8>>>),
 }
 

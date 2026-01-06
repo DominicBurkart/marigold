@@ -12,6 +12,7 @@ tokio = ["marigold-impl/tokio", "marigold-grammar/tokio"]
 async-std = ["marigold-impl/async-std", "marigold-grammar/async-std"]
 io = ["marigold-impl/io", "marigold-grammar/io", "marigold-macros/io"]
 cli = ["clap", "convert_case", "home"]
+pest-parser = ["marigold-grammar/pest-parser"]
 
 [dependencies]
 anyhow = "1.0"

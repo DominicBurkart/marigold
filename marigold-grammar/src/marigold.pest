@@ -1,6 +1,443 @@
-// Simplified Marigold Pest Grammar
-// Test implementation for basic functionality
+// Marigold Pest Grammar
+//
+// This grammar file defines the complete syntax for the Marigold language using Pest PEG syntax.
+//
+// The Marigold language is a domain-specific language for expressing stream processing programs
+// in Rust. This grammar defines all core language constructs:
+//
+// - **Streams**: Data flow pipelines composed of input functions, stream functions, and output functions
+// - **Stream Variables**: Named intermediate streams for composition and reuse
+// - **Type Declarations**: Struct and enum definitions for data transformation
+// - **Function Declarations**: User-defined functions for custom stream processing logic
 
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 
-program = { SOI ~ "hello" ~ EOI }
+// === Program Structure ===
+//
+// A Marigold program is a sequence of top-level expressions. The grammar uses
+// SOI (start of input) and EOI (end of input) to ensure we consume the entire input.
+
+program = { SOI ~ expr* ~ EOI }
+
+// === Expression Types ===
+//
+// Marigold supports five types of top-level expressions:
+//
+// 1. **Streams**: Complete data flow pipelines (input -> stream functions -> output)
+// 2. **Stream Variables**: Named intermediate streams for composition
+// 3. **Structs**: Data type definitions with fields
+// 4. **Enums**: Sum types for discriminated unions and default variants
+// 5. **Functions**: User-defined Rust functions callable from streams
+//
+// Each expression is independently valid at the top level and can be intermixed.
+
+expr = {
+    stream |
+    stream_variable_declaration |
+    struct_decl |
+    enum_decl |
+    fn_decl
+}
+
+// === Basic Tokens ===
+//
+// These are the fundamental lexical elements. The @ modifier makes them atomic,
+// preventing whitespace insertion within them (important for identifiers and numbers).
+
+number = @{ ASCII_DIGIT+ }
+
+// Identifier rules:
+// - Must start with letter or underscore
+// - Can contain letters, digits, underscores, and hyphens
+// - Hyphens are allowed for type names (e.g., "string_10", "Vec<T>")
+identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
+
+// Quoted strings for file paths and default enum values
+// Must be double-quoted and cannot contain unescaped quotes
+quoted_string = @{ "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
+
+// Type annotations for struct fields and function parameters
+// Matches Rust type syntax including generics, array brackets, and commas
+type_annotation = @{
+    (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "<" | ">" | "[" | "]" | ",")*
+}
+
+// FreeText split into two rules for better type safety:
+//
+// 1. free_text_identifier - Must start with letter or underscore (for identifiers, function names, type names)
+// 2. free_text_literal - Can start with digit (for numeric literals and identifiers)
+//
+// This prevents accepting invalid identifiers like "123abc" while still allowing numeric arguments
+
+// Identifier form: must start with letter or underscore
+free_text_identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ">" | "<" | "-")* }
+
+// Literal form: can be a pure number or an identifier
+free_text_literal = @{ ASCII_DIGIT+ | free_text_identifier }
+
+// Braced content (for struct/enum bodies)
+// These are raw strings captured for the AST builder to parse more carefully
+// This allows flexibility in the struct/enum content while maintaining line numbers
+braced_content = @{ "{" ~ (!"}" ~ ANY)* ~ "}" }
+
+// Function body markers
+// Function bodies are delimited by special markers rather than parsed here
+// The actual Rust code is extracted verbatim and inserted into generated output
+fn_body = @{ "%%%MARIGOLD_FUNCTION_START%%%" ~ (!"%%%MARIGOLD_FUNCTION_END%%%" ~ ANY)* ~ "%%%MARIGOLD_FUNCTION_END%%%" }
+
+// === Stream Syntax ===
+//
+// Streams are the core construct of Marigold. A stream is a complete data processing pipeline
+// that combines:
+// 1. Input source (range, read_file, select_all, or named stream variable)
+// 2. Zero or more transformations (map, filter, permutations, etc.)
+// 3. Output destination (return or write_file)
+//
+// # Stream Forms
+//
+// ## Unnamed Streams (Direct)
+// ```
+// range(0, 100).map(x -> x + 1).return
+// read_file("data.csv", csv, struct=Data).ok().write_file("out.csv", csv)
+// ```
+//
+// ## Named Streams (via Variables)
+// ```
+// my_data = range(0, 100)              // Stream variable (no output function)
+// my_data.map(x -> x + 1).return       // Uses stream variable as input
+// ```
+
+// Unnamed stream: InputFunction.StreamFunction*.OutputFunction
+// Named stream: variable_name.StreamFunction*.OutputFunction
+stream = {
+    (input_function ~ ("." ~ stream_function)* ~ "." ~ output_function) |
+    (identifier ~ ("." ~ stream_function)* ~ "." ~ output_function)
+}
+
+// Stream variable declaration: var = InputFunction.StreamFunction*
+//                            or: var = other_var.StreamFunction*
+//
+// Stream variables allow composition and reuse of stream pipelines. They don't have
+// an output function (no .return or .write_file) but can be used as input to other streams.
+//
+// # Examples
+// ```
+// processed = range(0, 1000).filter(x -> x % 2 == 0)
+// filtered = processed.map(x -> x * 2)
+// filtered.return
+// ```
+stream_variable_declaration = {
+    identifier ~ "=" ~ input_function ~ ("." ~ stream_function)* |
+    identifier ~ "=" ~ identifier ~ ("." ~ stream_function)*
+}
+
+// === Input Functions ===
+//
+// Input functions are the sources of data in a Marigold stream. They define where
+// data comes from and how to produce it. Each input function is the first element
+// of a stream pipeline.
+//
+// # Available Input Functions
+//
+// 1. **range(start, end)**: Generate integers from start (inclusive) to end (exclusive)
+// 2. **read_file(path, csv, struct=Type)**: Read CSV file with deserialization
+// 3. **select_all(stream1, stream2, ...)**: Combine multiple streams into one
+//
+// All input functions are async and produce Futures streams.
+
+input_function = {
+    range_input |
+    read_file_csv_input |
+    select_all_input
+}
+
+// range(start, end) - Generate integers from start to end-1
+// Arguments: start (i32), end (i32)
+// Returns: Stream<Item = i32>
+// Example: range(0, 100)
+range_input = {
+    "range(" ~ free_text_literal ~ "," ~ free_text_literal ~ ")"
+}
+
+// read_file(path, csv, struct=Type, infer_compression=true/false)
+// Arguments:
+//   path (string): File path, can include .gz extension
+//   format (csv): Currently only CSV is supported
+//   struct=Type: Rust type that implements serde::Deserialize
+//   infer_compression (optional): Auto-detect gzip compression
+// Returns: Stream<Item = Result<Type, Error>>
+// Example: read_file("data.csv", csv, struct=MyData)
+// Example with compression: read_file("data.csv.gz", csv, struct=MyData, infer_compression=true)
+read_file_csv_input = {
+    "read_file(" ~ quoted_string ~ "," ~ "csv" ~ "," ~ "struct" ~ "=" ~ free_text_identifier ~
+    ("," ~ "infer_compression" ~ "=" ~ ("true" | "false"))? ~ ")"
+}
+
+// select_all(stream1, stream2, ...) - Combine multiple streams
+// Merges multiple input streams into one, allowing them to run concurrently.
+// Each argument can be a complete input+stream pipeline.
+// Returns: Stream<Item = Union of all input item types>
+// Example: select_all(range(0, 100), read_file("data.csv", csv, struct=Data))
+select_all_input = {
+    "select_all(" ~
+    input_and_maybe_stream_functions ~ ("," ~ input_and_maybe_stream_functions)* ~
+    ")"
+}
+
+// Helper rule: input function with optional stream transformations
+// Used inside select_all to allow composition
+input_and_maybe_stream_functions = {
+    input_function ~ ("." ~ stream_function)*
+}
+
+// === Stream Functions ===
+//
+// Stream functions are transformations applied to stream items. They consume a stream
+// of type T and produce a stream of type U (possibly different). Stream functions are
+// optional - a stream can have zero or more of them.
+//
+// # Categories
+//
+// **Filtering**: filter, filter_map, keep_first_n
+// **Mapping**: map
+// **Combinatorics**: permutations, permutations_with_replacement, combinations
+// **Folding**: fold
+// **Error Handling**: ok, ok_or_panic
+//
+// # Ordering
+//
+// Multiple stream functions can be chained:
+// ```
+// range(0, 100)
+//   .filter(x -> x % 2 == 0)      // Remove odd numbers
+//   .map(x -> x * 2)               // Double remaining
+//   .return
+// ```
+//
+// The order matters: output of one function becomes input to the next.
+
+stream_function = {
+    permutations_fn |
+    permutations_with_replacement_fn |
+    combinations_fn |
+    keep_first_n_fn |
+    filter_fn |
+    filter_map_fn |
+    map_fn |
+    fold_fn |
+    ok_fn |
+    ok_or_panic_fn
+}
+
+// map(closure) - Transform each item with a closure
+// Transforms Stream<T> -> Stream<U> where U = closure(T)
+// Argument: Rust closure expression (e.g., "x -> x + 1" or "x -> x.to_uppercase()")
+map_fn = { "map(" ~ free_text_identifier ~ ")" }
+
+// filter(closure) - Keep items where closure returns true
+// Transforms Stream<T> -> Stream<T>, keeping only matching items
+// Argument: Rust closure that returns bool
+filter_fn = { "filter(" ~ free_text_identifier ~ ")" }
+
+// filter_map(closure) - Filter and map combined
+// Transforms Stream<T> -> Stream<U> where closure returns Option<U>
+// Argument: Rust closure returning Option<U>
+filter_map_fn = { "filter_map(" ~ free_text_identifier ~ ")" }
+
+// permutations(n) - Generate all ordered n-length permutations
+// Useful for combinatorial search spaces
+// Argument: n (usize) - length of permutations
+permutations_fn = { "permutations(" ~ free_text_literal ~ ")" }
+
+// permutations_with_replacement(n) - Generate n-length permutations allowing duplicates
+// Argument: n (usize) - length of permutations
+permutations_with_replacement_fn = { "permutations_with_replacement(" ~ free_text_literal ~ ")" }
+
+// combinations(n) - Generate all unordered n-item combinations
+// Argument: n (usize) - size of combinations
+combinations_fn = { "combinations(" ~ free_text_literal ~ ")" }
+
+// keep_first_n(stream, n) - Keep only first n items from a stream variable
+// Argument 1: stream variable name
+// Argument 2: n (usize) - number of items to keep
+keep_first_n_fn = { "keep_first_n(" ~ free_text_literal ~ "," ~ free_text_identifier ~ ")" }
+
+// fold(init, closure) - Reduce stream to single value
+// Transforms Stream<T> -> Stream<Acc> where Acc = closure(Acc, T)
+// Argument 1: Initial accumulator value
+// Argument 2: Rust closure(acc, item) -> new_acc
+fold_fn = { "fold(" ~ free_text_literal ~ "," ~ free_text_identifier ~ ")" }
+
+// ok() - Extract value from Result, skip errors
+// Transforms Stream<Result<T, E>> -> Stream<T>
+// Used to handle error types from read_file
+ok_fn = { "ok()" }
+
+// ok_or_panic() - Extract value from Result, panic on error
+// Transforms Stream<Result<T, E>> -> Stream<T>
+// Like ok() but panics instead of skipping errors
+ok_or_panic_fn = { "ok_or_panic()" }
+
+// === Output Functions ===
+//
+// Output functions terminate a stream pipeline and define how the stream is used.
+// Every stream must have exactly one output function.
+//
+// # Output Functions
+//
+// 1. **return**: Return items from the stream as the program result
+// 2. **write_file**: Write items to a file (no return value)
+
+output_function = {
+    return_fn |
+    write_file_fn
+}
+
+// return - Return stream items as output
+// Returns Stream<T> as the result of the async block
+// Allows collecting results with .collect::<Vec<_>>().await
+return_fn = { "return" }
+
+// write_file(path, format[, compression=none|gz]) - Write stream items to file
+// No return value; used for side effects only
+// Arguments:
+//   path (string): Output file path
+//   format (csv or other): Output format
+//   compression (optional): "none" or "gz" (auto-detects from .gz extension if omitted)
+// Examples:
+//   write_file("output.csv", csv)
+//   write_file("output.csv.gz", csv)  // auto-detects gzip
+//   write_file("output.csv", csv, compression=none)
+//   write_file("output.csv", csv, compression=gz)
+write_file_fn = {
+    "write_file(" ~ quoted_string ~ "," ~ write_file_format ~ write_file_compression? ~ ")"
+}
+
+write_file_format = { "csv" | free_text_identifier }
+
+write_file_compression = { "," ~ "compression" ~ "=" ~ compression_type }
+
+compression_type = { "none" | "gz" }
+
+// === Struct Declarations ===
+//
+// Structs define data types for deserialization and stream processing.
+// Struct bodies are captured as raw text and parsed by the AST builder to preserve
+// exact formatting and support flexible Rust type syntax.
+//
+// # Examples
+//
+// ```
+// struct Person {
+//     name: String,
+//     age: u32,
+//     email: Option<String>,
+// }
+//
+// struct Data {
+//     id: i32,
+//     value: f64,
+// }
+// ```
+//
+// These structs must implement `serde::Deserialize` when used with `read_file`.
+
+struct_decl = {
+    "struct" ~ free_text_identifier ~ braced_content
+}
+
+// Note: Field parsing will be done in AST builder using regex
+// to match LALRPOP's approach. This allows flexibility in the struct definition
+// while maintaining grammar simplicity.
+
+// === Enum Declarations ===
+//
+// Enums define sum types for deserialization. They support:
+// - Regular variants with string values
+// - Default variants that catch unknown values
+// - Default variants with types to preserve original data
+//
+// # Examples
+//
+// ```
+// enum Status {
+//     Active = "active",
+//     Inactive = "inactive",
+// }
+//
+// enum Result {
+//     Success = "ok",
+//     Failure = "err",
+//     default Unknown,  // Catch unknown values
+// }
+//
+// enum Color {
+//     Red = "red",
+//     Green = "green",
+//     default Other(String),  // Preserve unknown values
+// }
+// ```
+//
+// Default variants are particularly useful for robust CSV parsing that doesn't fail
+// on unexpected enum values.
+
+enum_decl = {
+    "enum" ~ free_text_identifier ~ braced_content
+}
+
+// Note: Variant parsing (including default variants) will be done
+// in AST builder using regex to match LALRPOP's approach.
+// This is the same strategy as structs - capture raw content and parse carefully.
+
+// === Function Declarations ===
+//
+// Functions are user-defined Rust functions that can be used in stream transformations.
+// They are declared once and can be called multiple times from different streams.
+//
+// # Function Signature
+//
+// Functions have:
+// - Name: Rust identifier
+// - Parameters: Optional list of (name: Type) pairs, with optional & for references
+// - Return type: Rust type (can be generic or complex)
+// - Body: Rust code between special markers
+//
+// # Examples
+//
+// ```
+// fn double(x: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%%x * 2%%%MARIGOLD_FUNCTION_END%%%
+//
+// fn filter_positive(x: &i32) -> bool %%%MARIGOLD_FUNCTION_START%%%x > 0%%%MARIGOLD_FUNCTION_END%%%
+//
+// fn process(data: &Data) -> Option<String> %%%MARIGOLD_FUNCTION_START%%%
+//     if data.valid {
+//         Some(data.name.clone())
+//     } else {
+//         None
+//     }
+// %%%MARIGOLD_FUNCTION_END%%%
+// ```
+//
+// Functions are inserted directly into the generated Rust code, so they must be valid Rust.
+
+fn_decl = {
+    "fn" ~ free_text_identifier ~ "(" ~ fn_param_list? ~ ")" ~
+    "->" ~ fn_return_type ~ fn_body
+}
+
+// Parameter list: param1, param2, ...
+fn_param_list = {
+    fn_param ~ ("," ~ fn_param)*
+}
+
+// Single parameter: name: Type or name: &Type
+// The & is optional for reference parameters
+fn_param = {
+    free_text_identifier ~ ":" ~ "&"? ~ free_text_identifier
+}
+
+// Return type: can be complex Rust types like Vec<String>, Option<T>, etc.
+// Uses free_text_identifier+ to allow generic parameters and other syntax
+fn_return_type = {
+    free_text_identifier+
+}

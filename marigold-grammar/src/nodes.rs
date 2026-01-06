@@ -431,21 +431,22 @@ impl EnumDeclarationNode {
                 // todo: when https://github.com/serde-rs/serde/issues/912 is resolved,
                 // we will no longer have to allocate a String and provide a conversion
                 // to this enum from a String.
-                enum_rep.push_str(format!("\n#[serde(try_from=\"String\")]").as_str());
+                enum_rep.push_str("\n#[serde(try_from=\"String\")]");
                 enum_rep.push_str(format!("\nenum {name} {{\n").as_str());
 
                 // add normal variants.
                 let mut serialized_to_name_mapping = String::new();
                 for (field_name, serialization_definition) in &self.variants {
                     // use the serde definition for deserialization
-                    Self::definition_to_serde(serialization_definition)
-                        .map(|s| enum_rep.push_str(format!("#[serde({s})]\n").as_str()));
+                    if let Some(s) = Self::definition_to_serde(serialization_definition) {
+                        enum_rep.push_str(format!("#[serde({s})]\n").as_str());
+                    }
                     enum_rep.push_str(format!("{},\n", field_name.as_str()).as_str());
 
                     // For serialization, we'll use this string in the From<String> implementation.
                     let serialized = serialization_definition
                         .as_ref()
-                        .unwrap_or_else(|| field_name)
+                        .unwrap_or(field_name)
                         .clone();
                     serialized_to_name_mapping
                         .push_str(format!("\"{serialized}\" => {field_name},\n").as_str());
@@ -456,7 +457,7 @@ impl EnumDeclarationNode {
                 let mut default_serialized_mapping = String::new();
                 match default_variant {
                     DefaultEnumVariant::Sized(default_name, size) => {
-                        enum_rep.push_str(format!("#[serde(skip_deserializing)]\n").as_str());
+                        enum_rep.push_str("#[serde(skip_deserializing)]\n");
                         enum_rep.push_str(format!("{default_name}(::marigold::marigold_impl::arrayvec::ArrayString<{size}>),\n").as_str());
 
                         default_serialized_mapping =
