@@ -556,7 +556,6 @@ impl PestAstBuilder {
         }
     }
 
-    /// Generate write_file output node with gzip compression
     fn generate_write_file_with_gzip(path: &str) -> Result<OutputFunctionNode, String> {
         Ok(OutputFunctionNode {
             stream_prefix: format!(
@@ -647,7 +646,6 @@ impl PestAstBuilder {
         })
     }
 
-    /// Generate write_file output node without compression
     fn generate_write_file_no_compression(path: &str) -> Result<OutputFunctionNode, String> {
         Ok(OutputFunctionNode {
             stream_prefix: format!(
