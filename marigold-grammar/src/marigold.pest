@@ -298,15 +298,26 @@ output_function = {
 // Allows collecting results with .collect::<Vec<_>>().await
 return_fn = { "return" }
 
-// write_file(path, format) - Write stream items to file
+// write_file(path, format[, compression=none|gz]) - Write stream items to file
 // No return value; used for side effects only
 // Arguments:
 //   path (string): Output file path
 //   format (csv or other): Output format
-// Example: write_file("output.csv", csv)
+//   compression (optional): "none" or "gz" (auto-detects from .gz extension if omitted)
+// Examples:
+//   write_file("output.csv", csv)
+//   write_file("output.csv.gz", csv)  // auto-detects gzip
+//   write_file("output.csv", csv, compression=none)
+//   write_file("output.csv", csv, compression=gz)
 write_file_fn = {
-    "write_file(" ~ quoted_string ~ "," ~ ("csv" | free_text_identifier) ~ ")"
+    "write_file(" ~ quoted_string ~ "," ~ write_file_format ~ write_file_compression? ~ ")"
 }
+
+write_file_format = { "csv" | free_text_identifier }
+
+write_file_compression = { "," ~ "compression" ~ "=" ~ compression_type }
+
+compression_type = { "none" | "gz" }
 
 // === Struct Declarations ===
 //
