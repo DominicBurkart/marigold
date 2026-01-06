@@ -8,8 +8,8 @@ license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
 
 [features]
-tokio = ["marigold-impl/tokio"]
-async-std = ["marigold-impl/async-std"]
+tokio = ["marigold-impl/tokio", "marigold-grammar/tokio"]
+async-std = ["marigold-impl/async-std", "marigold-grammar/async-std"]
 io = ["marigold-impl/io", "marigold-grammar/io", "marigold-macros/io"]
 cli = ["clap", "convert_case", "home"]
 
