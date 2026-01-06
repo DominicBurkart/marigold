@@ -540,6 +540,196 @@ mod tests {
             "Incomplete stream should be rejected"
         );
     }
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_parser_equivalence_read_file_basic() {
+        let input = r#"read_file("data.csv", csv, struct=Data).return"#;
+
+        let lalrpop_parser = LalrpopParser::new();
+        let pest_parser = PestParser::new();
+
+        let lalrpop_result = lalrpop_parser.parse(input);
+        let pest_result = pest_parser.parse(input);
+
+        assert!(
+            lalrpop_result.is_ok(),
+            "LALRPOP should parse read_file basic syntax"
+        );
+        assert!(
+            pest_result.is_ok(),
+            "Pest should parse read_file basic syntax"
+        );
+
+        let lalrpop_output = lalrpop_result.unwrap();
+        let pest_output = pest_result.unwrap();
+
+        assert!(lalrpop_output.contains("csv_async::AsyncDeserializer"));
+        assert!(pest_output.contains("csv_async::AsyncDeserializer"));
+    }
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_parser_equivalence_read_file_gzip() {
+        let input = r#"read_file("data.csv.gz", csv, struct=Data).return"#;
+
+        let lalrpop_parser = LalrpopParser::new();
+        let pest_parser = PestParser::new();
+
+        let lalrpop_result = lalrpop_parser.parse(input);
+        let pest_result = pest_parser.parse(input);
+
+        assert!(
+            lalrpop_result.is_ok(),
+            "LALRPOP should parse read_file with gzip compression"
+        );
+        assert!(
+            pest_result.is_ok(),
+            "Pest should parse read_file with gzip compression"
+        );
+
+        let lalrpop_output = lalrpop_result.unwrap();
+        let pest_output = pest_result.unwrap();
+
+        assert!(lalrpop_output.contains("GzipDecoder"));
+        assert!(pest_output.contains("GzipDecoder"));
+    }
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_parser_equivalence_read_file_no_compression() {
+        let input = r#"read_file("data.csv", csv, struct=Data, infer_compression=false).return"#;
+
+        let lalrpop_parser = LalrpopParser::new();
+        let pest_parser = PestParser::new();
+
+        let lalrpop_result = lalrpop_parser.parse(input);
+        let pest_result = pest_parser.parse(input);
+
+        assert!(
+            lalrpop_result.is_ok(),
+            "LALRPOP should parse read_file with infer_compression=false"
+        );
+        assert!(
+            pest_result.is_ok(),
+            "Pest should parse read_file with infer_compression=false"
+        );
+
+        let lalrpop_output = lalrpop_result.unwrap();
+        let pest_output = pest_result.unwrap();
+
+        assert!(lalrpop_output.contains("csv_async::AsyncDeserializer"));
+        assert!(!lalrpop_output.contains("GzipDecoder"));
+        assert!(pest_output.contains("csv_async::AsyncDeserializer"));
+        assert!(!pest_output.contains("GzipDecoder"));
+    }
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_parser_equivalence_select_all_single() {
+        let input = "select_all(range(0, 10)).return";
+
+        let lalrpop_parser = LalrpopParser::new();
+        let pest_parser = PestParser::new();
+
+        let lalrpop_result = lalrpop_parser.parse(input);
+        let pest_result = pest_parser.parse(input);
+
+        assert!(
+            lalrpop_result.is_ok(),
+            "LALRPOP should parse select_all with single stream"
+        );
+        assert!(
+            pest_result.is_ok(),
+            "Pest should parse select_all with single stream"
+        );
+
+        let lalrpop_output = lalrpop_result.unwrap();
+        let pest_output = pest_result.unwrap();
+
+        assert!(lalrpop_output.contains("select_all"));
+        assert!(pest_output.contains("select_all"));
+    }
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_parser_equivalence_select_all_multiple() {
+        let input = "select_all(range(0, 10), range(10, 20)).return";
+
+        let lalrpop_parser = LalrpopParser::new();
+        let pest_parser = PestParser::new();
+
+        let lalrpop_result = lalrpop_parser.parse(input);
+        let pest_result = pest_parser.parse(input);
+
+        assert!(
+            lalrpop_result.is_ok(),
+            "LALRPOP should parse select_all with multiple streams"
+        );
+        assert!(
+            pest_result.is_ok(),
+            "Pest should parse select_all with multiple streams"
+        );
+
+        let lalrpop_output = lalrpop_result.unwrap();
+        let pest_output = pest_result.unwrap();
+
+        assert!(lalrpop_output.contains("select_all"));
+        assert!(pest_output.contains("select_all"));
+    }
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_parser_equivalence_select_all_with_stream_functions() {
+        let input = "select_all(range(0, 10).map(double), range(10, 20)).return";
+
+        let lalrpop_parser = LalrpopParser::new();
+        let pest_parser = PestParser::new();
+
+        let lalrpop_result = lalrpop_parser.parse(input);
+        let pest_result = pest_parser.parse(input);
+
+        assert!(
+            lalrpop_result.is_ok(),
+            "LALRPOP should parse select_all with stream functions"
+        );
+        assert!(
+            pest_result.is_ok(),
+            "Pest should parse select_all with stream functions"
+        );
+
+        let lalrpop_output = lalrpop_result.unwrap();
+        let pest_output = pest_result.unwrap();
+
+        assert!(lalrpop_output.contains("select_all"));
+        assert!(lalrpop_output.contains("map"));
+        assert!(pest_output.contains("select_all"));
+        assert!(pest_output.contains("map"));
+    }
+
+    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_parser_exact_equivalence_select_all() {
+        let tests = vec![
+            "select_all(range(0, 10)).return",
+            "select_all(range(0, 10), range(10, 20)).return",
+            "select_all(range(0, 10), range(10, 20), range(20, 30)).return",
+        ];
+
+        let lalrpop_parser = LalrpopParser::new();
+        let pest_parser = PestParser::new();
+
+        for input in tests {
+            let lalrpop_output = lalrpop_parser.parse(input).expect("LALRPOP parse failed");
+            let pest_output = pest_parser.parse(input).expect("Pest parse failed");
+
+            assert_eq!(
+                lalrpop_output, pest_output,
+                "Parser outputs should match exactly for input: {}",
+                input
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -890,6 +1080,126 @@ mod negative_tests {
         assert!(
             result.is_ok(),
             "Should accept identifiers starting with underscore"
+        );
+    }
+
+    // ===== Invalid read_file tests =====
+
+    #[test]
+    fn test_reject_read_file_missing_file_path() {
+        let result = parse_marigold(r#"read_file(csv, struct=Data).return"#);
+        assert!(result.is_err(), "Should reject read_file without file path");
+    }
+
+    #[test]
+    fn test_reject_read_file_missing_struct() {
+        let result = parse_marigold(r#"read_file("data.csv", csv).return"#);
+        assert!(
+            result.is_err(),
+            "Should reject read_file without struct parameter"
+        );
+    }
+
+    #[test]
+    fn test_reject_read_file_unquoted_path() {
+        let result = parse_marigold(r#"read_file(data.csv, csv, struct=Data).return"#);
+        assert!(
+            result.is_err(),
+            "Should reject read_file with unquoted file path"
+        );
+    }
+
+    #[test]
+    fn test_reject_read_file_wrong_format() {
+        let result = parse_marigold(r#"read_file("data.csv", json, struct=Data).return"#);
+        assert!(
+            result.is_err(),
+            "Should reject read_file with unsupported format (only csv is supported)"
+        );
+    }
+
+    #[test]
+    fn test_reject_read_file_missing_struct_name() {
+        let result = parse_marigold(r#"read_file("data.csv", csv, struct=).return"#);
+        assert!(
+            result.is_err(),
+            "Should reject read_file with empty struct name"
+        );
+    }
+
+    #[test]
+    fn test_reject_read_file_invalid_compression_value() {
+        let result = parse_marigold(
+            r#"read_file("data.csv", csv, struct=Data, infer_compression=maybe).return"#,
+        );
+        assert!(
+            result.is_err(),
+            "Should reject read_file with invalid infer_compression value (must be true or false)"
+        );
+    }
+
+    #[test]
+    fn test_reject_read_file_missing_closing_paren() {
+        let result = parse_marigold(r#"read_file("data.csv", csv, struct=Data.return"#);
+        assert!(
+            result.is_err(),
+            "Should reject read_file with missing closing parenthesis"
+        );
+    }
+
+    // ===== Invalid select_all tests =====
+
+    #[test]
+    fn test_reject_select_all_no_args() {
+        let result = parse_marigold("select_all().return");
+        assert!(
+            result.is_err(),
+            "Should reject select_all with no arguments"
+        );
+    }
+
+    #[test]
+    fn test_reject_select_all_incomplete_stream() {
+        let result = parse_marigold("select_all(range(0, 10), .map(double)).return");
+        assert!(
+            result.is_err(),
+            "Should reject select_all with incomplete stream (missing input)"
+        );
+    }
+
+    #[test]
+    fn test_reject_select_all_trailing_comma() {
+        let result = parse_marigold("select_all(range(0, 10),).return");
+        assert!(
+            result.is_err(),
+            "Should reject select_all with trailing comma"
+        );
+    }
+
+    #[test]
+    fn test_reject_select_all_double_comma() {
+        let result = parse_marigold("select_all(range(0, 10),, range(10, 20)).return");
+        assert!(
+            result.is_err(),
+            "Should reject select_all with double comma"
+        );
+    }
+
+    #[test]
+    fn test_reject_select_all_missing_closing_paren() {
+        let result = parse_marigold("select_all(range(0, 10).return");
+        assert!(
+            result.is_err(),
+            "Should reject select_all with missing closing parenthesis"
+        );
+    }
+
+    #[test]
+    fn test_reject_select_all_invalid_input_function() {
+        let result = parse_marigold("select_all(invalid_func(0, 10)).return");
+        assert!(
+            result.is_err(),
+            "Should reject select_all with invalid input function"
         );
     }
 }

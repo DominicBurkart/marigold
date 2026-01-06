@@ -75,6 +75,9 @@ free_text_identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | ">" 
 // Literal form: can be a pure number or an identifier
 free_text_literal = @{ ASCII_DIGIT+ | free_text_identifier }
 
+// Boolean value for parameters
+boolean_value = @{ "true" | "false" }
+
 // Braced content (for struct/enum bodies)
 // These are raw strings captured for the AST builder to parse more carefully
 // This allows flexibility in the struct/enum content while maintaining line numbers
@@ -170,7 +173,7 @@ range_input = {
 // Example with compression: read_file("data.csv.gz", csv, struct=MyData, infer_compression=true)
 read_file_csv_input = {
     "read_file(" ~ quoted_string ~ "," ~ "csv" ~ "," ~ "struct" ~ "=" ~ free_text_identifier ~
-    ("," ~ "infer_compression" ~ "=" ~ ("true" | "false"))? ~ ")"
+    ("," ~ "infer_compression" ~ "=" ~ boolean_value)? ~ ")"
 }
 
 // select_all(stream1, stream2, ...) - Combine multiple streams
