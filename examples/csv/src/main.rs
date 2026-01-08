@@ -122,10 +122,9 @@ mod tests {
 
     #[tokio::test]
     async fn deserialize_and_filter() {
-        let inp = "./data/uncompressed.csv";
         assert_eq!(
             m!(
-                read_file(inp, csv, struct=Ship)
+                read_file("./data/uncompressed.csv", csv, struct=Ship)
                 .ok_or_panic()
                 .filter(is_spherical)
                 .return

@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies.marigold]
 path = "../marigold"
 version = "=0.1.16"
-features = ["pest-parser"]
 
 [dev-dependencies]
 futures = "0.3"

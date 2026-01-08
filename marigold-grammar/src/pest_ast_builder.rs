@@ -4,14 +4,11 @@ use crate::nodes::*;
 use pest::iterators::{Pair, Pairs};
 use std::str::FromStr;
 
-#[cfg(feature = "pest-parser")]
 use crate::parser::Rule;
 
 /// AST builder for converting Pest parse trees to Marigold AST nodes
-#[cfg(feature = "pest-parser")]
 pub struct PestAstBuilder;
 
-#[cfg(feature = "pest-parser")]
 impl PestAstBuilder {
     /// Build a complete program from the top-level program rule
     pub fn build_program(pairs: Pairs<Rule>) -> Result<Vec<TypedExpression>, String> {

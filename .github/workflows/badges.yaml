@@ -32,7 +32,7 @@ jobs:
 
           rm -rf development_metadata/badges
           mkdir  development_metadata/badges
-          lines="$(git ls-files | grep -e '\.rs' -e '\.lalrpop' | xargs wc -l | tail -n 1 | awk '{$1=$1};1' | cut -d " " -f1 | format_number)"
+          lines="$(git ls-files | grep -e '\.rs' -e '\.pest' | xargs wc -l | tail -n 1 | awk '{$1=$1};1' | cut -d " " -f1 | format_number)"
           curl "https://img.shields.io/badge/lines%20of%20code-$lines-informational" >> development_metadata/badges/lines_of_code.svg
           curl "https://img.shields.io/badge/lines%20of%20code-$lines-informational?style=for-the-badge" >> development_metadata/badges/lines_of_code_ftb.svg
 

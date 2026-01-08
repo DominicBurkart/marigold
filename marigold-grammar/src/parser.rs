@@ -2,52 +2,37 @@
 
 //! # Marigold Parser Module
 //!
-//! This module provides a unified parser abstraction that supports multiple parsing backends:
-//! - **LALRPOP** (default): The original parser based on LALRPOP grammar
-//! - **Pest** (opt-in): Alternative parser using Pest grammar, enabled with `--features pest-parser`
+//! This module provides the Marigold parser using the Pest parsing library.
 //!
 //! ## Usage Examples
 //!
-//! Parse with the default backend:
+//! Parse Marigold code:
 //! ```ignore
 //! let result = parse_marigold("range(0, 1).return")?;
 //! ```
 //!
-//! Explicitly use the LALRPOP backend:
+//! Explicitly create a parser instance:
 //! ```ignore
-//! let parser = LalrpopParser::new();
+//! let parser = PestParser::new();
 //! let result = parser.parse("range(0, 1).return")?;
 //! ```
-//!
-//! When compiled with `--features pest-parser`, the Pest parser is used by default:
-//! ```ignore
-//! cargo build --features pest-parser
-//! let parser = get_parser();  // Returns PestParser instance
-//! ```
 
+use pest::Parser;
 use std::fmt;
 
-/// Common error type for both parser backends
+/// Error type for parser
 #[derive(Debug, Clone)]
-pub enum MarigoldParseError {
-    LalrpopError(String),
-    #[cfg(feature = "pest-parser")]
-    PestError(String),
-}
+pub struct MarigoldParseError(pub String);
 
 impl fmt::Display for MarigoldParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            MarigoldParseError::LalrpopError(msg) => write!(f, "LALRPOP parse error: {}", msg),
-            #[cfg(feature = "pest-parser")]
-            MarigoldParseError::PestError(msg) => write!(f, "Pest parse error: {}", msg),
-        }
+        write!(f, "Parse error: {}", self.0)
     }
 }
 
 impl std::error::Error for MarigoldParseError {}
 
-/// Parser abstraction trait that allows switching between LALRPOP and Pest parsers
+/// Parser abstraction trait
 pub trait MarigoldParser {
     /// Parse a Marigold program string and return the generated Rust code
     fn parse(&self, input: &str) -> Result<String, MarigoldParseError>;
@@ -56,51 +41,14 @@ pub trait MarigoldParser {
     fn name(&self) -> &'static str;
 }
 
-/// LALRPOP parser backend
-pub struct LalrpopParser {
-    parser: crate::ast::ProgramParser,
-}
-
-impl LalrpopParser {
-    /// Create a new LALRPOP parser instance
-    pub fn new() -> Self {
-        Self {
-            parser: crate::ast::ProgramParser::new(),
-        }
-    }
-}
-
-impl Default for LalrpopParser {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl MarigoldParser for LalrpopParser {
-    fn parse(&self, input: &str) -> Result<String, MarigoldParseError> {
-        self.parser
-            .parse(input)
-            .map_err(|e| MarigoldParseError::LalrpopError(format!("{:?}", e)))
-    }
-
-    fn name(&self) -> &'static str {
-        "LALRPOP"
-    }
-}
-
 /// Pest parser backend
-#[cfg(feature = "pest-parser")]
 pub struct PestParser;
 
-// Note: pest::Parser import moved to local scope where needed
-
 /// Pest-derived parser struct that holds the compiled grammar
-#[cfg(feature = "pest-parser")]
 #[derive(pest_derive::Parser)]
 #[grammar = "marigold.pest"]
 pub struct MarigoldPestParser;
 
-#[cfg(feature = "pest-parser")]
 impl PestParser {
     /// Create a new Pest parser instance
     pub fn new() -> Self {
@@ -109,11 +57,9 @@ impl PestParser {
 
     /// Internal function: parse input and build AST
     fn parse_input(input: &str) -> Result<String, String> {
-        use pest::Parser;
-
         // Stage 1: Parse with Pest grammar
         let pairs = MarigoldPestParser::parse(Rule::program, input)
-            .map_err(|e| format!("Pest parse error: {}", e))?;
+            .map_err(|e| format!("Parse error: {}", e))?;
 
         // Stage 2: Build AST from parse tree
         let expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)?;
@@ -301,17 +247,15 @@ impl PestParser {
     }
 }
 
-#[cfg(feature = "pest-parser")]
 impl Default for PestParser {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(feature = "pest-parser")]
 impl MarigoldParser for PestParser {
     fn parse(&self, input: &str) -> Result<String, MarigoldParseError> {
-        Self::parse_input(input).map_err(MarigoldParseError::PestError)
+        Self::parse_input(input).map_err(MarigoldParseError)
     }
 
     fn name(&self) -> &'static str {
@@ -319,17 +263,9 @@ impl MarigoldParser for PestParser {
     }
 }
 
-/// Factory function that returns the appropriate parser based on feature flags
+/// Factory function that returns the parser
 pub fn get_parser() -> Box<dyn MarigoldParser> {
-    #[cfg(feature = "pest-parser")]
-    {
-        Box::new(PestParser::new())
-    }
-
-    #[cfg(not(feature = "pest-parser"))]
-    {
-        Box::new(LalrpopParser::new())
-    }
+    Box::new(PestParser::new())
 }
 
 /// Convenience function that uses the default parser to parse input
@@ -343,194 +279,89 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_lalrpop_parser_creation() {
-        let parser = LalrpopParser::new();
-        assert_eq!(parser.name(), "LALRPOP");
-    }
-
-    #[test]
-    fn test_default_parser_selection() {
-        let parser = get_parser();
-
-        #[cfg(feature = "pest-parser")]
-        assert_eq!(parser.name(), "Pest");
-
-        #[cfg(not(feature = "pest-parser"))]
-        assert_eq!(parser.name(), "LALRPOP");
-    }
-
-    #[test]
-    fn test_parse_marigold_function() {
-        // Test with a minimal valid program - empty input generates async block
-        let result = parse_marigold("");
-
-        // Both parsers should succeed with empty input
-        assert!(result.is_ok());
-
-        let output = result.unwrap();
-        assert!(output.contains("async"));
-    }
-
-    #[test]
-    fn test_lalrpop_parser_basic_functionality() {
-        let parser = LalrpopParser::new();
-
-        // Test with empty input - should generate basic async block
-        let result = parser.parse("");
-        assert!(result.is_ok());
-
-        let output = result.unwrap();
-        assert!(output.contains("async"));
-    }
-
-    #[cfg(feature = "pest-parser")]
-    #[test]
     fn test_pest_parser_creation() {
         let parser = PestParser::new();
         assert_eq!(parser.name(), "Pest");
     }
 
-    #[cfg(feature = "pest-parser")]
+    #[test]
+    fn test_default_parser_selection() {
+        let parser = get_parser();
+        assert_eq!(parser.name(), "Pest");
+    }
+
+    #[test]
+    fn test_parse_marigold_function() {
+        let result = parse_marigold("");
+
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        assert!(output.contains("async"));
+    }
+
+    #[test]
+    fn test_pest_parser_basic_functionality() {
+        let parser = PestParser::new();
+
+        let result = parser.parse("");
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        assert!(output.contains("async"));
+    }
+
     #[test]
     fn test_pest_parser_empty_input() {
         let parser = PestParser::new();
         let result = parser.parse("");
 
-        // Empty input should generate valid async block
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("async"));
         assert!(output.contains("use ::marigold::marigold_impl::*"));
     }
 
-    #[cfg(feature = "pest-parser")]
     #[test]
     fn test_pest_grammar_basic_parsing() {
-        // TODO: Fix Pest Rule enum access pattern to enable this test
-        // This test validates that the basic Pest grammar works correctly
-        // Currently blocked by Rust's associated type access limitations
-
-        // When working, this should test:
-        // - MarigoldPestParser::parse(Rule::program, "hello") -> Ok
-        // - MarigoldPestParser::parse(Rule::program, "goodbye") -> Err
-
-        // For now, we test that the parser structure exists
         let _parser = MarigoldPestParser;
-        // Test passes as a placeholder until Pest Rule access is resolved
     }
 
-    // Parser comparison tests
     #[test]
-    fn test_parser_compatibility_empty_input() {
-        let lalrpop_parser = LalrpopParser::new();
-        let lalrpop_result = lalrpop_parser.parse("");
+    fn test_parser_empty_input() {
+        let pest_parser = PestParser::new();
+        let pest_result = pest_parser.parse("");
 
-        // Empty input should succeed with LALRPOP
-        assert!(lalrpop_result.is_ok());
-        let lalrpop_output = lalrpop_result.unwrap();
-        assert!(lalrpop_output.contains("async"));
-
-        #[cfg(feature = "pest-parser")]
-        {
-            let pest_parser = PestParser::new();
-            let pest_result = pest_parser.parse("");
-
-            // Pest parser should also succeed and produce equivalent output
-            assert!(pest_result.is_ok());
-            let pest_output = pest_result.unwrap();
-            assert!(pest_output.contains("async"));
-            assert!(pest_output.contains("use ::marigold::marigold_impl::*"));
-        }
+        assert!(pest_result.is_ok());
+        let pest_output = pest_result.unwrap();
+        assert!(pest_output.contains("async"));
+        assert!(pest_output.contains("use ::marigold::marigold_impl::*"));
     }
 
     #[test]
     fn test_factory_function_consistency() {
-        // Test that the factory function returns the expected parser type
         let parser = get_parser();
-
-        #[cfg(feature = "pest-parser")]
         assert_eq!(parser.name(), "Pest");
-
-        #[cfg(not(feature = "pest-parser"))]
-        assert_eq!(parser.name(), "LALRPOP");
     }
 
     #[test]
     fn test_parse_marigold_function_works() {
-        // Test the convenience function
         let result = parse_marigold("");
-
-        // Both parsers should succeed
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("async"));
     }
 
-    // Equivalence test suite - validating Pest and LALRPOP generate identical code
-    #[cfg(feature = "pest-parser")]
-    #[test]
-    fn test_parser_equivalence_range_return() {
-        // Test: range(0, 1).return generates identical code between parsers
-        let input = "range(0, 1).return";
-
-        let lalrpop_parser = LalrpopParser::new();
-        let pest_parser = PestParser::new();
-
-        let lalrpop_result = lalrpop_parser.parse(input);
-        let pest_result = pest_parser.parse(input);
-
-        // Both should succeed
-        assert!(
-            lalrpop_result.is_ok(),
-            "LALRPOP should parse range(0, 1).return"
-        );
-        assert!(pest_result.is_ok(), "Pest should parse range(0, 1).return");
-
-        // Note: Exact equivalence will be validated when Pest parser is fully implemented
-        // For now, we verify both generate async blocks with the right structure
-        let lalrpop_output = lalrpop_result.unwrap();
-        let pest_output = pest_result.unwrap();
-
-        assert!(lalrpop_output.contains("async"));
-        assert!(pest_output.contains("async"));
-    }
-
-    #[cfg(feature = "pest-parser")]
-    #[test]
-    fn test_parser_equivalence_stream_variable() {
-        // Test: x = range(0, 5) generates identical code between parsers
-        // Note: This will be implemented in later milestones
-        // For now, this test documents the expected behavior
-        let input = "x = range(0, 5)";
-
-        let lalrpop_parser = LalrpopParser::new();
-        let lalrpop_result = lalrpop_parser.parse(input);
-
-        // LALRPOP should handle this
-        assert!(
-            lalrpop_result.is_ok(),
-            "LALRPOP should parse stream variables"
-        );
-
-        // Pest parser will be implemented to match this behavior in Milestone 3
-    }
-
-    #[cfg(feature = "pest-parser")]
     #[test]
     fn test_pest_grammar_rules_validation() {
-        // Test: Pest grammar accepts valid syntax, rejects invalid
-        // This validates the grammar rules work correctly
-
         let pest_parser = PestParser::new();
 
-        // Valid inputs (currently supported)
         let valid_empty = pest_parser.parse("");
         assert!(valid_empty.is_ok(), "Empty input should be valid");
 
         let valid_range = pest_parser.parse("range(0, 1).return");
         assert!(valid_range.is_ok(), "range(0, 1).return should be valid");
 
-        // Invalid inputs (should be rejected)
         let invalid_syntax = pest_parser.parse("invalid syntax here!");
         assert!(invalid_syntax.is_err(), "Invalid syntax should be rejected");
 
@@ -541,194 +372,96 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "pest-parser")]
     #[test]
-    fn test_parser_equivalence_read_file_basic() {
+    fn test_parser_read_file_basic() {
         let input = r#"read_file("data.csv", csv, struct=Data).return"#;
-
-        let lalrpop_parser = LalrpopParser::new();
         let pest_parser = PestParser::new();
-
-        let lalrpop_result = lalrpop_parser.parse(input);
         let pest_result = pest_parser.parse(input);
 
-        assert!(
-            lalrpop_result.is_ok(),
-            "LALRPOP should parse read_file basic syntax"
-        );
         assert!(
             pest_result.is_ok(),
             "Pest should parse read_file basic syntax"
         );
 
-        let lalrpop_output = lalrpop_result.unwrap();
         let pest_output = pest_result.unwrap();
-
-        assert!(lalrpop_output.contains("csv_async::AsyncDeserializer"));
         assert!(pest_output.contains("csv_async::AsyncDeserializer"));
     }
 
-    #[cfg(feature = "pest-parser")]
     #[test]
-    fn test_parser_equivalence_read_file_gzip() {
+    fn test_parser_read_file_gzip() {
         let input = r#"read_file("data.csv.gz", csv, struct=Data).return"#;
-
-        let lalrpop_parser = LalrpopParser::new();
         let pest_parser = PestParser::new();
-
-        let lalrpop_result = lalrpop_parser.parse(input);
         let pest_result = pest_parser.parse(input);
 
-        assert!(
-            lalrpop_result.is_ok(),
-            "LALRPOP should parse read_file with gzip compression"
-        );
         assert!(
             pest_result.is_ok(),
             "Pest should parse read_file with gzip compression"
         );
 
-        let lalrpop_output = lalrpop_result.unwrap();
         let pest_output = pest_result.unwrap();
-
-        assert!(lalrpop_output.contains("GzipDecoder"));
         assert!(pest_output.contains("GzipDecoder"));
     }
 
-    #[cfg(feature = "pest-parser")]
     #[test]
-    fn test_parser_equivalence_read_file_no_compression() {
+    fn test_parser_read_file_no_compression() {
         let input = r#"read_file("data.csv", csv, struct=Data, infer_compression=false).return"#;
-
-        let lalrpop_parser = LalrpopParser::new();
         let pest_parser = PestParser::new();
-
-        let lalrpop_result = lalrpop_parser.parse(input);
         let pest_result = pest_parser.parse(input);
 
-        assert!(
-            lalrpop_result.is_ok(),
-            "LALRPOP should parse read_file with infer_compression=false"
-        );
         assert!(
             pest_result.is_ok(),
             "Pest should parse read_file with infer_compression=false"
         );
 
-        let lalrpop_output = lalrpop_result.unwrap();
         let pest_output = pest_result.unwrap();
-
-        assert!(lalrpop_output.contains("csv_async::AsyncDeserializer"));
-        assert!(!lalrpop_output.contains("GzipDecoder"));
         assert!(pest_output.contains("csv_async::AsyncDeserializer"));
         assert!(!pest_output.contains("GzipDecoder"));
     }
 
-    #[cfg(feature = "pest-parser")]
     #[test]
-    fn test_parser_equivalence_select_all_single() {
+    fn test_parser_select_all_single() {
         let input = "select_all(range(0, 10)).return";
-
-        let lalrpop_parser = LalrpopParser::new();
         let pest_parser = PestParser::new();
-
-        let lalrpop_result = lalrpop_parser.parse(input);
         let pest_result = pest_parser.parse(input);
 
-        assert!(
-            lalrpop_result.is_ok(),
-            "LALRPOP should parse select_all with single stream"
-        );
         assert!(
             pest_result.is_ok(),
             "Pest should parse select_all with single stream"
         );
 
-        let lalrpop_output = lalrpop_result.unwrap();
         let pest_output = pest_result.unwrap();
-
-        assert!(lalrpop_output.contains("select_all"));
         assert!(pest_output.contains("select_all"));
     }
 
-    #[cfg(feature = "pest-parser")]
     #[test]
-    fn test_parser_equivalence_select_all_multiple() {
+    fn test_parser_select_all_multiple() {
         let input = "select_all(range(0, 10), range(10, 20)).return";
-
-        let lalrpop_parser = LalrpopParser::new();
         let pest_parser = PestParser::new();
-
-        let lalrpop_result = lalrpop_parser.parse(input);
         let pest_result = pest_parser.parse(input);
 
-        assert!(
-            lalrpop_result.is_ok(),
-            "LALRPOP should parse select_all with multiple streams"
-        );
         assert!(
             pest_result.is_ok(),
             "Pest should parse select_all with multiple streams"
         );
 
-        let lalrpop_output = lalrpop_result.unwrap();
         let pest_output = pest_result.unwrap();
-
-        assert!(lalrpop_output.contains("select_all"));
         assert!(pest_output.contains("select_all"));
     }
 
-    #[cfg(feature = "pest-parser")]
     #[test]
-    fn test_parser_equivalence_select_all_with_stream_functions() {
+    fn test_parser_select_all_with_stream_functions() {
         let input = "select_all(range(0, 10).map(double), range(10, 20)).return";
-
-        let lalrpop_parser = LalrpopParser::new();
         let pest_parser = PestParser::new();
-
-        let lalrpop_result = lalrpop_parser.parse(input);
         let pest_result = pest_parser.parse(input);
 
-        assert!(
-            lalrpop_result.is_ok(),
-            "LALRPOP should parse select_all with stream functions"
-        );
         assert!(
             pest_result.is_ok(),
             "Pest should parse select_all with stream functions"
         );
 
-        let lalrpop_output = lalrpop_result.unwrap();
         let pest_output = pest_result.unwrap();
-
-        assert!(lalrpop_output.contains("select_all"));
-        assert!(lalrpop_output.contains("map"));
         assert!(pest_output.contains("select_all"));
         assert!(pest_output.contains("map"));
-    }
-
-    #[cfg(feature = "pest-parser")]
-    #[test]
-    fn test_parser_exact_equivalence_select_all() {
-        let tests = vec![
-            "select_all(range(0, 10)).return",
-            "select_all(range(0, 10), range(10, 20)).return",
-            "select_all(range(0, 10), range(10, 20), range(20, 30)).return",
-        ];
-
-        let lalrpop_parser = LalrpopParser::new();
-        let pest_parser = PestParser::new();
-
-        for input in tests {
-            let lalrpop_output = lalrpop_parser.parse(input).expect("LALRPOP parse failed");
-            let pest_output = pest_parser.parse(input).expect("Pest parse failed");
-
-            assert_eq!(
-                lalrpop_output, pest_output,
-                "Parser outputs should match exactly for input: {}",
-                input
-            );
-        }
     }
 }
 
@@ -982,9 +715,7 @@ mod negative_tests {
     }
 
     // ===== Invalid identifier tests (validates free_text_identifier split) =====
-    // These tests are Pest-only because LALRPOP's FreeText rule is overly permissive
 
-    #[cfg(feature = "pest-parser")]
     #[test]
     fn test_reject_function_name_starting_with_digit() {
         let result = parse_marigold(
@@ -996,7 +727,6 @@ mod negative_tests {
         );
     }
 
-    #[cfg(feature = "pest-parser")]
     #[test]
     fn test_reject_struct_name_starting_with_digit() {
         let result = parse_marigold("struct 123Point { x: i32 }");
@@ -1006,7 +736,6 @@ mod negative_tests {
         );
     }
 
-    #[cfg(feature = "pest-parser")]
     #[test]
     fn test_reject_enum_name_starting_with_digit() {
         let result = parse_marigold("enum 456Color { Red, Green }");
@@ -1016,7 +745,6 @@ mod negative_tests {
         );
     }
 
-    #[cfg(feature = "pest-parser")]
     #[test]
     fn test_reject_map_function_name_starting_with_digit() {
         let result = parse_marigold("range(0, 10).map(123transform).return");
@@ -1026,7 +754,6 @@ mod negative_tests {
         );
     }
 
-    #[cfg(feature = "pest-parser")]
     #[test]
     fn test_reject_filter_function_name_starting_with_digit() {
         let result = parse_marigold("range(0, 10).filter(789predicate).return");
