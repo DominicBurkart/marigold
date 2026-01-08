@@ -51,7 +51,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter() {
-        fn is_odd_number(i: &i32) -> bool {
+        fn is_odd_number(i: i32) -> bool {
             i % 2 == 1
         }
 
