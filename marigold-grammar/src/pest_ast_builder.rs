@@ -4,14 +4,11 @@ use crate::nodes::*;
 use pest::iterators::{Pair, Pairs};
 use std::str::FromStr;
 
-#[cfg(feature = "pest-parser")]
 use crate::parser::Rule;
 
 /// AST builder for converting Pest parse trees to Marigold AST nodes
-#[cfg(feature = "pest-parser")]
 pub struct PestAstBuilder;
 
-#[cfg(feature = "pest-parser")]
 impl PestAstBuilder {
     /// Build a complete program from the top-level program rule
     pub fn build_program(pairs: Pairs<Rule>) -> Result<Vec<TypedExpression>, String> {
@@ -344,16 +341,131 @@ impl PestAstBuilder {
         })
     }
 
-    /// Build read_file CSV input (stub for Phase 2)
-    fn build_read_file_csv_input(_pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
-        // TODO: Implement full read_file parsing
-        Err("read_file input not yet implemented in Pest parser".to_string())
+    fn build_read_file_csv_input(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
+        let mut inner = pair.into_inner();
+
+        // Extract path (quoted_string) - keep quotes for LALRPOP compatibility
+        let path = inner
+            .next()
+            .ok_or_else(|| "Missing path in read_file".to_string())?
+            .as_str();
+
+        // Extract struct type (free_text_identifier)
+        // Note: Pest only captures non-literal tokens, so we skip "csv", "struct", "=" literals
+        let deserialization_struct = inner
+            .next()
+            .ok_or_else(|| "Missing struct type in read_file".to_string())?
+            .as_str();
+
+        // Check for optional infer_compression parameter (boolean_value)
+        let infer_compression = inner.next().map(|p| p.as_str() == "true");
+
+        // Determine whether to use gzip compression
+        let use_gzip = match infer_compression {
+            Some(false) => false, // Explicitly disabled
+            Some(true) | None => {
+                // Auto-detect from file extension (check if path ends with .gz")
+                // Strip quotes from path to check extension
+                let path_without_quotes = &path[1..path.len() - 1];
+                path_without_quotes.ends_with(".gz")
+            }
+        };
+
+        // Generate code based on compression
+        let code = if use_gzip {
+            format!(
+                "
+           ::marigold::marigold_impl::csv_async::AsyncDeserializer::from_reader(
+             ::marigold::marigold_impl::async_compression::tokio::bufread::GzipDecoder::new(
+              ::marigold::marigold_impl::tokio::io::BufReader::new(
+                ::marigold::marigold_impl::tokio::fs::File::open({path})
+                  .await
+                  .expect(\"Marigold could not open file\")
+              )
+             ).compat()
+           ).into_deserialize::<{deserialization_struct}>()
+           "
+            )
+        } else {
+            format!(
+                "
+           ::marigold::marigold_impl::csv_async::AsyncDeserializer::from_reader(
+              ::marigold::marigold_impl::tokio::fs::File::open({path})
+               .await
+               .expect(\"Marigold could not open file\")
+               .compat()
+           ).into_deserialize::<{deserialization_struct}>()
+           "
+            )
+        };
+
+        Ok(InputFunctionNode {
+            variability: InputVariability::Variable,
+            input_count: InputCount::Unknown,
+            code,
+        })
     }
 
-    /// Build select_all input (stub for Phase 2)
-    fn build_select_all_input(_pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
-        // TODO: Implement full select_all parsing
-        Err("select_all input not yet implemented in Pest parser".to_string())
+    /// Build select_all input
+    fn build_select_all_input(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
+        let mut streams: Vec<InputAndMaybeStreamFunctions> = Vec::new();
+
+        for inner in pair.into_inner() {
+            if inner.as_rule() == Rule::input_and_maybe_stream_functions {
+                let stream = Self::build_input_and_maybe_stream_functions(inner)?;
+                streams.push(stream);
+            }
+        }
+
+        if streams.is_empty() {
+            return Err("select_all requires at least one stream".to_string());
+        }
+
+        let variability = crate::type_aggregation::aggregate_input_variability(
+            streams.iter().map(|s| s.inp.variability.clone()),
+        );
+        let input_count = crate::type_aggregation::aggregate_input_count(
+            streams.iter().map(|s| s.inp.input_count.clone()),
+        );
+
+        let stream_code = streams
+            .iter()
+            .map(|stream| {
+                let code = stream.code();
+                format!("::marigold::marigold_impl::run_stream::run_stream({code})")
+            })
+            .collect::<Vec<_>>()
+            .join(",\n");
+
+        let code = format!(
+            "::marigold::marigold_impl::futures::prelude::stream::select_all::select_all([{stream_code}])"
+        );
+
+        Ok(InputFunctionNode {
+            variability,
+            input_count,
+            code,
+        })
+    }
+
+    /// Build input_and_maybe_stream_functions node
+    fn build_input_and_maybe_stream_functions(
+        pair: Pair<Rule>,
+    ) -> Result<InputAndMaybeStreamFunctions, String> {
+        let mut inner = pair.into_inner();
+
+        let inp = Self::build_input_function(inner.next().ok_or_else(|| {
+            "Missing input function in input_and_maybe_stream_functions".to_string()
+        })?)?;
+
+        let mut funs = Vec::new();
+        for item in inner {
+            if item.as_rule() == Rule::stream_function {
+                funs.push(Self::build_stream_function(item)?);
+            }
+        }
+
+        Ok(InputAndMaybeStreamFunctions { inp, funs })
     }
 
     /// Build stream function node
@@ -411,7 +523,7 @@ impl PestAstBuilder {
         ));
 
         #[cfg(any(feature = "tokio", feature = "async-std"))]
-        return Ok(format!("map(|v| async move {{ if {filter_fn}(&v) {{ Some(v) }} else {{ None }} }}).buffered(std::cmp::max(2 * (::marigold::marigold_impl::num_cpus::get() - 1), 2)).filter_map(|v| v)"));
+        return Ok(format!("map(|v| async move {{ if {filter_fn}(v) {{ Some(v) }} else {{ None }} }}).buffered(std::cmp::max(2 * (::marigold::marigold_impl::num_cpus::get() - 1), 2)).filter_map(|v| v)"));
     }
 
     fn build_filter_map_fn(pair: Pair<Rule>) -> Result<String, String> {

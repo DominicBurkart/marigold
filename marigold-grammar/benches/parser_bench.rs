@@ -1,24 +1,9 @@
-//! Performance benchmarks comparing LALRPOP and Pest parser implementations.
-//!
-//! This benchmark suite validates that the Pest parser maintains performance
-//! within 10% of the LALRPOP baseline (Phase 2 success criteria).
+//! Performance benchmarks for the Pest parser implementation.
 //!
 //! # Running Benchmarks
 //!
-//! Run LALRPOP benchmarks (default):
 //! ```bash
 //! cargo bench --bench parser_bench
-//! ```
-//!
-//! Run Pest benchmarks:
-//! ```bash
-//! cargo bench --bench parser_bench --features pest-parser
-//! ```
-//!
-//! Compare both parsers:
-//! ```bash
-//! cargo bench --bench parser_bench && \
-//! cargo bench --bench parser_bench --features pest-parser
 //! ```
 //!
 //! # Benchmark Categories
@@ -28,25 +13,12 @@
 //! - **Real-world**: Examples from integration tests
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use marigold_grammar::parser::{LalrpopParser, MarigoldParser};
-
-#[cfg(feature = "pest-parser")]
-use marigold_grammar::parser::PestParser;
+use marigold_grammar::parser::{MarigoldParser, PestParser};
 
 /// Benchmark simple range with return
 fn bench_simple_range_return(c: &mut Criterion) {
     let input = "range(0, 100).return";
 
-    c.bench_function("lalrpop_simple_range_return", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
-    });
-
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_simple_range_return", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -65,16 +37,11 @@ fn bench_range_map_return(c: &mut Criterion) {
             .return
     "#;
 
-    c.bench_function("lalrpop_range_map_return", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_range_map_return", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_range_map_return", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -90,16 +57,11 @@ fn bench_chained_operations(c: &mut Criterion) {
             .return
     "#;
 
-    c.bench_function("lalrpop_chained_operations", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_chained_operations", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_chained_operations", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -118,16 +80,11 @@ fn bench_filter_operation(c: &mut Criterion) {
             .return
     "#;
 
-    c.bench_function("lalrpop_filter_operation", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_filter_operation", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_filter_operation", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -145,16 +102,11 @@ fn bench_struct_declaration(c: &mut Criterion) {
         range(0, 10).return
     "#;
 
-    c.bench_function("lalrpop_struct_declaration", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_struct_declaration", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_struct_declaration", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -177,16 +129,11 @@ fn bench_enum_declaration(c: &mut Criterion) {
         range(0, 5).return
     "#;
 
-    c.bench_function("lalrpop_enum_declaration", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_enum_declaration", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_enum_declaration", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -206,16 +153,11 @@ fn bench_enum_default_variant(c: &mut Criterion) {
         range(0, 5).return
     "#;
 
-    c.bench_function("lalrpop_enum_default_variant", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_enum_default_variant", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_enum_default_variant", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -228,16 +170,11 @@ fn bench_stream_variable(c: &mut Criterion) {
         x = range(0, 100)
     "#;
 
-    c.bench_function("lalrpop_stream_variable", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_stream_variable", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_stream_variable", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -252,16 +189,11 @@ fn bench_permutations_with_replacement(c: &mut Criterion) {
             .return
     "#;
 
-    c.bench_function("lalrpop_permutations_with_replacement", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_permutations_with_replacement", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_permutations_with_replacement", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -281,16 +213,11 @@ fn bench_keep_first_n(c: &mut Criterion) {
             .return
     "#;
 
-    c.bench_function("lalrpop_keep_first_n", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_keep_first_n", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_keep_first_n", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -322,16 +249,11 @@ fn bench_complex_csv_example(c: &mut Criterion) {
             .return
     "#;
 
-    c.bench_function("lalrpop_complex_csv_example", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_complex_csv_example", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_complex_csv_example", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -358,16 +280,11 @@ fn bench_multiple_streams(c: &mut Criterion) {
             .return
     "#;
 
-    c.bench_function("lalrpop_multiple_streams", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_multiple_streams", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_multiple_streams", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -380,16 +297,11 @@ fn bench_write_file(c: &mut Criterion) {
         range(0, 100).write_file("output.csv", csv)
     "#;
 
-    c.bench_function("lalrpop_write_file", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_write_file", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_write_file", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -400,16 +312,11 @@ fn bench_write_file(c: &mut Criterion) {
 fn bench_empty_input(c: &mut Criterion) {
     let input = "";
 
-    c.bench_function("lalrpop_empty_input", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_empty_input", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_empty_input", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -434,16 +341,11 @@ fn bench_deeply_nested(c: &mut Criterion) {
             .return
     "#;
 
-    c.bench_function("lalrpop_deeply_nested", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_deeply_nested", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_deeply_nested", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
@@ -465,16 +367,11 @@ fn bench_color_palette_picker(c: &mut Criterion) {
             .return
     "#;
 
-    c.bench_function("lalrpop_color_palette_picker", |b| {
-        let parser = LalrpopParser::new();
-        b.iter(|| {
-            parser
-                .parse(black_box(input))
-                .expect("LALRPOP parse failed")
-        });
+    c.bench_function("pest_color_palette_picker", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 
-    #[cfg(feature = "pest-parser")]
     c.bench_function("pest_color_palette_picker", |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));

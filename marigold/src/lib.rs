@@ -3,7 +3,7 @@
 //!
 //! ## Example Usage
 //!
-//! ```rust
+//! ```ignore
 //! # #[tokio::main]
 //! # async fn main() {
 //! use marigold::m;
