@@ -523,7 +523,7 @@ impl PestAstBuilder {
         ));
 
         #[cfg(any(feature = "tokio", feature = "async-std"))]
-        return Ok(format!("map(|v| async move {{ if {filter_fn}(&v) {{ Some(v) }} else {{ None }} }}).buffered(std::cmp::max(2 * (::marigold::marigold_impl::num_cpus::get() - 1), 2)).filter_map(|v| v)"));
+        return Ok(format!("map(|v| async move {{ if {filter_fn}(v) {{ Some(v) }} else {{ None }} }}).buffered(std::cmp::max(2 * (::marigold::marigold_impl::num_cpus::get() - 1), 2)).filter_map(|v| v)"));
     }
 
     fn build_filter_map_fn(pair: Pair<Rule>) -> Result<String, String> {
