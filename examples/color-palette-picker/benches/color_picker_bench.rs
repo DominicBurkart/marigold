@@ -3,7 +3,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use marigold::m;
 use marigold::marigold_impl::StreamExt;
 
-fn mod_fifty(i: &u8) -> bool {
+fn mod_fifty(i: u8) -> bool {
     i % 50 == 0
 }
 
