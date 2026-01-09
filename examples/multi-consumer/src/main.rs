@@ -2,11 +2,11 @@ use marigold::m;
 use marigold::marigold_impl::StreamExt;
 use std::collections::HashSet;
 
-fn is_odd(i: &i32) -> bool {
+fn is_odd(i: i32) -> bool {
     i % 2 == 1
 }
 
-fn is_even(i: &i32) -> bool {
+fn is_even(i: i32) -> bool {
     i % 2 == 0
 }
 
