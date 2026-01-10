@@ -88,7 +88,7 @@ mod tests {
 
     #[tokio::test]
     async fn limited_palette() {
-        let mod_fifty = |i: &u8| i % 50 == 0; // decrease space to search
+        let mod_fifty = |i: u8| i % 50 == 0; // decrease space to search
         assert_eq!(
             m!(
                 range(0, 255)

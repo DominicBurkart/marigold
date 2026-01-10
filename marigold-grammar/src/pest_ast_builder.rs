@@ -519,7 +519,7 @@ impl PestAstBuilder {
 
         #[cfg(not(any(feature = "tokio", feature = "async-std")))]
         return Ok(format!(
-            "filter(|v| ::marigold::marigold_impl::futures::future::ready({filter_fn}(v)))"
+            "filter(|v| ::marigold::marigold_impl::futures::future::ready({filter_fn}(v.clone())))"
         ));
 
         #[cfg(any(feature = "tokio", feature = "async-std"))]

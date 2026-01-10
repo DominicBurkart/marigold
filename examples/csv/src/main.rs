@@ -12,7 +12,7 @@ struct Ship {
 }
 
 #[allow(dead_code)]
-fn is_spherical(ship: &Ship) -> bool {
+fn is_spherical(ship: Ship) -> bool {
     ship.hull == "spherical"
 }
 
