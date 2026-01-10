@@ -199,19 +199,68 @@ impl PestAstBuilder {
             .as_str()
             .to_string();
 
-        let braced_content = inner
+        let body = inner
             .next()
-            .ok_or_else(|| "Missing struct body".to_string())?
-            .as_str()
-            .to_string();
+            .ok_or_else(|| "Missing struct body".to_string())?;
 
-        // Parse fields using regex (matching LALRPOP approach)
-        let fields = Self::parse_struct_fields(&braced_content)?;
+        let mut fields = Vec::new();
+        for body_inner in body.into_inner() {
+            if body_inner.as_rule() == Rule::struct_field_list {
+                for field_pair in body_inner.into_inner() {
+                    if field_pair.as_rule() == Rule::struct_field {
+                        fields.push(Self::parse_struct_field(field_pair)?);
+                    }
+                }
+            }
+        }
 
         Ok(TypedExpression::from(StructDeclarationNode {
             name: struct_name,
             fields,
         }))
+    }
+
+    fn parse_struct_field(pair: Pair<Rule>) -> Result<(String, Type), String> {
+        let mut inner = pair.into_inner();
+
+        let field_name = inner
+            .next()
+            .ok_or_else(|| "Missing field name".to_string())?
+            .as_str()
+            .to_string();
+
+        let type_expr = inner
+            .next()
+            .ok_or_else(|| "Missing field type".to_string())?;
+
+        let type_str = Self::type_expr_to_string(type_expr);
+        let field_type =
+            Type::from_str(&type_str).map_err(|_| format!("Invalid type: {}", type_str))?;
+
+        Ok((field_name, field_type))
+    }
+
+    fn type_expr_to_string(pair: Pair<Rule>) -> String {
+        let mut result = String::new();
+        for inner in pair.into_inner() {
+            match inner.as_rule() {
+                Rule::type_identifier => {
+                    result.push_str(inner.as_str());
+                }
+                Rule::generic_params => {
+                    result.push('<');
+                    let params: Vec<String> = inner
+                        .into_inner()
+                        .filter(|p| p.as_rule() == Rule::type_expr)
+                        .map(Self::type_expr_to_string)
+                        .collect();
+                    result.push_str(&params.join(", "));
+                    result.push('>');
+                }
+                _ => {}
+            }
+        }
+        result
     }
 
     /// Build enum declaration
@@ -224,15 +273,111 @@ impl PestAstBuilder {
             .as_str()
             .to_string();
 
-        let braced_content = inner
+        let body = inner
             .next()
-            .ok_or_else(|| "Missing enum body".to_string())?
+            .ok_or_else(|| "Missing enum body".to_string())?;
+
+        let mut variants = Vec::new();
+        let mut default_variant = None;
+
+        for body_inner in body.into_inner() {
+            match body_inner.as_rule() {
+                Rule::enum_variant_list => {
+                    for variant_pair in body_inner.into_inner() {
+                        if variant_pair.as_rule() == Rule::enum_variant {
+                            variants.push(Self::parse_enum_variant(variant_pair)?);
+                        }
+                    }
+                }
+                Rule::default_variant => {
+                    default_variant = Some(Self::parse_default_variant(body_inner)?);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(TypedExpression::from(EnumDeclarationNode {
+            name: enum_name,
+            variants,
+            default_variant,
+        }))
+    }
+
+    fn parse_enum_variant(pair: Pair<Rule>) -> Result<(String, Option<String>), String> {
+        let mut inner = pair.into_inner();
+
+        let variant_name = inner
+            .next()
+            .ok_or_else(|| "Missing variant name".to_string())?
             .as_str()
             .to_string();
 
-        // Use the existing parse_enum function from nodes.rs
-        let expr = crate::nodes::parse_enum(enum_name, braced_content);
-        Ok(expr)
+        let serialized_value = inner.next().and_then(|p| {
+            if p.as_rule() == Rule::enum_value {
+                p.into_inner().next().map(|qs| {
+                    let s = qs.as_str();
+                    s[1..s.len() - 1].to_string()
+                })
+            } else {
+                None
+            }
+        });
+
+        Ok((variant_name, serialized_value))
+    }
+
+    fn parse_default_variant(pair: Pair<Rule>) -> Result<DefaultEnumVariant, String> {
+        let mut inner = pair.into_inner();
+
+        let default_name = inner
+            .next()
+            .ok_or_else(|| "Missing default variant name".to_string())?
+            .as_str()
+            .to_string();
+
+        if let Some(next) = inner.next() {
+            match next.as_rule() {
+                Rule::default_variant_type => {
+                    let type_expr = next
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| "Missing type in default variant".to_string())?;
+                    let type_str = Self::type_expr_to_string(type_expr);
+                    if let Some(size_str) = type_str.strip_prefix("string_") {
+                        let size = size_str
+                            .parse::<u32>()
+                            .map_err(|_| "Invalid string size".to_string())?;
+                        Ok(DefaultEnumVariant::Sized(default_name, size))
+                    } else {
+                        Err(format!(
+                            "Default variant type must be string_N, got: {}",
+                            type_str
+                        ))
+                    }
+                }
+                Rule::enum_value => {
+                    let value = next
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| "Missing serialization value".to_string())?
+                        .as_str();
+                    let value_str = value[1..value.len() - 1].to_string();
+                    Ok(DefaultEnumVariant::WithDefaultValue(
+                        default_name,
+                        value_str,
+                    ))
+                }
+                _ => Ok(DefaultEnumVariant::WithDefaultValue(
+                    default_name.clone(),
+                    default_name,
+                )),
+            }
+        } else {
+            Ok(DefaultEnumVariant::WithDefaultValue(
+                default_name.clone(),
+                default_name,
+            ))
+        }
     }
 
     /// Build function declaration
@@ -840,32 +985,5 @@ impl PestAstBuilder {
             .to_string(),
             returning: false,
         })
-    }
-
-    /// Parse struct fields from braced content (matching LALRPOP regex approach)
-    fn parse_struct_fields(braced_content: &str) -> Result<Vec<(String, Type)>, String> {
-        use once_cell::sync::Lazy;
-        use regex::Regex;
-
-        static WHITESPACE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[\s]+").unwrap());
-        static FIELD_DECLARATION: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"([\S]+)[\s]*:[\s]*(.*)").unwrap());
-
-        let cleaned = WHITESPACE.replace_all(braced_content, " ");
-        let content = &cleaned[1..cleaned.len() - 1]; // Remove surrounding braces
-
-        let fields = content
-            .split(',')
-            .filter_map(|t| {
-                FIELD_DECLARATION.captures(t).map(|c| {
-                    (
-                        c[1].to_string(),
-                        Type::from_str(&c[2]).expect("could not parse type in struct definition"),
-                    )
-                })
-            })
-            .collect::<Vec<_>>();
-
-        Ok(fields)
     }
 }

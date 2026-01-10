@@ -78,10 +78,19 @@ free_text_literal = @{ ASCII_DIGIT+ | free_text_identifier }
 // Boolean value for parameters
 boolean_value = @{ "true" | "false" }
 
-// Braced content (for struct/enum bodies)
-// These are raw strings captured for the AST builder to parse more carefully
-// This allows flexibility in the struct/enum content while maintaining line numbers
-braced_content = @{ "{" ~ (!"}" ~ ANY)* ~ "}" }
+// === Type Expression Grammar ===
+//
+// Handles Rust type syntax for struct fields and enum variant types:
+// - Primitive types: i32, u64, bool, String, etc.
+// - Generic types: Vec<T>, Option<String>, HashMap<K, V>
+// - Nested generics: Vec<HashMap<String, i32>>
+// - Marigold's string_N types: string_10, string_256
+
+type_identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+generic_params = { "<" ~ type_expr ~ ("," ~ type_expr)* ~ ">" }
+
+type_expr = { type_identifier ~ generic_params? }
 
 // Function body markers
 // Function bodies are delimited by special markers rather than parsed here
@@ -345,13 +354,13 @@ compression_type = { "none" | "gz" }
 //
 // These structs must implement `serde::Deserialize` when used with `read_file`.
 
-struct_decl = {
-    "struct" ~ free_text_identifier ~ braced_content
-}
+struct_field = { free_text_identifier ~ ":" ~ type_expr }
 
-// Note: Field parsing will be done in AST builder using regex
-// to match LALRPOP's approach. This allows flexibility in the struct definition
-// while maintaining grammar simplicity.
+struct_field_list = { (struct_field ~ ","?)* }
+
+struct_body = { "{" ~ struct_field_list ~ "}" }
+
+struct_decl = { "struct" ~ free_text_identifier ~ struct_body }
 
 // === Enum Declarations ===
 //
@@ -384,13 +393,19 @@ struct_decl = {
 // Default variants are particularly useful for robust CSV parsing that doesn't fail
 // on unexpected enum values.
 
-enum_decl = {
-    "enum" ~ free_text_identifier ~ braced_content
-}
+enum_value = { "=" ~ quoted_string }
 
-// Note: Variant parsing (including default variants) will be done
-// in AST builder using regex to match LALRPOP's approach.
-// This is the same strategy as structs - capture raw content and parse carefully.
+enum_variant = { !("default") ~ free_text_identifier ~ enum_value? }
+
+default_variant_type = { "(" ~ type_expr ~ ")" }
+
+default_variant = { "default" ~ free_text_identifier ~ (default_variant_type | enum_value)? }
+
+enum_variant_list = { (enum_variant ~ ","?)* }
+
+enum_body = { "{" ~ enum_variant_list ~ default_variant? ~ ","? ~ "}" }
+
+enum_decl = { "enum" ~ free_text_identifier ~ enum_body }
 
 // === Function Declarations ===
 //

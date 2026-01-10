@@ -930,3 +930,117 @@ mod negative_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod struct_enum_tests {
+    use super::*;
+
+    #[test]
+    fn test_struct_simple_fields() {
+        let result = parse_marigold("struct Foo { x: i32, y: u64 }");
+        assert!(result.is_ok(), "Should parse struct with simple fields");
+        let output = result.unwrap();
+        assert!(output.contains("struct Foo"));
+        assert!(output.contains("x: i32"));
+        assert!(output.contains("y: u64"));
+    }
+
+    #[test]
+    fn test_struct_generic_fields() {
+        let result = parse_marigold("struct Bar { data: Vec<String> }");
+        assert!(result.is_ok(), "Should parse struct with generic fields");
+        let output = result.unwrap();
+        assert!(output.contains("struct Bar"));
+    }
+
+    #[test]
+    fn test_struct_nested_generics() {
+        let result = parse_marigold("struct Baz { map: HashMap<String, Vec<i32>> }");
+        assert!(
+            result.is_ok(),
+            "Should parse struct with nested generic fields"
+        );
+        let output = result.unwrap();
+        assert!(output.contains("struct Baz"));
+    }
+
+    #[test]
+    fn test_struct_string_n_type() {
+        let result = parse_marigold("struct Qux { name: string_64 }");
+        assert!(result.is_ok(), "Should parse struct with string_N type");
+        let output = result.unwrap();
+        assert!(output.contains("struct Qux"));
+        assert!(output.contains("ArrayString<64>"));
+    }
+
+    #[test]
+    fn test_struct_option_field() {
+        let result = parse_marigold("struct Opt { value: Option<i32> }");
+        assert!(result.is_ok(), "Should parse struct with Option field");
+        let output = result.unwrap();
+        assert!(output.contains("struct Opt"));
+        assert!(output.contains("Option<i32>"));
+    }
+
+    #[test]
+    fn test_struct_trailing_comma() {
+        let result = parse_marigold("struct Trail { x: i32, }");
+        assert!(result.is_ok(), "Should parse struct with trailing comma");
+    }
+
+    #[test]
+    fn test_enum_with_values() {
+        let result = parse_marigold(r#"enum Status { Active = "active", Inactive = "inactive" }"#);
+        assert!(result.is_ok(), "Should parse enum with values");
+        let output = result.unwrap();
+        assert!(output.contains("enum Status"));
+        assert!(output.contains("Active"));
+        assert!(output.contains("Inactive"));
+    }
+
+    #[test]
+    fn test_enum_default_variant() {
+        let result = parse_marigold(r#"enum E { A = "a", default Unknown }"#);
+        assert!(result.is_ok(), "Should parse enum with default variant");
+    }
+
+    #[test]
+    fn test_enum_default_with_type() {
+        let result = parse_marigold(r#"enum E { A = "a", default Other(string_10) }"#);
+        assert!(
+            result.is_ok(),
+            "Should parse enum with default variant with type: {:?}",
+            result
+        );
+        let output = result.unwrap();
+        assert!(output.contains("enum E"));
+        assert!(output.contains("Other"));
+    }
+
+    #[test]
+    fn test_enum_default_with_value() {
+        let result = parse_marigold(r#"enum E { A = "a", default Unknown = "unknown" }"#);
+        assert!(
+            result.is_ok(),
+            "Should parse enum with default variant with value"
+        );
+    }
+
+    #[test]
+    fn test_struct_and_stream() {
+        let result = parse_marigold(
+            r#"struct Ship { class: string_8, hull: string_8 }
+            range(0, 10).return"#,
+        );
+        assert!(result.is_ok(), "Should parse struct followed by stream");
+    }
+
+    #[test]
+    fn test_enum_and_struct_together() {
+        let result = parse_marigold(
+            r#"enum Hull { Spherical = "spherical", Split = "split" }
+            struct Vaisseau { class: string_8, hull: Hull }"#,
+        );
+        assert!(result.is_ok(), "Should parse enum and struct together");
+    }
+}
