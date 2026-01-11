@@ -410,7 +410,8 @@ impl PestAstBuilder {
                     }
                 }
                 Rule::fn_body => {
-                    body = item.as_str().to_string();
+                    let raw = item.as_str();
+                    body = raw[1..raw.len() - 1].to_string();
                 }
                 _ => {}
             }
@@ -435,10 +436,13 @@ impl PestAstBuilder {
             .as_str()
             .to_string();
 
-        // Check if there's an ampersand and type
         let mut param_type = String::new();
         for part in parts {
-            param_type.push_str(part.as_str());
+            match part.as_rule() {
+                Rule::fn_param_ref => param_type.push('&'),
+                Rule::free_text_identifier => param_type.push_str(part.as_str()),
+                _ => {}
+            }
         }
 
         Ok((param_name, param_type))

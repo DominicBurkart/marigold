@@ -92,10 +92,52 @@ generic_params = { "<" ~ type_expr ~ ("," ~ type_expr)* ~ ">" }
 
 type_expr = { type_identifier ~ generic_params? }
 
-// Function body markers
-// Function bodies are delimited by special markers rather than parsed here
-// The actual Rust code is extracted verbatim and inserted into generated output
-fn_body = @{ "%%%MARIGOLD_FUNCTION_START%%%" ~ (!"%%%MARIGOLD_FUNCTION_END%%%" ~ ANY)* ~ "%%%MARIGOLD_FUNCTION_END%%%" }
+// === Function Body Grammar ===
+//
+// Handles proper brace matching in function bodies, accounting for:
+// - Nested braces in code
+// - String literals containing braces
+// - Character literals
+// - Comments
+
+// String literal - handles escaped quotes
+fn_string_literal = @{ "\"" ~ (fn_escape_sequence | !("\"" | "\\") ~ ANY)* ~ "\"" }
+
+// Raw string literals - r#"..."#
+fn_raw_string_literal = @{ "r" ~ PEEK[..] ~ fn_raw_string_hashes }
+fn_raw_string_hashes = @{ "#"* ~ "\"" ~ fn_raw_string_body ~ "\"" ~ "#"* }
+fn_raw_string_body = @{ (!("\"") ~ ANY)* }
+
+// Character literal - handles escaped chars
+fn_char_literal = @{ "'" ~ (fn_escape_sequence | !("'" | "\\") ~ ANY) ~ "'" }
+
+// Escape sequences in strings/chars
+fn_escape_sequence = @{ "\\" ~ ANY }
+
+// Line comment
+fn_line_comment = @{ "//" ~ (!NEWLINE ~ ANY)* }
+
+// Block comment (non-nested for simplicity)
+fn_block_comment = @{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+// Balanced braces for function body content
+fn_body_content = @{
+    (
+        fn_string_literal |
+        fn_raw_string_literal |
+        fn_char_literal |
+        fn_line_comment |
+        fn_block_comment |
+        fn_body_braced |
+        (!("{" | "}") ~ ANY)
+    )*
+}
+
+// Recursive rule for nested braces
+fn_body_braced = @{ "{" ~ fn_body_content ~ "}" }
+
+// Function body - the outer braces with content
+fn_body = @{ "{" ~ fn_body_content ~ "}" }
 
 // === Stream Syntax ===
 //
@@ -418,22 +460,22 @@ enum_decl = { "enum" ~ free_text_identifier ~ enum_body }
 // - Name: Rust identifier
 // - Parameters: Optional list of (name: Type) pairs, with optional & for references
 // - Return type: Rust type (can be generic or complex)
-// - Body: Rust code between special markers
+// - Body: Rust code in braces with proper brace matching
 //
 // # Examples
 //
 // ```
-// fn double(x: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%%x * 2%%%MARIGOLD_FUNCTION_END%%%
+// fn double(x: i32) -> i32 { x * 2 }
 //
-// fn filter_positive(x: &i32) -> bool %%%MARIGOLD_FUNCTION_START%%%x > 0%%%MARIGOLD_FUNCTION_END%%%
+// fn filter_positive(x: &i32) -> bool { *x > 0 }
 //
-// fn process(data: &Data) -> Option<String> %%%MARIGOLD_FUNCTION_START%%%
+// fn process(data: &Data) -> Option<String> {
 //     if data.valid {
 //         Some(data.name.clone())
 //     } else {
 //         None
 //     }
-// %%%MARIGOLD_FUNCTION_END%%%
+// }
 // ```
 //
 // Functions are inserted directly into the generated Rust code, so they must be valid Rust.
@@ -450,8 +492,9 @@ fn_param_list = {
 
 // Single parameter: name: Type or name: &Type
 // The & is optional for reference parameters
+fn_param_ref = { "&" }
 fn_param = {
-    free_text_identifier ~ ":" ~ "&"? ~ free_text_identifier
+    free_text_identifier ~ ":" ~ fn_param_ref? ~ free_text_identifier
 }
 
 // Return type: can be complex Rust types like Vec<String>, Option<T>, etc.

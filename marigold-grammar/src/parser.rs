@@ -558,9 +558,7 @@ mod negative_tests {
 
     #[test]
     fn test_reject_function_without_name() {
-        let result = parse_marigold(
-            "fn (x: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%% x %%%MARIGOLD_FUNCTION_END%%%",
-        );
+        let result = parse_marigold("fn (x: i32) -> i32 { x }");
         assert!(
             result.is_err(),
             "Should reject function declaration without name"
@@ -718,9 +716,7 @@ mod negative_tests {
 
     #[test]
     fn test_reject_function_name_starting_with_digit() {
-        let result = parse_marigold(
-            "fn 123func(x: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%% x %%%MARIGOLD_FUNCTION_END%%%",
-        );
+        let result = parse_marigold("fn 123func(x: i32) -> i32 { x }");
         assert!(
             result.is_err(),
             "Should reject function name starting with digit (free_text_identifier validation)"
@@ -1042,5 +1038,160 @@ mod struct_enum_tests {
             struct Vaisseau { class: string_8, hull: Hull }"#,
         );
         assert!(result.is_ok(), "Should parse enum and struct together");
+    }
+}
+
+#[cfg(test)]
+mod function_grammar_tests {
+    use super::*;
+
+    #[test]
+    fn test_fn_simple_body() {
+        let result = parse_marigold("fn double(x: i32) -> i32 { x * 2 }");
+        assert!(result.is_ok(), "Should parse simple function body");
+        let output = result.unwrap();
+        assert!(output.contains("const fn double"));
+        assert!(output.contains("x * 2"));
+    }
+
+    #[test]
+    fn test_fn_nested_braces() {
+        let result = parse_marigold("fn make_struct(x: i32) -> Foo { Foo { value: x } }");
+        assert!(result.is_ok(), "Should parse function with nested braces");
+        let output = result.unwrap();
+        assert!(output.contains("Foo { value: x }"));
+    }
+
+    #[test]
+    fn test_fn_deeply_nested_braces() {
+        let result = parse_marigold(
+            r#"fn complex(x: i32) -> Bar {
+                if x > 0 {
+                    Bar { inner: Baz { value: x } }
+                } else {
+                    Bar { inner: Baz { value: 0 } }
+                }
+            }"#,
+        );
+        assert!(
+            result.is_ok(),
+            "Should parse function with deeply nested braces"
+        );
+    }
+
+    #[test]
+    fn test_fn_string_with_braces() {
+        let result = parse_marigold(r#"fn get_json(x: i32) -> String { format!("{{ }}", x) }"#);
+        assert!(
+            result.is_ok(),
+            "Should parse function with braces in string literal"
+        );
+    }
+
+    #[test]
+    fn test_fn_char_literal_brace() {
+        let result = parse_marigold("fn get_open_brace() -> char { '{' }");
+        assert!(
+            result.is_ok(),
+            "Should parse function with brace char literal"
+        );
+
+        let result2 = parse_marigold("fn get_close_brace() -> char { '}' }");
+        assert!(
+            result2.is_ok(),
+            "Should parse function with close brace char literal"
+        );
+    }
+
+    #[test]
+    fn test_fn_with_line_comment() {
+        let result = parse_marigold(
+            r#"fn commented(x: i32) -> i32 {
+                // This { is in a comment
+                x + 1
+            }"#,
+        );
+        assert!(
+            result.is_ok(),
+            "Should parse function with line comment containing brace"
+        );
+    }
+
+    #[test]
+    fn test_fn_with_block_comment() {
+        let result = parse_marigold(
+            r#"fn block_commented(x: i32) -> i32 {
+                /* This { is in a block comment */
+                x + 1
+            }"#,
+        );
+        assert!(
+            result.is_ok(),
+            "Should parse function with block comment containing brace"
+        );
+    }
+
+    #[test]
+    fn test_fn_multiple_functions() {
+        let result = parse_marigold(
+            r#"fn first(x: i32) -> i32 { x + 1 }
+               fn second(y: i32) -> i32 { y * 2 }"#,
+        );
+        assert!(result.is_ok(), "Should parse multiple functions");
+        let output = result.unwrap();
+        assert!(output.contains("const fn first"));
+        assert!(output.contains("const fn second"));
+    }
+
+    #[test]
+    fn test_fn_with_reference_params() {
+        let result = parse_marigold("fn process(data: &Data) -> bool { data.valid }");
+        assert!(
+            result.is_ok(),
+            "Should parse function with reference parameter"
+        );
+        let output = result.unwrap();
+        assert!(output.contains("data: &Data"));
+    }
+
+    #[test]
+    fn test_fn_generic_return_type() {
+        let result = parse_marigold("fn maybe(x: i32) -> Option<i32> { Some(x) }");
+        assert!(
+            result.is_ok(),
+            "Should parse function with generic return type"
+        );
+        let output = result.unwrap();
+        assert!(output.contains("Option<i32>"));
+    }
+
+    #[test]
+    fn test_fn_empty_params() {
+        let result = parse_marigold("fn zero() -> i32 { 0 }");
+        assert!(result.is_ok(), "Should parse function with no parameters");
+    }
+
+    #[test]
+    fn test_fn_with_escaped_string() {
+        let result = parse_marigold(r#"fn escaped() -> String { "hello \"world\"".to_string() }"#);
+        assert!(
+            result.is_ok(),
+            "Should parse function with escaped quotes in string"
+        );
+    }
+
+    #[test]
+    fn test_fn_with_stream() {
+        let result = parse_marigold(
+            r#"fn double(x: i32) -> i32 { x * 2 }
+               range(0, 10).map(double).return"#,
+        );
+        assert!(
+            result.is_ok(),
+            "Should parse function declaration with stream"
+        );
+        let output = result.unwrap();
+        assert!(output.contains("const fn double"));
+        assert!(output.contains(".map(double)"));
     }
 }
