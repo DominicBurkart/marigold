@@ -854,8 +854,8 @@ impl PestAstBuilder {
         let cleaned = WHITESPACE.replace_all(braced_content, " ");
         let content = &cleaned[1..cleaned.len() - 1]; // Remove surrounding braces
 
-        let fields = content
-            .split(',')
+        let fields = Self::split_respecting_parens(content)
+            .iter()
             .filter_map(|t| {
                 FIELD_DECLARATION.captures(t).map(|c| {
                     (
@@ -867,5 +867,37 @@ impl PestAstBuilder {
             .collect::<Vec<_>>();
 
         Ok(fields)
+    }
+
+    fn split_respecting_parens(input: &str) -> Vec<String> {
+        let mut result = Vec::new();
+        let mut current = String::new();
+        let mut paren_depth: usize = 0;
+
+        for ch in input.chars() {
+            match ch {
+                '(' => {
+                    paren_depth += 1;
+                    current.push(ch);
+                }
+                ')' => {
+                    paren_depth = paren_depth.saturating_sub(1);
+                    current.push(ch);
+                }
+                ',' if paren_depth == 0 => {
+                    result.push(current.clone());
+                    current.clear();
+                }
+                _ => {
+                    current.push(ch);
+                }
+            }
+        }
+
+        if !current.is_empty() {
+            result.push(current);
+        }
+
+        result
     }
 }
