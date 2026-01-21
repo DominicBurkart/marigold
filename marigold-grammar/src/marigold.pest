@@ -62,6 +62,84 @@ type_annotation = @{
     (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "<" | ">" | "[" | "]" | ",")*
 }
 
+// === Bounded Type Syntax ===
+//
+// Bounded types define numerical types with explicit min/max bounds.
+// These bounds can be literal values or references to other types.
+//
+// # Examples
+//
+// ```
+// struct Pixel {
+//     color_index: boundedInt(0, 255),
+//     alpha: boundedUint(0, Color.len()),
+// }
+// ```
+//
+// Bounds can use:
+// - Literals: `0`, `-5`, `100`
+// - Type references: `MyEnum.len()`, `OtherType.min()`, `Field.cardinality()`
+// - Arithmetic: `MyEnum.len() - 1`, `2 * Size.max()`
+
+// boundedInt(min, max) - Signed bounded integer
+// The actual Rust type will be selected based on the resolved bounds (i8, i16, i32, i64, i128)
+bounded_int_type = {
+    "boundedInt" ~ "(" ~ bound_expr ~ "," ~ bound_expr ~ ")"
+}
+
+// boundedUint(min, max) - Unsigned bounded integer
+// The actual Rust type will be selected based on the resolved bounds (u8, u16, u32, u64, u128)
+bounded_uint_type = {
+    "boundedUint" ~ "(" ~ bound_expr ~ "," ~ bound_expr ~ ")"
+}
+
+// Bound expression - can be a literal, type reference, or arithmetic expression
+bound_expr = {
+    bound_additive_expr
+}
+
+bound_additive_expr = {
+    bound_multiplicative_expr ~ (bound_add_op ~ bound_multiplicative_expr)*
+}
+
+bound_multiplicative_expr = {
+    bound_unary_expr ~ (bound_mul_op ~ bound_unary_expr)*
+}
+
+bound_unary_expr = {
+    "-" ~ bound_unary_expr |
+    bound_primary_expr
+}
+
+bound_primary_expr = {
+    "(" ~ bound_expr ~ ")" |
+    bound_type_ref |
+    bound_literal
+}
+
+// Numeric literal (including negative numbers)
+bound_literal = @{
+    "-"? ~ ASCII_DIGIT+ ~ ("_" ~ ASCII_DIGIT+)*
+}
+
+// Type reference with method call: TypeName.method()
+// Available methods: len(), min(), max(), cardinality()
+bound_type_ref = {
+    bound_type_name ~ "." ~ bound_method ~ "(" ~ ")"
+}
+
+bound_type_name = @{
+    (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
+}
+
+bound_method = @{
+    "len" | "min" | "max" | "cardinality"
+}
+
+// Arithmetic operators
+bound_add_op = { "+" | "-" }
+bound_mul_op = { "*" | "/" }
+
 // FreeText split into two rules for better type safety:
 //
 // 1. free_text_identifier - Must start with letter or underscore (for identifiers, function names, type names)
