@@ -16,17 +16,21 @@
 //!
 //! ## Examples
 //!
-//! ```ignore
+//! ```
 //! use marigold_grammar::bound_expr::parse_bound_expr;
+//! use marigold_grammar::nodes::{BoundExpr, BoundOp, ArithOp};
 //!
 //! // Simple literal
 //! let expr = parse_bound_expr("42").unwrap();
+//! assert!(matches!(expr, BoundExpr::Literal(42)));
 //!
 //! // Type reference
 //! let expr = parse_bound_expr("MyEnum.len()").unwrap();
+//! assert!(matches!(expr, BoundExpr::TypeReference(_, BoundOp::Len)));
 //!
 //! // Arithmetic expression
 //! let expr = parse_bound_expr("MyEnum.len() - 1").unwrap();
+//! assert!(matches!(expr, BoundExpr::BinaryOp { op: ArithOp::Sub, .. }));
 //! ```
 
 use crate::nodes::{ArithOp, BoundExpr, BoundOp};

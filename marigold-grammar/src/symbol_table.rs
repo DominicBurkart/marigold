@@ -14,15 +14,27 @@
 //! [`BoundResolver`](crate::bound_resolution::BoundResolver) to evaluate
 //! type references.
 //!
-//! ```ignore
+//! ```
 //! use marigold_grammar::symbol_table::SymbolTable;
+//! use marigold_grammar::nodes::{TypedExpression, EnumDeclarationNode};
+//!
+//! // Create an enum with 3 variants
+//! let expressions = vec![
+//!     TypedExpression::EnumDeclaration(EnumDeclarationNode {
+//!         name: "Color".to_string(),
+//!         variants: vec![
+//!             ("Red".to_string(), Some("r".to_string())),
+//!             ("Green".to_string(), Some("g".to_string())),
+//!             ("Blue".to_string(), Some("b".to_string())),
+//!         ],
+//!         default_variant: None,
+//!     }),
+//! ];
 //!
 //! let table = SymbolTable::from_expressions(&expressions);
 //!
 //! // Check if an enum exists and get its variant count
-//! if let Some(len) = table.get_enum_len("Color") {
-//!     println!("Color has {} variants", len);
-//! }
+//! assert_eq!(table.get_enum_len("Color"), Some(3));
 //! ```
 
 use crate::nodes::{BoundExpr, EnumDeclarationNode, StructDeclarationNode, Type, TypedExpression};

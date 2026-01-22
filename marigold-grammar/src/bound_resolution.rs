@@ -17,23 +17,29 @@
 //!
 //! ## Example
 //!
-//! ```ignore
+//! ```
 //! use marigold_grammar::bound_resolution::BoundResolver;
 //! use marigold_grammar::symbol_table::SymbolTable;
+//! use marigold_grammar::nodes::{TypedExpression, StructDeclarationNode, Type, BoundExpr};
+//!
+//! // Create a struct with a bounded field
+//! let expressions = vec![
+//!     TypedExpression::StructDeclaration(StructDeclarationNode {
+//!         name: "Test".to_string(),
+//!         fields: vec![("value".to_string(), Type::BoundedInt {
+//!             min: BoundExpr::Literal(0),
+//!             max: BoundExpr::Literal(100),
+//!         })],
+//!     }),
+//! ];
 //!
 //! let table = SymbolTable::from_expressions(&expressions);
 //! let mut resolver = BoundResolver::new(&table);
 //!
-//! match resolver.resolve_all() {
-//!     Ok(resolved_bounds) => {
-//!         // Use resolved bounds for code generation
-//!     }
-//!     Err(errors) => {
-//!         for error in errors {
-//!             eprintln!("Error: {}", error);
-//!         }
-//!     }
-//! }
+//! let resolved = resolver.resolve_all().unwrap();
+//! let bound = resolved.get("Test", "value").unwrap();
+//! assert_eq!(bound.min, 0);
+//! assert_eq!(bound.max, 100);
 //! ```
 
 use crate::nodes::{ArithOp, BoundExpr, BoundOp};
