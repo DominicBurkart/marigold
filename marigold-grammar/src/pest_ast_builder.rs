@@ -1082,8 +1082,8 @@ mod tests {
     use pest::Parser;
 
     fn parse_struct(input: &str) -> Result<TypedExpression, String> {
-        let pairs = MarigoldPestParser::parse(Rule::struct_decl, input)
-            .map_err(|e| e.to_string())?;
+        let pairs =
+            MarigoldPestParser::parse(Rule::struct_decl, input).map_err(|e| e.to_string())?;
         let pair = pairs.into_iter().next().unwrap();
         PestAstBuilder::build_struct_decl(pair)
     }
@@ -1098,24 +1098,36 @@ mod tests {
     #[test]
     fn test_struct_with_primitives() {
         let fields = get_fields(parse_struct("struct Foo { x: u32, y: bool }").unwrap());
-        assert_eq!(fields, vec![
-            ("x".to_string(), Type::U32),
-            ("y".to_string(), Type::Bool),
-        ]);
+        assert_eq!(
+            fields,
+            vec![("x".to_string(), Type::U32), ("y".to_string(), Type::Bool),]
+        );
     }
 
     #[test]
     fn test_struct_with_bounded_int() {
         let fields = get_fields(parse_struct("struct Foo { v: boundedInt(0, 100) }").unwrap());
         assert_eq!(fields.len(), 1);
-        assert!(matches!(&fields[0].1, Type::BoundedInt { min: BoundExpr::Literal(0), max: BoundExpr::Literal(100) }));
+        assert!(matches!(
+            &fields[0].1,
+            Type::BoundedInt {
+                min: BoundExpr::Literal(0),
+                max: BoundExpr::Literal(100)
+            }
+        ));
     }
 
     #[test]
     fn test_struct_with_bounded_uint() {
         let fields = get_fields(parse_struct("struct Foo { v: boundedUint(0, 255) }").unwrap());
         assert_eq!(fields.len(), 1);
-        assert!(matches!(&fields[0].1, Type::BoundedUint { min: BoundExpr::Literal(0), max: BoundExpr::Literal(255) }));
+        assert!(matches!(
+            &fields[0].1,
+            Type::BoundedUint {
+                min: BoundExpr::Literal(0),
+                max: BoundExpr::Literal(255)
+            }
+        ));
     }
 
     #[test]
@@ -1123,11 +1135,14 @@ mod tests {
         let fields = get_fields(parse_struct("struct Foo { v: boundedInt(-128, 127) }").unwrap());
         match &fields[0].1 {
             Type::BoundedInt { min, max } => {
-                assert_eq!(*min, BoundExpr::BinaryOp {
-                    left: Box::new(BoundExpr::Literal(0)),
-                    op: ArithOp::Sub,
-                    right: Box::new(BoundExpr::Literal(128)),
-                });
+                assert_eq!(
+                    *min,
+                    BoundExpr::BinaryOp {
+                        left: Box::new(BoundExpr::Literal(0)),
+                        op: ArithOp::Sub,
+                        right: Box::new(BoundExpr::Literal(128)),
+                    }
+                );
                 assert_eq!(*max, BoundExpr::Literal(127));
             }
             _ => panic!("Expected BoundedInt"),
@@ -1139,8 +1154,20 @@ mod tests {
         let fields = get_fields(parse_struct("struct Foo { v: boundedInt(-1000, -1) }").unwrap());
         match &fields[0].1 {
             Type::BoundedInt { min, max } => {
-                assert!(matches!(min, BoundExpr::BinaryOp { op: ArithOp::Sub, .. }));
-                assert!(matches!(max, BoundExpr::BinaryOp { op: ArithOp::Sub, .. }));
+                assert!(matches!(
+                    min,
+                    BoundExpr::BinaryOp {
+                        op: ArithOp::Sub,
+                        ..
+                    }
+                ));
+                assert!(matches!(
+                    max,
+                    BoundExpr::BinaryOp {
+                        op: ArithOp::Sub,
+                        ..
+                    }
+                ));
             }
             _ => panic!("Expected BoundedInt"),
         }
@@ -1148,7 +1175,8 @@ mod tests {
 
     #[test]
     fn test_struct_with_type_reference_bound() {
-        let fields = get_fields(parse_struct("struct Foo { v: boundedInt(0, MyEnum.len()) }").unwrap());
+        let fields =
+            get_fields(parse_struct("struct Foo { v: boundedInt(0, MyEnum.len()) }").unwrap());
         match &fields[0].1 {
             Type::BoundedInt { min, max } => {
                 assert_eq!(*min, BoundExpr::Literal(0));
@@ -1160,10 +1188,17 @@ mod tests {
 
     #[test]
     fn test_struct_with_arithmetic_bound() {
-        let fields = get_fields(parse_struct("struct Foo { v: boundedInt(0, MyEnum.len() - 1) }").unwrap());
+        let fields =
+            get_fields(parse_struct("struct Foo { v: boundedInt(0, MyEnum.len() - 1) }").unwrap());
         match &fields[0].1 {
             Type::BoundedInt { max, .. } => {
-                assert!(matches!(max, BoundExpr::BinaryOp { op: ArithOp::Sub, .. }));
+                assert!(matches!(
+                    max,
+                    BoundExpr::BinaryOp {
+                        op: ArithOp::Sub,
+                        ..
+                    }
+                ));
             }
             _ => panic!("Expected BoundedInt"),
         }
@@ -1172,7 +1207,10 @@ mod tests {
     #[test]
     fn test_struct_with_optional_field() {
         let fields = get_fields(parse_struct("struct Foo { v: Option<u32> }").unwrap());
-        assert_eq!(fields, vec![("v".to_string(), Type::Option(Box::new(Type::U32)))]);
+        assert_eq!(
+            fields,
+            vec![("v".to_string(), Type::Option(Box::new(Type::U32)))]
+        );
     }
 
     #[test]
