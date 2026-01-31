@@ -2,7 +2,6 @@
 
 use crate::nodes::*;
 use pest::iterators::{Pair, Pairs};
-use std::str::FromStr;
 
 use crate::parser::Rule;
 
@@ -199,19 +198,252 @@ impl PestAstBuilder {
             .as_str()
             .to_string();
 
-        let braced_content = inner
+        let field_list = inner
             .next()
-            .ok_or_else(|| "Missing struct body".to_string())?
-            .as_str()
-            .to_string();
+            .ok_or_else(|| "Missing struct field list".to_string())?;
 
-        // Parse fields using regex (matching LALRPOP approach)
-        let fields = Self::parse_struct_fields(&braced_content)?;
+        let mut fields = Vec::new();
+        for field_pair in field_list.into_inner() {
+            if field_pair.as_rule() == Rule::struct_field {
+                fields.push(Self::build_struct_field(field_pair)?);
+            }
+        }
 
         Ok(TypedExpression::from(StructDeclarationNode {
             name: struct_name,
             fields,
         }))
+    }
+
+    fn build_struct_field(pair: Pair<Rule>) -> Result<(String, Type), String> {
+        let mut inner = pair.into_inner();
+        let name = inner
+            .next()
+            .ok_or_else(|| "Missing field name".to_string())?
+            .as_str()
+            .to_string();
+        let field_type_pair = inner
+            .next()
+            .ok_or_else(|| "Missing field type".to_string())?;
+        let ty = Self::build_field_type(field_type_pair)?;
+        Ok((name, ty))
+    }
+
+    fn build_field_type(pair: Pair<Rule>) -> Result<Type, String> {
+        let inner = pair
+            .into_inner()
+            .next()
+            .ok_or_else(|| "Empty field_type".to_string())?;
+
+        match inner.as_rule() {
+            Rule::optional_type => {
+                let inner_field_type = inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| "Missing inner type for Option".to_string())?;
+                let inner_ty = Self::build_field_type(inner_field_type)?;
+                Ok(Type::Option(Box::new(inner_ty)))
+            }
+            Rule::bounded_int_type => {
+                let mut exprs = inner.into_inner();
+                let min = Self::build_bound_expr(
+                    exprs
+                        .next()
+                        .ok_or_else(|| "Missing min in boundedInt".to_string())?,
+                )?;
+                let max = Self::build_bound_expr(
+                    exprs
+                        .next()
+                        .ok_or_else(|| "Missing max in boundedInt".to_string())?,
+                )?;
+                Ok(Type::BoundedInt { min, max })
+            }
+            Rule::bounded_uint_type => {
+                let mut exprs = inner.into_inner();
+                let min = Self::build_bound_expr(
+                    exprs
+                        .next()
+                        .ok_or_else(|| "Missing min in boundedUint".to_string())?,
+                )?;
+                let max = Self::build_bound_expr(
+                    exprs
+                        .next()
+                        .ok_or_else(|| "Missing max in boundedUint".to_string())?,
+                )?;
+                Ok(Type::BoundedUint { min, max })
+            }
+            Rule::string_type => {
+                let s = inner.as_str();
+                let size_str = s
+                    .strip_prefix("string_")
+                    .ok_or_else(|| format!("Invalid string type: {}", s))?;
+                let size: u32 = size_str
+                    .parse()
+                    .map_err(|_| format!("Invalid string size: {}", size_str))?;
+                Ok(Type::Str(size))
+            }
+            Rule::primitive_type => {
+                let s = inner.as_str();
+                match s {
+                    "u8" => Ok(Type::U8),
+                    "u16" => Ok(Type::U16),
+                    "u32" => Ok(Type::U32),
+                    "u64" => Ok(Type::U64),
+                    "u128" => Ok(Type::U128),
+                    "usize" => Ok(Type::USize),
+                    "i8" => Ok(Type::I8),
+                    "i16" => Ok(Type::I16),
+                    "i32" => Ok(Type::I32),
+                    "i64" => Ok(Type::I64),
+                    "i128" => Ok(Type::I128),
+                    "isize" => Ok(Type::ISize),
+                    "f32" => Ok(Type::F32),
+                    "f64" => Ok(Type::F64),
+                    "bool" => Ok(Type::Bool),
+                    "char" => Ok(Type::Char),
+                    _ => Err(format!("Unknown primitive type: {}", s)),
+                }
+            }
+            Rule::custom_type => {
+                let s = inner.as_str();
+                Ok(Type::Custom(
+                    arrayvec::ArrayString::from(s)
+                        .map_err(|_| format!("Type name too long: {}", s))?,
+                ))
+            }
+            rule => Err(format!("Unexpected field type rule: {:?}", rule)),
+        }
+    }
+
+    fn build_bound_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
+        let inner = pair
+            .into_inner()
+            .next()
+            .ok_or_else(|| "Empty bound_expr".to_string())?;
+        Self::build_bound_additive_expr(inner)
+    }
+
+    fn build_bound_additive_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
+        let mut inner = pair.into_inner();
+        let first = inner
+            .next()
+            .ok_or_else(|| "Empty additive expr".to_string())?;
+        let mut left = Self::build_bound_multiplicative_expr(first)?;
+
+        while let Some(op_pair) = inner.next() {
+            let op = match op_pair.as_str().trim() {
+                "+" => ArithOp::Add,
+                "-" => ArithOp::Sub,
+                s => return Err(format!("Unknown additive op: {}", s)),
+            };
+            let right_pair = inner
+                .next()
+                .ok_or_else(|| "Missing right operand in additive expr".to_string())?;
+            let right = Self::build_bound_multiplicative_expr(right_pair)?;
+            left = BoundExpr::BinaryOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    fn build_bound_multiplicative_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
+        let mut inner = pair.into_inner();
+        let first = inner
+            .next()
+            .ok_or_else(|| "Empty multiplicative expr".to_string())?;
+        let mut left = Self::build_bound_unary_expr(first)?;
+
+        while let Some(op_pair) = inner.next() {
+            let op = match op_pair.as_str().trim() {
+                "*" => ArithOp::Mul,
+                "/" => ArithOp::Div,
+                s => return Err(format!("Unknown multiplicative op: {}", s)),
+            };
+            let right_pair = inner
+                .next()
+                .ok_or_else(|| "Missing right operand in multiplicative expr".to_string())?;
+            let right = Self::build_bound_unary_expr(right_pair)?;
+            left = BoundExpr::BinaryOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    fn build_bound_unary_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
+        let inner: Vec<_> = pair.into_inner().collect();
+
+        if inner.len() == 1 {
+            let child = inner.into_iter().next().unwrap();
+            match child.as_rule() {
+                Rule::bound_unary_expr => {
+                    let expr = Self::build_bound_unary_expr(child)?;
+                    return Ok(BoundExpr::BinaryOp {
+                        left: Box::new(BoundExpr::Literal(0)),
+                        op: ArithOp::Sub,
+                        right: Box::new(expr),
+                    });
+                }
+                Rule::bound_primary_expr => {
+                    return Self::build_bound_primary_expr(child);
+                }
+                rule => return Err(format!("Unexpected rule in unary expr: {:?}", rule)),
+            }
+        }
+
+        Err(format!(
+            "Unexpected number of children in unary expr: {}",
+            inner.len()
+        ))
+    }
+
+    fn build_bound_primary_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
+        let inner = pair
+            .into_inner()
+            .next()
+            .ok_or_else(|| "Empty primary expr".to_string())?;
+
+        match inner.as_rule() {
+            Rule::bound_expr => Self::build_bound_expr(inner),
+            Rule::bound_type_ref => {
+                let mut parts = inner.into_inner();
+                let type_name = parts
+                    .next()
+                    .ok_or_else(|| "Missing type name".to_string())?
+                    .as_str();
+                let method = parts
+                    .next()
+                    .ok_or_else(|| "Missing method name".to_string())?
+                    .as_str();
+                let op = match method {
+                    "len" => BoundOp::Len,
+                    "min" => BoundOp::Min,
+                    "max" => BoundOp::Max,
+                    "cardinality" => BoundOp::Cardinality,
+                    _ => return Err(format!("Unknown bound method: {}", method)),
+                };
+                Ok(BoundExpr::TypeReference(
+                    arrayvec::ArrayString::from(type_name)
+                        .map_err(|_| format!("Type name too long: {}", type_name))?,
+                    op,
+                ))
+            }
+            Rule::bound_literal => {
+                let s: String = inner.as_str().chars().filter(|&c| c != '_').collect();
+                let val: i128 = s
+                    .parse()
+                    .map_err(|_| format!("Invalid bound literal: {}", inner.as_str()))?;
+                Ok(BoundExpr::Literal(val))
+            }
+            rule => Err(format!("Unexpected primary expr rule: {:?}", rule)),
+        }
     }
 
     /// Build enum declaration
@@ -841,31 +1073,174 @@ impl PestAstBuilder {
             returning: false,
         })
     }
+}
 
-    /// Parse struct fields from braced content (matching LALRPOP regex approach)
-    fn parse_struct_fields(braced_content: &str) -> Result<Vec<(String, Type)>, String> {
-        use once_cell::sync::Lazy;
-        use regex::Regex;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::{MarigoldPestParser, Rule};
+    use pest::Parser;
 
-        static WHITESPACE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[\s]+").unwrap());
-        static FIELD_DECLARATION: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"([\S]+)[\s]*:[\s]*(.*)").unwrap());
+    fn parse_struct(input: &str) -> Result<TypedExpression, String> {
+        let pairs =
+            MarigoldPestParser::parse(Rule::struct_decl, input).map_err(|e| e.to_string())?;
+        let pair = pairs.into_iter().next().unwrap();
+        PestAstBuilder::build_struct_decl(pair)
+    }
 
-        let cleaned = WHITESPACE.replace_all(braced_content, " ");
-        let content = &cleaned[1..cleaned.len() - 1]; // Remove surrounding braces
+    fn get_fields(expr: TypedExpression) -> Vec<(String, Type)> {
+        match expr {
+            TypedExpression::StructDeclaration(node) => node.fields,
+            _ => panic!("Expected StructDeclaration"),
+        }
+    }
 
-        let fields = content
-            .split(',')
-            .filter_map(|t| {
-                FIELD_DECLARATION.captures(t).map(|c| {
-                    (
-                        c[1].to_string(),
-                        Type::from_str(&c[2]).expect("could not parse type in struct definition"),
-                    )
-                })
-            })
-            .collect::<Vec<_>>();
+    #[test]
+    fn test_struct_with_primitives() {
+        let fields = get_fields(parse_struct("struct Foo { x: u32, y: bool }").unwrap());
+        assert_eq!(
+            fields,
+            vec![("x".to_string(), Type::U32), ("y".to_string(), Type::Bool),]
+        );
+    }
 
-        Ok(fields)
+    #[test]
+    fn test_struct_with_bounded_int() {
+        let fields = get_fields(parse_struct("struct Foo { v: boundedInt(0, 100) }").unwrap());
+        assert_eq!(fields.len(), 1);
+        assert!(matches!(
+            &fields[0].1,
+            Type::BoundedInt {
+                min: BoundExpr::Literal(0),
+                max: BoundExpr::Literal(100)
+            }
+        ));
+    }
+
+    #[test]
+    fn test_struct_with_bounded_uint() {
+        let fields = get_fields(parse_struct("struct Foo { v: boundedUint(0, 255) }").unwrap());
+        assert_eq!(fields.len(), 1);
+        assert!(matches!(
+            &fields[0].1,
+            Type::BoundedUint {
+                min: BoundExpr::Literal(0),
+                max: BoundExpr::Literal(255)
+            }
+        ));
+    }
+
+    #[test]
+    fn test_struct_with_negative_bounded_int() {
+        let fields = get_fields(parse_struct("struct Foo { v: boundedInt(-128, 127) }").unwrap());
+        match &fields[0].1 {
+            Type::BoundedInt { min, max } => {
+                assert_eq!(
+                    *min,
+                    BoundExpr::BinaryOp {
+                        left: Box::new(BoundExpr::Literal(0)),
+                        op: ArithOp::Sub,
+                        right: Box::new(BoundExpr::Literal(128)),
+                    }
+                );
+                assert_eq!(*max, BoundExpr::Literal(127));
+            }
+            _ => panic!("Expected BoundedInt"),
+        }
+    }
+
+    #[test]
+    fn test_struct_with_both_negative_bounds() {
+        let fields = get_fields(parse_struct("struct Foo { v: boundedInt(-1000, -1) }").unwrap());
+        match &fields[0].1 {
+            Type::BoundedInt { min, max } => {
+                assert!(matches!(
+                    min,
+                    BoundExpr::BinaryOp {
+                        op: ArithOp::Sub,
+                        ..
+                    }
+                ));
+                assert!(matches!(
+                    max,
+                    BoundExpr::BinaryOp {
+                        op: ArithOp::Sub,
+                        ..
+                    }
+                ));
+            }
+            _ => panic!("Expected BoundedInt"),
+        }
+    }
+
+    #[test]
+    fn test_struct_with_type_reference_bound() {
+        let fields =
+            get_fields(parse_struct("struct Foo { v: boundedInt(0, MyEnum.len()) }").unwrap());
+        match &fields[0].1 {
+            Type::BoundedInt { min, max } => {
+                assert_eq!(*min, BoundExpr::Literal(0));
+                assert!(matches!(max, BoundExpr::TypeReference(_, BoundOp::Len)));
+            }
+            _ => panic!("Expected BoundedInt"),
+        }
+    }
+
+    #[test]
+    fn test_struct_with_arithmetic_bound() {
+        let fields =
+            get_fields(parse_struct("struct Foo { v: boundedInt(0, MyEnum.len() - 1) }").unwrap());
+        match &fields[0].1 {
+            Type::BoundedInt { max, .. } => {
+                assert!(matches!(
+                    max,
+                    BoundExpr::BinaryOp {
+                        op: ArithOp::Sub,
+                        ..
+                    }
+                ));
+            }
+            _ => panic!("Expected BoundedInt"),
+        }
+    }
+
+    #[test]
+    fn test_struct_with_optional_field() {
+        let fields = get_fields(parse_struct("struct Foo { v: Option<u32> }").unwrap());
+        assert_eq!(
+            fields,
+            vec![("v".to_string(), Type::Option(Box::new(Type::U32)))]
+        );
+    }
+
+    #[test]
+    fn test_struct_with_string_field() {
+        let fields = get_fields(parse_struct("struct Foo { name: string_64 }").unwrap());
+        assert_eq!(fields, vec![("name".to_string(), Type::Str(64))]);
+    }
+
+    #[test]
+    fn test_struct_with_custom_type() {
+        let fields = get_fields(parse_struct("struct Foo { data: MyCustomType }").unwrap());
+        assert_eq!(fields.len(), 1);
+        assert!(matches!(&fields[0].1, Type::Custom(_)));
+    }
+
+    #[test]
+    fn test_struct_trailing_comma() {
+        let fields = get_fields(parse_struct("struct Foo { x: u32, y: u64, }").unwrap());
+        assert_eq!(fields.len(), 2);
+    }
+
+    #[test]
+    fn test_struct_mixed_fields() {
+        let fields = get_fields(parse_struct(
+            "struct Pixel { r: boundedUint(0, 255), g: boundedUint(0, 255), name: string_32, active: bool }"
+        ).unwrap());
+        assert_eq!(fields.len(), 4);
+        assert!(matches!(&fields[0].1, Type::BoundedUint { .. }));
+        assert!(matches!(&fields[1].1, Type::BoundedUint { .. }));
+        assert_eq!(fields[2].1, Type::Str(32));
+        assert_eq!(fields[3].1, Type::Bool);
     }
 }

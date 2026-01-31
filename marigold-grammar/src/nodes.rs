@@ -3,6 +3,58 @@ use regex::Regex;
 use std::str::FromStr;
 
 const MAX_CUSTOM_TYPE_SIZE: usize = 9_999;
+const MAX_TYPE_REFERENCE_SIZE: usize = 256;
+
+/// A bound expression for specifying min/max bounds in bounded types.
+///
+/// Bound expressions can be literal values, references to other types'
+/// properties (like enum lengths), or arithmetic combinations.
+///
+/// # Examples
+///
+/// - `BoundExpr::Literal(10)` - The literal value 10
+/// - `BoundExpr::TypeReference("Color", BoundOp::Len)` - The number of Color variants
+/// - `BoundExpr::BinaryOp { ... }` - An arithmetic expression
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[allow(clippy::large_enum_variant)]
+pub enum BoundExpr {
+    /// A literal integer value
+    Literal(i128),
+    /// A reference to a type property (e.g., `Color.len()`)
+    TypeReference(arrayvec::ArrayString<MAX_TYPE_REFERENCE_SIZE>, BoundOp),
+    /// A binary arithmetic operation
+    BinaryOp {
+        left: Box<BoundExpr>,
+        op: ArithOp,
+        right: Box<BoundExpr>,
+    },
+}
+
+/// Operations that can be performed on type references in bound expressions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BoundOp {
+    /// Number of enum variants (or field count for bounded types)
+    Len,
+    /// Minimum bound value
+    Min,
+    /// Maximum bound value
+    Max,
+    /// Total count of possible values (max - min + 1)
+    Cardinality,
+}
+
+/// Arithmetic operators for bound expression calculations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ArithOp {
+    /// Addition (+)
+    Add,
+    /// Subtraction (-)
+    Sub,
+    /// Multiplication (*)
+    Mul,
+    /// Division (/)
+    Div,
+}
 
 pub enum TypedExpression {
     UnnamedReturningStream(UnnamedStreamNode), // like `range(0, 10).return`
@@ -240,8 +292,27 @@ pub struct StructDeclarationNode {
     pub fields: Vec<(String, Type)>,
 }
 
+/// Resolved bounds for a struct field with a bounded type.
+///
+/// This struct holds the concrete min/max values after symbolic
+/// expressions have been evaluated by the bound resolver.
+#[derive(Debug, Clone)]
+pub struct ResolvedFieldBounds {
+    /// The resolved minimum bound value
+    pub min: i128,
+    /// The resolved maximum bound value
+    pub max: i128,
+}
+
 impl StructDeclarationNode {
     pub fn code(&self) -> String {
+        self.code_with_bounds(None)
+    }
+
+    pub fn code_with_bounds(
+        &self,
+        field_bounds: Option<&std::collections::HashMap<String, ResolvedFieldBounds>>,
+    ) -> String {
         #[cfg(not(feature = "io"))]
         let traits = &["Copy", "Clone", "Debug", "Eq", "PartialEq"].join(", ");
         #[cfg(feature = "io")]
@@ -256,19 +327,78 @@ impl StructDeclarationNode {
         ]
         .join(", ");
         let name = &self.name;
+        #[cfg(not(feature = "io"))]
         let mut struct_rep = format!(
             "
             #[derive({traits})]
             struct {name} {{
             "
         );
+        #[cfg(feature = "io")]
+        let mut struct_rep = format!(
+            "
+            #[derive({traits})]
+            #[serde(crate = \"::marigold::marigold_impl::serde\")]
+            struct {name} {{
+            "
+        );
         for (field_name, field_type) in &self.fields {
             struct_rep.push_str(field_name.as_str());
             struct_rep.push_str(": ");
-            struct_rep.push_str(field_type.primitive_to_type_string().as_str());
+
+            let type_str = if let Some(bounds_map) = field_bounds {
+                if let Some(bounds) = bounds_map.get(field_name) {
+                    field_type.primitive_to_type_string_with_resolved_bounds(
+                        Some(bounds.min),
+                        Some(bounds.max),
+                    )
+                } else {
+                    field_type.primitive_to_type_string()
+                }
+            } else {
+                field_type.primitive_to_type_string()
+            };
+            struct_rep.push_str(&type_str);
             struct_rep.push_str(",\n");
         }
         struct_rep.push('}');
+
+        if let Some(bounds_map) = field_bounds {
+            let bounded_fields: Vec<_> = self
+                .fields
+                .iter()
+                .filter(|(field_name, field_type)| {
+                    bounds_map.contains_key(field_name)
+                        && matches!(
+                            field_type,
+                            Type::BoundedInt { .. } | Type::BoundedUint { .. }
+                        )
+                })
+                .collect();
+
+            if !bounded_fields.is_empty() {
+                struct_rep.push_str(&format!("\nimpl {name} {{\n"));
+                for (field_name, _) in bounded_fields {
+                    if let Some(bounds) = bounds_map.get(field_name) {
+                        let upper_field = field_name.to_uppercase();
+                        let cardinality = (bounds.max - bounds.min + 1) as u128;
+                        struct_rep.push_str(&format!(
+                            "    pub const {upper_field}_MIN: i128 = {};\n",
+                            bounds.min
+                        ));
+                        struct_rep.push_str(&format!(
+                            "    pub const {upper_field}_MAX: i128 = {};\n",
+                            bounds.max
+                        ));
+                        struct_rep.push_str(&format!(
+                            "    pub const {upper_field}_CARDINALITY: u128 = {cardinality};\n"
+                        ));
+                    }
+                }
+                struct_rep.push('}');
+            }
+        }
+
         struct_rep
     }
 }
@@ -295,12 +425,15 @@ pub enum Type {
     Str(u32),
     Custom(arrayvec::ArrayString<MAX_CUSTOM_TYPE_SIZE>),
     Option(Box<Type>),
+    BoundedInt { min: BoundExpr, max: BoundExpr },
+    BoundedUint { min: BoundExpr, max: BoundExpr },
 }
 
 impl FromStr for Type {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Type, ()> {
+        let s = s.trim();
         match s {
             "u8" => Ok(Type::U8),
             "u16" => Ok(Type::U16),
@@ -376,7 +509,65 @@ impl Type {
                 format!("Option<{internal_type_string}>")
             }
             Type::Custom(v) => v.to_string(),
+            Type::BoundedInt { .. } => "i128".to_string(),
+            Type::BoundedUint { .. } => "u128".to_string(),
         }
+    }
+
+    pub fn primitive_to_type_string_with_resolved_bounds(
+        &self,
+        resolved_min: Option<i128>,
+        resolved_max: Option<i128>,
+    ) -> String {
+        match &self {
+            Type::BoundedInt { .. } => {
+                if let (Some(min), Some(max)) = (resolved_min, resolved_max) {
+                    select_smallest_signed_type(min, max)
+                } else {
+                    "i128".to_string()
+                }
+            }
+            Type::BoundedUint { .. } => {
+                if let (Some(min), Some(max)) = (resolved_min, resolved_max) {
+                    if min >= 0 && max >= 0 {
+                        select_smallest_unsigned_type(max as u128)
+                    } else {
+                        "u128".to_string()
+                    }
+                } else {
+                    "u128".to_string()
+                }
+            }
+            _ => self.primitive_to_type_string(),
+        }
+    }
+}
+
+fn select_smallest_signed_type(min: i128, max: i128) -> String {
+    if min >= i8::MIN as i128 && max <= i8::MAX as i128 {
+        "i8".to_string()
+    } else if min >= i16::MIN as i128 && max <= i16::MAX as i128 {
+        "i16".to_string()
+    } else if min >= i32::MIN as i128 && max <= i32::MAX as i128 {
+        "i32".to_string()
+    } else if min >= i64::MIN as i128 && max <= i64::MAX as i128 {
+        "i64".to_string()
+    } else {
+        "i128".to_string()
+    }
+}
+
+fn select_smallest_unsigned_type(max: u128) -> String {
+    if max <= u8::MAX as u128 {
+        "u8".to_string()
+    } else if max <= u16::MAX as u128 {
+        "u16".to_string()
+    } else if max <= u32::MAX as u128 {
+        "u32".to_string()
+    } else if max <= u64::MAX as u128 {
+        "u64".to_string()
+    } else {
+        "u128".to_string()
     }
 }
 
@@ -398,7 +589,7 @@ pub enum DefaultEnumVariant {
 }
 
 impl EnumDeclarationNode {
-    #[allow(dead_code)] // only used if io/serde enabled
+    #[cfg(feature = "io")]
     fn definition_to_serde(maybe_definition: &Option<String>) -> Option<String> {
         if let Some(definition) = maybe_definition {
             return match definition.as_str() {
@@ -425,25 +616,21 @@ impl EnumDeclarationNode {
         .join(", ");
         let name = &self.name;
         let mut enum_rep = format!("#[derive({traits})]");
+        #[cfg(feature = "io")]
+        enum_rep.push_str("\n#[serde(crate = \"::marigold::marigold_impl::serde\")]");
         if let Some(default_variant) = &self.default_variant {
             #[cfg(feature = "io")]
             {
-                // todo: when https://github.com/serde-rs/serde/issues/912 is resolved,
-                // we will no longer have to allocate a String and provide a conversion
-                // to this enum from a String.
                 enum_rep.push_str("\n#[serde(try_from=\"String\")]");
                 enum_rep.push_str(format!("\nenum {name} {{\n").as_str());
 
-                // add normal variants.
                 let mut serialized_to_name_mapping = String::new();
                 for (field_name, serialization_definition) in &self.variants {
-                    // use the serde definition for deserialization
                     if let Some(s) = Self::definition_to_serde(serialization_definition) {
                         enum_rep.push_str(format!("#[serde({s})]\n").as_str());
                     }
                     enum_rep.push_str(format!("{},\n", field_name.as_str()).as_str());
 
-                    // For serialization, we'll use this string in the From<String> implementation.
                     let serialized = serialization_definition
                         .as_ref()
                         .unwrap_or(field_name)
@@ -452,8 +639,7 @@ impl EnumDeclarationNode {
                         .push_str(format!("\"{serialized}\" => {field_name},\n").as_str());
                 }
 
-                // add default variant definition
-                #[allow(unused_assignments)] // actually used in a `format!`
+                #[allow(unused_assignments)]
                 let mut default_serialized_mapping = String::new();
                 match default_variant {
                     DefaultEnumVariant::Sized(default_name, size) => {
@@ -661,4 +847,70 @@ pub struct FunctionSignature {
     pub name: String,
     pub parameters: Vec<(String, String)>,
     pub output_type: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_type_primitive_to_string_bounded_int() {
+        let t = Type::BoundedInt {
+            min: BoundExpr::Literal(0),
+            max: BoundExpr::Literal(100),
+        };
+        assert_eq!(t.primitive_to_type_string(), "i128");
+    }
+
+    #[test]
+    fn test_type_primitive_to_string_with_resolved_bounds_i8() {
+        let t = Type::BoundedInt {
+            min: BoundExpr::Literal(0),
+            max: BoundExpr::Literal(100),
+        };
+        assert_eq!(
+            t.primitive_to_type_string_with_resolved_bounds(Some(0), Some(100)),
+            "i8"
+        );
+    }
+
+    #[test]
+    fn test_type_primitive_to_string_with_resolved_bounds_i16() {
+        let t = Type::BoundedInt {
+            min: BoundExpr::Literal(-1000),
+            max: BoundExpr::Literal(1000),
+        };
+        assert_eq!(
+            t.primitive_to_type_string_with_resolved_bounds(Some(-1000), Some(1000)),
+            "i16"
+        );
+    }
+
+    #[test]
+    fn test_type_primitive_to_string_with_resolved_bounds_u8() {
+        let t = Type::BoundedUint {
+            min: BoundExpr::Literal(0),
+            max: BoundExpr::Literal(200),
+        };
+        assert_eq!(
+            t.primitive_to_type_string_with_resolved_bounds(Some(0), Some(200)),
+            "u8"
+        );
+    }
+
+    #[test]
+    fn test_select_smallest_signed_type() {
+        assert_eq!(select_smallest_signed_type(-128, 127), "i8");
+        assert_eq!(select_smallest_signed_type(-129, 127), "i16");
+        assert_eq!(select_smallest_signed_type(-32768, 32767), "i16");
+        assert_eq!(select_smallest_signed_type(-32769, 32767), "i32");
+    }
+
+    #[test]
+    fn test_select_smallest_unsigned_type() {
+        assert_eq!(select_smallest_unsigned_type(255), "u8");
+        assert_eq!(select_smallest_unsigned_type(256), "u16");
+        assert_eq!(select_smallest_unsigned_type(65535), "u16");
+        assert_eq!(select_smallest_unsigned_type(65536), "u32");
+    }
 }

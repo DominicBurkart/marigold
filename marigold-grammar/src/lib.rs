@@ -39,7 +39,7 @@
 //! ### AST and Code Generation
 //!
 //! - [`nodes`]: AST node definitions for all Marigold constructs
-//! - [`parser::PestParser::generate_rust_code`]: Code generation logic
+//! - Code generation: Internal function that transforms AST to Rust code
 //! - [`pest_ast_builder`]: Transforms Pest parse trees into the AST
 //!
 //! ## Testing & Validation
@@ -69,8 +69,10 @@ extern crate proc_macro;
 
 pub use itertools;
 
+pub mod bound_resolution;
 pub mod nodes;
 pub mod parser;
+pub mod symbol_table;
 mod type_aggregation;
 
 pub mod pest_ast_builder;

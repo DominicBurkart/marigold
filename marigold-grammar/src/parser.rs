@@ -64,21 +64,51 @@ impl PestParser {
         // Stage 2: Build AST from parse tree
         let expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)?;
 
-        // Stage 3: Generate Rust code (replicating LALRPOP logic)
-        Self::generate_rust_code(expressions)
+        // Stage 3: Validate bounded types (if any)
+        let resolved_bounds = Self::validate_bounded_types(&expressions)?;
+
+        // Stage 4: Generate Rust code (replicating LALRPOP logic)
+        Self::generate_rust_code(expressions, resolved_bounds)
+    }
+
+    fn validate_bounded_types(
+        expressions: &[crate::nodes::TypedExpression],
+    ) -> Result<Option<crate::bound_resolution::ResolvedBounds>, String> {
+        let symbol_table = crate::symbol_table::SymbolTable::from_expressions(expressions);
+
+        if !symbol_table.has_bounded_types() {
+            return Ok(None);
+        }
+
+        let mut resolver = crate::bound_resolution::BoundResolver::new(&symbol_table);
+        match resolver.resolve_all() {
+            Ok(bounds) => Ok(Some(bounds)),
+            Err(errors) => {
+                let error_messages: Vec<String> = errors.iter().map(|e| format!("{}", e)).collect();
+                Err(format!(
+                    "Bounded type validation failed:\n  - {}",
+                    error_messages.join("\n  - ")
+                ))
+            }
+        }
     }
 
     /// Generate Rust code from AST expressions
     fn generate_rust_code(
         expressions: Vec<crate::nodes::TypedExpression>,
+        resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
     ) -> Result<String, String> {
+        let struct_bounds = Self::build_struct_bounds_map(&resolved_bounds);
         let mut output = "async {\n    use ::marigold::marigold_impl::*;\n    ".to_string();
 
         // 1. Generate enums and structs
         let enums_and_structs = expressions
             .iter()
             .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::StructDeclaration(s) => Some(s.code()),
+                crate::nodes::TypedExpression::StructDeclaration(s) => {
+                    let field_bounds = struct_bounds.get(&s.name);
+                    Some(s.code_with_bounds(field_bounds))
+                }
                 crate::nodes::TypedExpression::EnumDeclaration(e) => Some(e.code()),
                 _ => None,
             })
@@ -244,6 +274,32 @@ impl PestParser {
         output.push_str("}\n");
 
         Ok(output)
+    }
+
+    fn build_struct_bounds_map(
+        resolved_bounds: &Option<crate::bound_resolution::ResolvedBounds>,
+    ) -> std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, crate::nodes::ResolvedFieldBounds>,
+    > {
+        let mut struct_bounds = std::collections::HashMap::new();
+
+        if let Some(bounds) = resolved_bounds {
+            for resolved in bounds.bounds() {
+                struct_bounds
+                    .entry(resolved.struct_name.clone())
+                    .or_insert_with(std::collections::HashMap::new)
+                    .insert(
+                        resolved.field_name.clone(),
+                        crate::nodes::ResolvedFieldBounds {
+                            min: resolved.min,
+                            max: resolved.max,
+                        },
+                    );
+            }
+        }
+
+        struct_bounds
     }
 }
 
@@ -462,6 +518,335 @@ mod tests {
         let pest_output = pest_result.unwrap();
         assert!(pest_output.contains("select_all"));
         assert!(pest_output.contains("map"));
+    }
+
+    #[test]
+    fn test_bounded_int_literal_bounds() {
+        use pest::Parser;
+        let result = MarigoldPestParser::parse(Rule::bounded_int_type, "boundedInt(0, 10)");
+        assert!(result.is_ok(), "Should parse boundedInt(0, 10)");
+    }
+
+    #[test]
+    fn test_bounded_int_negative_bound() {
+        use pest::Parser;
+        let result = MarigoldPestParser::parse(Rule::bounded_int_type, "boundedInt(-100, 100)");
+        assert!(result.is_ok(), "Should parse boundedInt(-100, 100)");
+    }
+
+    #[test]
+    fn test_bounded_uint_literal_bounds() {
+        use pest::Parser;
+        let result = MarigoldPestParser::parse(Rule::bounded_uint_type, "boundedUint(0, 255)");
+        assert!(result.is_ok(), "Should parse boundedUint(0, 255)");
+    }
+
+    #[test]
+    fn test_bounded_int_type_reference() {
+        use pest::Parser;
+        let result =
+            MarigoldPestParser::parse(Rule::bounded_int_type, "boundedInt(0, MyEnum.len())");
+        assert!(result.is_ok(), "Should parse boundedInt(0, MyEnum.len())");
+    }
+
+    #[test]
+    fn test_bounded_uint_type_reference() {
+        use pest::Parser;
+        let result = MarigoldPestParser::parse(
+            Rule::bounded_uint_type,
+            "boundedUint(0, Color.cardinality())",
+        );
+        assert!(
+            result.is_ok(),
+            "Should parse boundedUint(0, Color.cardinality())"
+        );
+    }
+
+    #[test]
+    fn test_bounded_int_arithmetic_expression() {
+        use pest::Parser;
+        let result =
+            MarigoldPestParser::parse(Rule::bounded_int_type, "boundedInt(0, MyEnum.len() - 1)");
+        assert!(
+            result.is_ok(),
+            "Should parse boundedInt(0, MyEnum.len() - 1)"
+        );
+    }
+
+    #[test]
+    fn test_bounded_int_complex_arithmetic() {
+        use pest::Parser;
+        let result =
+            MarigoldPestParser::parse(Rule::bounded_int_type, "boundedInt(0, A.len() * 2 + 1)");
+        assert!(
+            result.is_ok(),
+            "Should parse boundedInt(0, A.len() * 2 + 1)"
+        );
+    }
+
+    #[test]
+    fn test_bound_expr_literal() {
+        use pest::Parser;
+        let result = MarigoldPestParser::parse(Rule::bound_expr, "42");
+        assert!(result.is_ok(), "Should parse literal 42");
+    }
+
+    #[test]
+    fn test_bound_expr_negative_literal() {
+        use pest::Parser;
+        let result = MarigoldPestParser::parse(Rule::bound_expr, "-5");
+        assert!(result.is_ok(), "Should parse negative literal -5");
+    }
+
+    #[test]
+    fn test_bound_expr_type_ref_len() {
+        use pest::Parser;
+        let result = MarigoldPestParser::parse(Rule::bound_expr, "MyEnum.len()");
+        assert!(result.is_ok(), "Should parse MyEnum.len()");
+    }
+
+    #[test]
+    fn test_bound_expr_type_ref_min() {
+        use pest::Parser;
+        let result = MarigoldPestParser::parse(Rule::bound_expr, "SomeType.min()");
+        assert!(result.is_ok(), "Should parse SomeType.min()");
+    }
+
+    #[test]
+    fn test_bound_expr_type_ref_max() {
+        use pest::Parser;
+        let result = MarigoldPestParser::parse(Rule::bound_expr, "OtherType.max()");
+        assert!(result.is_ok(), "Should parse OtherType.max()");
+    }
+
+    #[test]
+    fn test_bound_expr_parentheses() {
+        use pest::Parser;
+        let result = MarigoldPestParser::parse(Rule::bound_expr, "(1 + 2) * 3");
+        assert!(result.is_ok(), "Should parse (1 + 2) * 3");
+    }
+
+    #[test]
+    fn test_bounded_type_validation_valid() {
+        let input = r#"
+            enum Color { Red = "r", Green = "g", Blue = "b" }
+            struct Pixel { color_index: boundedInt(0, 2) }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(
+            result.is_ok(),
+            "Valid bounded type should parse successfully"
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_validation_with_enum_ref() {
+        let input = r#"
+            enum Color { Red = "r", Green = "g", Blue = "b" }
+            struct Pixel { color_index: boundedInt(0, Color.len()) }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(
+            result.is_ok(),
+            "Bounded type with enum reference should parse successfully"
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_validation_min_greater_than_max() {
+        let input = r#"
+            struct Test { field: boundedInt(10, 5) }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        eprintln!("Result: {:?}", result);
+        assert!(result.is_err(), "min > max should fail validation");
+        let err = result.unwrap_err();
+        assert!(
+            err.0.contains("min") && err.0.contains("max"),
+            "Error should mention min and max: {}",
+            err.0
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_validation_undefined_type() {
+        let input = r#"
+            struct Test { field: boundedInt(0, NonExistent.len()) }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(result.is_err(), "Undefined type reference should fail");
+        let err = result.unwrap_err();
+        assert!(
+            err.0.contains("NonExistent"),
+            "Error should mention undefined type: {}",
+            err.0
+        );
+    }
+
+    #[test]
+    fn test_bounded_uint_negative_min() {
+        let input = r#"
+            struct Test { field: boundedUint(-1, 10) }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(result.is_err(), "Negative min for boundedUint should fail");
+        let err = result.unwrap_err();
+        assert!(
+            err.0.contains("negative"),
+            "Error should mention negative: {}",
+            err.0
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_codegen_i8() {
+        let input = r#"
+            struct Test { value: boundedInt(0, 100) }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(result.is_ok(), "Should generate code successfully");
+        let code = result.unwrap();
+        assert!(
+            code.contains("value: i8"),
+            "boundedInt(0, 100) should generate i8 type, got: {}",
+            code
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_codegen_i16() {
+        let input = r#"
+            struct Test { value: boundedInt(-1000, 1000) }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(result.is_ok(), "Should generate code successfully");
+        let code = result.unwrap();
+        assert!(
+            code.contains("value: i16"),
+            "boundedInt(-1000, 1000) should generate i16 type, got: {}",
+            code
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_codegen_u8() {
+        let input = r#"
+            struct Test { value: boundedUint(0, 200) }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(result.is_ok(), "Should generate code successfully");
+        let code = result.unwrap();
+        assert!(
+            code.contains("value: u8"),
+            "boundedUint(0, 200) should generate u8 type, got: {}",
+            code
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_codegen_cardinality_constants() {
+        let input = r#"
+            struct Test { count: boundedInt(0, 10) }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(result.is_ok(), "Should generate code successfully");
+        let code = result.unwrap();
+        assert!(
+            code.contains("impl Test"),
+            "Should generate impl block for Test"
+        );
+        assert!(
+            code.contains("COUNT_MIN: i128 = 0"),
+            "Should generate COUNT_MIN constant, got: {}",
+            code
+        );
+        assert!(
+            code.contains("COUNT_MAX: i128 = 10"),
+            "Should generate COUNT_MAX constant, got: {}",
+            code
+        );
+        assert!(
+            code.contains("COUNT_CARDINALITY: u128 = 11"),
+            "Should generate COUNT_CARDINALITY constant (11 = 10 - 0 + 1), got: {}",
+            code
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_codegen_with_enum_ref() {
+        let input = r#"
+            enum Color { Red = "r", Green = "g", Blue = "b" }
+            struct Pixel { color_index: boundedInt(0, Color.len()) }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(result.is_ok(), "Should generate code successfully");
+        let code = result.unwrap();
+        assert!(
+            code.contains("color_index: i8"),
+            "boundedInt(0, 3) should generate i8 type, got: {}",
+            code
+        );
+        assert!(
+            code.contains("COLOR_INDEX_CARDINALITY: u128 = 4"),
+            "Should generate cardinality constant (4 = 3 - 0 + 1), got: {}",
+            code
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_struct_reference_error() {
+        let input = r#"
+            struct A { field: boundedInt(0, A.max()) }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(result.is_err(), "Struct reference A.max() should fail");
+        let err = result.unwrap_err();
+        assert!(
+            err.0.contains("Undefined") || err.0.contains("A"),
+            "Error should mention undefined type: {}",
+            err.0
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_multiple_fields_codegen() {
+        let input = r#"
+            struct Data {
+                x: boundedInt(-128, 127),
+                y: boundedUint(0, 1000)
+            }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(result.is_ok(), "Should generate code successfully");
+        let code = result.unwrap();
+        assert!(
+            code.contains("x: i8"),
+            "boundedInt(-128, 127) should generate i8 type"
+        );
+        assert!(
+            code.contains("y: u16"),
+            "boundedUint(0, 1000) should generate u16 type"
+        );
+        assert!(
+            code.contains("X_CARDINALITY: u128 = 256"),
+            "Should generate X_CARDINALITY constant"
+        );
+        assert!(
+            code.contains("Y_CARDINALITY: u128 = 1001"),
+            "Should generate Y_CARDINALITY constant"
+        );
     }
 }
 
