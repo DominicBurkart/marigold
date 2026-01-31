@@ -327,9 +327,18 @@ impl StructDeclarationNode {
         ]
         .join(", ");
         let name = &self.name;
+        #[cfg(not(feature = "io"))]
         let mut struct_rep = format!(
             "
             #[derive({traits})]
+            struct {name} {{
+            "
+        );
+        #[cfg(feature = "io")]
+        let mut struct_rep = format!(
+            "
+            #[derive({traits})]
+            #[serde(crate = \"::marigold::marigold_impl::serde\")]
             struct {name} {{
             "
         );
@@ -447,10 +456,6 @@ impl FromStr for Type {
                     static ref OPTIONAL: Regex =
                         Regex::new(r"Option[\s]*<[\s]*(.+?)[\s]*>").unwrap();
                     static ref STRING: Regex = Regex::new(r"string_([0-9_A-Za-z]+)").unwrap();
-                    static ref BOUNDED_INT: Regex =
-                        Regex::new(r"^int\s*\[\s*(.+?)\s*,\s*(.+?)\s*\]$").unwrap();
-                    static ref BOUNDED_UINT: Regex =
-                        Regex::new(r"^uint\s*\[\s*(.+?)\s*,\s*(.+?)\s*\]$").unwrap();
                 }
 
                 if let Some(optional_def) = OPTIONAL.captures(s) {
@@ -469,34 +474,6 @@ impl FromStr for Type {
                     let size = u32::from_str(size_str.as_str())
                         .expect("Could not parse string size in struct. Must be parsable as U32.");
                     return Ok(Type::Str(size));
-                } else if let Some(bounded_int_def) = BOUNDED_INT.captures(s) {
-                    let min_str = bounded_int_def
-                        .get(1)
-                        .expect("Could not get min bound from int[]")
-                        .as_str();
-                    let max_str = bounded_int_def
-                        .get(2)
-                        .expect("Could not get max bound from int[]")
-                        .as_str();
-                    let min = crate::bound_expr::parse_bound_expr(min_str)
-                        .expect("Could not parse min bound in int[]");
-                    let max = crate::bound_expr::parse_bound_expr(max_str)
-                        .expect("Could not parse max bound in int[]");
-                    return Ok(Type::BoundedInt { min, max });
-                } else if let Some(bounded_uint_def) = BOUNDED_UINT.captures(s) {
-                    let min_str = bounded_uint_def
-                        .get(1)
-                        .expect("Could not get min bound from uint[]")
-                        .as_str();
-                    let max_str = bounded_uint_def
-                        .get(2)
-                        .expect("Could not get max bound from uint[]")
-                        .as_str();
-                    let min = crate::bound_expr::parse_bound_expr(min_str)
-                        .expect("Could not parse min bound in uint[]");
-                    let max = crate::bound_expr::parse_bound_expr(max_str)
-                        .expect("Could not parse max bound in uint[]");
-                    return Ok(Type::BoundedUint { min, max });
                 }
                 Ok(Type::Custom(
                     arrayvec::ArrayString::<MAX_CUSTOM_TYPE_SIZE>::from(s)
@@ -612,7 +589,7 @@ pub enum DefaultEnumVariant {
 }
 
 impl EnumDeclarationNode {
-    #[allow(dead_code)] // only used if io/serde enabled
+    #[cfg(feature = "io")]
     fn definition_to_serde(maybe_definition: &Option<String>) -> Option<String> {
         if let Some(definition) = maybe_definition {
             return match definition.as_str() {
@@ -639,25 +616,21 @@ impl EnumDeclarationNode {
         .join(", ");
         let name = &self.name;
         let mut enum_rep = format!("#[derive({traits})]");
+        #[cfg(feature = "io")]
+        enum_rep.push_str("\n#[serde(crate = \"::marigold::marigold_impl::serde\")]");
         if let Some(default_variant) = &self.default_variant {
             #[cfg(feature = "io")]
             {
-                // todo: when https://github.com/serde-rs/serde/issues/912 is resolved,
-                // we will no longer have to allocate a String and provide a conversion
-                // to this enum from a String.
                 enum_rep.push_str("\n#[serde(try_from=\"String\")]");
                 enum_rep.push_str(format!("\nenum {name} {{\n").as_str());
 
-                // add normal variants.
                 let mut serialized_to_name_mapping = String::new();
                 for (field_name, serialization_definition) in &self.variants {
-                    // use the serde definition for deserialization
                     if let Some(s) = Self::definition_to_serde(serialization_definition) {
                         enum_rep.push_str(format!("#[serde({s})]\n").as_str());
                     }
                     enum_rep.push_str(format!("{},\n", field_name.as_str()).as_str());
 
-                    // For serialization, we'll use this string in the From<String> implementation.
                     let serialized = serialization_definition
                         .as_ref()
                         .unwrap_or(field_name)
@@ -666,8 +639,7 @@ impl EnumDeclarationNode {
                         .push_str(format!("\"{serialized}\" => {field_name},\n").as_str());
                 }
 
-                // add default variant definition
-                #[allow(unused_assignments)] // actually used in a `format!`
+                #[allow(unused_assignments)]
                 let mut default_serialized_mapping = String::new();
                 match default_variant {
                     DefaultEnumVariant::Sized(default_name, size) => {
@@ -880,77 +852,6 @@ pub struct FunctionSignature {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_type_from_str_bounded_int_literals() {
-        let t = Type::from_str("int[0, 10]").unwrap();
-        match t {
-            Type::BoundedInt { min, max } => {
-                assert_eq!(min, BoundExpr::Literal(0));
-                assert_eq!(max, BoundExpr::Literal(10));
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
-
-    #[test]
-    fn test_type_from_str_bounded_int_negative() {
-        let t = Type::from_str("int[-100, 100]").unwrap();
-        match t {
-            Type::BoundedInt { min, max } => {
-                assert_eq!(min, BoundExpr::Literal(-100));
-                assert_eq!(max, BoundExpr::Literal(100));
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
-
-    #[test]
-    fn test_type_from_str_bounded_uint_literals() {
-        let t = Type::from_str("uint[0, 255]").unwrap();
-        match t {
-            Type::BoundedUint { min, max } => {
-                assert_eq!(min, BoundExpr::Literal(0));
-                assert_eq!(max, BoundExpr::Literal(255));
-            }
-            _ => panic!("Expected BoundedUint"),
-        }
-    }
-
-    #[test]
-    fn test_type_from_str_bounded_int_type_reference() {
-        let t = Type::from_str("int[0, MyEnum.len()]").unwrap();
-        match t {
-            Type::BoundedInt { min, max } => {
-                assert_eq!(min, BoundExpr::Literal(0));
-                match max {
-                    BoundExpr::TypeReference(name, op) => {
-                        assert_eq!(name.as_str(), "MyEnum");
-                        assert_eq!(op, BoundOp::Len);
-                    }
-                    _ => panic!("Expected TypeReference for max"),
-                }
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
-
-    #[test]
-    fn test_type_from_str_bounded_int_arithmetic() {
-        let t = Type::from_str("int[0, MyEnum.len() - 1]").unwrap();
-        match t {
-            Type::BoundedInt { min, max } => {
-                assert_eq!(min, BoundExpr::Literal(0));
-                match max {
-                    BoundExpr::BinaryOp { op, .. } => {
-                        assert_eq!(op, ArithOp::Sub);
-                    }
-                    _ => panic!("Expected BinaryOp for max"),
-                }
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
 
     #[test]
     fn test_type_primitive_to_string_bounded_int() {
