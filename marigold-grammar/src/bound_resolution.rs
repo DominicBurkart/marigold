@@ -200,7 +200,7 @@ impl<'a> BoundResolver<'a> {
         if !field_info.is_signed && min < 0 {
             return Err(ResolutionError::BoundsViolation {
                 field: context,
-                message: format!("boundedUint cannot have negative min value ({})", min),
+                message: format!("uint[] cannot have negative min value ({})", min),
             });
         }
 

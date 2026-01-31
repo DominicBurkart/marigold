@@ -1,7 +1,7 @@
 //! Bound Expression Parser
 //!
 //! This module provides parsing functionality for bound expressions used in
-//! bounded numerical types (`boundedInt` and `boundedUint`).
+//! bounded numerical types (`int[min, max]` and `uint[min, max]`).
 //!
 //! ## Supported Syntax
 //!

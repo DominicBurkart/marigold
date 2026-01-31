@@ -873,6 +873,7 @@ impl PestAstBuilder {
         let mut result = Vec::new();
         let mut current = String::new();
         let mut paren_depth: usize = 0;
+        let mut bracket_depth: usize = 0;
 
         for ch in input.chars() {
             match ch {
@@ -884,7 +885,15 @@ impl PestAstBuilder {
                     paren_depth = paren_depth.saturating_sub(1);
                     current.push(ch);
                 }
-                ',' if paren_depth == 0 => {
+                '[' => {
+                    bracket_depth += 1;
+                    current.push(ch);
+                }
+                ']' => {
+                    bracket_depth = bracket_depth.saturating_sub(1);
+                    current.push(ch);
+                }
+                ',' if paren_depth == 0 && bracket_depth == 0 => {
                     result.push(current.clone());
                     current.clear();
                 }
