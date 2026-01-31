@@ -456,10 +456,6 @@ impl FromStr for Type {
                     static ref OPTIONAL: Regex =
                         Regex::new(r"Option[\s]*<[\s]*(.+?)[\s]*>").unwrap();
                     static ref STRING: Regex = Regex::new(r"string_([0-9_A-Za-z]+)").unwrap();
-                    static ref BOUNDED_INT: Regex =
-                        Regex::new(r"^boundedInt\s*\(\s*(.+?)\s*,\s*(.+?)\s*\)$").unwrap();
-                    static ref BOUNDED_UINT: Regex =
-                        Regex::new(r"^boundedUint\s*\(\s*(.+?)\s*,\s*(.+?)\s*\)$").unwrap();
                 }
 
                 if let Some(optional_def) = OPTIONAL.captures(s) {
@@ -478,34 +474,6 @@ impl FromStr for Type {
                     let size = u32::from_str(size_str.as_str())
                         .expect("Could not parse string size in struct. Must be parsable as U32.");
                     return Ok(Type::Str(size));
-                } else if let Some(bounded_int_def) = BOUNDED_INT.captures(s) {
-                    let min_str = bounded_int_def
-                        .get(1)
-                        .expect("Could not get min bound from boundedInt")
-                        .as_str();
-                    let max_str = bounded_int_def
-                        .get(2)
-                        .expect("Could not get max bound from boundedInt")
-                        .as_str();
-                    let min = crate::bound_expr::parse_bound_expr(min_str)
-                        .expect("Could not parse min bound in boundedInt");
-                    let max = crate::bound_expr::parse_bound_expr(max_str)
-                        .expect("Could not parse max bound in boundedInt");
-                    return Ok(Type::BoundedInt { min, max });
-                } else if let Some(bounded_uint_def) = BOUNDED_UINT.captures(s) {
-                    let min_str = bounded_uint_def
-                        .get(1)
-                        .expect("Could not get min bound from boundedUint")
-                        .as_str();
-                    let max_str = bounded_uint_def
-                        .get(2)
-                        .expect("Could not get max bound from boundedUint")
-                        .as_str();
-                    let min = crate::bound_expr::parse_bound_expr(min_str)
-                        .expect("Could not parse min bound in boundedUint");
-                    let max = crate::bound_expr::parse_bound_expr(max_str)
-                        .expect("Could not parse max bound in boundedUint");
-                    return Ok(Type::BoundedUint { min, max });
                 }
                 Ok(Type::Custom(
                     arrayvec::ArrayString::<MAX_CUSTOM_TYPE_SIZE>::from(s)
@@ -884,77 +852,6 @@ pub struct FunctionSignature {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_type_from_str_bounded_int_literals() {
-        let t = Type::from_str("boundedInt(0, 10)").unwrap();
-        match t {
-            Type::BoundedInt { min, max } => {
-                assert_eq!(min, BoundExpr::Literal(0));
-                assert_eq!(max, BoundExpr::Literal(10));
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
-
-    #[test]
-    fn test_type_from_str_bounded_int_negative() {
-        let t = Type::from_str("boundedInt(-100, 100)").unwrap();
-        match t {
-            Type::BoundedInt { min, max } => {
-                assert_eq!(min, BoundExpr::Literal(-100));
-                assert_eq!(max, BoundExpr::Literal(100));
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
-
-    #[test]
-    fn test_type_from_str_bounded_uint_literals() {
-        let t = Type::from_str("boundedUint(0, 255)").unwrap();
-        match t {
-            Type::BoundedUint { min, max } => {
-                assert_eq!(min, BoundExpr::Literal(0));
-                assert_eq!(max, BoundExpr::Literal(255));
-            }
-            _ => panic!("Expected BoundedUint"),
-        }
-    }
-
-    #[test]
-    fn test_type_from_str_bounded_int_type_reference() {
-        let t = Type::from_str("boundedInt(0, MyEnum.len())").unwrap();
-        match t {
-            Type::BoundedInt { min, max } => {
-                assert_eq!(min, BoundExpr::Literal(0));
-                match max {
-                    BoundExpr::TypeReference(name, op) => {
-                        assert_eq!(name.as_str(), "MyEnum");
-                        assert_eq!(op, BoundOp::Len);
-                    }
-                    _ => panic!("Expected TypeReference for max"),
-                }
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
-
-    #[test]
-    fn test_type_from_str_bounded_int_arithmetic() {
-        let t = Type::from_str("boundedInt(0, MyEnum.len() - 1)").unwrap();
-        match t {
-            Type::BoundedInt { min, max } => {
-                assert_eq!(min, BoundExpr::Literal(0));
-                match max {
-                    BoundExpr::BinaryOp { op, .. } => {
-                        assert_eq!(op, ArithOp::Sub);
-                    }
-                    _ => panic!("Expected BinaryOp for max"),
-                }
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
 
     #[test]
     fn test_type_primitive_to_string_bounded_int() {

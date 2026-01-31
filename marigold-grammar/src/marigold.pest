@@ -424,12 +424,22 @@ compression_type = { "none" | "gz" }
 // These structs must implement `serde::Deserialize` when used with `read_file`.
 
 struct_decl = {
-    "struct" ~ free_text_identifier ~ braced_content
+    "struct" ~ free_text_identifier ~ "{" ~ struct_field_list ~ "}"
 }
 
-// Note: Field parsing will be done in AST builder using regex
-// to match LALRPOP's approach. This allows flexibility in the struct definition
-// while maintaining grammar simplicity.
+struct_field_list = { (struct_field ~ ("," ~ struct_field)* ~ ","?)? }
+
+struct_field = { free_text_identifier ~ ":" ~ field_type }
+
+field_type = { optional_type | bounded_int_type | bounded_uint_type | string_type | primitive_type | custom_type }
+
+optional_type = { "Option" ~ "<" ~ field_type ~ ">" }
+
+string_type = @{ "string_" ~ ASCII_DIGIT+ }
+
+primitive_type = @{ "u128" | "usize" | "u64" | "u32" | "u16" | "u8" | "i128" | "isize" | "i64" | "i32" | "i16" | "i8" | "f64" | "f32" | "bool" | "char" }
+
+custom_type = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "<" | ">" )* }
 
 // === Enum Declarations ===
 //
