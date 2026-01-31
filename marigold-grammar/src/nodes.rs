@@ -327,9 +327,18 @@ impl StructDeclarationNode {
         ]
         .join(", ");
         let name = &self.name;
+        #[cfg(not(feature = "io"))]
         let mut struct_rep = format!(
             "
             #[derive({traits})]
+            struct {name} {{
+            "
+        );
+        #[cfg(feature = "io")]
+        let mut struct_rep = format!(
+            "
+            #[derive({traits})]
+            #[serde(crate = \"::marigold::marigold_impl::serde\")]
             struct {name} {{
             "
         );
@@ -612,7 +621,7 @@ pub enum DefaultEnumVariant {
 }
 
 impl EnumDeclarationNode {
-    #[allow(dead_code)] // only used if io/serde enabled
+    #[cfg(feature = "io")]
     fn definition_to_serde(maybe_definition: &Option<String>) -> Option<String> {
         if let Some(definition) = maybe_definition {
             return match definition.as_str() {
@@ -639,25 +648,21 @@ impl EnumDeclarationNode {
         .join(", ");
         let name = &self.name;
         let mut enum_rep = format!("#[derive({traits})]");
+        #[cfg(feature = "io")]
+        enum_rep.push_str("\n#[serde(crate = \"::marigold::marigold_impl::serde\")]");
         if let Some(default_variant) = &self.default_variant {
             #[cfg(feature = "io")]
             {
-                // todo: when https://github.com/serde-rs/serde/issues/912 is resolved,
-                // we will no longer have to allocate a String and provide a conversion
-                // to this enum from a String.
                 enum_rep.push_str("\n#[serde(try_from=\"String\")]");
                 enum_rep.push_str(format!("\nenum {name} {{\n").as_str());
 
-                // add normal variants.
                 let mut serialized_to_name_mapping = String::new();
                 for (field_name, serialization_definition) in &self.variants {
-                    // use the serde definition for deserialization
                     if let Some(s) = Self::definition_to_serde(serialization_definition) {
                         enum_rep.push_str(format!("#[serde({s})]\n").as_str());
                     }
                     enum_rep.push_str(format!("{},\n", field_name.as_str()).as_str());
 
-                    // For serialization, we'll use this string in the From<String> implementation.
                     let serialized = serialization_definition
                         .as_ref()
                         .unwrap_or(field_name)
@@ -666,8 +671,7 @@ impl EnumDeclarationNode {
                         .push_str(format!("\"{serialized}\" => {field_name},\n").as_str());
                 }
 
-                // add default variant definition
-                #[allow(unused_assignments)] // actually used in a `format!`
+                #[allow(unused_assignments)]
                 let mut default_serialized_mapping = String::new();
                 match default_variant {
                     DefaultEnumVariant::Sized(default_name, size) => {
