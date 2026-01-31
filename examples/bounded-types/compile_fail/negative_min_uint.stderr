@@ -1,0 +1,23 @@
+error: proc macro panicked
+  --> compile_fail/negative_min_uint.rs:6:13
+   |
+ 6 |       let _ = m!(
+   |  _____________^
+ 7 | |         struct Sensor {
+ 8 | |             reading: boundedUint(-1, 10)
+...  |
+11 | |     )
+   | |_____^
+   |
+   = help: message: marigold parsing error: MarigoldParseError("Bounded type validation failed:\n  - Bounds violation for field 'Sensor.reading': boundedUint cannot have negative min value (-1)")
+
+error[E0282]: type annotations needed
+  --> compile_fail/negative_min_uint.rs:6:13
+   |
+ 6 |       let _ = m!(
+   |  _____________^
+ 7 | |         struct Sensor {
+ 8 | |             reading: boundedUint(-1, 10)
+...  |
+12 | |     .await
+   | |__________^ cannot infer type

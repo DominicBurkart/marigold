@@ -9,6 +9,7 @@ members = [
   "examples/multi-consumer",
   "examples/select-all",
   "examples/stateful",
+  "examples/bounded-types",
   "tests"
 ]
 resolver = "2"
