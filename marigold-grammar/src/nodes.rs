@@ -378,20 +378,26 @@ impl StructDeclarationNode {
 
             if !bounded_fields.is_empty() {
                 struct_rep.push_str(&format!("\nimpl {name} {{\n"));
-                for (field_name, _) in bounded_fields {
+                for (field_name, field_type) in bounded_fields {
                     if let Some(bounds) = bounds_map.get(field_name) {
                         let upper_field = field_name.to_uppercase();
                         let cardinality = (bounds.max - bounds.min + 1) as u128;
+                        let field_type_str = field_type
+                            .primitive_to_type_string_with_resolved_bounds(
+                                Some(bounds.min),
+                                Some(bounds.max),
+                            );
+                        let card_type = select_smallest_unsigned_type(cardinality);
                         struct_rep.push_str(&format!(
-                            "    pub const {upper_field}_MIN: i128 = {};\n",
+                            "    pub const {upper_field}_MIN: {field_type_str} = {};\n",
                             bounds.min
                         ));
                         struct_rep.push_str(&format!(
-                            "    pub const {upper_field}_MAX: i128 = {};\n",
+                            "    pub const {upper_field}_MAX: {field_type_str} = {};\n",
                             bounds.max
                         ));
                         struct_rep.push_str(&format!(
-                            "    pub const {upper_field}_CARDINALITY: u128 = {cardinality};\n"
+                            "    pub const {upper_field}_CARDINALITY: {card_type} = {cardinality};\n"
                         ));
                     }
                 }

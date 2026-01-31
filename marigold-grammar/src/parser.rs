@@ -751,17 +751,17 @@ mod tests {
             "Should generate impl block for Test"
         );
         assert!(
-            code.contains("COUNT_MIN: i128 = 0"),
+            code.contains("COUNT_MIN: i8 = 0"),
             "Should generate COUNT_MIN constant, got: {}",
             code
         );
         assert!(
-            code.contains("COUNT_MAX: i128 = 10"),
+            code.contains("COUNT_MAX: i8 = 10"),
             "Should generate COUNT_MAX constant, got: {}",
             code
         );
         assert!(
-            code.contains("COUNT_CARDINALITY: u128 = 11"),
+            code.contains("COUNT_CARDINALITY: u8 = 11"),
             "Should generate COUNT_CARDINALITY constant (11 = 10 - 0 + 1), got: {}",
             code
         );
@@ -783,7 +783,7 @@ mod tests {
             code
         );
         assert!(
-            code.contains("COLOR_INDEX_CARDINALITY: u128 = 4"),
+            code.contains("COLOR_INDEX_CARDINALITY: u8 = 4"),
             "Should generate cardinality constant (4 = 3 - 0 + 1), got: {}",
             code
         );
@@ -802,6 +802,41 @@ mod tests {
             err.0.contains("Undefined") || err.0.contains("A"),
             "Error should mention undefined type: {}",
             err.0
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_negative_range_codegen() {
+        let input = r#"
+            struct Temp { reading: int[-256, -1] }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(
+            result.is_ok(),
+            "Should generate code successfully, got: {:?}",
+            result
+        );
+        let code = result.unwrap();
+        assert!(
+            code.contains("reading: i16"),
+            "int[-256, -1] should generate i16 type, got: {}",
+            code
+        );
+        assert!(
+            code.contains("READING_MIN: i16 = -256"),
+            "Should generate READING_MIN with i16 type, got: {}",
+            code
+        );
+        assert!(
+            code.contains("READING_MAX: i16 = -1"),
+            "Should generate READING_MAX with i16 type, got: {}",
+            code
+        );
+        assert!(
+            code.contains("READING_CARDINALITY: u16 = 256"),
+            "Should generate READING_CARDINALITY with u16 type, got: {}",
+            code
         );
     }
 
@@ -826,11 +861,11 @@ mod tests {
             "uint[0, 1000] should generate u16 type"
         );
         assert!(
-            code.contains("X_CARDINALITY: u128 = 256"),
+            code.contains("X_CARDINALITY: u16 = 256"),
             "Should generate X_CARDINALITY constant"
         );
         assert!(
-            code.contains("Y_CARDINALITY: u128 = 1001"),
+            code.contains("Y_CARDINALITY: u16 = 1001"),
             "Should generate Y_CARDINALITY constant"
         );
     }
