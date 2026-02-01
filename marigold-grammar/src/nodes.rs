@@ -528,7 +528,11 @@ impl Type {
         match &self {
             Type::BoundedInt { .. } => {
                 if let (Some(min), Some(max)) = (resolved_min, resolved_max) {
-                    select_smallest_signed_type(min, max)
+                    if min >= 0 {
+                        select_smallest_unsigned_type(max as u128)
+                    } else {
+                        select_smallest_signed_type(min, max)
+                    }
                 } else {
                     "i128".to_string()
                 }
@@ -869,14 +873,14 @@ mod tests {
     }
 
     #[test]
-    fn test_type_primitive_to_string_with_resolved_bounds_i8() {
+    fn test_type_primitive_to_string_with_resolved_bounds_nonneg_int_uses_unsigned() {
         let t = Type::BoundedInt {
             min: BoundExpr::Literal(0),
             max: BoundExpr::Literal(100),
         };
         assert_eq!(
             t.primitive_to_type_string_with_resolved_bounds(Some(0), Some(100)),
-            "i8"
+            "u8"
         );
     }
 
