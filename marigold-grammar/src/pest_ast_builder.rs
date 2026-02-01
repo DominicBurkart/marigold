@@ -308,10 +308,10 @@ impl PestAstBuilder {
                     _ => Err(format!("Unknown primitive type: {}", s)),
                 }
             }
-            Rule::custom_type => {
-                let s = inner.as_str();
+            Rule::type_expr => {
+                let s = Self::type_expr_to_string(inner);
                 Ok(Type::Custom(
-                    arrayvec::ArrayString::from(s)
+                    arrayvec::ArrayString::from(&s)
                         .map_err(|_| format!("Type name too long: {}", s))?,
                 ))
             }
