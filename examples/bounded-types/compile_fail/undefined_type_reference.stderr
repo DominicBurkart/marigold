@@ -4,7 +4,7 @@ error: proc macro panicked
  6 |       let _ = m!(
    |  _____________^
  7 | |         struct Sensor {
- 8 | |             reading: boundedInt(0, NonExistent.len())
+ 8 | |             reading: int[0, NonExistent.len()]
 ...  |
 11 | |     )
    | |_____^
@@ -17,7 +17,7 @@ error[E0282]: type annotations needed
  6 |       let _ = m!(
    |  _____________^
  7 | |         struct Sensor {
- 8 | |             reading: boundedInt(0, NonExistent.len())
+ 8 | |             reading: int[0, NonExistent.len()]
 ...  |
 12 | |     .await
    | |__________^ cannot infer type

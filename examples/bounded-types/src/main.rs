@@ -4,7 +4,7 @@ use marigold::marigold_impl::StreamExt;
 async fn bounded_int_basic() {
     let values = m!(
         struct Sensor {
-            reading: boundedInt(-40, 85)
+            reading: int[-40, 85]
         }
 
         fn to_sensor(i: i32) -> Sensor {
@@ -30,7 +30,7 @@ async fn bounded_int_basic() {
 async fn bounded_uint_basic() {
     let values = m!(
         struct Pixel {
-            brightness: boundedUint(0, 255)
+            brightness: uint[0, 255]
         }
 
         fn to_pixel(i: i32) -> Pixel {
@@ -63,7 +63,7 @@ async fn bounded_with_enum_reference() {
         }
 
         struct Compass {
-            heading: boundedUint(0, Direction.len())
+            heading: uint[0, Direction.len()]
         }
 
         fn to_compass(i: i32) -> Compass {
@@ -95,7 +95,7 @@ async fn bounded_with_arithmetic_bounds() {
         }
 
         struct Palette {
-            index: boundedUint(0, Color.len() - 1)
+            index: uint[0, Color.len() - 1]
         }
 
         fn to_palette(i: i32) -> Palette {
@@ -121,8 +121,8 @@ async fn bounded_with_arithmetic_bounds() {
 async fn bounded_multiple_fields() {
     let values = m!(
         struct Point {
-            x: boundedInt(-1000, 1000),
-            y: boundedInt(-1000, 1000)
+            x: int[-1000, 1000],
+            y: int[-1000, 1000]
         }
 
         fn to_point(i: i32) -> Point {

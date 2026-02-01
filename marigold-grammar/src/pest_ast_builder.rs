@@ -1106,7 +1106,7 @@ mod tests {
 
     #[test]
     fn test_struct_with_bounded_int() {
-        let fields = get_fields(parse_struct("struct Foo { v: boundedInt(0, 100) }").unwrap());
+        let fields = get_fields(parse_struct("struct Foo { v: int[0, 100] }").unwrap());
         assert_eq!(fields.len(), 1);
         assert!(matches!(
             &fields[0].1,
@@ -1119,7 +1119,7 @@ mod tests {
 
     #[test]
     fn test_struct_with_bounded_uint() {
-        let fields = get_fields(parse_struct("struct Foo { v: boundedUint(0, 255) }").unwrap());
+        let fields = get_fields(parse_struct("struct Foo { v: uint[0, 255] }").unwrap());
         assert_eq!(fields.len(), 1);
         assert!(matches!(
             &fields[0].1,
@@ -1132,7 +1132,7 @@ mod tests {
 
     #[test]
     fn test_struct_with_negative_bounded_int() {
-        let fields = get_fields(parse_struct("struct Foo { v: boundedInt(-128, 127) }").unwrap());
+        let fields = get_fields(parse_struct("struct Foo { v: int[-128, 127] }").unwrap());
         match &fields[0].1 {
             Type::BoundedInt { min, max } => {
                 assert_eq!(
@@ -1151,7 +1151,7 @@ mod tests {
 
     #[test]
     fn test_struct_with_both_negative_bounds() {
-        let fields = get_fields(parse_struct("struct Foo { v: boundedInt(-1000, -1) }").unwrap());
+        let fields = get_fields(parse_struct("struct Foo { v: int[-1000, -1] }").unwrap());
         match &fields[0].1 {
             Type::BoundedInt { min, max } => {
                 assert!(matches!(
@@ -1175,8 +1175,7 @@ mod tests {
 
     #[test]
     fn test_struct_with_type_reference_bound() {
-        let fields =
-            get_fields(parse_struct("struct Foo { v: boundedInt(0, MyEnum.len()) }").unwrap());
+        let fields = get_fields(parse_struct("struct Foo { v: int[0, MyEnum.len()] }").unwrap());
         match &fields[0].1 {
             Type::BoundedInt { min, max } => {
                 assert_eq!(*min, BoundExpr::Literal(0));
@@ -1189,7 +1188,7 @@ mod tests {
     #[test]
     fn test_struct_with_arithmetic_bound() {
         let fields =
-            get_fields(parse_struct("struct Foo { v: boundedInt(0, MyEnum.len() - 1) }").unwrap());
+            get_fields(parse_struct("struct Foo { v: int[0, MyEnum.len() - 1] }").unwrap());
         match &fields[0].1 {
             Type::BoundedInt { max, .. } => {
                 assert!(matches!(
@@ -1234,13 +1233,57 @@ mod tests {
 
     #[test]
     fn test_struct_mixed_fields() {
-        let fields = get_fields(parse_struct(
-            "struct Pixel { r: boundedUint(0, 255), g: boundedUint(0, 255), name: string_32, active: bool }"
-        ).unwrap());
+        let fields = get_fields(
+            parse_struct(
+                "struct Pixel { r: uint[0, 255], g: uint[0, 255], name: string_32, active: bool }",
+            )
+            .unwrap(),
+        );
         assert_eq!(fields.len(), 4);
         assert!(matches!(&fields[0].1, Type::BoundedUint { .. }));
         assert!(matches!(&fields[1].1, Type::BoundedUint { .. }));
         assert_eq!(fields[2].1, Type::Str(32));
         assert_eq!(fields[3].1, Type::Bool);
+    }
+
+    fn split_respecting_parens(input: &str) -> Vec<String> {
+        let mut result = Vec::new();
+        let mut current = String::new();
+        let mut paren_depth: usize = 0;
+        let mut bracket_depth: usize = 0;
+
+        for ch in input.chars() {
+            match ch {
+                '(' => {
+                    paren_depth += 1;
+                    current.push(ch);
+                }
+                ')' => {
+                    paren_depth = paren_depth.saturating_sub(1);
+                    current.push(ch);
+                }
+                '[' => {
+                    bracket_depth += 1;
+                    current.push(ch);
+                }
+                ']' => {
+                    bracket_depth = bracket_depth.saturating_sub(1);
+                    current.push(ch);
+                }
+                ',' if paren_depth == 0 && bracket_depth == 0 => {
+                    result.push(current.clone());
+                    current.clear();
+                }
+                _ => {
+                    current.push(ch);
+                }
+            }
+        }
+
+        if !current.is_empty() {
+            result.push(current);
+        }
+
+        result
     }
 }

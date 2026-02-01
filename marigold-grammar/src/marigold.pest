@@ -71,8 +71,8 @@ type_annotation = @{
 //
 // ```
 // struct Pixel {
-//     color_index: boundedInt(0, 255),
-//     alpha: boundedUint(0, Color.len()),
+//     color_index: int[0, 255],
+//     alpha: uint[0, Color.len()],
 // }
 // ```
 //
@@ -81,16 +81,16 @@ type_annotation = @{
 // - Type references: `MyEnum.len()`, `OtherType.min()`, `Field.cardinality()`
 // - Arithmetic: `MyEnum.len() - 1`, `2 * Size.max()`
 
-// boundedInt(min, max) - Signed bounded integer
+// int[min, max] - Signed bounded integer
 // The actual Rust type will be selected based on the resolved bounds (i8, i16, i32, i64, i128)
 bounded_int_type = {
-    "boundedInt" ~ "(" ~ bound_expr ~ "," ~ bound_expr ~ ")"
+    "int" ~ "[" ~ bound_expr ~ "," ~ bound_expr ~ "]"
 }
 
-// boundedUint(min, max) - Unsigned bounded integer
+// uint[min, max] - Unsigned bounded integer
 // The actual Rust type will be selected based on the resolved bounds (u8, u16, u32, u64, u128)
 bounded_uint_type = {
-    "boundedUint" ~ "(" ~ bound_expr ~ "," ~ bound_expr ~ ")"
+    "uint" ~ "[" ~ bound_expr ~ "," ~ bound_expr ~ "]"
 }
 
 // Bound expression - can be a literal, type reference, or arithmetic expression

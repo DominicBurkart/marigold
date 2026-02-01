@@ -5,7 +5,7 @@ use marigold::marigold_impl::StreamExt;
 async fn main() {
     let _ = m!(
         struct Sensor {
-            reading: boundedInt(0, NonExistent.len())
+            reading: int[0, NonExistent.len()]
         }
         range(0, 1).return
     )

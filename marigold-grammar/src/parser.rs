@@ -523,65 +523,51 @@ mod tests {
     #[test]
     fn test_bounded_int_literal_bounds() {
         use pest::Parser;
-        let result = MarigoldPestParser::parse(Rule::bounded_int_type, "boundedInt(0, 10)");
-        assert!(result.is_ok(), "Should parse boundedInt(0, 10)");
+        let result = MarigoldPestParser::parse(Rule::bounded_int_type, "int[0, 10]");
+        assert!(result.is_ok(), "Should parse int[0, 10]");
     }
 
     #[test]
     fn test_bounded_int_negative_bound() {
         use pest::Parser;
-        let result = MarigoldPestParser::parse(Rule::bounded_int_type, "boundedInt(-100, 100)");
-        assert!(result.is_ok(), "Should parse boundedInt(-100, 100)");
+        let result = MarigoldPestParser::parse(Rule::bounded_int_type, "int[-100, 100]");
+        assert!(result.is_ok(), "Should parse int[-100, 100]");
     }
 
     #[test]
     fn test_bounded_uint_literal_bounds() {
         use pest::Parser;
-        let result = MarigoldPestParser::parse(Rule::bounded_uint_type, "boundedUint(0, 255)");
-        assert!(result.is_ok(), "Should parse boundedUint(0, 255)");
+        let result = MarigoldPestParser::parse(Rule::bounded_uint_type, "uint[0, 255]");
+        assert!(result.is_ok(), "Should parse uint[0, 255]");
     }
 
     #[test]
     fn test_bounded_int_type_reference() {
         use pest::Parser;
-        let result =
-            MarigoldPestParser::parse(Rule::bounded_int_type, "boundedInt(0, MyEnum.len())");
-        assert!(result.is_ok(), "Should parse boundedInt(0, MyEnum.len())");
+        let result = MarigoldPestParser::parse(Rule::bounded_int_type, "int[0, MyEnum.len()]");
+        assert!(result.is_ok(), "Should parse int[0, MyEnum.len()]");
     }
 
     #[test]
     fn test_bounded_uint_type_reference() {
         use pest::Parser;
-        let result = MarigoldPestParser::parse(
-            Rule::bounded_uint_type,
-            "boundedUint(0, Color.cardinality())",
-        );
-        assert!(
-            result.is_ok(),
-            "Should parse boundedUint(0, Color.cardinality())"
-        );
+        let result =
+            MarigoldPestParser::parse(Rule::bounded_uint_type, "uint[0, Color.cardinality()]");
+        assert!(result.is_ok(), "Should parse uint[0, Color.cardinality()]");
     }
 
     #[test]
     fn test_bounded_int_arithmetic_expression() {
         use pest::Parser;
-        let result =
-            MarigoldPestParser::parse(Rule::bounded_int_type, "boundedInt(0, MyEnum.len() - 1)");
-        assert!(
-            result.is_ok(),
-            "Should parse boundedInt(0, MyEnum.len() - 1)"
-        );
+        let result = MarigoldPestParser::parse(Rule::bounded_int_type, "int[0, MyEnum.len() - 1]");
+        assert!(result.is_ok(), "Should parse int[0, MyEnum.len() - 1]");
     }
 
     #[test]
     fn test_bounded_int_complex_arithmetic() {
         use pest::Parser;
-        let result =
-            MarigoldPestParser::parse(Rule::bounded_int_type, "boundedInt(0, A.len() * 2 + 1)");
-        assert!(
-            result.is_ok(),
-            "Should parse boundedInt(0, A.len() * 2 + 1)"
-        );
+        let result = MarigoldPestParser::parse(Rule::bounded_int_type, "int[0, A.len() * 2 + 1]");
+        assert!(result.is_ok(), "Should parse int[0, A.len() * 2 + 1]");
     }
 
     #[test]
@@ -630,7 +616,7 @@ mod tests {
     fn test_bounded_type_validation_valid() {
         let input = r#"
             enum Color { Red = "r", Green = "g", Blue = "b" }
-            struct Pixel { color_index: boundedInt(0, 2) }
+            struct Pixel { color_index: int[0, 2] }
             range(0, 1).return
         "#;
         let result = parse_marigold(input);
@@ -644,7 +630,7 @@ mod tests {
     fn test_bounded_type_validation_with_enum_ref() {
         let input = r#"
             enum Color { Red = "r", Green = "g", Blue = "b" }
-            struct Pixel { color_index: boundedInt(0, Color.len()) }
+            struct Pixel { color_index: int[0, Color.len()] }
             range(0, 1).return
         "#;
         let result = parse_marigold(input);
@@ -657,7 +643,7 @@ mod tests {
     #[test]
     fn test_bounded_type_validation_min_greater_than_max() {
         let input = r#"
-            struct Test { field: boundedInt(10, 5) }
+            struct Test { field: int[10, 5] }
             range(0, 1).return
         "#;
         let result = parse_marigold(input);
@@ -674,7 +660,7 @@ mod tests {
     #[test]
     fn test_bounded_type_validation_undefined_type() {
         let input = r#"
-            struct Test { field: boundedInt(0, NonExistent.len()) }
+            struct Test { field: int[0, NonExistent.len()] }
             range(0, 1).return
         "#;
         let result = parse_marigold(input);
@@ -690,7 +676,7 @@ mod tests {
     #[test]
     fn test_bounded_uint_negative_min() {
         let input = r#"
-            struct Test { field: boundedUint(-1, 10) }
+            struct Test { field: uint[-1, 10] }
             range(0, 1).return
         "#;
         let result = parse_marigold(input);
@@ -704,41 +690,9 @@ mod tests {
     }
 
     #[test]
-    fn test_bounded_type_codegen_i8() {
+    fn test_bounded_type_codegen_nonneg_int_uses_unsigned() {
         let input = r#"
-            struct Test { value: boundedInt(0, 100) }
-            range(0, 1).return
-        "#;
-        let result = parse_marigold(input);
-        assert!(result.is_ok(), "Should generate code successfully");
-        let code = result.unwrap();
-        assert!(
-            code.contains("value: i8"),
-            "boundedInt(0, 100) should generate i8 type, got: {}",
-            code
-        );
-    }
-
-    #[test]
-    fn test_bounded_type_codegen_i16() {
-        let input = r#"
-            struct Test { value: boundedInt(-1000, 1000) }
-            range(0, 1).return
-        "#;
-        let result = parse_marigold(input);
-        assert!(result.is_ok(), "Should generate code successfully");
-        let code = result.unwrap();
-        assert!(
-            code.contains("value: i16"),
-            "boundedInt(-1000, 1000) should generate i16 type, got: {}",
-            code
-        );
-    }
-
-    #[test]
-    fn test_bounded_type_codegen_u8() {
-        let input = r#"
-            struct Test { value: boundedUint(0, 200) }
+            struct Test { value: int[0, 100] }
             range(0, 1).return
         "#;
         let result = parse_marigold(input);
@@ -746,7 +700,39 @@ mod tests {
         let code = result.unwrap();
         assert!(
             code.contains("value: u8"),
-            "boundedUint(0, 200) should generate u8 type, got: {}",
+            "int[0, 100] should generate u8 type, got: {}",
+            code
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_codegen_i16() {
+        let input = r#"
+            struct Test { value: int[-1000, 1000] }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(result.is_ok(), "Should generate code successfully");
+        let code = result.unwrap();
+        assert!(
+            code.contains("value: i16"),
+            "int[-1000, 1000] should generate i16 type, got: {}",
+            code
+        );
+    }
+
+    #[test]
+    fn test_bounded_type_codegen_u8() {
+        let input = r#"
+            struct Test { value: uint[0, 200] }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(result.is_ok(), "Should generate code successfully");
+        let code = result.unwrap();
+        assert!(
+            code.contains("value: u8"),
+            "uint[0, 200] should generate u8 type, got: {}",
             code
         );
     }
@@ -754,7 +740,7 @@ mod tests {
     #[test]
     fn test_bounded_type_codegen_cardinality_constants() {
         let input = r#"
-            struct Test { count: boundedInt(0, 10) }
+            struct Test { count: int[0, 10] }
             range(0, 1).return
         "#;
         let result = parse_marigold(input);
@@ -765,17 +751,17 @@ mod tests {
             "Should generate impl block for Test"
         );
         assert!(
-            code.contains("COUNT_MIN: i128 = 0"),
+            code.contains("COUNT_MIN: u8 = 0"),
             "Should generate COUNT_MIN constant, got: {}",
             code
         );
         assert!(
-            code.contains("COUNT_MAX: i128 = 10"),
+            code.contains("COUNT_MAX: u8 = 10"),
             "Should generate COUNT_MAX constant, got: {}",
             code
         );
         assert!(
-            code.contains("COUNT_CARDINALITY: u128 = 11"),
+            code.contains("COUNT_CARDINALITY: u8 = 11"),
             "Should generate COUNT_CARDINALITY constant (11 = 10 - 0 + 1), got: {}",
             code
         );
@@ -785,19 +771,19 @@ mod tests {
     fn test_bounded_type_codegen_with_enum_ref() {
         let input = r#"
             enum Color { Red = "r", Green = "g", Blue = "b" }
-            struct Pixel { color_index: boundedInt(0, Color.len()) }
+            struct Pixel { color_index: int[0, Color.len()] }
             range(0, 1).return
         "#;
         let result = parse_marigold(input);
         assert!(result.is_ok(), "Should generate code successfully");
         let code = result.unwrap();
         assert!(
-            code.contains("color_index: i8"),
-            "boundedInt(0, 3) should generate i8 type, got: {}",
+            code.contains("color_index: u8"),
+            "int[0, 3] should generate u8 type, got: {}",
             code
         );
         assert!(
-            code.contains("COLOR_INDEX_CARDINALITY: u128 = 4"),
+            code.contains("COLOR_INDEX_CARDINALITY: u8 = 4"),
             "Should generate cardinality constant (4 = 3 - 0 + 1), got: {}",
             code
         );
@@ -806,7 +792,7 @@ mod tests {
     #[test]
     fn test_bounded_type_struct_reference_error() {
         let input = r#"
-            struct A { field: boundedInt(0, A.max()) }
+            struct A { field: int[0, A.max()] }
             range(0, 1).return
         "#;
         let result = parse_marigold(input);
@@ -820,11 +806,46 @@ mod tests {
     }
 
     #[test]
+    fn test_bounded_type_negative_range_codegen() {
+        let input = r#"
+            struct Temp { reading: int[-256, -1] }
+            range(0, 1).return
+        "#;
+        let result = parse_marigold(input);
+        assert!(
+            result.is_ok(),
+            "Should generate code successfully, got: {:?}",
+            result
+        );
+        let code = result.unwrap();
+        assert!(
+            code.contains("reading: i16"),
+            "int[-256, -1] should generate i16 type, got: {}",
+            code
+        );
+        assert!(
+            code.contains("READING_MIN: i16 = -256"),
+            "Should generate READING_MIN with i16 type, got: {}",
+            code
+        );
+        assert!(
+            code.contains("READING_MAX: i16 = -1"),
+            "Should generate READING_MAX with i16 type, got: {}",
+            code
+        );
+        assert!(
+            code.contains("READING_CARDINALITY: u16 = 256"),
+            "Should generate READING_CARDINALITY with u16 type, got: {}",
+            code
+        );
+    }
+
+    #[test]
     fn test_bounded_type_multiple_fields_codegen() {
         let input = r#"
             struct Data {
-                x: boundedInt(-128, 127),
-                y: boundedUint(0, 1000)
+                x: int[-128, 127],
+                y: uint[0, 1000]
             }
             range(0, 1).return
         "#;
@@ -833,18 +854,18 @@ mod tests {
         let code = result.unwrap();
         assert!(
             code.contains("x: i8"),
-            "boundedInt(-128, 127) should generate i8 type"
+            "int[-128, 127] should generate i8 type"
         );
         assert!(
             code.contains("y: u16"),
-            "boundedUint(0, 1000) should generate u16 type"
+            "uint[0, 1000] should generate u16 type"
         );
         assert!(
-            code.contains("X_CARDINALITY: u128 = 256"),
+            code.contains("X_CARDINALITY: u16 = 256"),
             "Should generate X_CARDINALITY constant"
         );
         assert!(
-            code.contains("Y_CARDINALITY: u128 = 1001"),
+            code.contains("Y_CARDINALITY: u16 = 1001"),
             "Should generate Y_CARDINALITY constant"
         );
     }
