@@ -28,9 +28,7 @@ fn bench_simple_range_return(c: &mut Criterion) {
 /// Benchmark range with map and return
 fn bench_range_map_return(c: &mut Criterion) {
     let input = r#"
-        fn double(v: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%%
-            v * 2
-        %%%MARIGOLD_FUNCTION_END%%%
+        fn double(v: i32) -> i32 { v * 2 }
 
         range(0, 100)
             .map(double)
@@ -71,9 +69,7 @@ fn bench_chained_operations(c: &mut Criterion) {
 /// Benchmark filter operation
 fn bench_filter_operation(c: &mut Criterion) {
     let input = r#"
-        fn is_odd_number(i: &i32) -> bool %%%MARIGOLD_FUNCTION_START%%%
-            i % 2 == 1
-        %%%MARIGOLD_FUNCTION_END%%%
+        fn is_odd_number(i: &i32) -> bool { i % 2 == 1 }
 
         range(0, 100)
             .filter(is_odd_number)
@@ -203,9 +199,7 @@ fn bench_permutations_with_replacement(c: &mut Criterion) {
 /// Benchmark keep_first_n with external function
 fn bench_keep_first_n(c: &mut Criterion) {
     let input = r#"
-        fn sorter(a: &Vec<i32>, b: &Vec<i32>) -> Ordering %%%MARIGOLD_FUNCTION_START%%%
-            a[0].cmp(&b[0])
-        %%%MARIGOLD_FUNCTION_END%%%
+        fn sorter(a: &Vec<i32>, b: &Vec<i32>) -> Ordering { a[0].cmp(&b[0]) }
 
         range(0, 20)
             .permutations(2)
@@ -237,12 +231,7 @@ fn bench_complex_csv_example(c: &mut Criterion) {
             hull: Hull,
         }
 
-        fn is_spherical(v: &Vaisseau) -> bool %%%MARIGOLD_FUNCTION_START%%%
-            match v.hull {
-                Hull::Spherical => true,
-                _ => false
-            }
-        %%%MARIGOLD_FUNCTION_END%%%
+        fn is_spherical(v: &Vaisseau) -> bool { match v.hull { Hull::Spherical => true, _ => false } }
 
         range(0, 100)
             .filter(is_spherical)
@@ -326,10 +315,10 @@ fn bench_empty_input(c: &mut Criterion) {
 /// Benchmark deeply nested function calls
 fn bench_deeply_nested(c: &mut Criterion) {
     let input = r#"
-        fn process_a(v: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%% v + 1 %%%MARIGOLD_FUNCTION_END%%%
-        fn process_b(v: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%% v * 2 %%%MARIGOLD_FUNCTION_END%%%
-        fn process_c(v: i32) -> i32 %%%MARIGOLD_FUNCTION_START%%% v - 3 %%%MARIGOLD_FUNCTION_END%%%
-        fn filter_even(v: &i32) -> bool %%%MARIGOLD_FUNCTION_START%%% v % 2 == 0 %%%MARIGOLD_FUNCTION_END%%%
+        fn process_a(v: i32) -> i32 { v + 1 }
+        fn process_b(v: i32) -> i32 { v * 2 }
+        fn process_c(v: i32) -> i32 { v - 3 }
+        fn filter_even(v: &i32) -> bool { v % 2 == 0 }
 
         range(0, 100)
             .map(process_a)
@@ -355,10 +344,7 @@ fn bench_deeply_nested(c: &mut Criterion) {
 /// Benchmark color palette picker example (real-world use case)
 fn bench_color_palette_picker(c: &mut Criterion) {
     let input = r#"
-        fn compare_contrast(a: &Vec<Vec<u8>>, b: &Vec<Vec<u8>>) -> Ordering %%%MARIGOLD_FUNCTION_START%%%
-            // Comparison logic placeholder
-            Ordering::Equal
-        %%%MARIGOLD_FUNCTION_END%%%
+        fn compare_contrast(a: &Vec<Vec<u8>>, b: &Vec<Vec<u8>>) -> Ordering { Ordering::Equal }
 
         range(0, 255)
             .permutations_with_replacement(3)

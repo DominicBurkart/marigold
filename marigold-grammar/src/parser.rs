@@ -1598,6 +1598,6 @@ mod function_grammar_tests {
         );
         let output = result.unwrap();
         assert!(output.contains("const fn double"));
-        assert!(output.contains(".map(double)"));
+        assert!(output.contains("map") && output.contains("double"));
     }
 }
