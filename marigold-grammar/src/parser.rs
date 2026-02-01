@@ -690,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bounded_type_codegen_i8() {
+    fn test_bounded_type_codegen_nonneg_int_uses_unsigned() {
         let input = r#"
             struct Test { value: int[0, 100] }
             range(0, 1).return
@@ -699,8 +699,8 @@ mod tests {
         assert!(result.is_ok(), "Should generate code successfully");
         let code = result.unwrap();
         assert!(
-            code.contains("value: i8"),
-            "int[0, 100] should generate i8 type, got: {}",
+            code.contains("value: u8"),
+            "int[0, 100] should generate u8 type, got: {}",
             code
         );
     }
@@ -751,12 +751,12 @@ mod tests {
             "Should generate impl block for Test"
         );
         assert!(
-            code.contains("COUNT_MIN: i8 = 0"),
+            code.contains("COUNT_MIN: u8 = 0"),
             "Should generate COUNT_MIN constant, got: {}",
             code
         );
         assert!(
-            code.contains("COUNT_MAX: i8 = 10"),
+            code.contains("COUNT_MAX: u8 = 10"),
             "Should generate COUNT_MAX constant, got: {}",
             code
         );
@@ -778,8 +778,8 @@ mod tests {
         assert!(result.is_ok(), "Should generate code successfully");
         let code = result.unwrap();
         assert!(
-            code.contains("color_index: i8"),
-            "int[0, 3] should generate i8 type, got: {}",
+            code.contains("color_index: u8"),
+            "int[0, 3] should generate u8 type, got: {}",
             code
         );
         assert!(
