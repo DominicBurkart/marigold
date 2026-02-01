@@ -1,4 +1,3 @@
-use once_cell::sync::Lazy;
 use regex::Regex;
 use std::str::FromStr;
 
@@ -828,11 +827,6 @@ pub struct FnDeclarationNode {
 
 impl FnDeclarationNode {
     pub fn code(&self) -> String {
-        static FUNCTION_BODY: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"%%%MARIGOLD_FUNCTION_START%%%([\s\S]*)%%%MARIGOLD_FUNCTION_END%%%")
-                .unwrap()
-        });
-
         let name = &self.name;
         let parameters_string = self
             .parameters
@@ -841,12 +835,7 @@ impl FnDeclarationNode {
             .collect::<Vec<_>>()
             .join(", ");
         let output_type = &self.output_type;
-        let body = FUNCTION_BODY
-            .captures(&self.body)
-            .expect("function body not parseable")
-            .get(1)
-            .expect("could not get function body")
-            .as_str();
+        let body = &self.body;
 
         format!("const fn {name}({parameters_string}) -> {output_type} {{{body}}}")
     }

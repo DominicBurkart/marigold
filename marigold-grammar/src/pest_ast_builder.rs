@@ -198,14 +198,18 @@ impl PestAstBuilder {
             .as_str()
             .to_string();
 
-        let field_list = inner
+        let body = inner
             .next()
-            .ok_or_else(|| "Missing struct field list".to_string())?;
+            .ok_or_else(|| "Missing struct body".to_string())?;
 
         let mut fields = Vec::new();
-        for field_pair in field_list.into_inner() {
-            if field_pair.as_rule() == Rule::struct_field {
-                fields.push(Self::build_struct_field(field_pair)?);
+        for body_inner in body.into_inner() {
+            if body_inner.as_rule() == Rule::struct_field_list {
+                for field_pair in body_inner.into_inner() {
+                    if field_pair.as_rule() == Rule::struct_field {
+                        fields.push(Self::build_struct_field(field_pair)?);
+                    }
+                }
             }
         }
 
@@ -446,6 +450,29 @@ impl PestAstBuilder {
         }
     }
 
+    fn type_expr_to_string(pair: Pair<Rule>) -> String {
+        let mut result = String::new();
+        for inner in pair.into_inner() {
+            match inner.as_rule() {
+                Rule::type_identifier => {
+                    result.push_str(inner.as_str());
+                }
+                Rule::generic_params => {
+                    result.push('<');
+                    let params: Vec<String> = inner
+                        .into_inner()
+                        .filter(|p| p.as_rule() == Rule::type_expr)
+                        .map(Self::type_expr_to_string)
+                        .collect();
+                    result.push_str(&params.join(", "));
+                    result.push('>');
+                }
+                _ => {}
+            }
+        }
+        result
+    }
+
     /// Build enum declaration
     fn build_enum_decl(pair: Pair<Rule>) -> Result<TypedExpression, String> {
         let mut inner = pair.into_inner();
@@ -456,15 +483,111 @@ impl PestAstBuilder {
             .as_str()
             .to_string();
 
-        let braced_content = inner
+        let body = inner
             .next()
-            .ok_or_else(|| "Missing enum body".to_string())?
+            .ok_or_else(|| "Missing enum body".to_string())?;
+
+        let mut variants = Vec::new();
+        let mut default_variant = None;
+
+        for body_inner in body.into_inner() {
+            match body_inner.as_rule() {
+                Rule::enum_variant_list => {
+                    for variant_pair in body_inner.into_inner() {
+                        if variant_pair.as_rule() == Rule::enum_variant {
+                            variants.push(Self::parse_enum_variant(variant_pair)?);
+                        }
+                    }
+                }
+                Rule::default_variant => {
+                    default_variant = Some(Self::parse_default_variant(body_inner)?);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(TypedExpression::from(EnumDeclarationNode {
+            name: enum_name,
+            variants,
+            default_variant,
+        }))
+    }
+
+    fn parse_enum_variant(pair: Pair<Rule>) -> Result<(String, Option<String>), String> {
+        let mut inner = pair.into_inner();
+
+        let variant_name = inner
+            .next()
+            .ok_or_else(|| "Missing variant name".to_string())?
             .as_str()
             .to_string();
 
-        // Use the existing parse_enum function from nodes.rs
-        let expr = crate::nodes::parse_enum(enum_name, braced_content);
-        Ok(expr)
+        let serialized_value = inner.next().and_then(|p| {
+            if p.as_rule() == Rule::enum_value {
+                p.into_inner().next().map(|qs| {
+                    let s = qs.as_str();
+                    s[1..s.len() - 1].to_string()
+                })
+            } else {
+                None
+            }
+        });
+
+        Ok((variant_name, serialized_value))
+    }
+
+    fn parse_default_variant(pair: Pair<Rule>) -> Result<DefaultEnumVariant, String> {
+        let mut inner = pair.into_inner();
+
+        let default_name = inner
+            .next()
+            .ok_or_else(|| "Missing default variant name".to_string())?
+            .as_str()
+            .to_string();
+
+        if let Some(next) = inner.next() {
+            match next.as_rule() {
+                Rule::default_variant_type => {
+                    let type_expr = next
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| "Missing type in default variant".to_string())?;
+                    let type_str = Self::type_expr_to_string(type_expr);
+                    if let Some(size_str) = type_str.strip_prefix("string_") {
+                        let size = size_str
+                            .parse::<u32>()
+                            .map_err(|_| "Invalid string size".to_string())?;
+                        Ok(DefaultEnumVariant::Sized(default_name, size))
+                    } else {
+                        Err(format!(
+                            "Default variant type must be string_N, got: {}",
+                            type_str
+                        ))
+                    }
+                }
+                Rule::enum_value => {
+                    let value = next
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| "Missing serialization value".to_string())?
+                        .as_str();
+                    let value_str = value[1..value.len() - 1].to_string();
+                    Ok(DefaultEnumVariant::WithDefaultValue(
+                        default_name,
+                        value_str,
+                    ))
+                }
+                _ => Ok(DefaultEnumVariant::WithDefaultValue(
+                    default_name.clone(),
+                    default_name,
+                )),
+            }
+        } else {
+            Ok(DefaultEnumVariant::WithDefaultValue(
+                default_name.clone(),
+                default_name,
+            ))
+        }
     }
 
     /// Build function declaration
@@ -497,7 +620,8 @@ impl PestAstBuilder {
                     }
                 }
                 Rule::fn_body => {
-                    body = item.as_str().to_string();
+                    let raw = item.as_str();
+                    body = raw[1..raw.len() - 1].to_string();
                 }
                 _ => {}
             }
@@ -522,10 +646,13 @@ impl PestAstBuilder {
             .as_str()
             .to_string();
 
-        // Check if there's an ampersand and type
         let mut param_type = String::new();
         for part in parts {
-            param_type.push_str(part.as_str());
+            match part.as_rule() {
+                Rule::fn_param_ref => param_type.push('&'),
+                Rule::free_text_identifier => param_type.push_str(part.as_str()),
+                _ => {}
+            }
         }
 
         Ok((param_name, param_type))
