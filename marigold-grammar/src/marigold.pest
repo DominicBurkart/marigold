@@ -62,6 +62,84 @@ type_annotation = @{
     (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "<" | ">" | "[" | "]" | ",")*
 }
 
+// === Bounded Type Syntax ===
+//
+// Bounded types define numerical types with explicit min/max bounds.
+// These bounds can be literal values or references to other types.
+//
+// # Examples
+//
+// ```
+// struct Pixel {
+//     color_index: int[0, 255],
+//     alpha: uint[0, Color.len()],
+// }
+// ```
+//
+// Bounds can use:
+// - Literals: `0`, `-5`, `100`
+// - Type references: `MyEnum.len()`, `OtherType.min()`, `Field.cardinality()`
+// - Arithmetic: `MyEnum.len() - 1`, `2 * Size.max()`
+
+// int[min, max] - Signed bounded integer
+// The actual Rust type will be selected based on the resolved bounds (i8, i16, i32, i64, i128)
+bounded_int_type = {
+    "int" ~ "[" ~ bound_expr ~ "," ~ bound_expr ~ "]"
+}
+
+// uint[min, max] - Unsigned bounded integer
+// The actual Rust type will be selected based on the resolved bounds (u8, u16, u32, u64, u128)
+bounded_uint_type = {
+    "uint" ~ "[" ~ bound_expr ~ "," ~ bound_expr ~ "]"
+}
+
+// Bound expression - can be a literal, type reference, or arithmetic expression
+bound_expr = {
+    bound_additive_expr
+}
+
+bound_additive_expr = {
+    bound_multiplicative_expr ~ (bound_add_op ~ bound_multiplicative_expr)*
+}
+
+bound_multiplicative_expr = {
+    bound_unary_expr ~ (bound_mul_op ~ bound_unary_expr)*
+}
+
+bound_unary_expr = {
+    "-" ~ bound_unary_expr |
+    bound_primary_expr
+}
+
+bound_primary_expr = {
+    "(" ~ bound_expr ~ ")" |
+    bound_type_ref |
+    bound_literal
+}
+
+// Numeric literal (including negative numbers)
+bound_literal = @{
+    "-"? ~ ASCII_DIGIT+ ~ ("_" ~ ASCII_DIGIT+)*
+}
+
+// Type reference with method call: TypeName.method()
+// Available methods: len(), min(), max(), cardinality()
+bound_type_ref = {
+    bound_type_name ~ "." ~ bound_method ~ "(" ~ ")"
+}
+
+bound_type_name = @{
+    (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
+}
+
+bound_method = @{
+    "len" | "min" | "max" | "cardinality"
+}
+
+// Arithmetic operators
+bound_add_op = { "+" | "-" }
+bound_mul_op = { "*" | "/" }
+
 // FreeText split into two rules for better type safety:
 //
 // 1. free_text_identifier - Must start with letter or underscore (for identifiers, function names, type names)
@@ -396,13 +474,23 @@ compression_type = { "none" | "gz" }
 //
 // These structs must implement `serde::Deserialize` when used with `read_file`.
 
-struct_field = { free_text_identifier ~ ":" ~ type_expr }
+struct_field = { free_text_identifier ~ ":" ~ field_type }
 
-struct_field_list = { (struct_field ~ ","?)* }
+struct_field_list = { (struct_field ~ ("," ~ struct_field)* ~ ","?)? }
 
 struct_body = { "{" ~ struct_field_list ~ "}" }
 
 struct_decl = { "struct" ~ free_text_identifier ~ struct_body }
+
+field_type = { optional_type | bounded_int_type | bounded_uint_type | string_type | primitive_type | custom_type }
+
+optional_type = { "Option" ~ "<" ~ field_type ~ ">" }
+
+string_type = @{ "string_" ~ ASCII_DIGIT+ }
+
+primitive_type = @{ "u128" | "usize" | "u64" | "u32" | "u16" | "u8" | "i128" | "isize" | "i64" | "i32" | "i16" | "i8" | "f64" | "f32" | "bool" | "char" }
+
+custom_type = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "<" | ">" | "," | " ")* }
 
 // === Enum Declarations ===
 //
