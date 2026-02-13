@@ -616,7 +616,7 @@ impl PestAstBuilder {
                 }
                 Rule::fn_return_type => {
                     for part in item.into_inner() {
-                        return_type_parts.push(part.as_str().to_string());
+                        return_type_parts.push(Self::translate_marigold_type(part.as_str()));
                     }
                 }
                 Rule::fn_body => {
@@ -637,7 +637,17 @@ impl PestAstBuilder {
         }))
     }
 
-    /// Parse function parameter
+    fn translate_marigold_type(type_str: &str) -> String {
+        if let Some(size_str) = type_str.strip_prefix("string_") {
+            if size_str.chars().all(|c| c.is_ascii_digit()) && !size_str.is_empty() {
+                return format!(
+                    "::marigold::marigold_impl::arrayvec::ArrayString<{size_str}>"
+                );
+            }
+        }
+        type_str.to_string()
+    }
+
     fn parse_fn_param(pair: Pair<Rule>) -> Result<(String, String), String> {
         let mut parts = pair.into_inner();
         let param_name = parts
@@ -650,7 +660,9 @@ impl PestAstBuilder {
         for part in parts {
             match part.as_rule() {
                 Rule::fn_param_ref => param_type.push('&'),
-                Rule::free_text_identifier => param_type.push_str(part.as_str()),
+                Rule::free_text_identifier => {
+                    param_type.push_str(&Self::translate_marigold_type(part.as_str()));
+                }
                 _ => {}
             }
         }
