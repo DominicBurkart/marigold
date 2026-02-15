@@ -491,7 +491,9 @@ pub struct StreamComplexity {
     pub description: String,
     pub cardinality: String,
     pub time_class: ComplexityClass,
+    pub exact_time: ExactComplexity,
     pub space_class: ComplexityClass,
+    pub exact_space: ExactComplexity,
     pub collects_input: bool,
 }
 
@@ -499,7 +501,9 @@ pub struct StreamComplexity {
 pub struct ProgramComplexity {
     pub streams: Vec<StreamComplexity>,
     pub program_time: ComplexityClass,
+    pub program_exact_time: ExactComplexity,
     pub program_space: ComplexityClass,
+    pub program_exact_space: ExactComplexity,
 }
 
 fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
@@ -537,6 +541,7 @@ fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Sy
     }
 }
 
+#[cfg(test)]
 fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
     match kind {
         StreamFunctionKind::Permutations(_)
@@ -552,20 +557,75 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
     }
 }
 
+fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
+    if let Some(v) = cardinality.try_evaluate() {
+        return if v <= BigUint::one() {
+            ComplexityClass::O1
+        } else {
+            ComplexityClass::ON
+        };
+    }
+    let base = cardinality.classify_as_time();
+    if base == ComplexityClass::O1 {
+        ComplexityClass::ON
+    } else {
+        base
+    }
+}
+
+fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
+    match kind {
+        StreamFunctionKind::Permutations(k) => {
+            if matches!(cardinality, Symbolic::Constant(_)) {
+                ComplexityClass::O1
+            } else {
+                ComplexityClass::OPermutational(*k)
+            }
+        }
+        StreamFunctionKind::PermutationsWithReplacement(k) => {
+            if matches!(cardinality, Symbolic::Constant(_)) {
+                ComplexityClass::O1
+            } else {
+                ComplexityClass::OPolynomial(*k)
+            }
+        }
+        StreamFunctionKind::Combinations(k) => {
+            if matches!(cardinality, Symbolic::Constant(_)) {
+                ComplexityClass::O1
+            } else {
+                ComplexityClass::OCombinatorial(*k)
+            }
+        }
+        _ => cardinality_to_time_class(cardinality),
+    }
+}
+
+fn step_space_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
+    match kind {
+        StreamFunctionKind::Permutations(_)
+        | StreamFunctionKind::PermutationsWithReplacement(_)
+        | StreamFunctionKind::Combinations(_) => cardinality_to_time_class(cardinality),
+        _ => ComplexityClass::O1,
+    }
+}
+
 fn analyze_stream_fns(
     funs: &[crate::nodes::StreamFunctionNode],
     initial_cardinality: Symbolic,
     description: &str,
 ) -> StreamComplexity {
     let mut cardinality = initial_cardinality;
-    let mut space = ComplexityClass::O1;
+    let mut exact_time = ExactComplexity::new();
+    let mut exact_space = ExactComplexity::new();
     let mut collects = false;
 
     for f in funs {
-        let fn_space = space_for_kind(&f.kind);
-        if fn_space > space {
-            space = fn_space;
-        }
+        let time_work = step_work_class(&cardinality, &f.kind);
+        exact_time.add_work(time_work, 1);
+
+        let space_work = step_space_class(&cardinality, &f.kind);
+        exact_space.add_work(space_work, 1);
+
         if matches!(
             f.kind,
             StreamFunctionKind::Permutations(_)
@@ -577,23 +637,20 @@ fn analyze_stream_fns(
         cardinality = propagate_cardinality(cardinality, &f.kind);
     }
 
-    let time = match &cardinality {
-        Symbolic::Constant(v) if v <= &BigUint::one() => ComplexityClass::O1,
-        _ => {
-            let base_time = cardinality.classify_as_time();
-            if base_time == ComplexityClass::O1 {
-                ComplexityClass::ON
-            } else {
-                base_time
-            }
-        }
-    };
+    if exact_time.is_empty() {
+        exact_time.add_work(cardinality_to_time_class(&cardinality), 1);
+    }
+
+    let time = exact_time.simplified();
+    let space = exact_space.simplified();
 
     StreamComplexity {
         description: description.to_string(),
         cardinality: cardinality.to_string(),
         time_class: time,
+        exact_time,
         space_class: space,
+        exact_space,
         collects_input: collects,
     }
 }
@@ -619,41 +676,56 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
 }
 
 pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
-    let mut stream_vars: std::collections::HashMap<String, (Symbolic, ComplexityClass)> =
-        std::collections::HashMap::new();
+    let mut stream_vars: std::collections::HashMap<
+        String,
+        (Symbolic, ComplexityClass, ExactComplexity, ExactComplexity),
+    > = std::collections::HashMap::new();
 
     for expr in expressions {
         match expr {
             TypedExpression::StreamVariable(v) => {
                 let card = input_cardinality(&v.inp);
-                let mut space = ComplexityClass::O1;
                 let mut current_card = card;
+                let mut var_exact_time = ExactComplexity::new();
+                let mut var_exact_space = ExactComplexity::new();
                 for f in &v.funs {
-                    let fn_space = space_for_kind(&f.kind);
-                    if fn_space > space {
-                        space = fn_space;
-                    }
+                    let time_work = step_work_class(&current_card, &f.kind);
+                    var_exact_time.add_work(time_work, 1);
+                    let space_work = step_space_class(&current_card, &f.kind);
+                    var_exact_space.add_work(space_work, 1);
                     current_card = propagate_cardinality(current_card, &f.kind);
                 }
-                space = space.max(ComplexityClass::ON);
-                stream_vars.insert(v.variable_name.clone(), (current_card, space));
+                let space = var_exact_space.simplified().max(ComplexityClass::ON);
+                stream_vars.insert(
+                    v.variable_name.clone(),
+                    (current_card, space, var_exact_time, var_exact_space),
+                );
             }
             TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                let (prior_card, prior_space) = stream_vars
+                let (prior_card, prior_space, prior_exact_time, prior_exact_space) = stream_vars
                     .get(&v.prior_stream_variable)
                     .cloned()
-                    .unwrap_or((Symbolic::Unknown, ComplexityClass::Unknown));
-                let mut space = prior_space;
+                    .unwrap_or((
+                        Symbolic::Unknown,
+                        ComplexityClass::Unknown,
+                        ExactComplexity::new(),
+                        ExactComplexity::new(),
+                    ));
                 let mut current_card = prior_card;
+                let mut var_exact_time = prior_exact_time;
+                let mut var_exact_space = prior_exact_space;
                 for f in &v.funs {
-                    let fn_space = space_for_kind(&f.kind);
-                    if fn_space > space {
-                        space = fn_space;
-                    }
+                    let time_work = step_work_class(&current_card, &f.kind);
+                    var_exact_time.add_work(time_work, 1);
+                    let space_work = step_space_class(&current_card, &f.kind);
+                    var_exact_space.add_work(space_work, 1);
                     current_card = propagate_cardinality(current_card, &f.kind);
                 }
-                space = space.max(ComplexityClass::ON);
-                stream_vars.insert(v.variable_name.clone(), (current_card, space));
+                let space = var_exact_space.simplified().max(prior_space);
+                stream_vars.insert(
+                    v.variable_name.clone(),
+                    (current_card, space, var_exact_time, var_exact_space),
+                );
             }
             _ => {}
         }
@@ -661,7 +733,9 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
 
     let mut streams = Vec::new();
     let mut program_time = ComplexityClass::O1;
+    let mut program_exact_time = ExactComplexity::new();
     let mut program_space = ComplexityClass::O1;
+    let mut program_exact_space = ExactComplexity::new();
 
     for expr in expressions {
         let sc = match expr {
@@ -683,10 +757,13 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
             }
             TypedExpression::NamedReturningStream(s)
             | TypedExpression::NamedNonReturningStream(s) => {
-                let (card, var_space) = stream_vars
-                    .get(&s.stream_variable)
-                    .cloned()
-                    .unwrap_or((Symbolic::Unknown, ComplexityClass::Unknown));
+                let (card, var_space, var_exact_time, var_exact_space) =
+                    stream_vars.get(&s.stream_variable).cloned().unwrap_or((
+                        Symbolic::Unknown,
+                        ComplexityClass::Unknown,
+                        ExactComplexity::new(),
+                        ExactComplexity::new(),
+                    ));
                 let funs_desc = describe_stream_fns(&s.funs);
                 let out_desc = if s.out.returning {
                     "return"
@@ -699,21 +776,28 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
                     format!("{}.{funs_desc}.{out_desc}", s.stream_variable)
                 };
                 let mut sc = analyze_stream_fns(&s.funs, card, &desc);
-                sc.space_class = sc.space_class.max(var_space);
+                sc.exact_time.merge(&var_exact_time);
+                sc.time_class = sc.exact_time.simplified();
+                sc.exact_space.merge(&var_exact_space);
+                sc.space_class = sc.exact_space.simplified().max(var_space);
                 sc
             }
             _ => continue,
         };
 
         program_time = program_time.max(sc.time_class.clone());
+        program_exact_time.merge(&sc.exact_time);
         program_space = program_space.max(sc.space_class.clone());
+        program_exact_space.merge(&sc.exact_space);
         streams.push(sc);
     }
 
     ProgramComplexity {
         streams,
         program_time,
+        program_exact_time,
         program_space,
+        program_exact_space,
     }
 }
 
@@ -1068,7 +1152,7 @@ mod tests {
             crate::parser::PestParser::analyze("range(0, 100).fold(0, add).return").unwrap();
         assert_eq!(result.streams.len(), 1);
         assert_eq!(result.streams[0].cardinality, "1");
-        assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
+        assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
         assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
     }
 
