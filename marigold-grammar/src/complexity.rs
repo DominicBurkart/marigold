@@ -1,5 +1,6 @@
 #![allow(clippy::enum_variant_names)]
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
@@ -8,9 +9,7 @@ use num_traits::{One, Zero};
 use pest::Parser;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::nodes::{
-    InputCount, InputVariability, StreamFunctionKind, TypedExpression,
-};
+use crate::nodes::{InputCount, InputVariability, StreamFunctionKind, TypedExpression};
 
 #[derive(pest_derive::Parser)]
 #[grammar = "complexity_notation.pest"]
@@ -39,15 +38,19 @@ impl ComplexityClass {
             ComplexityClass::ONLogK(_) => 3,
             ComplexityClass::ONLogN => 4,
             ComplexityClass::OPolynomial(k) => 5 + *k,
-            ComplexityClass::OCombinatorial(_) => 1_000_000,
-            ComplexityClass::OPermutational(_) => 1_000_001,
-            ComplexityClass::OFactorial => 1_000_002,
+            ComplexityClass::OCombinatorial(k) => 1_000_000 + *k,
+            ComplexityClass::OPermutational(k) => 2_000_000 + *k,
+            ComplexityClass::OFactorial => 3_000_000,
             ComplexityClass::Unknown => u64::MAX,
         }
     }
 
     pub fn max(self, other: ComplexityClass) -> ComplexityClass {
-        if self >= other { self } else { other }
+        if self >= other {
+            self
+        } else {
+            other
+        }
     }
 }
 
@@ -84,7 +87,7 @@ impl FromStr for ComplexityClass {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        ComplexityNotationParser::parse(Rule::complexity, s)
+        ComplexityNotationParser::parse(Rule::simple_complexity, s)
             .map_err(|e| format!("Invalid complexity notation: {e}"))?;
 
         if let Some(rest) = s.strip_prefix("O(n!/(n-") {
@@ -134,6 +137,23 @@ impl FromStr for ComplexityClass {
     }
 }
 
+impl ComplexityClass {
+    fn fmt_inner(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ComplexityClass::O1 => write!(f, "1"),
+            ComplexityClass::OLogN => write!(f, "log(n)"),
+            ComplexityClass::ON => write!(f, "n"),
+            ComplexityClass::ONLogK(k) => write!(f, "n*log({k})"),
+            ComplexityClass::ONLogN => write!(f, "n*log(n)"),
+            ComplexityClass::OPolynomial(k) => write!(f, "n^{k}"),
+            ComplexityClass::OCombinatorial(k) => write!(f, "C(n,{k})"),
+            ComplexityClass::OPermutational(k) => write!(f, "n!/(n-{k})!"),
+            ComplexityClass::OFactorial => write!(f, "n!"),
+            ComplexityClass::Unknown => write!(f, "?"),
+        }
+    }
+}
+
 impl Serialize for ComplexityClass {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -150,6 +170,205 @@ impl<'de> Deserialize<'de> for ComplexityClass {
     {
         let s = String::deserialize(deserializer)?;
         ComplexityClass::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExactComplexity {
+    terms: BTreeMap<ComplexityClass, u64>,
+}
+
+impl ExactComplexity {
+    pub fn new() -> Self {
+        ExactComplexity {
+            terms: BTreeMap::new(),
+        }
+    }
+
+    pub fn add_work(&mut self, class: ComplexityClass, count: u64) {
+        *self.terms.entry(class).or_insert(0) += count;
+    }
+
+    pub fn merge(&mut self, other: &ExactComplexity) {
+        for (class, count) in &other.terms {
+            *self.terms.entry(class.clone()).or_insert(0) += count;
+        }
+    }
+
+    pub fn simplified(&self) -> ComplexityClass {
+        self.terms
+            .keys()
+            .max()
+            .cloned()
+            .unwrap_or(ComplexityClass::O1)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.terms.is_empty()
+    }
+}
+
+impl Default for ExactComplexity {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for ExactComplexity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.terms.is_empty() {
+            return write!(f, "O(1)");
+        }
+
+        let has_higher = self.terms.keys().any(|k| *k > ComplexityClass::O1);
+        let terms_desc: Vec<_> = self
+            .terms
+            .iter()
+            .rev()
+            .filter(|(class, _)| !has_higher || **class != ComplexityClass::O1)
+            .collect();
+
+        if terms_desc.is_empty() {
+            return write!(f, "O(1)");
+        }
+
+        write!(f, "O(")?;
+        for (i, (class, coeff)) in terms_desc.iter().enumerate() {
+            if i > 0 {
+                write!(f, " + ")?;
+            }
+            if **class == ComplexityClass::O1 {
+                write!(f, "{coeff}")?;
+            } else if **coeff == 1 {
+                class.fmt_inner(f)?;
+            } else {
+                write!(f, "{coeff}")?;
+                class.fmt_inner(f)?;
+            }
+        }
+        write!(f, ")")
+    }
+}
+
+impl FromStr for ExactComplexity {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(simple) = ComplexityClass::from_str(s) {
+            let mut ec = ExactComplexity::new();
+            ec.add_work(simple, 1);
+            return Ok(ec);
+        }
+
+        let pairs = ComplexityNotationParser::parse(Rule::exact_complexity, s)
+            .map_err(|e| format!("Invalid exact complexity notation: {e}"))?;
+
+        let mut ec = ExactComplexity::new();
+
+        for pair in pairs {
+            if pair.as_rule() != Rule::exact_complexity {
+                continue;
+            }
+            for inner in pair.into_inner() {
+                if inner.as_rule() != Rule::exact_expr {
+                    continue;
+                }
+                for term in inner.into_inner() {
+                    if term.as_rule() != Rule::exact_term {
+                        continue;
+                    }
+                    let mut coeff: u64 = 1;
+                    let mut class = ComplexityClass::O1;
+                    for part in term.into_inner() {
+                        match part.as_rule() {
+                            Rule::coefficient => {
+                                coeff = part
+                                    .as_str()
+                                    .parse()
+                                    .map_err(|_| "Invalid coefficient".to_string())?;
+                            }
+                            Rule::base_complexity | Rule::base_complexity_non_constant => {
+                                class = parse_base_complexity(part.as_str())?;
+                            }
+                            Rule::constant_term => {
+                                coeff = part
+                                    .as_str()
+                                    .parse()
+                                    .map_err(|_| "Invalid constant".to_string())?;
+                                class = ComplexityClass::O1;
+                            }
+                            _ => {}
+                        }
+                    }
+                    ec.add_work(class, coeff);
+                }
+            }
+        }
+
+        Ok(ec)
+    }
+}
+
+impl Serialize for ExactComplexity {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for ExactComplexity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        ExactComplexity::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+fn parse_base_complexity(s: &str) -> Result<ComplexityClass, String> {
+    if let Some(rest) = s.strip_prefix("n!/(n-") {
+        if let Some(num_str) = rest.strip_suffix(")!") {
+            let k: u64 = num_str
+                .parse()
+                .map_err(|_| format!("Invalid permutation argument: {num_str}"))?;
+            return Ok(ComplexityClass::OPermutational(k));
+        }
+    }
+    if let Some(rest) = s.strip_prefix("n^") {
+        let k: u64 = rest
+            .parse()
+            .map_err(|_| format!("Invalid exponent: {rest}"))?;
+        return Ok(ComplexityClass::OPolynomial(k));
+    }
+    if let Some(rest) = s.strip_prefix("n*log(") {
+        if let Some(num_str) = rest.strip_suffix(')') {
+            if num_str == "n" {
+                return Ok(ComplexityClass::ONLogN);
+            }
+            let k: u64 = num_str
+                .parse()
+                .map_err(|_| format!("Invalid log argument: {num_str}"))?;
+            return Ok(ComplexityClass::ONLogK(k));
+        }
+    }
+    if let Some(rest) = s.strip_prefix("C(n,") {
+        if let Some(num_str) = rest.strip_suffix(')') {
+            let k: u64 = num_str
+                .parse()
+                .map_err(|_| format!("Invalid combination argument: {num_str}"))?;
+            return Ok(ComplexityClass::OCombinatorial(k));
+        }
+    }
+    match s {
+        "1" => Ok(ComplexityClass::O1),
+        "log(n)" => Ok(ComplexityClass::OLogN),
+        "n" => Ok(ComplexityClass::ON),
+        "n!" => Ok(ComplexityClass::OFactorial),
+        "?" => Ok(ComplexityClass::Unknown),
+        _ => Err(format!("Could not classify base complexity: {s}")),
     }
 }
 
@@ -446,10 +665,15 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
 
     for expr in expressions {
         let sc = match expr {
-            TypedExpression::UnnamedReturningStream(s) | TypedExpression::UnnamedNonReturningStream(s) => {
+            TypedExpression::UnnamedReturningStream(s)
+            | TypedExpression::UnnamedNonReturningStream(s) => {
                 let card = input_cardinality(&s.inp_and_funs.inp);
                 let funs_desc = describe_stream_fns(&s.inp_and_funs.funs);
-                let out_desc = if s.out.returning { "return" } else { "write_file(...)" };
+                let out_desc = if s.out.returning {
+                    "return"
+                } else {
+                    "write_file(...)"
+                };
                 let desc = if funs_desc.is_empty() {
                     format!("input.{out_desc}")
                 } else {
@@ -457,13 +681,18 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
                 };
                 analyze_stream_fns(&s.inp_and_funs.funs, card, &desc)
             }
-            TypedExpression::NamedReturningStream(s) | TypedExpression::NamedNonReturningStream(s) => {
+            TypedExpression::NamedReturningStream(s)
+            | TypedExpression::NamedNonReturningStream(s) => {
                 let (card, var_space) = stream_vars
                     .get(&s.stream_variable)
                     .cloned()
                     .unwrap_or((Symbolic::Unknown, ComplexityClass::Unknown));
                 let funs_desc = describe_stream_fns(&s.funs);
-                let out_desc = if s.out.returning { "return" } else { "write_file(...)" };
+                let out_desc = if s.out.returning {
+                    "return"
+                } else {
+                    "write_file(...)"
+                };
                 let desc = if funs_desc.is_empty() {
                     format!("{}.{out_desc}", s.stream_variable)
                 } else {
@@ -494,17 +723,26 @@ mod tests {
 
     #[test]
     fn test_parse_o1() {
-        assert_eq!(ComplexityClass::from_str("O(1)").unwrap(), ComplexityClass::O1);
+        assert_eq!(
+            ComplexityClass::from_str("O(1)").unwrap(),
+            ComplexityClass::O1
+        );
     }
 
     #[test]
     fn test_parse_on() {
-        assert_eq!(ComplexityClass::from_str("O(n)").unwrap(), ComplexityClass::ON);
+        assert_eq!(
+            ComplexityClass::from_str("O(n)").unwrap(),
+            ComplexityClass::ON
+        );
     }
 
     #[test]
     fn test_parse_ologn() {
-        assert_eq!(ComplexityClass::from_str("O(log(n))").unwrap(), ComplexityClass::OLogN);
+        assert_eq!(
+            ComplexityClass::from_str("O(log(n))").unwrap(),
+            ComplexityClass::OLogN
+        );
     }
 
     #[test]
@@ -728,27 +966,51 @@ mod tests {
 
     #[test]
     fn test_streaming_ops_space_o1() {
-        assert_eq!(space_for_kind(&StreamFunctionKind::Map), ComplexityClass::O1);
-        assert_eq!(space_for_kind(&StreamFunctionKind::Filter), ComplexityClass::O1);
-        assert_eq!(space_for_kind(&StreamFunctionKind::FilterMap), ComplexityClass::O1);
-        assert_eq!(space_for_kind(&StreamFunctionKind::Fold), ComplexityClass::O1);
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Map),
+            ComplexityClass::O1
+        );
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Filter),
+            ComplexityClass::O1
+        );
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::FilterMap),
+            ComplexityClass::O1
+        );
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Fold),
+            ComplexityClass::O1
+        );
         assert_eq!(space_for_kind(&StreamFunctionKind::Ok), ComplexityClass::O1);
-        assert_eq!(space_for_kind(&StreamFunctionKind::OkOrPanic), ComplexityClass::O1);
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::OkOrPanic),
+            ComplexityClass::O1
+        );
     }
 
     #[test]
     fn test_permutations_space_on() {
-        assert_eq!(space_for_kind(&StreamFunctionKind::Permutations(3)), ComplexityClass::ON);
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Permutations(3)),
+            ComplexityClass::ON
+        );
     }
 
     #[test]
     fn test_combinations_space_on() {
-        assert_eq!(space_for_kind(&StreamFunctionKind::Combinations(2)), ComplexityClass::ON);
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Combinations(2)),
+            ComplexityClass::ON
+        );
     }
 
     #[test]
     fn test_keep_first_n_space_o1() {
-        assert_eq!(space_for_kind(&StreamFunctionKind::KeepFirstN(5)), ComplexityClass::O1);
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::KeepFirstN(5)),
+            ComplexityClass::O1
+        );
     }
 
     #[test]
@@ -812,17 +1074,17 @@ mod tests {
 
     #[test]
     fn test_analyze_select_all() {
-        let result = crate::parser::PestParser::analyze(
-            "select_all(range(0, 10), range(0, 20)).return",
-        )
-        .unwrap();
+        let result =
+            crate::parser::PestParser::analyze("select_all(range(0, 10), range(0, 20)).return")
+                .unwrap();
         assert_eq!(result.streams.len(), 1);
         assert_eq!(result.streams[0].cardinality, "30");
     }
 
     #[test]
     fn test_analyze_stream_variable() {
-        let input = "fn double(x: i32) -> i32 { x * 2 }\ndigits = range(0, 10)\ndigits.map(double).return";
+        let input =
+            "fn double(x: i32) -> i32 { x * 2 }\ndigits = range(0, 10)\ndigits.map(double).return";
         let result = crate::parser::PestParser::analyze(input).unwrap();
         assert_eq!(result.streams.len(), 1);
         assert_eq!(result.streams[0].space_class, ComplexityClass::ON);
@@ -863,6 +1125,114 @@ mod tests {
         assert_eq!(result.streams.len(), 1);
         assert_eq!(result.streams[0].space_class, ComplexityClass::ON);
         assert!(result.streams[0].collects_input);
+    }
+
+    #[test]
+    fn test_exact_complexity_new_is_empty() {
+        let ec = ExactComplexity::new();
+        assert!(ec.is_empty());
+        assert_eq!(ec.simplified(), ComplexityClass::O1);
+    }
+
+    #[test]
+    fn test_exact_complexity_add_work() {
+        let mut ec = ExactComplexity::new();
+        ec.add_work(ComplexityClass::ON, 1);
+        assert!(!ec.is_empty());
+        assert_eq!(ec.simplified(), ComplexityClass::ON);
+    }
+
+    #[test]
+    fn test_exact_complexity_accumulates() {
+        let mut ec = ExactComplexity::new();
+        ec.add_work(ComplexityClass::ON, 1);
+        ec.add_work(ComplexityClass::ON, 1);
+        assert_eq!(ec.to_string(), "O(2n)");
+    }
+
+    #[test]
+    fn test_exact_complexity_multiple_tiers() {
+        let mut ec = ExactComplexity::new();
+        ec.add_work(ComplexityClass::OPermutational(2), 1);
+        ec.add_work(ComplexityClass::ON, 2);
+        assert_eq!(ec.to_string(), "O(n!/(n-2)! + 2n)");
+        assert_eq!(ec.simplified(), ComplexityClass::OPermutational(2));
+    }
+
+    #[test]
+    fn test_exact_complexity_merge() {
+        let mut a = ExactComplexity::new();
+        a.add_work(ComplexityClass::ON, 2);
+        let mut b = ExactComplexity::new();
+        b.add_work(ComplexityClass::ON, 1);
+        b.add_work(ComplexityClass::OPolynomial(2), 1);
+        a.merge(&b);
+        assert_eq!(a.to_string(), "O(n^2 + 3n)");
+    }
+
+    #[test]
+    fn test_exact_complexity_display_single_coeff_1() {
+        let mut ec = ExactComplexity::new();
+        ec.add_work(ComplexityClass::ON, 1);
+        assert_eq!(ec.to_string(), "O(n)");
+    }
+
+    #[test]
+    fn test_exact_complexity_display_o1_only() {
+        let mut ec = ExactComplexity::new();
+        ec.add_work(ComplexityClass::O1, 3);
+        assert_eq!(ec.to_string(), "O(3)");
+    }
+
+    #[test]
+    fn test_exact_complexity_display_omits_o1_when_higher_exists() {
+        let mut ec = ExactComplexity::new();
+        ec.add_work(ComplexityClass::ON, 2);
+        ec.add_work(ComplexityClass::O1, 1);
+        assert_eq!(ec.to_string(), "O(2n)");
+    }
+
+    #[test]
+    fn test_exact_complexity_display_empty_is_o1() {
+        let ec = ExactComplexity::new();
+        assert_eq!(ec.to_string(), "O(1)");
+    }
+
+    #[test]
+    fn test_exact_complexity_fromstr_simple() {
+        let ec = ExactComplexity::from_str("O(n)").unwrap();
+        assert_eq!(ec.simplified(), ComplexityClass::ON);
+        assert_eq!(ec.to_string(), "O(n)");
+    }
+
+    #[test]
+    fn test_exact_complexity_fromstr_with_coefficient() {
+        let ec = ExactComplexity::from_str("O(2n)").unwrap();
+        assert_eq!(ec.to_string(), "O(2n)");
+    }
+
+    #[test]
+    fn test_exact_complexity_fromstr_multi_term() {
+        let ec = ExactComplexity::from_str("O(n^2 + 3n)").unwrap();
+        assert_eq!(ec.simplified(), ComplexityClass::OPolynomial(2));
+        assert_eq!(ec.to_string(), "O(n^2 + 3n)");
+    }
+
+    #[test]
+    fn test_exact_complexity_fromstr_permutational() {
+        let ec = ExactComplexity::from_str("O(2n!/(n-2)! + n)").unwrap();
+        assert_eq!(ec.simplified(), ComplexityClass::OPermutational(2));
+        assert_eq!(ec.to_string(), "O(2n!/(n-2)! + n)");
+    }
+
+    #[test]
+    fn test_exact_complexity_serde_roundtrip() {
+        let mut ec = ExactComplexity::new();
+        ec.add_work(ComplexityClass::OPermutational(2), 1);
+        ec.add_work(ComplexityClass::ON, 3);
+        let json = serde_json::to_string(&ec).unwrap();
+        let parsed: ExactComplexity = serde_json::from_str(&json).unwrap();
+        assert_eq!(ec, parsed);
     }
 }
 
@@ -940,6 +1310,65 @@ mod proptests {
             let json = serde_json::to_string(&c).unwrap();
             let parsed: ComplexityClass = serde_json::from_str(&json).unwrap();
             prop_assert_eq!(c, parsed);
+        }
+    }
+
+    fn arb_exact_complexity() -> impl Strategy<Value = ExactComplexity> {
+        proptest::collection::btree_map(
+            prop_oneof![
+                Just(ComplexityClass::O1),
+                Just(ComplexityClass::OLogN),
+                Just(ComplexityClass::ON),
+                Just(ComplexityClass::ONLogN),
+                (2..10u64).prop_map(ComplexityClass::OPolynomial),
+                (1..10u64).prop_map(ComplexityClass::OPermutational),
+                (1..10u64).prop_map(ComplexityClass::OCombinatorial),
+            ],
+            1..10u64,
+            1..4,
+        )
+        .prop_map(|terms| ExactComplexity { terms })
+    }
+
+    fn normalize_exact(ec: &ExactComplexity) -> ExactComplexity {
+        let has_higher = ec.terms.keys().any(|k| *k > ComplexityClass::O1);
+        ExactComplexity {
+            terms: ec
+                .terms
+                .iter()
+                .filter(|(class, _)| !has_higher || **class != ComplexityClass::O1)
+                .map(|(c, v)| (c.clone(), *v))
+                .collect(),
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_exact_complexity_display_fromstr_roundtrip(ec in arb_exact_complexity()) {
+            let s = ec.to_string();
+            let parsed = ExactComplexity::from_str(&s).unwrap();
+            let expected = normalize_exact(&ec);
+            prop_assert_eq!(expected, parsed);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_exact_complexity_serde_roundtrip_proptest(ec in arb_exact_complexity()) {
+            let json = serde_json::to_string(&ec).unwrap();
+            let parsed: ExactComplexity = serde_json::from_str(&json).unwrap();
+            let expected = normalize_exact(&ec);
+            prop_assert_eq!(expected, parsed);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_exact_complexity_simplified_is_max_term(ec in arb_exact_complexity()) {
+            let simplified = ec.simplified();
+            for class in ec.terms.keys() {
+                prop_assert!(simplified >= *class);
+            }
         }
     }
 }

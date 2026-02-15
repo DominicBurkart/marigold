@@ -1,8 +1,16 @@
-complexity = { SOI ~ "O(" ~ complexity_expr ~ ")" ~ EOI }
+WHITESPACE = _{ " " }
 
-complexity_expr = {
-    "1"
-  | "log(n)"
+simple_complexity = { SOI ~ "O(" ~ base_complexity ~ ")" ~ EOI }
+
+exact_complexity = { SOI ~ "O(" ~ exact_expr ~ ")" ~ EOI }
+exact_expr = { exact_term ~ ("+" ~ exact_term)* }
+exact_term = { coefficient ~ base_complexity_non_constant | constant_term | base_complexity }
+coefficient = @{ ASCII_DIGIT+ }
+constant_term = @{ ASCII_DIGIT+ }
+
+base_complexity = { "1" | base_complexity_non_constant }
+base_complexity_non_constant = {
+    "log(n)"
   | "n" ~ "!/" ~ "(n-" ~ number ~ ")!"
   | "n" ~ "!"
   | "n" ~ "^" ~ number
