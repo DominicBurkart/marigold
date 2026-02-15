@@ -574,23 +574,24 @@ fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
 }
 
 fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
+    let is_concrete = cardinality.try_evaluate().is_some();
     match kind {
         StreamFunctionKind::Permutations(k) => {
-            if matches!(cardinality, Symbolic::Constant(_)) {
+            if is_concrete {
                 ComplexityClass::O1
             } else {
                 ComplexityClass::OPermutational(*k)
             }
         }
         StreamFunctionKind::PermutationsWithReplacement(k) => {
-            if matches!(cardinality, Symbolic::Constant(_)) {
+            if is_concrete {
                 ComplexityClass::O1
             } else {
                 ComplexityClass::OPolynomial(*k)
             }
         }
         StreamFunctionKind::Combinations(k) => {
-            if matches!(cardinality, Symbolic::Constant(_)) {
+            if is_concrete {
                 ComplexityClass::O1
             } else {
                 ComplexityClass::OCombinatorial(*k)
