@@ -70,6 +70,7 @@ extern crate proc_macro;
 pub use itertools;
 
 pub mod bound_resolution;
+pub mod complexity;
 pub mod nodes;
 pub mod parser;
 pub mod symbol_table;
@@ -92,6 +93,12 @@ pub mod pest_ast_builder;
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
+}
+
+pub fn marigold_analyze(
+    s: &str,
+) -> Result<complexity::ProgramComplexity, parser::MarigoldParseError> {
+    parser::PestParser::analyze(s)
 }
 
 #[cfg(test)]

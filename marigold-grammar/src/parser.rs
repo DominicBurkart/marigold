@@ -55,6 +55,16 @@ impl PestParser {
         Self
     }
 
+    pub fn analyze(
+        input: &str,
+    ) -> Result<crate::complexity::ProgramComplexity, MarigoldParseError> {
+        let pairs = MarigoldPestParser::parse(Rule::program, input)
+            .map_err(|e| MarigoldParseError(format!("Parse error: {}", e)))?;
+        let expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)
+            .map_err(MarigoldParseError)?;
+        Ok(crate::complexity::analyze_program(&expressions))
+    }
+
     /// Internal function: parse input and build AST
     fn parse_input(input: &str) -> Result<String, String> {
         // Stage 1: Parse with Pest grammar

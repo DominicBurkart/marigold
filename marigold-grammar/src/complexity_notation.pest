@@ -1,0 +1,16 @@
+complexity = { SOI ~ "O(" ~ complexity_expr ~ ")" ~ EOI }
+
+complexity_expr = {
+    "1"
+  | "log(n)"
+  | "n" ~ "!/" ~ "(n-" ~ number ~ ")!"
+  | "n" ~ "!"
+  | "n" ~ "^" ~ number
+  | "n" ~ "*log(n)"
+  | "n" ~ "*log(" ~ number ~ ")"
+  | "n"
+  | "C(n," ~ number ~ ")"
+  | "?"
+}
+
+number = @{ ASCII_DIGIT+ }

@@ -827,6 +827,13 @@ impl PestAstBuilder {
         Ok(InputAndMaybeStreamFunctions { inp, funs })
     }
 
+    fn peek_numeric_arg(pair: &Pair<Rule>) -> Result<u64, String> {
+        let first_inner = pair.clone().into_inner().next()
+            .ok_or_else(|| "Missing numeric argument".to_string())?;
+        first_inner.as_str().parse::<u64>()
+            .map_err(|e| format!("Could not parse numeric argument: {}", e))
+    }
+
     /// Build stream function node
     fn build_stream_function(pair: Pair<Rule>) -> Result<StreamFunctionNode, String> {
         let inner = pair
@@ -834,25 +841,36 @@ impl PestAstBuilder {
             .next()
             .ok_or_else(|| "Empty stream function".to_string())?;
 
-        let code = match inner.as_rule() {
-            Rule::map_fn => Self::build_map_fn(inner)?,
-            Rule::filter_fn => Self::build_filter_fn(inner)?,
-            Rule::filter_map_fn => Self::build_filter_map_fn(inner)?,
-            Rule::permutations_fn => Self::build_permutations_fn(inner)?,
+        let (kind, code) = match inner.as_rule() {
+            Rule::map_fn => (StreamFunctionKind::Map, Self::build_map_fn(inner)?),
+            Rule::filter_fn => (StreamFunctionKind::Filter, Self::build_filter_fn(inner)?),
+            Rule::filter_map_fn => (StreamFunctionKind::FilterMap, Self::build_filter_map_fn(inner)?),
+            Rule::permutations_fn => {
+                let n = Self::peek_numeric_arg(&inner)?;
+                (StreamFunctionKind::Permutations(n), Self::build_permutations_fn(inner)?)
+            }
             Rule::permutations_with_replacement_fn => {
-                Self::build_permutations_with_replacement_fn(inner)?
+                let n = Self::peek_numeric_arg(&inner)?;
+                (StreamFunctionKind::PermutationsWithReplacement(n), Self::build_permutations_with_replacement_fn(inner)?)
             }
-            Rule::combinations_fn => Self::build_combinations_fn(inner)?,
-            Rule::keep_first_n_fn => Self::build_keep_first_n_fn(inner)?,
-            Rule::fold_fn => Self::build_fold_fn(inner)?,
-            Rule::ok_fn => {
-                "filter(|r| futures::future::ready(r.is_ok())).map(|r| r.unwrap())".to_string()
+            Rule::combinations_fn => {
+                let n = Self::peek_numeric_arg(&inner)?;
+                (StreamFunctionKind::Combinations(n), Self::build_combinations_fn(inner)?)
             }
-            Rule::ok_or_panic_fn => "map(|r| r.unwrap())".to_string(),
+            Rule::keep_first_n_fn => {
+                let n = Self::peek_numeric_arg(&inner)?;
+                (StreamFunctionKind::KeepFirstN(n), Self::build_keep_first_n_fn(inner)?)
+            }
+            Rule::fold_fn => (StreamFunctionKind::Fold, Self::build_fold_fn(inner)?),
+            Rule::ok_fn => (
+                StreamFunctionKind::Ok,
+                "filter(|r| futures::future::ready(r.is_ok())).map(|r| r.unwrap())".to_string(),
+            ),
+            Rule::ok_or_panic_fn => (StreamFunctionKind::OkOrPanic, "map(|r| r.unwrap())".to_string()),
             _ => return Err(format!("Unknown stream function: {:?}", inner.as_rule())),
         };
 
-        Ok(StreamFunctionNode { code })
+        Ok(StreamFunctionNode { kind, code })
     }
 
     fn build_map_fn(pair: Pair<Rule>) -> Result<String, String> {

@@ -32,6 +32,11 @@ enum MarigoldCommand {
     },
     /// Clean all Marigold caches for this user.
     CleanAll,
+    /// Statically analyze program complexity.
+    Analyze {
+        /// Path of the Marigold file to read
+        file: Option<String>,
+    },
 }
 
 #[cfg(feature = "cli")]
@@ -60,6 +65,7 @@ fn get_file_name_argument(args: &Args) -> Option<String> {
         Some(Install { file }) => file.clone(),
         Some(Uninstall { file }) => file.clone(),
         Some(Clean { file }) => file.clone(),
+        Some(Analyze { file }) => file.clone(),
         Some(CleanAll) => None,
         None => None,
     }
@@ -138,6 +144,21 @@ fn main() -> Result<()> {
                 if marigold_cache_directory.exists() {
                     std::fs::remove_dir_all(&marigold_cache_directory)?;
                 }
+                std::process::exit(0);
+            }
+            Analyze { file: _ } => {
+                let program_contents = match &file_name_argument {
+                    Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
+                    None => {
+                        let mut stdin = String::new();
+                        io::stdin().lock().read_to_string(&mut stdin)?;
+                        stdin.trim().to_string()
+                    }
+                };
+                let result = marigold_grammar::marigold_analyze(&program_contents)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                let json = serde_json::to_string_pretty(&result)?;
+                println!("{json}");
                 std::process::exit(0);
             }
         },
