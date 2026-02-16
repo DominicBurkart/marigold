@@ -898,7 +898,9 @@ impl PestAstBuilder {
         ));
 
         #[cfg(any(feature = "tokio", feature = "async-std"))]
-        return Ok(format!("filter_map(|v| async move {{ {filter_map_fn}(v) }})"));
+        return Ok(format!(
+            "filter_map(|v| async move {{ {filter_map_fn}(v) }})"
+        ));
     }
 
     fn build_permutations_fn(pair: Pair<Rule>) -> Result<String, String> {
