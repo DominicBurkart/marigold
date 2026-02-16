@@ -8,9 +8,7 @@ use num_traits::{One, Zero};
 use pest::Parser;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::nodes::{
-    InputCount, InputVariability, StreamFunctionKind, TypedExpression,
-};
+use crate::nodes::{InputCount, InputVariability, StreamFunctionKind, TypedExpression};
 
 #[derive(pest_derive::Parser)]
 #[grammar = "complexity_notation.pest"]
@@ -47,7 +45,11 @@ impl ComplexityClass {
     }
 
     pub fn max(self, other: ComplexityClass) -> ComplexityClass {
-        if self >= other { self } else { other }
+        if self >= other {
+            self
+        } else {
+            other
+        }
     }
 }
 
@@ -446,10 +448,15 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
 
     for expr in expressions {
         let sc = match expr {
-            TypedExpression::UnnamedReturningStream(s) | TypedExpression::UnnamedNonReturningStream(s) => {
+            TypedExpression::UnnamedReturningStream(s)
+            | TypedExpression::UnnamedNonReturningStream(s) => {
                 let card = input_cardinality(&s.inp_and_funs.inp);
                 let funs_desc = describe_stream_fns(&s.inp_and_funs.funs);
-                let out_desc = if s.out.returning { "return" } else { "write_file(...)" };
+                let out_desc = if s.out.returning {
+                    "return"
+                } else {
+                    "write_file(...)"
+                };
                 let desc = if funs_desc.is_empty() {
                     format!("input.{out_desc}")
                 } else {
@@ -457,13 +464,18 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
                 };
                 analyze_stream_fns(&s.inp_and_funs.funs, card, &desc)
             }
-            TypedExpression::NamedReturningStream(s) | TypedExpression::NamedNonReturningStream(s) => {
+            TypedExpression::NamedReturningStream(s)
+            | TypedExpression::NamedNonReturningStream(s) => {
                 let (card, var_space) = stream_vars
                     .get(&s.stream_variable)
                     .cloned()
                     .unwrap_or((Symbolic::Unknown, ComplexityClass::Unknown));
                 let funs_desc = describe_stream_fns(&s.funs);
-                let out_desc = if s.out.returning { "return" } else { "write_file(...)" };
+                let out_desc = if s.out.returning {
+                    "return"
+                } else {
+                    "write_file(...)"
+                };
                 let desc = if funs_desc.is_empty() {
                     format!("{}.{out_desc}", s.stream_variable)
                 } else {
@@ -494,17 +506,26 @@ mod tests {
 
     #[test]
     fn test_parse_o1() {
-        assert_eq!(ComplexityClass::from_str("O(1)").unwrap(), ComplexityClass::O1);
+        assert_eq!(
+            ComplexityClass::from_str("O(1)").unwrap(),
+            ComplexityClass::O1
+        );
     }
 
     #[test]
     fn test_parse_on() {
-        assert_eq!(ComplexityClass::from_str("O(n)").unwrap(), ComplexityClass::ON);
+        assert_eq!(
+            ComplexityClass::from_str("O(n)").unwrap(),
+            ComplexityClass::ON
+        );
     }
 
     #[test]
     fn test_parse_ologn() {
-        assert_eq!(ComplexityClass::from_str("O(log(n))").unwrap(), ComplexityClass::OLogN);
+        assert_eq!(
+            ComplexityClass::from_str("O(log(n))").unwrap(),
+            ComplexityClass::OLogN
+        );
     }
 
     #[test]
@@ -728,27 +749,51 @@ mod tests {
 
     #[test]
     fn test_streaming_ops_space_o1() {
-        assert_eq!(space_for_kind(&StreamFunctionKind::Map), ComplexityClass::O1);
-        assert_eq!(space_for_kind(&StreamFunctionKind::Filter), ComplexityClass::O1);
-        assert_eq!(space_for_kind(&StreamFunctionKind::FilterMap), ComplexityClass::O1);
-        assert_eq!(space_for_kind(&StreamFunctionKind::Fold), ComplexityClass::O1);
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Map),
+            ComplexityClass::O1
+        );
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Filter),
+            ComplexityClass::O1
+        );
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::FilterMap),
+            ComplexityClass::O1
+        );
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Fold),
+            ComplexityClass::O1
+        );
         assert_eq!(space_for_kind(&StreamFunctionKind::Ok), ComplexityClass::O1);
-        assert_eq!(space_for_kind(&StreamFunctionKind::OkOrPanic), ComplexityClass::O1);
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::OkOrPanic),
+            ComplexityClass::O1
+        );
     }
 
     #[test]
     fn test_permutations_space_on() {
-        assert_eq!(space_for_kind(&StreamFunctionKind::Permutations(3)), ComplexityClass::ON);
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Permutations(3)),
+            ComplexityClass::ON
+        );
     }
 
     #[test]
     fn test_combinations_space_on() {
-        assert_eq!(space_for_kind(&StreamFunctionKind::Combinations(2)), ComplexityClass::ON);
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Combinations(2)),
+            ComplexityClass::ON
+        );
     }
 
     #[test]
     fn test_keep_first_n_space_o1() {
-        assert_eq!(space_for_kind(&StreamFunctionKind::KeepFirstN(5)), ComplexityClass::O1);
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::KeepFirstN(5)),
+            ComplexityClass::O1
+        );
     }
 
     #[test]
@@ -812,17 +857,17 @@ mod tests {
 
     #[test]
     fn test_analyze_select_all() {
-        let result = crate::parser::PestParser::analyze(
-            "select_all(range(0, 10), range(0, 20)).return",
-        )
-        .unwrap();
+        let result =
+            crate::parser::PestParser::analyze("select_all(range(0, 10), range(0, 20)).return")
+                .unwrap();
         assert_eq!(result.streams.len(), 1);
         assert_eq!(result.streams[0].cardinality, "30");
     }
 
     #[test]
     fn test_analyze_stream_variable() {
-        let input = "fn double(x: i32) -> i32 { x * 2 }\ndigits = range(0, 10)\ndigits.map(double).return";
+        let input =
+            "fn double(x: i32) -> i32 { x * 2 }\ndigits = range(0, 10)\ndigits.map(double).return";
         let result = crate::parser::PestParser::analyze(input).unwrap();
         assert_eq!(result.streams.len(), 1);
         assert_eq!(result.streams[0].space_class, ComplexityClass::ON);
