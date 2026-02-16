@@ -775,7 +775,7 @@ fn binomial(n: &BigUint, k: u64) -> BigUint {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamComplexity {
     pub description: String,
-    pub cardinality: String,
+    pub cardinality: Cardinality,
     pub time_class: ComplexityClass,
     pub exact_time: ExactComplexity,
     pub space_class: ComplexityClass,
@@ -790,6 +790,7 @@ pub struct ProgramComplexity {
     pub program_exact_time: ExactComplexity,
     pub program_space: ComplexityClass,
     pub program_exact_space: ExactComplexity,
+    pub program_cardinality: Cardinality,
 }
 
 fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
@@ -933,7 +934,7 @@ fn analyze_stream_fns(
 
     StreamComplexity {
         description: description.to_string(),
-        cardinality: cardinality.to_string(),
+        cardinality: cardinality.classify_as_cardinality(),
         time_class: time,
         exact_time,
         space_class: space,
@@ -1023,6 +1024,7 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
     let mut program_exact_time = ExactComplexity::new();
     let mut program_space = ComplexityClass::O1;
     let mut program_exact_space = ExactComplexity::new();
+    let mut program_cardinality = Cardinality::Exact(BigUint::zero());
 
     for expr in expressions {
         let sc = match expr {
@@ -1076,6 +1078,7 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
         program_exact_time.merge(&sc.exact_time);
         program_space = program_space.max(sc.space_class.clone());
         program_exact_space.merge(&sc.exact_space);
+        program_cardinality = program_cardinality.max(sc.cardinality.clone());
         streams.push(sc);
     }
 
@@ -1085,6 +1088,7 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
         program_exact_time,
         program_space,
         program_exact_space,
+        program_cardinality,
     }
 }
 
@@ -1438,7 +1442,10 @@ mod tests {
         let result =
             crate::parser::PestParser::analyze("range(0, 100).fold(0, add).return").unwrap();
         assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].cardinality, "1");
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::one())
+        );
         assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
         assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
     }
@@ -1449,7 +1456,10 @@ mod tests {
             crate::parser::PestParser::analyze("select_all(range(0, 10), range(0, 20)).return")
                 .unwrap();
         assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].cardinality, "30");
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(30u64))
+        );
     }
 
     #[test]
