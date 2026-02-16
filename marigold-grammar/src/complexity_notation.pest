@@ -22,3 +22,15 @@ base_complexity_non_constant = {
 }
 
 number = @{ ASCII_DIGIT+ }
+
+symbolic = { SOI ~ symbolic_expr ~ EOI }
+symbolic_expr = { symbolic_sum | symbolic_atom }
+symbolic_sum = { symbolic_atom ~ ("+" ~ symbolic_atom)+ }
+symbolic_atom = { symbolic_filtered | symbolic_min | symbolic_perm | symbolic_perm_rep | symbolic_comb | symbolic_constant | symbolic_unknown }
+symbolic_filtered = { "\u{2264}" ~ symbolic_atom }
+symbolic_min = { "min(" ~ symbolic_expr ~ ", " ~ symbolic_expr ~ ")" }
+symbolic_perm = { "P(" ~ symbolic_expr ~ ", " ~ number ~ ")" }
+symbolic_perm_rep = { symbolic_constant ~ "^" ~ number }
+symbolic_comb = { "C(" ~ symbolic_expr ~ ", " ~ number ~ ")" }
+symbolic_constant = @{ ASCII_DIGIT+ }
+symbolic_unknown = { "?" }

@@ -441,6 +441,61 @@ impl Symbolic {
             }
         }
     }
+
+    pub fn contains_unknown(&self) -> bool {
+        match self {
+            Symbolic::Unknown => true,
+            Symbolic::Constant(_) => false,
+            Symbolic::Filtered(inner) => inner.contains_unknown(),
+            Symbolic::Permutations { n, .. }
+            | Symbolic::PermutationsWithReplacement { n, .. }
+            | Symbolic::Combinations { n, .. } => n.contains_unknown(),
+            Symbolic::Min(a, b) => a.contains_unknown() || b.contains_unknown(),
+            Symbolic::Sum(parts) => parts.iter().any(|p| p.contains_unknown()),
+        }
+    }
+
+    pub fn upper_bound(&self) -> Option<BigUint> {
+        match self {
+            Symbolic::Constant(v) => Some(v.clone()),
+            Symbolic::Unknown => None,
+            Symbolic::Filtered(inner) => inner.upper_bound(),
+            Symbolic::Permutations { n, k } => {
+                let n_val = n.upper_bound()?;
+                Some(falling_factorial(&n_val, *k))
+            }
+            Symbolic::PermutationsWithReplacement { n, k } => {
+                let n_val = n.upper_bound()?;
+                Some(n_val.pow(*k as u32))
+            }
+            Symbolic::Combinations { n, k } => {
+                let n_val = n.upper_bound()?;
+                Some(binomial(&n_val, *k))
+            }
+            Symbolic::Min(a, b) => match (a.upper_bound(), b.upper_bound()) {
+                (Some(av), Some(bv)) => Some(av.min(bv)),
+                (Some(v), None) | (None, Some(v)) => Some(v),
+                (None, None) => None,
+            },
+            Symbolic::Sum(parts) => {
+                let mut total = BigUint::zero();
+                for part in parts {
+                    total += part.upper_bound()?;
+                }
+                Some(total)
+            }
+        }
+    }
+
+    pub fn classify_as_cardinality(&self) -> Cardinality {
+        if self.contains_unknown() {
+            return Cardinality::Unknown;
+        }
+        match self.try_evaluate() {
+            Some(v) => Cardinality::Exact(v),
+            None => Cardinality::Bounded(self.clone()),
+        }
+    }
 }
 
 impl fmt::Display for Symbolic {
@@ -458,6 +513,237 @@ impl fmt::Display for Symbolic {
                 write!(f, "{}", strs.join(" + "))
             }
         }
+    }
+}
+
+impl FromStr for Symbolic {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let pairs = ComplexityNotationParser::parse(Rule::symbolic, s)
+            .map_err(|e| format!("Invalid symbolic notation: {e}"))?;
+
+        let pair = pairs
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Empty parse result".to_string())?;
+
+        parse_symbolic_pair(pair)
+    }
+}
+
+fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, String> {
+    match pair.as_rule() {
+        Rule::symbolic => {
+            let inner = pair
+                .into_inner()
+                .find(|p| p.as_rule() == Rule::symbolic_expr)
+                .ok_or_else(|| "Missing symbolic_expr".to_string())?;
+            parse_symbolic_pair(inner)
+        }
+        Rule::symbolic_expr => {
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "Empty symbolic_expr".to_string())?;
+            parse_symbolic_pair(inner)
+        }
+        Rule::symbolic_sum => {
+            let parts: Result<Vec<Symbolic>, String> =
+                pair.into_inner().map(parse_symbolic_pair).collect();
+            Ok(Symbolic::Sum(parts?))
+        }
+        Rule::symbolic_atom => {
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "Empty symbolic_atom".to_string())?;
+            parse_symbolic_pair(inner)
+        }
+        Rule::symbolic_filtered => {
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "Missing filtered inner".to_string())?;
+            Ok(Symbolic::Filtered(Box::new(parse_symbolic_pair(inner)?)))
+        }
+        Rule::symbolic_min => {
+            let mut inner = pair.into_inner();
+            let a = inner
+                .next()
+                .ok_or_else(|| "Missing min first arg".to_string())?;
+            let b = inner
+                .next()
+                .ok_or_else(|| "Missing min second arg".to_string())?;
+            Ok(Symbolic::Min(
+                Box::new(parse_symbolic_pair(a)?),
+                Box::new(parse_symbolic_pair(b)?),
+            ))
+        }
+        Rule::symbolic_perm => {
+            let mut inner = pair.into_inner();
+            let n_pair = inner.next().ok_or_else(|| "Missing P n arg".to_string())?;
+            let k_pair = inner.next().ok_or_else(|| "Missing P k arg".to_string())?;
+            let k: u64 = k_pair
+                .as_str()
+                .parse()
+                .map_err(|_| "Invalid P k value".to_string())?;
+            Ok(Symbolic::Permutations {
+                n: Box::new(parse_symbolic_pair(n_pair)?),
+                k,
+            })
+        }
+        Rule::symbolic_perm_rep => {
+            let mut inner = pair.into_inner();
+            let n_str = inner
+                .next()
+                .ok_or_else(|| "Missing perm_rep n".to_string())?
+                .as_str();
+            let k_str = inner
+                .next()
+                .ok_or_else(|| "Missing perm_rep k".to_string())?
+                .as_str();
+            let n: BigUint = n_str
+                .parse()
+                .map_err(|_| "Invalid perm_rep n value".to_string())?;
+            let k: u64 = k_str
+                .parse()
+                .map_err(|_| "Invalid perm_rep k value".to_string())?;
+            Ok(Symbolic::PermutationsWithReplacement {
+                n: Box::new(Symbolic::Constant(n)),
+                k,
+            })
+        }
+        Rule::symbolic_comb => {
+            let mut inner = pair.into_inner();
+            let n_pair = inner.next().ok_or_else(|| "Missing C n arg".to_string())?;
+            let k_pair = inner.next().ok_or_else(|| "Missing C k arg".to_string())?;
+            let k: u64 = k_pair
+                .as_str()
+                .parse()
+                .map_err(|_| "Invalid C k value".to_string())?;
+            Ok(Symbolic::Combinations {
+                n: Box::new(parse_symbolic_pair(n_pair)?),
+                k,
+            })
+        }
+        Rule::symbolic_constant => {
+            let v: BigUint = pair
+                .as_str()
+                .parse()
+                .map_err(|_| "Invalid constant".to_string())?;
+            Ok(Symbolic::Constant(v))
+        }
+        Rule::symbolic_unknown => Ok(Symbolic::Unknown),
+        _ => Err(format!("Unexpected rule: {:?}", pair.as_rule())),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Cardinality {
+    Exact(BigUint),
+    Bounded(Symbolic),
+    Unknown,
+}
+
+impl Cardinality {
+    fn ordinal(&self) -> u8 {
+        match self {
+            Cardinality::Exact(_) => 0,
+            Cardinality::Bounded(_) => 1,
+            Cardinality::Unknown => 2,
+        }
+    }
+
+    pub fn max(self, other: Cardinality) -> Cardinality {
+        match (&self, &other) {
+            (Cardinality::Exact(a), Cardinality::Exact(b)) => {
+                Cardinality::Exact(a.clone().max(b.clone()))
+            }
+            (Cardinality::Unknown, _) | (_, Cardinality::Unknown) => Cardinality::Unknown,
+            (Cardinality::Bounded(a), Cardinality::Bounded(b)) => {
+                match (a.upper_bound(), b.upper_bound()) {
+                    (Some(av), Some(bv)) => {
+                        if av >= bv {
+                            self
+                        } else {
+                            other
+                        }
+                    }
+                    _ => self,
+                }
+            }
+            (Cardinality::Bounded(_), Cardinality::Exact(v)) => match self.clone() {
+                Cardinality::Bounded(sym) => match sym.upper_bound() {
+                    Some(ub) if ub >= *v => Cardinality::Bounded(sym),
+                    _ => Cardinality::Bounded(sym),
+                },
+                _ => unreachable!(),
+            },
+            (Cardinality::Exact(v), Cardinality::Bounded(_)) => match other.clone() {
+                Cardinality::Bounded(sym) => match sym.upper_bound() {
+                    Some(ub) if ub >= *v => Cardinality::Bounded(sym),
+                    _ => Cardinality::Bounded(sym),
+                },
+                _ => unreachable!(),
+            },
+        }
+    }
+}
+
+impl PartialOrd for Cardinality {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Cardinality {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.ordinal().cmp(&other.ordinal())
+    }
+}
+
+impl fmt::Display for Cardinality {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Cardinality::Exact(n) => write!(f, "{n}"),
+            Cardinality::Bounded(sym) => write!(f, "{sym}"),
+            Cardinality::Unknown => write!(f, "?"),
+        }
+    }
+}
+
+impl FromStr for Cardinality {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "?" {
+            return Ok(Cardinality::Unknown);
+        }
+        if let Ok(n) = s.parse::<BigUint>() {
+            return Ok(Cardinality::Exact(n));
+        }
+        let sym = Symbolic::from_str(s)?;
+        Ok(Cardinality::Bounded(sym))
+    }
+}
+
+impl Serialize for Cardinality {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for Cardinality {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Cardinality::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -1318,6 +1604,316 @@ mod tests {
         let json = serde_json::to_string(&ec).unwrap();
         let parsed: ExactComplexity = serde_json::from_str(&json).unwrap();
         assert_eq!(ec, parsed);
+    }
+
+    #[test]
+    fn test_cardinality_display_exact() {
+        let c = Cardinality::Exact(BigUint::from(100u64));
+        assert_eq!(c.to_string(), "100");
+    }
+
+    #[test]
+    fn test_cardinality_display_unknown() {
+        assert_eq!(Cardinality::Unknown.to_string(), "?");
+    }
+
+    #[test]
+    fn test_cardinality_display_bounded() {
+        let c = Cardinality::Bounded(Symbolic::Filtered(Box::new(Symbolic::Constant(
+            BigUint::from(100u64),
+        ))));
+        assert_eq!(c.to_string(), "\u{2264}100");
+    }
+
+    #[test]
+    fn test_cardinality_fromstr_exact() {
+        assert_eq!(
+            Cardinality::from_str("100").unwrap(),
+            Cardinality::Exact(BigUint::from(100u64))
+        );
+    }
+
+    #[test]
+    fn test_cardinality_fromstr_unknown() {
+        assert_eq!(Cardinality::from_str("?").unwrap(), Cardinality::Unknown);
+    }
+
+    #[test]
+    fn test_cardinality_fromstr_bounded() {
+        let c = Cardinality::from_str("\u{2264}100").unwrap();
+        assert!(matches!(c, Cardinality::Bounded(_)));
+    }
+
+    #[test]
+    fn test_cardinality_ordering() {
+        assert!(Cardinality::Exact(BigUint::from(100u64)) < Cardinality::Unknown);
+        assert!(
+            Cardinality::Exact(BigUint::from(100u64))
+                < Cardinality::Bounded(Symbolic::Filtered(Box::new(Symbolic::Constant(
+                    BigUint::from(100u64)
+                ))))
+        );
+        assert!(
+            Cardinality::Bounded(Symbolic::Filtered(Box::new(Symbolic::Constant(
+                BigUint::from(100u64)
+            )))) < Cardinality::Unknown
+        );
+    }
+
+    #[test]
+    fn test_cardinality_serde_roundtrip_exact() {
+        let c = Cardinality::Exact(BigUint::from(42u64));
+        let json = serde_json::to_string(&c).unwrap();
+        assert_eq!(json, r#""42""#);
+        let parsed: Cardinality = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, c);
+    }
+
+    #[test]
+    fn test_cardinality_serde_roundtrip_unknown() {
+        let c = Cardinality::Unknown;
+        let json = serde_json::to_string(&c).unwrap();
+        assert_eq!(json, r#""?""#);
+        let parsed: Cardinality = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, c);
+    }
+
+    #[test]
+    fn test_cardinality_serde_roundtrip_bounded() {
+        let c = Cardinality::Bounded(Symbolic::Filtered(Box::new(Symbolic::Constant(
+            BigUint::from(100u64),
+        ))));
+        let json = serde_json::to_string(&c).unwrap();
+        let parsed: Cardinality = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, c);
+    }
+
+    #[test]
+    fn test_symbolic_upper_bound_constant() {
+        let s = Symbolic::Constant(BigUint::from(100u64));
+        assert_eq!(s.upper_bound(), Some(BigUint::from(100u64)));
+    }
+
+    #[test]
+    fn test_symbolic_upper_bound_filtered() {
+        let s = Symbolic::Filtered(Box::new(Symbolic::Constant(BigUint::from(100u64))));
+        assert_eq!(s.upper_bound(), Some(BigUint::from(100u64)));
+    }
+
+    #[test]
+    fn test_symbolic_upper_bound_nested_filtered() {
+        let s = Symbolic::Filtered(Box::new(Symbolic::Filtered(Box::new(Symbolic::Constant(
+            BigUint::from(100u64),
+        )))));
+        assert_eq!(s.upper_bound(), Some(BigUint::from(100u64)));
+    }
+
+    #[test]
+    fn test_symbolic_upper_bound_min_with_filtered() {
+        let s = Symbolic::Min(
+            Box::new(Symbolic::Filtered(Box::new(Symbolic::Constant(
+                BigUint::from(100u64),
+            )))),
+            Box::new(Symbolic::Constant(BigUint::from(5u64))),
+        );
+        assert_eq!(s.upper_bound(), Some(BigUint::from(5u64)));
+    }
+
+    #[test]
+    fn test_symbolic_upper_bound_unknown() {
+        assert_eq!(Symbolic::Unknown.upper_bound(), None);
+    }
+
+    #[test]
+    fn test_symbolic_contains_unknown_false() {
+        assert!(!Symbolic::Constant(BigUint::from(100u64)).contains_unknown());
+    }
+
+    #[test]
+    fn test_symbolic_contains_unknown_true() {
+        assert!(Symbolic::Unknown.contains_unknown());
+    }
+
+    #[test]
+    fn test_symbolic_contains_unknown_nested() {
+        let s = Symbolic::Filtered(Box::new(Symbolic::Unknown));
+        assert!(s.contains_unknown());
+    }
+
+    #[test]
+    fn test_classify_as_cardinality_exact() {
+        let s = Symbolic::Constant(BigUint::from(100u64));
+        assert_eq!(
+            s.classify_as_cardinality(),
+            Cardinality::Exact(BigUint::from(100u64))
+        );
+    }
+
+    #[test]
+    fn test_classify_as_cardinality_exact_evaluable() {
+        let s = Symbolic::Permutations {
+            n: Box::new(Symbolic::Constant(BigUint::from(100u64))),
+            k: 2,
+        };
+        assert_eq!(
+            s.classify_as_cardinality(),
+            Cardinality::Exact(BigUint::from(9900u64))
+        );
+    }
+
+    #[test]
+    fn test_classify_as_cardinality_bounded() {
+        let s = Symbolic::Filtered(Box::new(Symbolic::Constant(BigUint::from(100u64))));
+        assert!(matches!(
+            s.classify_as_cardinality(),
+            Cardinality::Bounded(_)
+        ));
+    }
+
+    #[test]
+    fn test_classify_as_cardinality_unknown() {
+        assert_eq!(
+            Symbolic::Unknown.classify_as_cardinality(),
+            Cardinality::Unknown
+        );
+    }
+
+    #[test]
+    fn test_cardinality_max_exact_exact() {
+        let a = Cardinality::Exact(BigUint::from(10u64));
+        let b = Cardinality::Exact(BigUint::from(20u64));
+        assert_eq!(a.max(b), Cardinality::Exact(BigUint::from(20u64)));
+    }
+
+    #[test]
+    fn test_cardinality_max_exact_unknown() {
+        let a = Cardinality::Exact(BigUint::from(10u64));
+        let b = Cardinality::Unknown;
+        assert_eq!(a.max(b), Cardinality::Unknown);
+    }
+
+    #[test]
+    fn test_cardinality_max_bounded_exact() {
+        let a = Cardinality::Bounded(Symbolic::Filtered(Box::new(Symbolic::Constant(
+            BigUint::from(100u64),
+        ))));
+        let b = Cardinality::Exact(BigUint::from(50u64));
+        assert!(matches!(a.max(b), Cardinality::Bounded(_)));
+    }
+
+    #[test]
+    fn test_symbolic_fromstr_constant() {
+        let s = Symbolic::from_str("100").unwrap();
+        assert_eq!(s, Symbolic::Constant(BigUint::from(100u64)));
+    }
+
+    #[test]
+    fn test_symbolic_fromstr_unknown() {
+        let s = Symbolic::from_str("?").unwrap();
+        assert_eq!(s, Symbolic::Unknown);
+    }
+
+    #[test]
+    fn test_symbolic_fromstr_filtered() {
+        let s = Symbolic::from_str("\u{2264}100").unwrap();
+        assert_eq!(
+            s,
+            Symbolic::Filtered(Box::new(Symbolic::Constant(BigUint::from(100u64))))
+        );
+    }
+
+    #[test]
+    fn test_symbolic_fromstr_permutations() {
+        let s = Symbolic::from_str("P(100, 2)").unwrap();
+        assert_eq!(
+            s,
+            Symbolic::Permutations {
+                n: Box::new(Symbolic::Constant(BigUint::from(100u64))),
+                k: 2
+            }
+        );
+    }
+
+    #[test]
+    fn test_symbolic_fromstr_combinations() {
+        let s = Symbolic::from_str("C(100, 2)").unwrap();
+        assert_eq!(
+            s,
+            Symbolic::Combinations {
+                n: Box::new(Symbolic::Constant(BigUint::from(100u64))),
+                k: 2
+            }
+        );
+    }
+
+    #[test]
+    fn test_symbolic_fromstr_perm_rep() {
+        let s = Symbolic::from_str("100^3").unwrap();
+        assert_eq!(
+            s,
+            Symbolic::PermutationsWithReplacement {
+                n: Box::new(Symbolic::Constant(BigUint::from(100u64))),
+                k: 3
+            }
+        );
+    }
+
+    #[test]
+    fn test_symbolic_fromstr_min() {
+        let s = Symbolic::from_str("min(100, 5)").unwrap();
+        assert_eq!(
+            s,
+            Symbolic::Min(
+                Box::new(Symbolic::Constant(BigUint::from(100u64))),
+                Box::new(Symbolic::Constant(BigUint::from(5u64)))
+            )
+        );
+    }
+
+    #[test]
+    fn test_symbolic_fromstr_sum() {
+        let s = Symbolic::from_str("10 + 20").unwrap();
+        assert_eq!(
+            s,
+            Symbolic::Sum(vec![
+                Symbolic::Constant(BigUint::from(10u64)),
+                Symbolic::Constant(BigUint::from(20u64))
+            ])
+        );
+    }
+
+    #[test]
+    fn test_symbolic_display_roundtrip() {
+        let cases = vec![
+            Symbolic::Constant(BigUint::from(100u64)),
+            Symbolic::Unknown,
+            Symbolic::Filtered(Box::new(Symbolic::Constant(BigUint::from(100u64)))),
+            Symbolic::Permutations {
+                n: Box::new(Symbolic::Constant(BigUint::from(100u64))),
+                k: 2,
+            },
+            Symbolic::Combinations {
+                n: Box::new(Symbolic::Constant(BigUint::from(100u64))),
+                k: 3,
+            },
+            Symbolic::PermutationsWithReplacement {
+                n: Box::new(Symbolic::Constant(BigUint::from(10u64))),
+                k: 3,
+            },
+            Symbolic::Min(
+                Box::new(Symbolic::Constant(BigUint::from(100u64))),
+                Box::new(Symbolic::Constant(BigUint::from(5u64))),
+            ),
+            Symbolic::Sum(vec![
+                Symbolic::Constant(BigUint::from(10u64)),
+                Symbolic::Constant(BigUint::from(20u64)),
+            ]),
+        ];
+        for sym in cases {
+            let s = sym.to_string();
+            let parsed = Symbolic::from_str(&s).unwrap();
+            assert_eq!(sym, parsed, "Roundtrip failed for {s}");
+        }
     }
 }
 
