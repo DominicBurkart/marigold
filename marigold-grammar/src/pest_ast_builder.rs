@@ -640,9 +640,7 @@ impl PestAstBuilder {
     fn translate_marigold_type(type_str: &str) -> String {
         if let Some(size_str) = type_str.strip_prefix("string_") {
             if size_str.chars().all(|c| c.is_ascii_digit()) && !size_str.is_empty() {
-                return format!(
-                    "::marigold::marigold_impl::arrayvec::ArrayString<{size_str}>"
-                );
+                return format!("::marigold::marigold_impl::arrayvec::ArrayString<{size_str}>");
             }
         }
         type_str.to_string()
