@@ -1,0 +1,1 @@
+range(0, 100).filter_map(try_parse).return

@@ -1,0 +1,1 @@
+range(0, 10).combinations(3).return

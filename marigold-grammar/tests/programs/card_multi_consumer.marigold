@@ -1,0 +1,13 @@
+fn doubled_plus_ten(i: i32) -> i32 {
+    (i * 2) + 10
+}
+
+digits = range(0, 10)
+
+digits
+    .return
+
+digits
+    .filter(is_even)
+    .map(doubled_plus_ten)
+    .return
