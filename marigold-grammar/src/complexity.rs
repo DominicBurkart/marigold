@@ -2062,4 +2062,88 @@ mod proptests {
             }
         }
     }
+
+    fn arb_symbolic_constant() -> impl Strategy<Value = Symbolic> {
+        (1u64..1000).prop_map(|n| Symbolic::Constant(BigUint::from(n)))
+    }
+
+    fn arb_symbolic() -> impl Strategy<Value = Symbolic> {
+        prop_oneof![
+            arb_symbolic_constant(),
+            Just(Symbolic::Unknown),
+            arb_symbolic_constant().prop_map(|s| Symbolic::Filtered(Box::new(s))),
+            (arb_symbolic_constant(), 1u64..5)
+                .prop_map(|(s, k)| Symbolic::Permutations { n: Box::new(s), k }),
+            (arb_symbolic_constant(), 1u64..5)
+                .prop_map(|(s, k)| Symbolic::Combinations { n: Box::new(s), k }),
+            (arb_symbolic_constant(), 1u64..4)
+                .prop_map(|(s, k)| Symbolic::PermutationsWithReplacement { n: Box::new(s), k }),
+            (arb_symbolic_constant(), arb_symbolic_constant())
+                .prop_map(|(a, b)| Symbolic::Min(Box::new(a), Box::new(b))),
+            proptest::collection::vec(arb_symbolic_constant(), 2..4).prop_map(Symbolic::Sum),
+        ]
+    }
+
+    fn arb_cardinality() -> impl Strategy<Value = Cardinality> {
+        prop_oneof![
+            (1u64..10000).prop_map(|n| Cardinality::Exact(BigUint::from(n))),
+            arb_symbolic_constant()
+                .prop_map(|s| Cardinality::Bounded(Symbolic::Filtered(Box::new(s)))),
+            Just(Cardinality::Unknown),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn test_cardinality_display_fromstr_roundtrip(c in arb_cardinality()) {
+            let s = c.to_string();
+            let parsed = Cardinality::from_str(&s).unwrap();
+            prop_assert_eq!(c, parsed);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_cardinality_serde_roundtrip_proptest(c in arb_cardinality()) {
+            let json = serde_json::to_string(&c).unwrap();
+            let parsed: Cardinality = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(c, parsed);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_cardinality_max_commutativity_exact(a_val in 1u64..10000, b_val in 1u64..10000) {
+            let a = Cardinality::Exact(BigUint::from(a_val));
+            let b = Cardinality::Exact(BigUint::from(b_val));
+            let ab = a.clone().max(b.clone());
+            let ba = b.max(a);
+            prop_assert_eq!(ab, ba);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_cardinality_ordering_is_total(a in arb_cardinality(), b in arb_cardinality()) {
+            prop_assert!(a.partial_cmp(&b).is_some());
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_symbolic_upper_bound_ge_try_evaluate(sym in arb_symbolic()) {
+            if let (Some(exact), Some(upper)) = (sym.try_evaluate(), sym.upper_bound()) {
+                prop_assert!(upper >= exact, "upper_bound ({upper}) must be >= try_evaluate ({exact})");
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_symbolic_display_fromstr_roundtrip(sym in arb_symbolic()) {
+            let s = sym.to_string();
+            let parsed = Symbolic::from_str(&s).unwrap();
+            prop_assert_eq!(sym, parsed);
+        }
+    }
 }
