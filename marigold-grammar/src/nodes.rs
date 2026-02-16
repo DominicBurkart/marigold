@@ -701,11 +701,14 @@ impl EnumDeclarationNode {
                     enum_rep.push_str(field_name.as_str());
                     enum_rep.push_str(",\n");
                 }
-                let default_variant_name = match default_variant {
-                    DefaultEnumVariant::Sized(name, _) => name,
-                    DefaultEnumVariant::WithDefaultValue(name, _) => name,
+                match default_variant {
+                    DefaultEnumVariant::Sized(name, size) => {
+                        enum_rep.push_str(format!("{name}(::marigold::marigold_impl::arrayvec::ArrayString<{size}>),\n").as_str());
+                    }
+                    DefaultEnumVariant::WithDefaultValue(name, _) => {
+                        enum_rep.push_str(format!("{name},\n").as_str());
+                    }
                 };
-                enum_rep.push_str(format!("{default_variant_name},\n").as_str());
                 enum_rep.push('}');
             }
         } else {
