@@ -120,7 +120,7 @@ fn select_all() {
 
 #[test]
 fn chained_maps() {
-    let result = analyze_file("tests/programs/chained_maps.marigold");
+    let result = analyze_file("tests/programs/chained_maps.mg");
     assert_eq!(result.streams.len(), 1);
     assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
     assert_eq!(
