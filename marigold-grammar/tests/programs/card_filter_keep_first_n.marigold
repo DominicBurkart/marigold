@@ -1,0 +1,1 @@
+range(0, 100).filter(is_even).keep_first_n(5, compare).return

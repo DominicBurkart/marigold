@@ -1,0 +1,1 @@
+read_file("data.csv", csv, struct=Data).ok().map(transform).return
