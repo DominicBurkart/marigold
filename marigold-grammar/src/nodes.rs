@@ -252,11 +252,23 @@ impl StreamVariableFromPriorStreamVariableNode {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StreamFunctionKind {
+    Map,
+    Filter,
+    FilterMap,
+    Permutations(u64),
+    PermutationsWithReplacement(u64),
+    Combinations(u64),
+    KeepFirstN(u64),
+    Fold,
+    Ok,
+    OkOrPanic,
+}
+
 pub struct StreamFunctionNode {
+    pub kind: StreamFunctionKind,
     pub code: String,
-    // needs to include values for if the function supports parallelism, is lazy etc.
-    // pub computational_complexity: String,
-    // pub memory: String,
 }
 
 /// Number of inputs
