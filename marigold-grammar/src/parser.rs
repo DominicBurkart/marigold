@@ -1610,4 +1610,41 @@ mod function_grammar_tests {
         assert!(output.contains("const fn double"));
         assert!(output.contains("map") && output.contains("double"));
     }
+
+    #[test]
+    fn test_fn_with_string_n_param() {
+        let result = parse_marigold("fn greet(name: string_20) -> string_20 { name }");
+        assert!(
+            result.is_ok(),
+            "Should parse function with string_N types: {:?}",
+            result
+        );
+        let output = result.unwrap();
+        assert!(
+            output.contains("ArrayString<20>"),
+            "string_20 should be translated to ArrayString<20>, got: {}",
+            output
+        );
+        assert!(
+            !output.contains("string_20"),
+            "Raw string_20 should not appear in output, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_fn_with_string_n_ref_param() {
+        let result = parse_marigold("fn check(s: &string_64) -> bool { s.len() > 0 }");
+        assert!(
+            result.is_ok(),
+            "Should parse function with &string_N param: {:?}",
+            result
+        );
+        let output = result.unwrap();
+        assert!(
+            output.contains("&::marigold::marigold_impl::arrayvec::ArrayString<64>"),
+            "&string_64 should be translated to &ArrayString<64>, got: {}",
+            output
+        );
+    }
 }
