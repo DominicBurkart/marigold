@@ -1,0 +1,1 @@
+range(0, 10).write_file("/dev/stdout", csv)
