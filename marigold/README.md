@@ -33,7 +33,7 @@ println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
 
 ## Quickstart
 
-**Install**
+### Install
 
 ```sh
 # one-line installer
@@ -46,11 +46,11 @@ cargo install marigold -F cli
 git clone https://github.com/DominicBurkart/marigold && cargo install --path marigold/marigold -F cli
 ```
 
-**Hello World**
+### Hello World
 
 Save the following as `integers.marigold`:
 
-```
+```text
 range(0, 10).write_file("/dev/stdout", csv)
 ```
 
@@ -60,7 +60,7 @@ Run it:
 marigold run integers.marigold
 ```
 
-**Static Analysis**
+### Static Analysis
 
 ```sh
 marigold analyze integers.marigold
