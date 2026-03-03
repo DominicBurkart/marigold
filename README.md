@@ -31,6 +31,68 @@ let odd_digits = m!(
 println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
 ```
 
+## Quickstart
+
+### Install
+
+
+#### one-line installer
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/DominicBurkart/marigold/main/install.sh | sh
+```
+
+
+#### or via cargo
+```sh
+cargo install marigold -F cli
+```
+
+#### or from source
+```sh
+git clone https://github.com/DominicBurkart/marigold && cargo install --path marigold/marigold -F cli
+```
+
+### Hello World
+
+Save the following as `integers.marigold`:
+
+```text
+range(0, 10).write_file("/dev/stdout", csv)
+```
+
+Run it:
+
+```sh
+marigold run integers.marigold
+```
+
+### Static Analysis
+
+```sh
+marigold analyze integers.marigold
+```
+
+```json
+{
+  "streams": [
+    {
+      "description": "input.write_file(...)",
+      "cardinality": "10",
+      "time_class": "O(n)",
+      "exact_time": "O(n)",
+      "space_class": "O(1)",
+      "exact_space": "O(1)",
+      "collects_input": false
+    }
+  ],
+  "program_time": "O(n)",
+  "program_exact_time": "O(n)",
+  "program_space": "O(1)",
+  "program_exact_space": "O(1)",
+  "program_cardinality": "10"
+}
+```
+
 ## Runtimes
 
 By default, Marigold works in a single future and can work with any runtime.

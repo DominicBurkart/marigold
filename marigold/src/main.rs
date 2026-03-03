@@ -93,15 +93,14 @@ fn main() -> Result<()> {
     let program_name = {
         let mut file_name = match &file_name_argument {
             Some(path) => {
-                if path.contains('.') {
-                    let partial = &path[0..path.find('.').unwrap()];
-                    if partial.len() > 1 {
-                        partial.to_string()
-                    } else {
-                        "marigold_program".to_string()
-                    }
+                let stem = std::path::Path::new(path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("marigold_program");
+                if stem.len() > 1 {
+                    stem.to_string()
                 } else {
-                    path.to_string()
+                    "marigold_program".to_string()
                 }
             }
             None => "marigold_program".to_string(),

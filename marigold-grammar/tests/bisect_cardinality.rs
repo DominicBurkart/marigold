@@ -6,6 +6,9 @@ fn git(dir: &std::path::Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .args(args)
         .current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
         .output()
         .expect("failed to run git");
     if !output.status.success() {
