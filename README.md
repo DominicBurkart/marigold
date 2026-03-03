@@ -35,14 +35,20 @@ println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
 
 ### Install
 
+
+#### one-line installer
 ```sh
-# one-line installer
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/DominicBurkart/marigold/main/install.sh | sh
+```
 
-# or via cargo
+
+#### or via cargo
+```sh
 cargo install marigold -F cli
+```
 
-# or from source
+#### or from source
+```sh
 git clone https://github.com/DominicBurkart/marigold && cargo install --path marigold/marigold -F cli
 ```
 
