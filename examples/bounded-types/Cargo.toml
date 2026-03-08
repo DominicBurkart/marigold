@@ -3,6 +3,7 @@ name = "bounded-types"
 version = "0.1.0"
 publish = false
 edition = "2021"
+license = "Apache-2.0 OR MIT"
 
 [dependencies]
 marigold = {path = "../../marigold", version = "=0.1.16"}

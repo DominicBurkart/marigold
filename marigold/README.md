@@ -10,6 +10,7 @@
 [![style](https://github.com/DominicBurkart/marigold/workflows/style/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/style.yaml)
 [![wasm](https://github.com/DominicBurkart/marigold/workflows/wasm/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml)
 [![last commit](https://img.shields.io/github/last-commit/dominicburkart/marigold)](https://github.com/DominicBurkart/marigold)
+[![onboarding](https://github.com/DominicBurkart/marigold/workflows/onboarding/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/onboarding.yaml)
 
 Marigold is an imperative, domain-specific language for data pipelining and
 analysis using async streams. It can be used as a standalone language or within
@@ -36,34 +37,53 @@ println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
 ### Install
 
 ```sh
-# one-line installer
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/DominicBurkart/marigold/main/install.sh | sh
+```
 
-# or via cargo
+Or via cargo:
+
+```sh
 cargo install marigold -F cli
+```
 
-# or from source
-git clone https://github.com/DominicBurkart/marigold && cargo install --path marigold/marigold -F cli
+Or from source:
+
+```sh
+git clone https://github.com/DominicBurkart/marigold.git
+cd marigold/marigold
+cargo install --path . -F cli
 ```
 
 ### Hello World
 
-Save the following as `integers.marigold`:
+Create `hello_world.marigold`:
 
-```text
-range(0, 10).write_file("/dev/stdout", csv)
+```marigold
+range(0, 5).write_file("/dev/stdout", csv)
 ```
 
 Run it:
 
 ```sh
-marigold run integers.marigold
+marigold run hello_world.marigold
+```
+
+Output:
+
+```text
+0
+1
+2
+3
+4
 ```
 
 ### Static Analysis
 
+Marigold can statically analyze your program's complexity:
+
 ```sh
-marigold analyze integers.marigold
+marigold analyze hello_world.marigold
 ```
 
 ```json
@@ -71,7 +91,7 @@ marigold analyze integers.marigold
   "streams": [
     {
       "description": "input.write_file(...)",
-      "cardinality": "10",
+      "cardinality": "5",
       "time_class": "O(n)",
       "exact_time": "O(n)",
       "space_class": "O(1)",
@@ -83,7 +103,7 @@ marigold analyze integers.marigold
   "program_exact_time": "O(n)",
   "program_space": "O(1)",
   "program_exact_space": "O(1)",
-  "program_cardinality": "10"
+  "program_cardinality": "5"
 }
 ```
 

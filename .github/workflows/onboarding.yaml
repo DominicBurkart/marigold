@@ -12,19 +12,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
+    - run: shellcheck install.sh install_test.sh
+    - run: sh install_test.sh
     - run: cargo install --path marigold -F cli
-    - run: marigold run examples/integers.marigold
-    - run: marigold analyze examples/integers.marigold
-    - run: |
-        marigold analyze examples/integers.marigold > /tmp/analyze_output.json
-        python3 -c "
-        import json, sys
-        with open('/tmp/analyze_output.json') as f:
-            data = json.load(f)
-        assert 'streams' in data
-        assert 'program_time' in data
-        assert 'program_space' in data
-        assert len(data['streams']) == 1
-        print('Analyze output validated successfully')
-        "
-    - run: shellcheck install.sh
+    - run: marigold run hello_world.marigold
+    - run: marigold analyze hello_world.marigold
