@@ -90,7 +90,6 @@ async fn main() {
 mod tests {
     use super::*;
 
-
     #[cfg(all(feature = "async-std", not(feature = "tokio")))]
     #[async_std::test]
     async fn stateful() {
