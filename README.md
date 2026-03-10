@@ -50,8 +50,8 @@ Or from source:
 
 ```sh
 git clone https://github.com/DominicBurkart/marigold.git
-cd marigold/marigold
-cargo install --path . -F cli
+cd marigold
+cargo install --path marigold -F cli
 ```
 
 ### Hello World
