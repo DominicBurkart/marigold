@@ -1,0 +1,44 @@
+fn min_palette_contrast(palette: &[[i32; 3]; 3]) -> i64 {
+    let mut min: i64 = i64::MAX;
+    let mut i: usize = 0;
+    while i < 3 {
+        let mut j: usize = i + 1;
+        while j < 3 {
+            let r1 = palette[i][0] as i64;
+            let g1 = palette[i][1] as i64;
+            let b1 = palette[i][2] as i64;
+            let r2 = palette[j][0] as i64;
+            let g2 = palette[j][1] as i64;
+            let b2 = palette[j][2] as i64;
+            let dr = r1 - r2;
+            let dg = g1 - g2;
+            let db = b1 - b2;
+            let rbar = (r1 + r2) / 2;
+            let normal = (2 * 256 + rbar) * dr * dr + 4 * 256 * dg * dg + (2 * 256 + 255 - rbar) * db * db;
+            if normal < min { min = normal; }
+            let deut = dr * dr + db * db;
+            if deut < min { min = deut; }
+            let prot = dg * dg + db * db;
+            if prot < min { min = prot; }
+            let trit = dr * dr + dg * dg;
+            if trit < min { min = trit; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    min
+}
+
+fn compare_contrast(a: &[[i32; 3]; 3], b: &[[i32; 3]; 3]) -> Ordering {
+    let ma = min_palette_contrast(a);
+    let mb = min_palette_contrast(b);
+    if ma < mb { Ordering::Less }
+    else if ma > mb { Ordering::Greater }
+    else { Ordering::Equal }
+}
+
+range(0, 4)
+    .permutations_with_replacement(3)
+    .combinations(3)
+    .keep_first_n(5, compare_contrast)
+    .write_file("/dev/stdout", csv)
