@@ -9,6 +9,7 @@ fn git(dir: &std::path::Path, args: &[&str]) -> String {
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_COMMON_DIR")
         .output()
         .expect("failed to run git");
     if !output.status.success() {

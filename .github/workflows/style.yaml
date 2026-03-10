@@ -7,7 +7,7 @@ env:
 
 jobs:
   style:
-    name:            Style checks
+    name:            style hooks
     runs-on:         ubuntu-latest
     steps:
     - uses:          actions/checkout@v4

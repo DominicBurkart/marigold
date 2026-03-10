@@ -3,6 +3,7 @@ name = "stateful"
 version = "0.1.0"
 publish = false
 edition = "2021"
+license = "Apache-2.0 OR MIT"
 
 [features]
 tokio = ["marigold/tokio", "tokio/rt-multi-thread"]
