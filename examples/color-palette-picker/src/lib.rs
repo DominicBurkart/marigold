@@ -6,15 +6,23 @@ use prisma::{lms::LmsCam2002, FromColor, Rgb};
 
 static SRGB: Lazy<SRgb<f64>> = Lazy::new(SRgb::new);
 
+fn to_lms(v: &[u8; 3]) -> LmsCam2002<f64> {
+    let rgb = Rgb::new(v[0], v[1], v[2])
+        .color_cast::<f64>()
+        .srgb_encoded();
+    let xyz = SRGB.convert_to_xyz(&rgb);
+    LmsCam2002::from_color(&xyz)
+}
+
 /// Returns the minimal contrast across normative vision, deuteranomaly, protanomaly, and
 /// tritanomaly.
-fn min_contrast(colors: Vec<LmsCam2002<f64>>) -> f64 {
+fn min_contrast<const N: usize>(colors: &[[u8; 3]; N]) -> f64 {
     let mut min = f64::MAX;
-    for i1 in 0..colors.len() {
-        for i2 in 0..colors.len() {
+    for i1 in 0..N {
+        for i2 in 0..N {
             if i1 != i2 {
-                let color1 = colors[i1];
-                let color2 = colors[i2];
+                let color1 = to_lms(&colors[i1]);
+                let color2 = to_lms(&colors[i2]);
 
                 let rgb_contrast = (color1.l() - color2.l()).abs()
                     + (color1.m() - color2.m()).abs()
@@ -49,23 +57,9 @@ fn min_contrast(colors: Vec<LmsCam2002<f64>>) -> f64 {
 /// Uses [prisma](https://crates.io/crates/prisma) to convert u8 RGBs into
 /// [CIECAM02](https://en.wikipedia.org/wiki/CIECAM02) values, which are then
 /// tested for contrast.
-#[allow(clippy::ptr_arg)]
-pub fn compare_contrast(palette1: &Vec<Vec<u8>>, palette2: &Vec<Vec<u8>>) -> std::cmp::Ordering {
-    fn to_lms(v: &[u8]) -> LmsCam2002<f64> {
-        let rgb = Rgb::new(v[0], v[1], v[2])
-            .color_cast::<f64>()
-            .srgb_encoded();
-        let xyz = SRGB.convert_to_xyz(&rgb);
-        LmsCam2002::from_color(&xyz)
-    }
-
-    let palette_1_min_contrast = min_contrast(cute::c![
-        to_lms(v),
-        for v in palette1.iter()
-    ]);
-    let palette_2_min_contrast = min_contrast(cute::c![
-        to_lms(v),
-        for v in palette2.iter()
-    ]);
-    palette_1_min_contrast.total_cmp(&palette_2_min_contrast)
+pub fn compare_contrast<const N: usize>(
+    palette1: &[[u8; 3]; N],
+    palette2: &[[u8; 3]; N],
+) -> std::cmp::Ordering {
+    min_contrast(palette1).total_cmp(&min_contrast(palette2))
 }
