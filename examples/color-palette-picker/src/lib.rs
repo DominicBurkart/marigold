@@ -1,3 +1,64 @@
+#[cfg(test)]
+mod lut_gen {
+    #[test]
+    #[ignore]
+    fn print_srgb_lut_and_matrix() {
+        let lut: Vec<i64> = (0u32..=255)
+            .map(|v| {
+                let linear = if v <= 10 {
+                    v as f64 / (255.0 * 12.92)
+                } else {
+                    ((v as f64 / 255.0 + 0.055) / 1.055).powf(2.4)
+                };
+                (linear * 1_000_000.0).round() as i64
+            })
+            .collect();
+
+        print!("const SRGB_LUT: [i64; 256] = [");
+        for (i, v) in lut.iter().enumerate() {
+            if i % 8 == 0 {
+                print!("\n    ");
+            }
+            print!("{}", v);
+            if i < 255 {
+                print!(", ");
+            }
+        }
+        println!("\n];");
+
+        let srgb_to_xyz: [[f64; 3]; 3] = [
+            [0.4124564, 0.3575761, 0.1804375],
+            [0.2126729, 0.7151522, 0.0721750],
+            [0.0193339, 0.1191920, 0.9503041],
+        ];
+        let xyz_to_lms: [[f64; 3]; 3] = [
+            [0.7328, 0.4296, -0.1624],
+            [-0.7036, 1.6975, 0.0061],
+            [0.0030, 0.0136, 0.9834],
+        ];
+
+        let mut combined = [[0f64; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                for k in 0..3 {
+                    combined[i][j] += xyz_to_lms[i][k] * srgb_to_xyz[k][j];
+                }
+            }
+        }
+        println!("Combined sRGB_linear -> LMS matrix (×1_000_000):");
+        let names = ["L", "M", "S"];
+        for (i, row) in combined.iter().enumerate() {
+            println!(
+                "  {} = {}*R + {}*G + {}*B",
+                names[i],
+                (row[0] * 1_000_000.0).round() as i64,
+                (row[1] * 1_000_000.0).round() as i64,
+                (row[2] * 1_000_000.0).round() as i64,
+            );
+        }
+    }
+}
+
 use once_cell::sync::Lazy;
 use prisma::color_space::named::SRgb;
 use prisma::color_space::ConvertToXyz;
