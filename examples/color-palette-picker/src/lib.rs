@@ -75,8 +75,15 @@ fn to_lms(v: &[u8; 3]) -> LmsCam2002<f64> {
     LmsCam2002::from_color(&xyz)
 }
 
-/// Returns the minimal contrast across normative vision, deuteranomaly, protanomaly, and
-/// tritanomaly.
+fn to_luminance(v: &[u8; 3]) -> f64 {
+    let rgb = Rgb::new(v[0], v[1], v[2])
+        .color_cast::<f64>()
+        .srgb_encoded();
+    SRGB.convert_to_xyz(&rgb).y()
+}
+
+/// Returns the minimal contrast across normative vision, deuteranomaly, protanomaly,
+/// tritanomaly, and achromatopsia (monochromacy).
 fn min_contrast<const N: usize>(colors: &[[u8; 3]; N]) -> f64 {
     let mut min = f64::MAX;
     for i1 in 0..N {
@@ -108,6 +115,12 @@ fn min_contrast<const N: usize>(colors: &[[u8; 3]; N]) -> f64 {
                     (color1.l() - color2.l()).abs() + (color1.m() - color2.m()).abs();
                 if tritanomaly_contrast < min {
                     min = tritanomaly_contrast;
+                }
+
+                let achromat_contrast =
+                    (to_luminance(&colors[i1]) - to_luminance(&colors[i2])).abs();
+                if achromat_contrast < min {
+                    min = achromat_contrast;
                 }
             }
         }

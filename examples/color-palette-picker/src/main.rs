@@ -173,6 +173,17 @@ mod integer_lms_tests {
         23143 * lr + 128012 * lg + 936052 * lb
     }
 
+    fn to_luminance(r: i32, g: i32, b: i32) -> i64 {
+        let lr = linearize(r);
+        let lg = linearize(g);
+        let lb = linearize(b);
+        212673 * lr + 715152 * lg + 72175 * lb
+    }
+
+    fn pair_contrast_achromat(c1: &[i32; 3], c2: &[i32; 3]) -> i64 {
+        abs_i64(to_luminance(c1[0], c1[1], c1[2]) - to_luminance(c2[0], c2[1], c2[2]))
+    }
+
     fn pair_contrast_normal(c1: &[i32; 3], c2: &[i32; 3]) -> i64 {
         abs_i64(to_lms_l(c1[0], c1[1], c1[2]) - to_lms_l(c2[0], c2[1], c2[2]))
             + abs_i64(to_lms_m(c1[0], c1[1], c1[2]) - to_lms_m(c2[0], c2[1], c2[2]))
@@ -199,6 +210,7 @@ mod integer_lms_tests {
         let deutan = pair_contrast_deutan(c1, c2);
         let protan = pair_contrast_protan(c1, c2);
         let tritan = pair_contrast_tritan(c1, c2);
+        let achromat = pair_contrast_achromat(c1, c2);
         let mut min = normal;
         if deutan < min {
             min = deutan;
@@ -208,6 +220,9 @@ mod integer_lms_tests {
         }
         if tritan < min {
             min = tritan;
+        }
+        if achromat < min {
+            min = achromat;
         }
         min
     }
