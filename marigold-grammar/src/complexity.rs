@@ -861,29 +861,10 @@ fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
 }
 
 fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
-    let is_concrete = cardinality.try_evaluate().is_some();
     match kind {
-        StreamFunctionKind::Permutations(k) => {
-            if is_concrete {
-                ComplexityClass::O1
-            } else {
-                ComplexityClass::OPermutational(*k)
-            }
-        }
-        StreamFunctionKind::PermutationsWithReplacement(k) => {
-            if is_concrete {
-                ComplexityClass::O1
-            } else {
-                ComplexityClass::OPolynomial(*k)
-            }
-        }
-        StreamFunctionKind::Combinations(k) => {
-            if is_concrete {
-                ComplexityClass::O1
-            } else {
-                ComplexityClass::OCombinatorial(*k)
-            }
-        }
+        StreamFunctionKind::Permutations(k) => ComplexityClass::OPermutational(*k),
+        StreamFunctionKind::PermutationsWithReplacement(k) => ComplexityClass::OPolynomial(*k),
+        StreamFunctionKind::Combinations(k) => ComplexityClass::OCombinatorial(*k),
         _ => cardinality_to_time_class(cardinality),
     }
 }
@@ -1925,6 +1906,37 @@ mod tests {
             assert_eq!(sym, parsed, "Roundtrip failed for {s}");
         }
     }
+
+    #[test]
+    fn test_complexity_class_error_case() {
+        assert!(ComplexityClass::from_str("O(invalid)").is_err());
+    }
+
+    #[test]
+    fn test_exact_complexity_default_is_empty() {
+        let ec = ExactComplexity::default();
+        assert_eq!(ec.to_string(), "O(1)");
+    }
+
+    #[test]
+    fn test_exact_complexity_onlogk_factorial_unknown_roundtrip() {
+        for (class, expected_multi) in [
+            (ComplexityClass::ONLogK(5), "O(n*log(5) + n)"),
+            (ComplexityClass::OFactorial, "O(n! + n)"),
+            (ComplexityClass::Unknown, "O(? + n)"),
+        ] {
+            let mut ec = ExactComplexity::new();
+            ec.add_work(class.clone(), 1);
+            ec.add_work(ComplexityClass::ON, 1);
+            assert_eq!(ec.to_string(), expected_multi, "display for {class:?}");
+            let parsed = ExactComplexity::from_str(expected_multi).unwrap();
+            assert_eq!(
+                parsed.to_string(),
+                expected_multi,
+                "roundtrip for {class:?}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1974,6 +1986,24 @@ mod proptests {
             for op in &collecting_ops {
                 let space = space_for_kind(op);
                 prop_assert!(space >= ComplexityClass::ON, "Collecting op {:?} should have space >= O(n)", op);
+            }
+        }
+
+        #[test]
+        fn test_combinatoric_step_work_always_asymptotic(k in 1..10u64, n_val in 1u64..1000) {
+            for cardinality in &[Symbolic::Constant(BigUint::from(n_val)), Symbolic::Unknown] {
+                prop_assert_eq!(
+                    step_work_class(cardinality, &StreamFunctionKind::Permutations(k)),
+                    ComplexityClass::OPermutational(k)
+                );
+                prop_assert_eq!(
+                    step_work_class(cardinality, &StreamFunctionKind::PermutationsWithReplacement(k)),
+                    ComplexityClass::OPolynomial(k)
+                );
+                prop_assert_eq!(
+                    step_work_class(cardinality, &StreamFunctionKind::Combinations(k)),
+                    ComplexityClass::OCombinatorial(k)
+                );
             }
         }
     }
