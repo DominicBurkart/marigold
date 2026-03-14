@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+export MARIGOLD_WORKSPACE_PATH="$(git rev-parse --show-toplevel)/marigold"
+
 cargo fmt --all -- --check
 cargo clippy --all-features -- -D warnings
 cargo test --all-features --doc
