@@ -580,11 +580,25 @@ fn_param_list = {
 // The & is optional for reference parameters
 fn_param_ref = { "&" }
 fn_param = {
-    free_text_identifier ~ ":" ~ fn_param_ref? ~ free_text_identifier
+    free_text_identifier ~ ":" ~ fn_param_ref? ~ fn_param_type
 }
 
-// Return type: can be complex Rust types like Vec<String>, Option<T>, etc.
-// Uses free_text_identifier+ to allow generic parameters and other syntax
+// Type for function parameters and return types.
+// Supports: simple types (i32), generics (Vec<T>), array types ([T; N], [[T; N]; M]),
+// and path types (std::cmp::Ordering). No spaces allowed outside brackets.
+fn_param_type_inner_segment = @{
+    ("[" ~ fn_param_type_inner_segment* ~ "]") |
+    ("<" ~ fn_param_type_inner_segment* ~ ">") |
+    (!("[" | "]" | "<" | ">") ~ ANY)
+}
+fn_param_type_segment = @{
+    ("[" ~ fn_param_type_inner_segment* ~ "]") |
+    ("<" ~ fn_param_type_inner_segment* ~ ">") |
+    (!("[" | "]" | "<" | ">" | "," | ")" | "{" | "}" | " " | "\t" | "\n" | "\r") ~ ANY)
+}
+fn_param_type = @{ fn_param_type_segment+ }
+
+// Return type: can be complex Rust types like Vec<String>, Option<T>, std::cmp::Ordering, etc.
 fn_return_type = {
-    free_text_identifier+
+    fn_param_type
 }

@@ -99,6 +99,10 @@ where
     // Otherwise, we can check each remaining value in the stream against the smallest
     // kept value, updating the kept values only when a keepable value is found. This
     // is done by spawning tasks, which can be parallelized by multithreaded runtimes.
+    //
+    // The check and update are performed atomically under the same mutex to avoid a
+    // TOCTOU race where two tasks could both observe the same "smallest" and both
+    // decide to replace it, leading to non-deterministic tie-breaking.
     let first_n_mutex = std::sync::Arc::new(parking_lot::Mutex::new(first_n));
     let smallest_kept = std::sync::Arc::new(parking_lot::RwLock::new(
         first_n_mutex.lock().peek().unwrap().to_owned(),
@@ -111,18 +115,27 @@ where
                 let first_n_arc = first_n_arc.clone();
                 let smallest_kept_arc = smallest_kept_arc.clone();
                 crate::async_runtime::spawn(async move {
-                    let smallest = smallest_kept_arc.read();
-                    // Compare items, using index as tie-breaker
-                    let should_keep = match sorted_by(&smallest.1, &indexed_item.1) {
-                        Ordering::Less => true,
-                        Ordering::Greater => false,
-                        // When equal, prefer item with lower index (earlier in stream)
-                        Ordering::Equal => indexed_item.0 < smallest.0,
-                    };
-                    drop(smallest);
+                    // Fast pre-check under read lock to skip clearly inferior items
+                    // without contending on the mutex.
+                    {
+                        let smallest = smallest_kept_arc.read();
+                        if sorted_by(&smallest.1, &indexed_item.1) == Ordering::Greater {
+                            return;
+                        }
+                    }
 
+                    // Atomically check and update under the mutex to prevent TOCTOU.
+                    let mut update_first_n = first_n_arc.lock();
+                    let should_keep = {
+                        let smallest = update_first_n.peek().unwrap();
+                        match sorted_by(&smallest.1, &indexed_item.1) {
+                            Ordering::Less => true,
+                            Ordering::Greater => false,
+                            // When equal, prefer item with lower index (earlier in stream)
+                            Ordering::Equal => indexed_item.0 < smallest.0,
+                        }
+                    };
                     if should_keep {
-                        let mut update_first_n = first_n_arc.lock();
                         update_first_n.pop();
                         update_first_n.push(indexed_item);
                         let mut update_smallest_kept = smallest_kept_arc.write();

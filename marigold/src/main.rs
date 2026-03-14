@@ -187,6 +187,12 @@ fn main() -> Result<()> {
 
     let manifest_path = program_project_dir.join("Cargo.toml");
 
+    let marigold_dep = if let Ok(workspace_path) = std::env::var("MARIGOLD_WORKSPACE_PATH") {
+        format!(r#"marigold = {{ path = "{workspace_path}", features = ["tokio", "io"]}}"#)
+    } else {
+        format!(r#"marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}"#)
+    };
+
     std::fs::write(
         &manifest_path,
         format!(
@@ -198,7 +204,7 @@ version = "0.0.1"
 [dependencies]
 serde = "1"
 tokio = {{ version = "1", features = ["full"]}}
-marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}
+{marigold_dep}
         "#
         ),
     )?;
