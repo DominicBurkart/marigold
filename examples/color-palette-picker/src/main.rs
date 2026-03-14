@@ -339,4 +339,30 @@ mod integer_lms_tests {
         let similar = [[200i32, 150, 100], [210, 160, 110], [190, 140, 90]];
         assert_order_agrees(&similar, &accessible);
     }
+
+    #[tokio::test]
+    async fn small_range_pipeline_returns_five_palettes() {
+        use marigold::m;
+        use marigold::marigold_impl::StreamExt;
+
+        let results = m!(
+            range(0, 4)
+            .permutations_with_replacement(3)
+            .combinations(3)
+            .keep_first_n(5, lms_compare)
+            .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+
+        assert_eq!(results.len(), 5);
+        for palette in &results {
+            for color in palette {
+                for channel in color {
+                    assert!(*channel >= 0 && *channel < 4);
+                }
+            }
+        }
+    }
 }
