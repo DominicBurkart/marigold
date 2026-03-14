@@ -16,5 +16,7 @@ jobs:
         components:  rustfmt, clippy
     - run:           cargo fmt --all -- --check
     - run:           cargo clippy --all-features -- -D warnings
+    - run:           cargo install cargo-audit && cargo audit
+    - run:           cargo install cargo-deny && cargo deny check
     - run:           cmp -- README.md ./marigold/README.md
     - run:           npx --yes markdownlint-cli2 "**/*.md" "#node_modules" "#target"
