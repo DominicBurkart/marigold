@@ -99,16 +99,16 @@ fn min_pair_contrast(c1: &[i32; 3], c2: &[i32; 3]) -> i64 {
     min
 }
 
-fn mod_five(v: i32) -> bool {
-    v % 5 == 0
+fn mod_seventeen(v: i32) -> bool {
+    v.is_multiple_of(17)
 }
 
-fn min_palette_contrast(palette: &[[i32; 3]; 5]) -> i64 {
+fn min_palette_contrast(palette: &[[i32; 3]; 3]) -> i64 {
     let mut min: i64 = i64::MAX;
     let mut i: usize = 0;
-    while i < 5 {
+    while i < 3 {
         let mut j: usize = i + 1;
-        while j < 5 {
+        while j < 3 {
             let c = min_pair_contrast(&palette[i], &palette[j]);
             if c < min { min = c; }
             j = j + 1;
@@ -118,7 +118,7 @@ fn min_palette_contrast(palette: &[[i32; 3]; 5]) -> i64 {
     min
 }
 
-fn compare_contrast(a: &[[i32; 3]; 5], b: &[[i32; 3]; 5]) -> Ordering {
+fn compare_contrast(a: &[[i32; 3]; 3], b: &[[i32; 3]; 3]) -> Ordering {
     let ma = min_palette_contrast(a);
     let mb = min_palette_contrast(b);
     if ma < mb { Ordering::Less }
@@ -127,8 +127,8 @@ fn compare_contrast(a: &[[i32; 3]; 5], b: &[[i32; 3]; 5]) -> Ordering {
 }
 
 range(0, 256)
-    .filter(mod_five)
+    .filter(mod_seventeen)
     .permutations_with_replacement(3)
-    .combinations(5)
-    .keep_first_n(20, compare_contrast)
+    .combinations(3)
+    .keep_first_n(5, compare_contrast)
     .write_file("/dev/stdout", csv)
