@@ -31,12 +31,18 @@ mod left_right {
         let left = analyze_file("tests/programs/left_quadratic.marigold");
         let right = analyze_file("tests/programs/right_quadratic.marigold");
 
-        assert_eq!(left.streams[0].time_class, ComplexityClass::ON);
-        assert_eq!(right.streams[0].time_class, ComplexityClass::ON);
+        assert_eq!(
+            left.streams[0].time_class,
+            ComplexityClass::OPermutational(2)
+        );
+        assert_eq!(
+            right.streams[0].time_class,
+            ComplexityClass::OPermutational(2)
+        );
         assert_eq!(left.streams[0].time_class, right.streams[0].time_class);
 
-        assert_eq!(left.streams[0].exact_time.to_string(), "O(n)");
-        assert_eq!(right.streams[0].exact_time.to_string(), "O(3n)");
+        assert_eq!(left.streams[0].exact_time.to_string(), "O(n!/(n-2)! + n)");
+        assert_eq!(right.streams[0].exact_time.to_string(), "O(n!/(n-2)! + 3n)");
         assert_ne!(left.streams[0].exact_time, right.streams[0].exact_time);
 
         assert!(left.streams[0].collects_input);
@@ -77,7 +83,10 @@ fn streaming_pipeline() {
 fn color_palette() {
     let result = analyze_file("tests/programs/color_palette.marigold");
     assert_eq!(result.streams.len(), 1);
-    assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+    assert_eq!(
+        result.streams[0].time_class,
+        ComplexityClass::OCombinatorial(5)
+    );
     assert!(result.streams[0].collects_input);
 }
 
