@@ -1205,6 +1205,50 @@ mod negative_tests {
     }
 
     #[test]
+    fn test_permutations_generates_array_conversion() {
+        let code = parse_marigold("range(0, 5).permutations(2).return")
+            .expect("Should parse permutations(2)");
+        assert!(
+            code.contains("<[_; 2]>::try_from"),
+            "permutations(2) should generate array conversion, got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_permutations_with_replacement_generates_array_conversion() {
+        let code = parse_marigold("range(0, 5).permutations_with_replacement(3).return")
+            .expect("Should parse permutations_with_replacement(3)");
+        assert!(
+            code.contains("<[_; 3]>::try_from"),
+            "permutations_with_replacement(3) should generate array conversion, got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_combinations_generates_array_conversion() {
+        let code = parse_marigold("range(0, 5).combinations(2).return")
+            .expect("Should parse combinations(2)");
+        assert!(
+            code.contains("<[_; 2]>::try_from"),
+            "combinations(2) should generate array conversion, got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_nested_permutations_combinations_generate_array_conversions() {
+        let code = parse_marigold("range(0, 5).permutations(2).combinations(3).return")
+            .expect("Should parse nested permutations+combinations");
+        assert!(
+            code.contains("<[_; 2]>::try_from"),
+            "nested: permutations(2) should generate array conversion, got: {code}"
+        );
+        assert!(
+            code.contains("<[_; 3]>::try_from"),
+            "nested: combinations(3) should generate array conversion, got: {code}"
+        );
+    }
+
+    #[test]
     fn test_accept_valid_function_names() {
         let result = parse_marigold("range(0, 10).map(transform).filter(is_even).return");
         assert!(
@@ -1718,5 +1762,46 @@ mod function_grammar_tests {
             "&string_64 should be translated to &ArrayString<64>, got: {}",
             output
         );
+    }
+
+    #[test]
+    fn test_fn_array_param_type() {
+        let code = parse_marigold("fn first(arr: &[[i32; 3]; 3]) -> i64 { 0 }")
+            .expect("Should parse fn with array reference param");
+        assert!(
+            code.contains("&[[i32; 3]; 3]"),
+            "Array ref param should appear verbatim, got: {code}"
+        );
+        assert!(
+            code.contains("-> i64"),
+            "Return type should be i64, got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_fn_path_return_type() {
+        let code =
+            parse_marigold("fn cmp_fn(a: &[[i32; 3]; 3], b: &[[i32; 3]; 3]) -> std::cmp::Ordering { std::cmp::Ordering::Equal }")
+                .expect("Should parse fn with path return type");
+        assert!(
+            code.contains("std::cmp::Ordering"),
+            "Path return type should appear verbatim, got: {code}"
+        );
+        assert!(
+            code.contains("a: &[[i32; 3]; 3]"),
+            "First array param should appear verbatim, got: {code}"
+        );
+        assert!(
+            code.contains("b: &[[i32; 3]; 3]"),
+            "Second array param should appear verbatim, got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_fn_simple_types_still_work_after_param_grammar_change() {
+        let code = parse_marigold("fn double(x: i32) -> i32 { x * 2 }")
+            .expect("Simple fn should still parse after grammar change");
+        assert!(code.contains("x: i32"), "param type i32 should be present");
+        assert!(code.contains("-> i32"), "return type i32 should be present");
     }
 }

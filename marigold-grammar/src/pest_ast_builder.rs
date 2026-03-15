@@ -658,7 +658,7 @@ impl PestAstBuilder {
         for part in parts {
             match part.as_rule() {
                 Rule::fn_param_ref => param_type.push('&'),
-                Rule::free_text_identifier => {
+                Rule::fn_param_type | Rule::free_text_identifier => {
                     param_type.push_str(&Self::translate_marigold_type(part.as_str()));
                 }
                 _ => {}
@@ -985,7 +985,9 @@ impl PestAstBuilder {
             .next()
             .ok_or_else(|| "Missing permutations size".to_string())?
             .as_str();
-        Ok(format!("permutations({n}).await"))
+        Ok(format!(
+            "permutations({n}).await.map(|v| <[_; {n}]>::try_from(v).unwrap())"
+        ))
     }
 
     fn build_permutations_with_replacement_fn(pair: Pair<Rule>) -> Result<String, String> {
@@ -994,7 +996,9 @@ impl PestAstBuilder {
             .next()
             .ok_or_else(|| "Missing permutations_with_replacement size".to_string())?
             .as_str();
-        Ok(format!("permutations_with_replacement({n}).await"))
+        Ok(format!(
+            "permutations_with_replacement({n}).await.map(|v| <[_; {n}]>::try_from(v).unwrap())"
+        ))
     }
 
     fn build_combinations_fn(pair: Pair<Rule>) -> Result<String, String> {
@@ -1003,7 +1007,9 @@ impl PestAstBuilder {
             .next()
             .ok_or_else(|| "Missing combinations size".to_string())?
             .as_str();
-        Ok(format!("combinations({n}).await"))
+        Ok(format!(
+            "combinations({n}).await.map(|v| <[_; {n}]>::try_from(v).unwrap())"
+        ))
     }
 
     fn build_keep_first_n_fn(pair: Pair<Rule>) -> Result<String, String> {

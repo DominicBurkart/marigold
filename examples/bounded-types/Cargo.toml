@@ -6,7 +6,7 @@ edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-marigold = {path = "../../marigold", version = "=0.1.16"}
+marigold = {path = "../../marigold", version = "=0.1.17"}
 tokio = {version = "1", features = ["rt", "macros"]}
 
 [dev-dependencies]
