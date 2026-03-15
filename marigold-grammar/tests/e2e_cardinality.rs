@@ -26,6 +26,19 @@ mod exact {
     }
 
     #[test]
+    fn range_inclusive() {
+        let result = analyze_file("tests/programs/card_range_inclusive.marigold");
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(101u64))
+        );
+        assert_eq!(
+            result.program_cardinality,
+            Cardinality::Exact(BigUint::from(101u64))
+        );
+    }
+
+    #[test]
     fn permutations() {
         let result = analyze_file("tests/programs/card_permutations.marigold");
         assert_eq!(

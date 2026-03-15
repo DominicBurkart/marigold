@@ -157,4 +157,15 @@ mod tests {
         sorted.sort();
         assert_eq!(sorted, vec![0, 1, 2, 10, 11, 12]);
     }
+
+    #[tokio::test]
+    async fn test_inclusive_range() {
+        let result = m!(
+            range(0, =3).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2, 3]);
+    }
 }

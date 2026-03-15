@@ -690,23 +690,48 @@ impl PestAstBuilder {
             .next()
             .ok_or_else(|| "Missing range start".to_string())?
             .as_str();
-        let n2 = inner
-            .next()
-            .ok_or_else(|| "Missing range end".to_string())?
-            .as_str();
 
-        let count = (n2
+        let next = inner
+            .next()
+            .ok_or_else(|| "Missing range end".to_string())?;
+
+        let (inclusive, n2) = if next.as_rule() == Rule::inclusive_marker {
+            let n2 = inner
+                .next()
+                .ok_or_else(|| "Missing range end after =".to_string())?
+                .as_str();
+            (true, n2)
+        } else {
+            (false, next.as_str())
+        };
+
+        let end_val = n2
             .parse::<num_bigint::BigInt>()
-            .map_err(|e| format!("Could not parse range end: {}", e))?
-            - n1.parse::<num_bigint::BigInt>()
-                .map_err(|e| format!("Could not parse range start: {}", e))?)
-        .to_biguint()
-        .ok_or_else(|| "Range count is negative".to_string())?;
+            .map_err(|e| format!("Could not parse range end: {}", e))?;
+        let start_val = n1
+            .parse::<num_bigint::BigInt>()
+            .map_err(|e| format!("Could not parse range start: {}", e))?;
+
+        let count = if inclusive {
+            (end_val - &start_val + num_bigint::BigInt::from(1u32))
+                .to_biguint()
+                .ok_or_else(|| "Range count is negative".to_string())?
+        } else {
+            (end_val - &start_val)
+                .to_biguint()
+                .ok_or_else(|| "Range count is negative".to_string())?
+        };
+
+        let range_expr = if inclusive {
+            format!("::marigold::marigold_impl::futures::stream::iter({n1}..={n2})")
+        } else {
+            format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})")
+        };
 
         Ok(InputFunctionNode {
             variability: InputVariability::Constant,
             input_count: InputCount::Known(count),
-            code: format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})"),
+            code: range_expr,
         })
     }
 
