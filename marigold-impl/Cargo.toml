@@ -50,3 +50,13 @@ required-features = ["tokio"]
 name = "cpu_utilization"
 harness = false
 required-features = ["tokio"]
+
+[[bench]]
+name = "per_item_costs"
+harness = false
+required-features = ["tokio"]
+
+[[bench]]
+name = "map_filter_utilization"
+harness = false
+required-features = ["tokio"]
