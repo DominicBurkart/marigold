@@ -8,12 +8,12 @@ use color_palette_picker::compare_contrast;
 #[tokio::main]
 async fn main() {
     console_subscriber::init();
-    let mod_seventeen = |i: u8| i.is_multiple_of(17);
+    let mod_fifty_one = |i: u8| i.is_multiple_of(51);
     println!(
         "program complete. Best colors: {:?}",
         m!(
             range(0, 255)
-            .filter(mod_seventeen)
+            .filter(mod_fifty_one)
             .permutations_with_replacement(3)
             .combinations(3)
             .keep_first_n(20, compare_contrast)
@@ -29,12 +29,12 @@ async fn main() {
 #[cfg(all(feature = "async-std", not(feature = "tokio")))]
 #[async_std::main]
 async fn main() {
-    let mod_seventeen = |i: u8| i.is_multiple_of(17);
+    let mod_fifty_one = |i: u8| i.is_multiple_of(51);
     println!(
         "program complete. Best colors: {:?}",
         m!(
             range(0, 255)
-            .filter(mod_seventeen)
+            .filter(mod_fifty_one)
             .permutations_with_replacement(3)
             .combinations(3)
             .keep_first_n(20, compare_contrast)
@@ -51,12 +51,12 @@ async fn main() {
 #[tokio::main]
 async fn main() {
     console_subscriber::init();
-    let mod_seventeen = |i: u8| i.is_multiple_of(17);
+    let mod_fifty_one = |i: u8| i.is_multiple_of(51);
     println!(
         "program complete. Best colors: {:?}",
         m!(
             range(0, 255)
-            .filter(mod_seventeen)
+            .filter(mod_fifty_one)
             .permutations_with_replacement(3)
             .combinations(3)
             .keep_first_n(20, compare_contrast)
@@ -73,12 +73,12 @@ async fn main() {
 #[cfg(not(any(feature = "tokio", feature = "async-std")))]
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let mod_seventeen = |i: u8| i.is_multiple_of(17);
+    let mod_fifty_one = |i: u8| i.is_multiple_of(51);
     println!(
         "program complete. Best colors: {:?}",
         m!(
             range(0, 255)
-            .filter(mod_seventeen)
+            .filter(mod_fifty_one)
             .permutations_with_replacement(3)
             .combinations(3)
             .keep_first_n(20, compare_contrast)
