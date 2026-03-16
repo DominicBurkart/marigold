@@ -69,12 +69,46 @@ fn bench_mutex_heap_ops(c: &mut Criterion) {
     });
 }
 
+fn bench_joinhandle_poll(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    c.bench_function("joinhandle_poll_completed", |b| {
+        b.iter_batched(
+            || {
+                rt.block_on(async {
+                    let handle = tokio::spawn(async {});
+                    tokio::task::yield_now().await;
+                    handle
+                })
+            },
+            |handle| rt.block_on(async { handle.await.unwrap() }),
+            criterion::BatchSize::PerIteration,
+        )
+    });
+}
+
+fn bench_comparator_work(c: &mut Criterion) {
+    use std::cmp::Ordering;
+    fn compare_by_sum(a: &[u16; 3], b: &[u16; 3]) -> Ordering {
+        let sa: u32 = a.iter().map(|&x| x as u32).sum();
+        let sb: u32 = b.iter().map(|&x| x as u32).sum();
+        sa.cmp(&sb)
+    }
+
+    let a = [100u16, 200, 300];
+    let b = [150u16, 250, 350];
+    c.bench_function("compare_by_sum_array3", |b_bench| {
+        b_bench.iter(|| compare_by_sum(&a, &b))
+    });
+}
+
 criterion_group!(
     benches,
     bench_spawn_join,
     bench_stream_advance,
     bench_arc_clone,
     bench_rwlock_read_compare,
-    bench_mutex_heap_ops
+    bench_mutex_heap_ops,
+    bench_joinhandle_poll,
+    bench_comparator_work
 );
 criterion_main!(benches);
