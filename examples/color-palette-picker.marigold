@@ -99,8 +99,8 @@ fn min_pair_contrast(c1: &[i32; 3], c2: &[i32; 3]) -> i64 {
     min
 }
 
-fn mod_seventeen(v: i32) -> bool {
-    v % 17 == 0
+fn mod_fifty_one(v: i32) -> bool {
+    v % 51 == 0
 }
 
 fn min_palette_contrast(palette: &[[i32; 3]; 3]) -> i64 {
@@ -127,7 +127,7 @@ fn compare_contrast(a: &[[i32; 3]; 3], b: &[[i32; 3]; 3]) -> Ordering {
 }
 
 range(0, 256)
-    .filter(mod_seventeen)
+    .filter(mod_fifty_one)
     .permutations_with_replacement(3)
     .combinations(3)
     .keep_first_n(5, compare_contrast)
