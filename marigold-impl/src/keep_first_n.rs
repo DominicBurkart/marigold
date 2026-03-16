@@ -110,15 +110,17 @@ where
     let smallest_kept = std::sync::Arc::new(parking_lot::RwLock::new(
         first_n_mutex.lock().peek().unwrap().to_owned(),
     ));
-    {
-        let first_n_arc = first_n_mutex.clone();
-        let smallest_kept_arc = smallest_kept.clone();
+    let first_n_arc = first_n_mutex.clone();
+    let smallest_kept_arc = smallest_kept.clone();
+    let parallel_work = async move {
         let mut ongoing_tasks = indexed_stream
             .ready_chunks(READY_CHUNK_SIZE)
             .map(move |chunk: Vec<(usize, T)>| {
                 let first_n_arc = first_n_arc.clone();
                 let smallest_kept_arc = smallest_kept_arc.clone();
                 crate::async_runtime::spawn(async move {
+                    #[cfg(feature = "bench-instrumentation")]
+                    let _worker_span = tracing::info_span!("keep_first_n_worker_task").entered();
                     for indexed_item in chunk {
                         let smallest = smallest_kept_arc.read();
                         let should_keep = match sorted_by(&smallest.1, &indexed_item.1) {
@@ -140,7 +142,16 @@ where
             })
             .buffer_unordered(num_cpus::get() * 4);
         while let Some(_task) = ongoing_tasks.next().await {}
+    };
+    #[cfg(feature = "bench-instrumentation")]
+    {
+        use tracing::Instrument;
+        parallel_work
+            .instrument(tracing::info_span!("keep_first_n_parallel_section"))
+            .await;
     }
+    #[cfg(not(feature = "bench-instrumentation"))]
+    parallel_work.await;
     futures::stream::iter(
         std::sync::Arc::try_unwrap(first_n_mutex)
             .expect("Dangling references to mutex")
