@@ -5,6 +5,9 @@ use futures::stream::StreamExt;
 use std::cmp::Ordering;
 use tracing::instrument;
 
+#[cfg(any(feature = "tokio", feature = "async-std"))]
+const READY_CHUNK_SIZE: usize = 256;
+
 #[async_trait]
 pub trait KeepFirstN<T, F>
 where
@@ -111,35 +114,27 @@ where
         let first_n_arc = first_n_mutex.clone();
         let smallest_kept_arc = smallest_kept.clone();
         let mut ongoing_tasks = indexed_stream
-            .map(move |indexed_item| {
+            .ready_chunks(READY_CHUNK_SIZE)
+            .map(move |chunk: Vec<(usize, T)>| {
                 let first_n_arc = first_n_arc.clone();
                 let smallest_kept_arc = smallest_kept_arc.clone();
                 crate::async_runtime::spawn(async move {
-                    // Fast pre-check under read lock to skip clearly inferior items
-                    // without contending on the mutex.
-                    {
+                    for indexed_item in chunk {
                         let smallest = smallest_kept_arc.read();
-                        if sorted_by(&smallest.1, &indexed_item.1) == Ordering::Greater {
-                            return;
-                        }
-                    }
-
-                    // Atomically check and update under the mutex to prevent TOCTOU.
-                    let mut update_first_n = first_n_arc.lock();
-                    let should_keep = {
-                        let smallest = update_first_n.peek().unwrap();
-                        match sorted_by(&smallest.1, &indexed_item.1) {
+                        let should_keep = match sorted_by(&smallest.1, &indexed_item.1) {
                             Ordering::Less => true,
                             Ordering::Greater => false,
-                            // When equal, prefer item with lower index (earlier in stream)
                             Ordering::Equal => indexed_item.0 < smallest.0,
+                        };
+                        drop(smallest);
+
+                        if should_keep {
+                            let mut update_first_n = first_n_arc.lock();
+                            update_first_n.pop();
+                            update_first_n.push(indexed_item);
+                            let mut update_smallest_kept = smallest_kept_arc.write();
+                            *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
                         }
-                    };
-                    if should_keep {
-                        update_first_n.pop();
-                        update_first_n.push(indexed_item);
-                        let mut update_smallest_kept = smallest_kept_arc.write();
-                        *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
                     }
                 })
             })
@@ -233,5 +228,107 @@ mod tests {
                 .await,
             vec![9, 7]
         );
+    }
+
+    #[tokio::test]
+    async fn large_stream_correctness() {
+        let items: Vec<u64> = (0..10_000).map(|i| (i * 7 + 3) % 10_000).collect();
+        let mut expected: Vec<u64> = items.clone();
+        expected.sort_by(|a, b| b.cmp(a));
+        expected.truncate(10);
+
+        let result = futures::stream::iter(items)
+            .keep_first_n(10, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(result, expected);
+    }
+
+    #[tokio::test]
+    async fn chunk_boundary_exact() {
+        let items: Vec<u32> = (0..256).collect();
+        let result = futures::stream::iter(items)
+            .keep_first_n(5, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![255, 254, 253, 252, 251]);
+    }
+
+    #[tokio::test]
+    async fn chunk_boundary_plus_one() {
+        let items: Vec<u32> = (0..257).collect();
+        let result = futures::stream::iter(items)
+            .keep_first_n(5, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![256, 255, 254, 253, 252]);
+    }
+
+    #[tokio::test]
+    async fn chunk_boundary_less_than_chunk() {
+        let items: Vec<u32> = (0..100).collect();
+        let result = futures::stream::iter(items)
+            .keep_first_n(5, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![99, 98, 97, 96, 95]);
+    }
+
+    #[tokio::test]
+    async fn chunk_boundary_keep_all() {
+        let items: Vec<u32> = (0..10).collect();
+        let result = futures::stream::iter(items)
+            .keep_first_n(10, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+    }
+
+    #[tokio::test]
+    async fn tie_breaking_determinism() {
+        let items: Vec<(u32, usize)> = (0..100).map(|i| (42u32, i)).collect();
+        let result = futures::stream::iter(items)
+            .keep_first_n(5, |a, b| a.0.cmp(&b.0))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(result.len(), 5);
+        let mut indices: Vec<usize> = result.iter().map(|(_, i)| *i).collect();
+        indices.sort_unstable();
+        assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[tokio::test]
+    async fn stream_shorter_than_n() {
+        let result = futures::stream::iter(vec![3u32, 1, 2])
+            .keep_first_n(10, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![3, 2, 1]);
+    }
+
+    #[tokio::test]
+    async fn cross_chunk_concurrent_correctness() {
+        let n = 10_000usize;
+        let items: Vec<u64> = (0..n as u64).collect();
+        let mut expected: Vec<u64> = items.clone();
+        expected.sort_by(|a, b| b.cmp(a));
+        expected.truncate(50);
+
+        let result = futures::stream::iter(items)
+            .keep_first_n(50, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(result, expected);
     }
 }
