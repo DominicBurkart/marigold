@@ -1656,6 +1656,78 @@ mod function_grammar_tests {
     }
 
     #[test]
+    fn test_inclusive_range_parses() {
+        let result = parse_marigold("range(0, =255).return");
+        assert!(
+            result.is_ok(),
+            "range(0, =255).return should parse successfully: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_inclusive_range_no_space_parses() {
+        let result = parse_marigold("range(0,=255).return");
+        assert!(
+            result.is_ok(),
+            "range(0,=255).return (no space) should parse successfully: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_exclusive_range_regression() {
+        let result = parse_marigold("range(0, 255).return");
+        assert!(
+            result.is_ok(),
+            "range(0, 255).return should still work (regression): {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_inclusive_range_codegen_uses_inclusive_operator() {
+        let result = parse_marigold("range(0, =255).return");
+        assert!(result.is_ok(), "Should parse: {:?}", result);
+        let code = result.unwrap();
+        assert!(
+            code.contains("..=255"),
+            "Inclusive range should generate ..=255, got: {}",
+            code
+        );
+    }
+
+    #[test]
+    fn test_exclusive_range_codegen_regression() {
+        let result = parse_marigold("range(0, 255).return");
+        assert!(result.is_ok(), "Should parse: {:?}", result);
+        let code = result.unwrap();
+        assert!(
+            code.contains("0..255"),
+            "Exclusive range should generate 0..255, got: {}",
+            code
+        );
+    }
+
+    #[test]
+    fn test_reject_inclusive_marker_on_start_bound() {
+        let result = parse_marigold("range(=0, 255).return");
+        assert!(
+            result.is_err(),
+            "range(=0, 255).return should be rejected (= only valid on end bound)"
+        );
+    }
+
+    #[test]
+    fn test_reject_inclusive_marker_on_both_bounds() {
+        let result = parse_marigold("range(=0, =255).return");
+        assert!(
+            result.is_err(),
+            "range(=0, =255).return should be rejected (= on start bound is invalid)"
+        );
+    }
+
+    #[test]
     fn test_fn_with_string_n_param() {
         let result = parse_marigold("fn greet(name: string_20) -> string_20 { name }");
         assert!(
