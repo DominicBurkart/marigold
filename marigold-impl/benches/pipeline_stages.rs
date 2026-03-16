@@ -32,6 +32,10 @@ fn bench_pipeline_stages(c: &mut Criterion) {
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(30));
 
+    group.bench_function("range_8_only", |b| {
+        b.iter(|| rt.block_on(async { futures::stream::iter(0u16..8).collect::<Vec<_>>().await }))
+    });
+
     group.bench_function("permutations_with_replacement_8_k3", |b| {
         b.iter(|| {
             rt.block_on(async {
