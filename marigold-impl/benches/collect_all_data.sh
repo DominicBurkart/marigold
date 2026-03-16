@@ -11,40 +11,34 @@ set -euo pipefail
 #   output_file  Path to write the markdown summary (default: bench_summary.md)
 #
 # Must be run from the marigold-impl directory or workspace root.
-# Requirements: bc, awk, cargo
+# Requirements: bc, awk, cargo, jq
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 BENCH_DIR="${REPO_ROOT}/marigold-impl"
 SCRIPT_DIR="${REPO_ROOT}/marigold-impl/benches"
 OUTPUT="${1:-bench_summary.md}"
 
+command -v jq >/dev/null 2>&1 || { echo "error: jq is required" >&2; exit 1; }
+
 cd "$BENCH_DIR"
 
 echo "=== Collecting benchmark data for issue #82 ==="
 echo ""
 
-# ─── Helper: extract median ns from Criterion output ─────────────────────────
-# Criterion prints lines like:  "spawn_task            time:   [345.12 ns 350.34 ns 356.78 ns]"
-# We capture the middle value (median).
-extract_median_ns() {
-    local bench_output="$1"
-    echo "$bench_output" | grep -oP 'time:\s+\[\S+\s+\K[\d.]+(?=\s+\w+\s+\d)' | head -1
-}
-
-extract_median_with_unit() {
-    local bench_output="$1"
-    echo "$bench_output" | grep -oP 'time:\s+\[\S+\s+\K[\d.]+ \w+(?=\s+\d)' | head -1
+criterion_ns() {
+    local bench_name="$1"
+    jq -r '.mean.point_estimate' "${BENCH_DIR}/target/criterion/${bench_name}/new/estimates.json" 2>/dev/null || echo "0"
 }
 
 # ─── 1. per_item_costs ────────────────────────────────────────────────────────
 echo "--- Running per_item_costs ---"
-PER_ITEM_OUT=$(cargo bench --bench per_item_costs --features tokio 2>&1)
+cargo bench --bench per_item_costs --features tokio 2>&1
 
-spawn_ns=$(echo "$PER_ITEM_OUT"      | grep -A2 'spawn_task'           | extract_median_ns "$(echo "$PER_ITEM_OUT" | grep -A2 'spawn_task')" || echo "0")
-iter_ns=$(echo "$PER_ITEM_OUT"       | grep -A2 'iter_advance'         | extract_median_ns "$(echo "$PER_ITEM_OUT" | grep -A2 'iter_advance')" || echo "0")
-joinhandle_ns=$(echo "$PER_ITEM_OUT" | grep -A2 'joinhandle_poll'      | extract_median_ns "$(echo "$PER_ITEM_OUT" | grep -A2 'joinhandle_poll')" || echo "0")
-arc_ns=$(echo "$PER_ITEM_OUT"        | grep -A2 'arc_clone'            | extract_median_ns "$(echo "$PER_ITEM_OUT" | grep -A2 'arc_clone')" || echo "0")
-useful_ns=$(echo "$PER_ITEM_OUT"     | grep -A2 'compare_by_sum'       | extract_median_ns "$(echo "$PER_ITEM_OUT" | grep -A2 'compare_by_sum')" || echo "0")
+spawn_ns=$(criterion_ns "tokio_spawn_join")
+iter_ns=$(criterion_ns "stream_advance_enumerate_next")
+joinhandle_ns=$(criterion_ns "joinhandle_poll_completed")
+arc_ns=$(criterion_ns "arc_clone_x2")
+useful_ns=$(criterion_ns "compare_by_sum_array3")
 
 echo "  spawn_task:      ${spawn_ns} ns"
 echo "  iter_advance:    ${iter_ns} ns"
@@ -55,8 +49,10 @@ echo "  compare_by_sum:  ${useful_ns} ns"
 # ─── 2. keep_first_n wall time ───────────────────────────────────────────────
 echo ""
 echo "--- Running keep_first_n ---"
-KFN_OUT=$(cargo bench --bench keep_first_n --features tokio 2>&1)
-kfn_time=$(echo "$KFN_OUT" | grep -oP 'time:\s+\[\S+\s+\K[\d.]+ \w+(?=\s+\d)' | head -1 || echo "unknown")
+cargo bench --bench keep_first_n --features tokio 2>&1
+kfn_ns=$(criterion_ns "keep_first_n/c_512_3_stream_iter")
+kfn_secs=$(echo "scale=9; $kfn_ns / 1000000000" | bc 2>/dev/null || echo "")
+kfn_time="${kfn_ns} ns"
 echo "  keep_first_n wall time: $kfn_time"
 
 # ─── 3. cpu_utilization ──────────────────────────────────────────────────────
@@ -80,10 +76,13 @@ echo "  parallel_wall: $parallel_wall"
 # ─── 5. pipeline_stages ──────────────────────────────────────────────────────
 echo ""
 echo "--- Running pipeline_stages ---"
-PIPE_OUT=$(cargo bench --bench pipeline_stages --features tokio 2>&1)
-pwr3_time=$(echo "$PIPE_OUT"  | grep -A2 'pwr_3_items_8'  | grep -oP 'time:\s+\[\S+\s+\K[\d.]+ \w+(?=\s+\d)' | head -1 || echo "unknown")
-comb3_time=$(echo "$PIPE_OUT" | grep -A2 'comb_3_items_512'| grep -oP 'time:\s+\[\S+\s+\K[\d.]+ \w+(?=\s+\d)'| head -1 || echo "unknown")
-full_time=$(echo "$PIPE_OUT"  | grep -A2 'full_pipeline'  | grep -oP 'time:\s+\[\S+\s+\K[\d.]+ \w+(?=\s+\d)'| head -1 || echo "unknown")
+cargo bench --bench pipeline_stages --features tokio 2>&1
+pwr3_ns=$(criterion_ns "pipeline_stages/permutations_with_replacement_8_k3")
+comb3_ns=$(criterion_ns "pipeline_stages/combinations_512_k3")
+full_ns=$(criterion_ns "pipeline_stages/full_pipeline_range8_pwr3_comb3_kfn20")
+pwr3_time="${pwr3_ns} ns"
+comb3_time="${comb3_ns} ns"
+full_time="${full_ns} ns"
 echo "  pwr(3) 8 items:       $pwr3_time"
 echo "  combinations(3) 512:  $comb3_time"
 echo "  full pipeline:        $full_time"
@@ -121,7 +120,6 @@ echo "  overhead_pct: $overhead_pct%"
 BENCH_ITEMS=22238720
 FULL_SCALE_ITEMS=463000000000000
 
-kfn_secs=$(echo "$KFN_OUT" | grep -oP 'time:\s+\[\S+\s+\K[\d.]+(?=\s+s\s+\d)' | head -1 || echo "")
 if [[ -n "$kfn_secs" && "$kfn_secs" != "0" ]]; then
     throughput=$(echo "scale=0; $BENCH_ITEMS / $kfn_secs" | bc 2>/dev/null || echo "unknown")
     projected_secs=$(echo "scale=1; $FULL_SCALE_ITEMS / ($BENCH_ITEMS / $kfn_secs)" | bc 2>/dev/null || echo "unknown")
