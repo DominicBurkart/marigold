@@ -38,12 +38,16 @@ spawn_ns=$(criterion_ns "tokio_spawn_join")
 iter_ns=$(criterion_ns "stream_advance_enumerate_next")
 joinhandle_ns=$(criterion_ns "joinhandle_poll_completed")
 arc_ns=$(criterion_ns "arc_clone_x2")
+rwlock_ns=$(criterion_ns "rwlock_read_compare")
+mutex_heap_ns=$(criterion_ns "mutex_heap_peek_pop_push")
 useful_ns=$(criterion_ns "compare_by_sum_array3")
 
 echo "  spawn_task:      ${spawn_ns} ns"
 echo "  iter_advance:    ${iter_ns} ns"
 echo "  joinhandle_poll: ${joinhandle_ns} ns"
 echo "  arc_clone:       ${arc_ns} ns"
+echo "  rwlock_read:     ${rwlock_ns} ns"
+echo "  mutex_heap:      ${mutex_heap_ns} ns"
 echo "  compare_by_sum:  ${useful_ns} ns"
 
 # ─── 2. keep_first_n wall time ───────────────────────────────────────────────
@@ -59,16 +63,16 @@ echo "  keep_first_n wall time: $kfn_time"
 echo ""
 echo "--- Running cpu_utilization ---"
 CPU_OUT=$(cargo bench --bench cpu_utilization --features tokio 2>&1)
-effective_cores=$(echo "$CPU_OUT" | grep -oP 'effective_cores\s+\|\s+\K[\d.]+' | head -1 || echo "unknown")
+effective_cores=$(echo "$CPU_OUT" | grep -oP 'effective_cores: mean=\K[\d.]+' | head -1 || echo "unknown")
 echo "  effective_cores: $effective_cores"
 
 # ─── 4. driver_worker_split ──────────────────────────────────────────────────
 echo ""
 echo "--- Running driver_worker_split ---"
 DWS_OUT=$(cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation" 2>&1)
-driver_wall=$(echo "$DWS_OUT"  | grep -oP 'driver_wall\s+\|\s+\K[\d.]+\s*s' | head -1 || echo "unknown")
-worker_cpu=$(echo "$DWS_OUT"   | grep -oP 'worker_cpu\s+\|\s+\K[\d.]+\s*s'  | head -1 || echo "unknown")
-parallel_wall=$(echo "$DWS_OUT"| grep -oP 'parallel_wall\s+\|\s+\K[\d.]+\s*s'| head -1 || echo "unknown")
+driver_wall=$(echo "$DWS_OUT"  | grep -oP 'driver_wall_time_s:\s+\K[\d.]+' | head -1 || echo "unknown")
+worker_cpu=$(echo "$DWS_OUT"   | grep -oP 'total_worker_cpu_s:\s+\K[\d.]+'  | head -1 || echo "unknown")
+parallel_wall=$(echo "$DWS_OUT"| grep -oP 'worker_wall_time_s:\s+\K[\d.]+'  | head -1 || echo "unknown")
 echo "  driver_wall:   $driver_wall"
 echo "  worker_cpu:    $worker_cpu"
 echo "  parallel_wall: $parallel_wall"
@@ -100,14 +104,34 @@ echo "  CPU samples written to: $CPU_CSV"
 
 CPU_CHART=$("${SCRIPT_DIR}/render_cpu_chart.sh" "$CPU_CSV" 50)
 
-# ─── 7. Derived values ───────────────────────────────────────────────────────
+# ─── 7. color-palette-picker ─────────────────────────────────────────────────
+echo ""
+echo "--- Running color-palette-picker bench ---"
+COLOR_PICKER_DIR="${REPO_ROOT}/examples/color-palette-picker"
+if [[ -d "$COLOR_PICKER_DIR" ]]; then
+    (cd "$COLOR_PICKER_DIR" && cargo bench --bench color_picker_bench 2>&1)
+    color_picker_ns=$(jq -r '.mean.point_estimate' \
+        "${COLOR_PICKER_DIR}/target/criterion/bench_color_picker/new/estimates.json" 2>/dev/null || echo "0")
+    range8_ns=$(jq -r '.mean.point_estimate' \
+        "${COLOR_PICKER_DIR}/target/criterion/range_8_pipeline/pwr3_comb3_kfn20_compare_by_sum/new/estimates.json" 2>/dev/null || echo "0")
+    echo "  bench_color_picker:      ${color_picker_ns} ns"
+    echo "  range_8_pipeline:        ${range8_ns} ns"
+else
+    color_picker_ns="unknown"
+    range8_ns="unknown"
+    echo "  color-palette-picker example not found at $COLOR_PICKER_DIR"
+fi
+
+# ─── 8. Derived values ───────────────────────────────────────────────────────
 echo ""
 echo "--- Computing derived values ---"
 
-# Spawn overhead fraction (overhead components / total per-item cost)
+# Spawn overhead fraction: spawn + iter + joinhandle + arc are overhead;
+# rwlock + mutex_heap + compare are "useful work" per item
 overhead_total=$(echo "$spawn_ns + $iter_ns + $joinhandle_ns + $arc_ns" | bc 2>/dev/null || echo "0")
-total_cost=$(echo "$overhead_total + $useful_ns" | bc 2>/dev/null || echo "1")
-if [[ "$total_cost" != "0" && "$total_cost" != "1" ]]; then
+useful_total=$(echo "$useful_ns + $rwlock_ns + $mutex_heap_ns" | bc 2>/dev/null || echo "0")
+total_cost=$(echo "$overhead_total + $useful_total" | bc 2>/dev/null || echo "0")
+if [[ "$total_cost" != "0" ]]; then
     overhead_pct=$(echo "scale=1; $overhead_total * 100 / $total_cost" | bc 2>/dev/null || echo "unknown")
 else
     overhead_pct="unknown"
@@ -143,15 +167,17 @@ cat > "$OUTPUT" << MARKDOWN
 
 ## Per-item cost breakdown
 
-| Component | Time (ns) |
-|---|---|
-| spawn_task | ${spawn_ns} |
-| iter_advance | ${iter_ns} |
-| joinhandle_poll | ${joinhandle_ns} |
-| arc_clone | ${arc_ns} |
-| compare_by_sum (useful work) | ${useful_ns} |
-| **overhead total** | **${overhead_total}** |
-| **overhead fraction** | **${overhead_pct}%** |
+| Component | Time (ns) | Category |
+|---|---|---|
+| spawn_task | ${spawn_ns} | overhead |
+| iter_advance | ${iter_ns} | overhead |
+| joinhandle_poll | ${joinhandle_ns} | overhead |
+| arc_clone | ${arc_ns} | overhead |
+| rwlock_read_compare | ${rwlock_ns} | useful work |
+| mutex_heap_peek_pop_push | ${mutex_heap_ns} | useful work |
+| compare_by_sum | ${useful_ns} | useful work |
+| **overhead total** | **${overhead_total}** | |
+| **overhead fraction** | **${overhead_pct}%** | |
 
 ## keep_first_n wall time
 
@@ -176,6 +202,13 @@ cat > "$OUTPUT" << MARKDOWN
 | pwr(3) on 8 items | ${pwr3_time} |
 | combinations(3) on 512 items | ${comb3_time} |
 | full pipeline | ${full_time} |
+
+## color-palette-picker end-to-end
+
+| Benchmark | Time (ns) |
+|---|---|
+| bench_color_picker | ${color_picker_ns} |
+| range_8_pipeline | ${range8_ns} |
 
 ## Full-scale projection
 

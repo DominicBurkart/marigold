@@ -18,6 +18,12 @@ jobs:
       working-directory: marigold-impl
     - run:           cargo bench --bench pipeline_stages --features tokio
       working-directory: marigold-impl
+    - run:           cargo bench --bench cpu_utilization --features tokio
+      working-directory: marigold-impl
+    - run:           cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation"
+      working-directory: marigold-impl
+    - run:           cargo bench --bench color_picker_bench
+      working-directory: examples/color-palette-picker
     - uses:          actions/upload-artifact@v4
       if:            always()
       with:
