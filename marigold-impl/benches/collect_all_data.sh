@@ -109,7 +109,7 @@ echo ""
 echo "--- Running color-palette-picker bench ---"
 COLOR_PICKER_DIR="${REPO_ROOT}/examples/color-palette-picker"
 if [[ -d "$COLOR_PICKER_DIR" ]]; then
-    (cd "$COLOR_PICKER_DIR" && cargo bench --bench color_picker_bench 2>&1)
+    (cd "$COLOR_PICKER_DIR" && cargo bench --bench color_picker_bench --features tokio 2>&1)
     color_picker_ns=$(jq -r '.mean.point_estimate' \
         "${REPO_ROOT}/target/criterion/bench_color_picker/new/estimates.json" 2>/dev/null || echo "0")
     range8_ns=$(jq -r '.mean.point_estimate' \
