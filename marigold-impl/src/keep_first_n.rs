@@ -103,9 +103,11 @@ where
     // kept value, updating the kept values only when a keepable value is found. This
     // is done by spawning tasks, which can be parallelized by multithreaded runtimes.
     //
-    // The check and update are performed atomically under the same mutex to avoid a
-    // TOCTOU race where two tasks could both observe the same "smallest" and both
-    // decide to replace it, leading to non-deterministic tie-breaking.
+    // A double-check pattern is used: the RwLock provides a fast-path filter
+    // (most items are rejected without touching the mutex), and after acquiring
+    // the mutex the condition is re-checked against the current heap state to
+    // eliminate the TOCTOU race where two tasks could both pass the fast-path
+    // check but only one should actually replace the smallest kept value.
     let first_n_mutex = std::sync::Arc::new(parking_lot::Mutex::new(first_n));
     let smallest_kept = std::sync::Arc::new(parking_lot::RwLock::new(
         first_n_mutex.lock().peek().unwrap().to_owned(),
@@ -132,10 +134,19 @@ where
 
                         if should_keep {
                             let mut update_first_n = first_n_arc.lock();
-                            update_first_n.pop();
-                            update_first_n.push(indexed_item);
-                            let mut update_smallest_kept = smallest_kept_arc.write();
-                            *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
+                            let current_smallest = update_first_n.peek().unwrap();
+                            let still_should_keep =
+                                match sorted_by(&current_smallest.1, &indexed_item.1) {
+                                    Ordering::Less => true,
+                                    Ordering::Greater => false,
+                                    Ordering::Equal => indexed_item.0 < current_smallest.0,
+                                };
+                            if still_should_keep {
+                                update_first_n.pop();
+                                update_first_n.push(indexed_item);
+                                let mut update_smallest_kept = smallest_kept_arc.write();
+                                *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
+                            }
                         }
                     }
                 })
