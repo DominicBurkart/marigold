@@ -27,7 +27,7 @@ echo ""
 
 criterion_ns() {
     local bench_name="$1"
-    jq -r '.mean.point_estimate' "${BENCH_DIR}/target/criterion/${bench_name}/new/estimates.json" 2>/dev/null || echo "0"
+    jq -r '.mean.point_estimate' "${REPO_ROOT}/target/criterion/${bench_name}/new/estimates.json" 2>/dev/null || echo "0"
 }
 
 # ─── 1. per_item_costs ────────────────────────────────────────────────────────
@@ -111,9 +111,9 @@ COLOR_PICKER_DIR="${REPO_ROOT}/examples/color-palette-picker"
 if [[ -d "$COLOR_PICKER_DIR" ]]; then
     (cd "$COLOR_PICKER_DIR" && cargo bench --bench color_picker_bench 2>&1)
     color_picker_ns=$(jq -r '.mean.point_estimate' \
-        "${COLOR_PICKER_DIR}/target/criterion/bench_color_picker/new/estimates.json" 2>/dev/null || echo "0")
+        "${REPO_ROOT}/target/criterion/bench_color_picker/new/estimates.json" 2>/dev/null || echo "0")
     range8_ns=$(jq -r '.mean.point_estimate' \
-        "${COLOR_PICKER_DIR}/target/criterion/range_8_pipeline/pwr3_comb3_kfn20_compare_by_sum/new/estimates.json" 2>/dev/null || echo "0")
+        "${REPO_ROOT}/target/criterion/range_8_pipeline/pwr3_comb3_kfn20_compare_by_sum/new/estimates.json" 2>/dev/null || echo "0")
     echo "  bench_color_picker:      ${color_picker_ns} ns"
     echo "  range_8_pipeline:        ${range8_ns} ns"
 else
