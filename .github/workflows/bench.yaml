@@ -22,11 +22,11 @@ jobs:
       working-directory: marigold-impl
     - run:           cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation"
       working-directory: marigold-impl
-    - run:           cargo bench --bench color_picker_bench
+    - run:           cargo bench --bench color_picker_bench --features tokio
       working-directory: examples/color-palette-picker
     - uses:          actions/upload-artifact@v4
       if:            always()
       with:
         name:        criterion-reports
-        path:        marigold-impl/target/criterion/
+        path:        target/criterion/
         if-no-files-found: ignore
