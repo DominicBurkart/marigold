@@ -42,7 +42,7 @@ trap cleanup EXIT
 
 criterion_ns() {
     local bench_name="$1"
-    jq -r '.mean.point_estimate' "${BENCH_DIR}/target/criterion/${bench_name}/new/estimates.json" 2>/dev/null || echo "0"
+    jq -r '.mean.point_estimate' "${REPO_ROOT}/target/criterion/${bench_name}/new/estimates.json" 2>/dev/null || echo "0"
 }
 
 collect_metrics() {
