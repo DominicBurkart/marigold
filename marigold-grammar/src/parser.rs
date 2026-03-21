@@ -1499,6 +1499,79 @@ mod struct_enum_tests {
         );
         assert!(result.is_ok(), "Should parse enum and struct together");
     }
+
+    #[test]
+    fn test_enum_range_parses() {
+        let result = parse_marigold("enum Words { Hello, World, } range(Words).return");
+        assert!(result.is_ok(), "Should parse range(EnumName): {:?}", result);
+    }
+
+    #[test]
+    fn test_enum_range_codegen_variants_method() {
+        let result = parse_marigold("enum Words { Hello, World, } range(Words).return");
+        assert!(result.is_ok(), "Should parse range(EnumName)");
+        let code = result.unwrap();
+        assert!(
+            code.contains("__marigold_variants"),
+            "Should generate __marigold_variants method, got: {code}"
+        );
+        assert!(
+            code.contains("Words::Hello"),
+            "Should include Hello variant, got: {code}"
+        );
+        assert!(
+            code.contains("Words::World"),
+            "Should include World variant, got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_enum_range_with_default_unit_variant_included() {
+        let result = parse_marigold(r#"enum E { A = "a", default Unknown } range(E).return"#);
+        assert!(
+            result.is_ok(),
+            "Should parse enum with unit default variant"
+        );
+        let code = result.unwrap();
+        assert!(
+            code.contains("__marigold_variants"),
+            "Should generate __marigold_variants"
+        );
+        assert!(
+            code.contains("E::Unknown"),
+            "WithDefaultValue default should be included in variants"
+        );
+    }
+
+    #[test]
+    fn test_enum_range_with_sized_default_excluded() {
+        let result =
+            parse_marigold(r#"enum E { A = "a", default Other(string_10) } range(E).return"#);
+        assert!(
+            result.is_ok(),
+            "Should parse enum with sized default variant"
+        );
+        let code = result.unwrap();
+        assert!(
+            code.contains("__marigold_variants"),
+            "Should generate __marigold_variants"
+        );
+        assert!(
+            !code.contains("E::Other"),
+            "Sized default should be excluded from variants"
+        );
+    }
+
+    #[test]
+    fn test_enum_range_stream_code_generated() {
+        let result = parse_marigold("enum Words { Hello, World, } range(Words).return");
+        assert!(result.is_ok());
+        let code = result.unwrap();
+        assert!(
+            code.contains("Words::__marigold_variants()"),
+            "Should call __marigold_variants() in stream, got: {code}"
+        );
+    }
 }
 
 #[cfg(test)]
