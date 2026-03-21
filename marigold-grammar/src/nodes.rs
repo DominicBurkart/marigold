@@ -738,6 +738,24 @@ impl EnumDeclarationNode {
 
             enum_rep.push('}');
         }
+
+        let mut unit_variants: Vec<String> = self.variants.iter().map(|(n, _)| n.clone()).collect();
+        match &self.default_variant {
+            Some(DefaultEnumVariant::WithDefaultValue(default_name, _)) => {
+                unit_variants.push(default_name.clone());
+            }
+            Some(DefaultEnumVariant::Sized(_, _)) | None => {}
+        }
+        let variant_count = unit_variants.len();
+        let variants_list = unit_variants
+            .iter()
+            .map(|v| format!("{name}::{v}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        enum_rep.push_str(&format!(
+            "\nimpl {name} {{\n    fn __marigold_variants() -> [{name}; {variant_count}] {{\n        [{variants_list}]\n    }}\n}}"
+        ));
+
         enum_rep
     }
 }
