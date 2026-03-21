@@ -11,17 +11,17 @@ mod left_right {
         let left = analyze_file("tests/programs/left_linear.marigold");
         let right = analyze_file("tests/programs/right_linear.marigold");
 
-        assert_eq!(left.streams[0].time_class, ComplexityClass::ON);
-        assert_eq!(right.streams[0].time_class, ComplexityClass::ON);
+        assert_eq!(left.streams[0].time_class, ComplexityClass::O1);
+        assert_eq!(right.streams[0].time_class, ComplexityClass::O1);
         assert_eq!(left.streams[0].time_class, right.streams[0].time_class);
 
         assert_eq!(
             left.streams[0].exact_time,
-            ExactComplexity::from_str("O(n)").unwrap()
+            ExactComplexity::from_str("O(1)").unwrap()
         );
         assert_eq!(
             right.streams[0].exact_time,
-            ExactComplexity::from_str("O(3n)").unwrap()
+            ExactComplexity::from_str("O(3)").unwrap()
         );
         assert_ne!(left.streams[0].exact_time, right.streams[0].exact_time);
     }
@@ -31,12 +31,12 @@ mod left_right {
         let left = analyze_file("tests/programs/left_quadratic.marigold");
         let right = analyze_file("tests/programs/right_quadratic.marigold");
 
-        assert_eq!(left.streams[0].time_class, ComplexityClass::ON);
-        assert_eq!(right.streams[0].time_class, ComplexityClass::ON);
+        assert_eq!(left.streams[0].time_class, ComplexityClass::O1);
+        assert_eq!(right.streams[0].time_class, ComplexityClass::O1);
         assert_eq!(left.streams[0].time_class, right.streams[0].time_class);
 
-        assert_eq!(left.streams[0].exact_time.to_string(), "O(n)");
-        assert_eq!(right.streams[0].exact_time.to_string(), "O(3n)");
+        assert_eq!(left.streams[0].exact_time.to_string(), "O(2)");
+        assert_eq!(right.streams[0].exact_time.to_string(), "O(4)");
         assert_ne!(left.streams[0].exact_time, right.streams[0].exact_time);
 
         assert!(left.streams[0].collects_input);
@@ -65,10 +65,10 @@ fn analyze_file(path: &str) -> marigold_grammar::complexity::ProgramComplexity {
 fn streaming_pipeline() {
     let result = analyze_file("tests/programs/streaming_pipeline.marigold");
     assert_eq!(result.streams.len(), 1);
-    assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+    assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
     assert_eq!(
         result.streams[0].exact_time,
-        ExactComplexity::from_str("O(2n)").unwrap()
+        ExactComplexity::from_str("O(2)").unwrap()
     );
     assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
 }
@@ -77,7 +77,7 @@ fn streaming_pipeline() {
 fn color_palette() {
     let result = analyze_file("tests/programs/color_palette.marigold");
     assert_eq!(result.streams.len(), 1);
-    assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+    assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
     assert!(result.streams[0].collects_input);
 }
 
@@ -85,10 +85,10 @@ fn color_palette() {
 fn stateful_fold() {
     let result = analyze_file("tests/programs/stateful_fold.marigold");
     assert_eq!(result.streams.len(), 1);
-    assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+    assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
     assert_eq!(
         result.streams[0].exact_time,
-        ExactComplexity::from_str("O(n)").unwrap()
+        ExactComplexity::from_str("O(1)").unwrap()
     );
     assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
 }
@@ -98,24 +98,21 @@ fn multi_consumer() {
     let result = analyze_file("tests/programs/multi_consumer.marigold");
     assert_eq!(result.streams.len(), 2);
 
-    assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+    assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
     assert_eq!(
         result.streams[0].exact_time,
-        ExactComplexity::from_str("O(n)").unwrap()
+        ExactComplexity::from_str("O(1)").unwrap()
     );
 
     assert_eq!(result.streams[1].time_class, ComplexityClass::ON);
-    assert_eq!(
-        result.streams[1].exact_time,
-        ExactComplexity::from_str("O(2n)").unwrap()
-    );
+    assert_eq!(result.streams[1].exact_time.to_string(), "O(n)");
 }
 
 #[test]
 fn select_all() {
     let result = analyze_file("tests/programs/select_all.marigold");
     assert_eq!(result.streams.len(), 1);
-    assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+    assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
     assert_eq!(
         result.streams[0].cardinality,
         Cardinality::Exact(BigUint::from(30u64))
@@ -126,9 +123,20 @@ fn select_all() {
 fn chained_maps() {
     let result = analyze_file("tests/programs/chained_maps.marigold");
     assert_eq!(result.streams.len(), 1);
-    assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+    assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
     assert_eq!(
         result.streams[0].exact_time,
-        ExactComplexity::from_str("O(2n)").unwrap()
+        ExactComplexity::from_str("O(2)").unwrap()
     );
+}
+
+#[test]
+fn var_permutations() {
+    let result = analyze_file("tests/programs/var_permutations.marigold");
+    assert_eq!(result.streams.len(), 1);
+    assert_eq!(
+        result.streams[0].time_class,
+        ComplexityClass::OPermutational(2)
+    );
+    assert!(result.streams[0].space_class > ComplexityClass::O1);
 }
