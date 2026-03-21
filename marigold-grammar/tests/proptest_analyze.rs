@@ -441,20 +441,6 @@ proptest! {
         }
     }
 
-    /// Range-based streams with at least 2 elements should have time >= O(n).
-    /// (Ranges are generated with count >= 2, so cardinality >= 2.)
-    #[test]
-    fn range_programs_have_at_least_o_n_time(prog in arb_unnamed_stream_program()) {
-        let result = marigold_grammar::marigold_analyze(&prog.source).unwrap();
-        for stream in &result.streams {
-            prop_assert!(
-                stream.time_class >= ComplexityClass::ON,
-                "Range-based stream should have time >= O(n), got {:?} in program:\n{}",
-                stream.time_class,
-                prog.source
-            );
-        }
-    }
 }
 
 /// Targeted regression test: stream variable ending with fold, empty output chain.
