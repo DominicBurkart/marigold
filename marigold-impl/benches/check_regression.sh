@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+THRESHOLD="${1:-15}"
+shift || true
+
+if [[ $# -eq 0 ]]; then
+    echo "Usage: $0 [threshold_pct] <bench_output_file> [...]" >&2
+    exit 1
+fi
+
+regressions=()
+no_baseline=0
+
+for file in "$@"; do
+    if [[ ! -f "$file" ]]; then
+        echo "warning: file not found: $file" >&2
+        continue
+    fi
+
+    if grep -q "Failed to load baseline" "$file" 2>/dev/null; then
+        echo "warning: no baseline found in $file — skipping (first run or cache eviction)" >&2
+        no_baseline=1
+        continue
+    fi
+
+    while IFS= read -r result; do
+        bench=$(echo "$result" | cut -d'|' -f1)
+        pct=$(echo "$result" | cut -d'|' -f2)
+        int_pct=$(printf '%.0f' "$pct" 2>/dev/null || echo "$pct" | cut -d. -f1)
+        if (( int_pct > THRESHOLD )); then
+            regressions+=("${bench}: +${pct}% regression (threshold: ${THRESHOLD}%) [${file}]")
+        else
+            echo "ok: ${bench} regressed ${pct}% (within ${THRESHOLD}% threshold)"
+        fi
+    done < <(awk '
+        /Performance has regressed/ {
+            pct = ""
+            for (i = NR-1; i >= NR-5 && i >= 1; i--) {
+                if (match(lines[i], /\+[0-9]+\.[0-9]+%/)) {
+                    pct = substr(lines[i], RSTART+1, RLENGTH-2)
+                    break
+                }
+            }
+            if (pct != "") {
+                print bench "|" pct
+            }
+        }
+        /^[A-Za-z]/ && !/time:|change:|Performance|thrpt:|slope:|mean:|std|median|MAD|outliers|regression|Benchmarking/ {
+            bench = $1
+        }
+        { lines[NR] = $0 }
+    ' "$file")
+done
+
+echo ""
+echo "=== Bench regression check ==="
+
+if [[ ${#regressions[@]} -gt 0 ]]; then
+    echo "FAILED: ${#regressions[@]} benchmark(s) exceeded ${THRESHOLD}% threshold:"
+    for r in "${regressions[@]}"; do
+        echo "  - $r"
+    done
+    exit 1
+elif [[ $no_baseline -eq 1 ]]; then
+    echo "SKIPPED: no cached baseline — regression check skipped (cache not yet populated)"
+    exit 0
+else
+    echo "PASSED: all benchmarks within ${THRESHOLD}% threshold"
+    exit 0
+fi

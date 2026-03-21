@@ -50,7 +50,7 @@ collect_metrics() {
     local cpu_csv="$2"
 
     echo "  running per_item_costs..." >&2
-    cargo bench --bench per_item_costs --features tokio >/dev/null 2>&1 || true
+    cargo bench --bench per_item_costs --features tokio >/dev/null 2>&1
 
     local spawn_ns iter_ns joinhandle_ns arc_ns rwlock_ns mutex_heap_ns useful_ns
     spawn_ns=$(criterion_ns "tokio_spawn_join")
@@ -64,7 +64,7 @@ collect_metrics() {
     echo "  running keep_first_n (with CPU sampling)..." >&2
     "${SCRIPT_DIR}/sample_cpu.sh" 100 "$cpu_csv" &
     local sampler_pid=$!
-    cargo bench --bench keep_first_n --features tokio >/dev/null 2>&1 || true
+    cargo bench --bench keep_first_n --features tokio >/dev/null 2>&1
     kill "$sampler_pid" 2>/dev/null || true
     wait "$sampler_pid" 2>/dev/null || true
 
@@ -73,13 +73,13 @@ collect_metrics() {
 
     echo "  running cpu_utilization..." >&2
     local cpu_out
-    cpu_out=$(cargo bench --bench cpu_utilization --features tokio 2>&1 || true)
+    cpu_out=$(cargo bench --bench cpu_utilization --features tokio 2>&1)
     local effective_cores
     effective_cores=$(echo "$cpu_out" | grep -oP 'effective_cores: mean=\K[\d.]+' | head -1 || echo "unknown")
 
     echo "  running driver_worker_split..." >&2
     local dws_out
-    dws_out=$(cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation" 2>&1 || true)
+    dws_out=$(cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation" 2>&1)
     local driver_wall worker_cpu parallel_wall
     driver_wall=$(echo "$dws_out"  | grep -oP 'driver_wall_time_s:\s+\K[\d.]+' | head -1 || echo "unknown")
     worker_cpu=$(echo "$dws_out"   | grep -oP 'total_worker_cpu_s:\s+\K[\d.]+'  | head -1 || echo "unknown")
