@@ -753,7 +753,12 @@ impl EnumDeclarationNode {
             .collect::<Vec<_>>()
             .join(", ");
         enum_rep.push_str(&format!(
-            "\nimpl {name} {{\n    fn __marigold_variants() -> [{name}; {variant_count}] {{\n        [{variants_list}]\n    }}\n}}"
+            "\nimpl {name} {{\n\
+             \x20   #[allow(dead_code)]\n\
+             \x20   fn __marigold_variants() -> [{name}; {variant_count}] {{\n\
+             \x20       [{variants_list}]\n\
+             \x20   }}\n\
+             }}"
         ));
 
         enum_rep

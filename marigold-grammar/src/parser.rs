@@ -1563,6 +1563,15 @@ mod struct_enum_tests {
     }
 
     #[test]
+    fn test_range_single_numeric_literal_rejected() {
+        let result = parse_marigold("range(42).return");
+        assert!(
+            result.is_err(),
+            "range(42) with a single numeric literal should be rejected"
+        );
+    }
+
+    #[test]
     fn test_enum_range_stream_code_generated() {
         let result = parse_marigold("enum Words { Hello, World, } range(Words).return");
         assert!(result.is_ok());
