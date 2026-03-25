@@ -73,9 +73,9 @@ fn get_file_name_argument(args: &Args) -> Option<String> {
 
 #[cfg(feature = "cli")]
 fn cache_root() -> Result<std::path::PathBuf> {
-    let base = home::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("could not locate user's home directory for marigold cache"))?;
-    Ok(base.join(".marigold"))
+    let base = dirs::cache_dir()
+        .ok_or_else(|| anyhow::anyhow!("could not determine OS cache directory"))?;
+    Ok(base.join("marigold"))
 }
 
 #[cfg(feature = "cli")]
