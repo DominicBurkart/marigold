@@ -272,7 +272,7 @@ pub struct StreamFunctionNode {
 }
 
 /// Number of inputs
-#[derive(PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum InputCount {
     Known(num_bigint::BigUint),
     Unknown,
@@ -280,7 +280,7 @@ pub enum InputCount {
 
 /// Whether the input is known at compile time (constant),
 /// or whether it is not available until runtime (variable).
-#[derive(PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum InputVariability {
     Constant,
     Variable,

@@ -100,3 +100,55 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
         (0, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream::StreamExt;
+
+    #[tokio::test]
+    async fn single_consumer_receives_all_items() {
+        let mut mcs = MultiConsumerStream::new(futures::stream::iter(vec![1, 2, 3]));
+        let rx = mcs.get();
+        mcs.run().await;
+        let collected: Vec<i32> = rx.collect().await;
+        assert_eq!(collected, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn multiple_consumers_each_receive_all_items() {
+        let mut mcs = MultiConsumerStream::new(futures::stream::iter(vec![10, 20, 30]));
+        let rx1 = mcs.get();
+        let rx2 = mcs.get();
+        mcs.run().await;
+        let (c1, c2): (Vec<i32>, Vec<i32>) =
+            futures::future::join(rx1.collect(), rx2.collect()).await;
+        assert_eq!(c1, vec![10, 20, 30]);
+        assert_eq!(c2, vec![10, 20, 30]);
+    }
+
+    #[tokio::test]
+    async fn empty_stream_produces_no_items() {
+        let mut mcs = MultiConsumerStream::new(futures::stream::iter(Vec::<i32>::new()));
+        let rx = mcs.get();
+        mcs.run().await;
+        let collected: Vec<i32> = rx.collect().await;
+        assert!(collected.is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_consumers_runs_without_panic() {
+        let mcs = MultiConsumerStream::new(futures::stream::iter(vec![1, 2, 3]));
+        // Should complete without panic even with no consumers.
+        mcs.run().await;
+    }
+
+    #[tokio::test]
+    async fn run_future_as_stream_completes_to_none() {
+        let future = Box::pin(async { 42 });
+        let mut stream = RunFutureAsStream::<String, i32, _>::new(future);
+        // The stream should yield None once the future resolves.
+        let item = stream.next().await;
+        assert_eq!(item, None);
+    }
+}

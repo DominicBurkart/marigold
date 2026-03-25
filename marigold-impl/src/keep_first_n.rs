@@ -60,6 +60,10 @@ where
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
     FReversed: Fn(&T, &T) -> std::cmp::Ordering + Clone + Send + 'static,
 {
+    if n == 0 {
+        return futures::stream::iter(Vec::new().into_iter());
+    }
+
     // Add indices to items for deterministic tie-breaking
     let mut indexed_stream = sinput.enumerate();
 
@@ -172,6 +176,10 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
+        if n == 0 {
+            return futures::stream::iter(Vec::new().into_iter());
+        }
+
         // use the reverse ordering so that the smallest value is always the first to pop.
         let mut first_n = BinaryHeap::with_capacity_by(n, |a, b| match sorted_by(a, b) {
             Ordering::Less => Ordering::Greater,
@@ -233,5 +241,99 @@ mod tests {
                 .await,
             vec![9, 7]
         );
+    }
+
+    #[tokio::test]
+    async fn empty_stream() {
+        let result = futures::stream::iter(Vec::<i32>::new())
+            .keep_first_n(5, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn n_zero_returns_empty() {
+        let result = futures::stream::iter(1..=10)
+            .keep_first_n(0, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn stream_shorter_than_n() {
+        let result = futures::stream::iter(vec![3, 1, 2])
+            .keep_first_n(10, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![3, 2, 1]);
+    }
+
+    #[tokio::test]
+    async fn n_equals_stream_length() {
+        let result = futures::stream::iter(vec![5, 3, 4, 1, 2])
+            .keep_first_n(5, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![5, 4, 3, 2, 1]);
+    }
+
+    #[tokio::test]
+    async fn single_element() {
+        let result = futures::stream::iter(vec![42])
+            .keep_first_n(1, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![42]);
+    }
+
+    #[tokio::test]
+    async fn ties_preserve_stream_order() {
+        // All elements are equal; tie-breaking should prefer earlier stream indices.
+        let result = futures::stream::iter(vec![1, 1, 1, 1, 1])
+            .keep_first_n(3, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result.len(), 3);
+        assert!(result.iter().all(|&v| v == 1));
+    }
+
+    #[tokio::test]
+    async fn descending_order_output() {
+        // The trait doc says "returned in descending order (max first)".
+        let result = futures::stream::iter(vec![1, 5, 2, 4, 3])
+            .keep_first_n(3, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![5, 4, 3]);
+    }
+
+    #[tokio::test]
+    async fn keep_first_n_with_reverse_comparator() {
+        // Use reverse ordering to keep the smallest N instead.
+        let result = futures::stream::iter(vec![5, 1, 4, 2, 3])
+            .keep_first_n(2, |a, b| b.cmp(a))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn large_stream_keeps_correct_top_n() {
+        let result = futures::stream::iter(0..1000)
+            .keep_first_n(3, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![999, 998, 997]);
     }
 }
