@@ -383,3 +383,162 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "cli")]
+mod cache_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_cache_root_returns_path() {
+        let root = cache_root().expect("cache_root should succeed");
+        assert_eq!(root.file_name().unwrap(), "marigold");
+    }
+
+    #[test]
+    fn test_prepare_cache_creates_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project_dir = tmp.path().join("my_program");
+        let src_dir = prepare_cache(&project_dir).unwrap();
+        assert!(src_dir.exists());
+        assert_eq!(src_dir.file_name().unwrap(), "src");
+    }
+
+    #[test]
+    fn test_prepare_cache_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project_dir = tmp.path().join("my_program");
+        prepare_cache(&project_dir).unwrap();
+        let result = prepare_cache(&project_dir);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_clean_program_cache_removes_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project_dir = tmp.path().join("my_program");
+        prepare_cache(&project_dir).unwrap();
+        fs::write(project_dir.join("src").join("main.rs"), "fn main() {}").unwrap();
+        clean_program_cache(&project_dir).unwrap();
+        assert!(!project_dir.exists());
+    }
+
+    #[test]
+    fn test_clean_program_cache_nonexistent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project_dir = tmp.path().join("does_not_exist");
+        let result = clean_program_cache(&project_dir);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_clean_all_cache_removes_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().join("cache");
+        fs::create_dir_all(cache_dir.join("program_a").join("src")).unwrap();
+        fs::create_dir_all(cache_dir.join("program_b").join("src")).unwrap();
+        clean_all_cache(&cache_dir).unwrap();
+        assert!(!cache_dir.exists());
+    }
+
+    #[test]
+    fn test_clean_all_cache_nonexistent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().join("nope");
+        let result = clean_all_cache(&cache_dir);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_clean_all_cache_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache_dir = tmp.path().join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        clean_all_cache(&cache_dir).unwrap();
+        let result = clean_all_cache(&cache_dir);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_prepare_then_clean_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project_dir = tmp.path().join("my_program");
+        prepare_cache(&project_dir).unwrap();
+        clean_program_cache(&project_dir).unwrap();
+        assert!(!project_dir.exists());
+    }
+
+    #[test]
+    fn test_partial_cache_loss_main_rs_deleted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project_dir = tmp.path().join("my_program");
+        let src_dir = prepare_cache(&project_dir).unwrap();
+        let main_rs = src_dir.join("main.rs");
+        fs::write(&main_rs, "fn main() {}").unwrap();
+        fs::remove_file(&main_rs).unwrap();
+        let result = prepare_cache(&project_dir);
+        assert!(result.is_ok());
+        assert!(src_dir.exists());
+    }
+
+    #[test]
+    fn test_partial_cache_loss_src_dir_deleted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project_dir = tmp.path().join("my_program");
+        prepare_cache(&project_dir).unwrap();
+        fs::remove_dir_all(project_dir.join("src")).unwrap();
+        let result = prepare_cache(&project_dir);
+        assert!(result.is_ok());
+        assert!(project_dir.join("src").exists());
+    }
+
+    #[cfg(unix)]
+    fn can_bypass_permissions() -> bool {
+        // root and some container environments bypass filesystem permissions
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("perm_check");
+        fs::create_dir_all(&dir).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o444)).unwrap();
+        let result = fs::create_dir(dir.join("test"));
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        result.is_ok()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_clean_program_cache_readonly_parent() {
+        if can_bypass_permissions() {
+            // root bypasses filesystem permissions; skip this test
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let parent = tmp.path().join("locked");
+        let project_dir = parent.join("my_program");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o444)).unwrap();
+        let result = clean_program_cache(&project_dir);
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_prepare_cache_readonly_parent() {
+        if can_bypass_permissions() {
+            // root bypasses filesystem permissions; skip this test
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let parent = tmp.path().join("locked");
+        fs::create_dir_all(&parent).unwrap();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o444)).unwrap();
+        let project_dir = parent.join("my_program");
+        let result = prepare_cache(&project_dir);
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err());
+    }
+}
