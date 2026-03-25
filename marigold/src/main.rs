@@ -72,6 +72,65 @@ fn get_file_name_argument(args: &Args) -> Option<String> {
 }
 
 #[cfg(feature = "cli")]
+fn cache_root() -> Result<std::path::PathBuf> {
+    let base = home::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("could not locate user's home directory for marigold cache"))?;
+    Ok(base.join(".marigold"))
+}
+
+#[cfg(feature = "cli")]
+fn prepare_cache(program_project_dir: &std::path::Path) -> Result<std::path::PathBuf> {
+    let src_dir = program_project_dir.join("src");
+    std::fs::create_dir_all(&src_dir)?;
+    Ok(src_dir)
+}
+
+#[cfg(feature = "cli")]
+fn clean_program_cache(program_project_dir: &std::path::Path) -> Result<()> {
+    if program_project_dir.exists() {
+        std::fs::remove_dir_all(program_project_dir)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn clean_all_cache(cache_dir: &std::path::Path) -> Result<()> {
+    if cache_dir.exists() {
+        std::fs::remove_dir_all(cache_dir)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn invoke_cargo(
+    command: &str,
+    manifest_path: &std::path::Path,
+    program_project_dir: &std::path::Path,
+    unoptimized: bool,
+) -> Result<std::process::ExitStatus> {
+    use std::process::Command;
+
+    if command == "run" {
+        let manifest_str = manifest_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("cache manifest path is not valid UTF-8"))?;
+        let mut args = vec![command, "--manifest-path", manifest_str];
+        if !unoptimized {
+            args.insert(1, "--release");
+        }
+        Ok(Command::new("cargo").args(&args).spawn()?.wait()?)
+    } else {
+        let dir_str = program_project_dir
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("cache project path is not valid UTF-8"))?;
+        Ok(Command::new("cargo")
+            .args([command, "--path", dir_str])
+            .spawn()?
+            .wait()?)
+    }
+}
+
+#[cfg(feature = "cli")]
 fn main() -> Result<()> {
     use MarigoldCommand::*;
 
@@ -84,9 +143,7 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let marigold_cache_directory = home::home_dir()
-        .expect("could not locate user's home directory for marigold cache")
-        .join(".marigold");
+    let marigold_cache_directory = cache_root()?;
 
     let file_name_argument = get_file_name_argument(&args);
 
@@ -120,14 +177,16 @@ fn main() -> Result<()> {
 
     let program_project_dir = marigold_cache_directory.join(&program_name);
 
+    let unoptimized = matches!(
+        &args.command,
+        Some(Run { unoptimized: true, .. })
+    );
+
     let command = match args.command {
         Some(ref command) => match command {
-            Run {
-                unoptimized: _,
-                file: _,
-            } => "run",
-            Install { file: _ } => "install",
-            Uninstall { file: _ } => std::process::exit(
+            Run { .. } => "run",
+            Install { .. } => "install",
+            Uninstall { .. } => std::process::exit(
                 Command::new("cargo")
                     .args(["uninstall", &program_name])
                     .spawn()?
@@ -135,17 +194,15 @@ fn main() -> Result<()> {
                     .code()
                     .unwrap_or(0),
             ),
-            Clean { file: _ } => {
-                std::fs::remove_dir_all(&program_project_dir)?;
+            Clean { .. } => {
+                clean_program_cache(&program_project_dir)?;
                 std::process::exit(0);
             }
             CleanAll => {
-                if marigold_cache_directory.exists() {
-                    std::fs::remove_dir_all(&marigold_cache_directory)?;
-                }
+                clean_all_cache(&marigold_cache_directory)?;
                 std::process::exit(0);
             }
-            Analyze { file: _ } => {
+            Analyze { .. } => {
                 let program_contents = match &file_name_argument {
                     Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
                     None => {
@@ -164,9 +221,7 @@ fn main() -> Result<()> {
         None => "run", // default is run.
     };
 
-    let program_src_dir = program_project_dir.join("src");
-
-    std::fs::create_dir_all(&program_src_dir)?;
+    let program_src_dir = prepare_cache(&program_project_dir)?;
 
     let program_contents = match file_name_argument {
         Some(path) => std::fs::read_to_string(&path)?.trim().to_string(),
@@ -209,56 +264,7 @@ tokio = {{ version = "1", features = ["full"]}}
         ),
     )?;
 
-    let exit_status = {
-        if command == "run" {
-            let unoptimized = {
-                if let Some(Run {
-                    unoptimized,
-                    file: _,
-                }) = &args.command
-                {
-                    *unoptimized
-                } else {
-                    false
-                }
-            };
-            if unoptimized {
-                Command::new("cargo")
-                    .args([
-                        command,
-                        "--manifest-path",
-                        manifest_path
-                            .to_str()
-                            .expect("Marigold could not parse cache manifest path as utf-8"),
-                    ])
-                    .spawn()?
-                    .wait()?
-            } else {
-                Command::new("cargo")
-                    .args([
-                        command,
-                        "--release",
-                        "--manifest-path",
-                        manifest_path
-                            .to_str()
-                            .expect("Marigold could not parse cache manifest path as utf-8"),
-                    ])
-                    .spawn()?
-                    .wait()?
-            }
-        } else {
-            Command::new("cargo")
-                .args([
-                    command,
-                    "--path",
-                    program_project_dir
-                        .to_str()
-                        .expect("Marigold could not parse cache manifest path as utf-8"),
-                ])
-                .spawn()?
-                .wait()?
-        }
-    };
+    let exit_status = invoke_cargo(command, &manifest_path, &program_project_dir, unoptimized)?;
 
     std::process::exit(exit_status.code().unwrap_or(0));
 }
