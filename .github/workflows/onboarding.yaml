@@ -17,3 +17,7 @@ jobs:
     - run: cargo install --path marigold -F cli
     - run: marigold run hello_world.marigold
     - run: marigold analyze hello_world.marigold
+    - run: MARIGOLD_WORKSPACE_PATH=${{ github.workspace }}/marigold marigold run examples/color-palette-picker.marigold
+    - run: MARIGOLD_WORKSPACE_PATH=${{ github.workspace }}/marigold marigold run examples/integers.marigold
+    - run: marigold analyze examples/color-palette-picker.marigold
+    - run: marigold analyze examples/integers.marigold

@@ -31,12 +31,12 @@ mod tests {
         .await
         .collect::<Vec<_>>()
         .await;
-        assert_eq!(r, vec![vec![vec![0, 1], vec![1, 0]]]);
+        assert_eq!(r, vec![[[0i32, 1], [1i32, 0]]]);
     }
 
     #[tokio::test]
     async fn sort_by_external_function() {
-        let sorter = |a: &Vec<i32>, b: &Vec<i32>| a[0].partial_cmp(&b[0]).unwrap();
+        let sorter = |a: &[i32; 2], b: &[i32; 2]| a[0].partial_cmp(&b[0]).unwrap();
         let r = m!(
             range(0, 2)
                 .permutations(2)
@@ -46,7 +46,7 @@ mod tests {
         .await
         .collect::<Vec<_>>()
         .await;
-        assert_eq!(r, vec![vec![1, 0]]);
+        assert_eq!(r, vec![[1i32, 0]]);
     }
 
     #[tokio::test]
@@ -80,15 +80,15 @@ mod tests {
             .collect::<Vec<_>>()
             .await,
             vec![
-                vec![0, 0],
-                vec![0, 1],
-                vec![0, 2],
-                vec![1, 0],
-                vec![1, 1],
-                vec![1, 2],
-                vec![2, 0],
-                vec![2, 1],
-                vec![2, 2]
+                [0i32, 0],
+                [0, 1],
+                [0, 2],
+                [1, 0],
+                [1, 1],
+                [1, 2],
+                [2, 0],
+                [2, 1],
+                [2, 2]
             ]
         );
     }
@@ -156,5 +156,16 @@ mod tests {
         let mut sorted = result.clone();
         sorted.sort();
         assert_eq!(sorted, vec![0, 1, 2, 10, 11, 12]);
+    }
+
+    #[tokio::test]
+    async fn test_inclusive_range() {
+        let result = m!(
+            range(0, =3).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2, 3]);
     }
 }
