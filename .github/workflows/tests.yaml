@@ -1,6 +1,6 @@
 name:                tests
 
-on:                  [push]
+on:                  [push, pull_request]
 
 env:
   CARGO_TERM_COLOR:  always
@@ -19,3 +19,21 @@ jobs:
     - run:           cargo test --features tokio
     - run:           cargo test --features async-std
     - run:           cargo test --all-features
+
+  coverage:
+    name:            Coverage
+    runs-on:         ubuntu-latest
+    environment:     codecov
+    steps:
+    - uses:          actions/checkout@v4
+    - uses:          dtolnay/rust-toolchain@stable
+    - name:          Install cargo-tarpaulin
+      run:           cargo install cargo-tarpaulin
+    - name:          Generate coverage
+      run:           cargo tarpaulin --all-features --ignore-tests --workspace --exclude color-palette-picker --exclude csv --exclude multi-consumer --exclude select-all --exclude stateful --exclude bounded-types --out Lcov --output-dir .
+    - name:          Upload coverage reports
+      uses:          codecov/codecov-action@v5
+      with:
+        token:       ${{ secrets.CODECOV_TOKEN }}
+        files:       lcov.info
+        fail_ci_if_error: true
