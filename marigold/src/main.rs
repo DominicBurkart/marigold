@@ -296,19 +296,28 @@ mod tests {
             .join("marigold")
     }
 
-    /// Create a Command for the marigold CLI with MARIGOLD_WORKSPACE_PATH set
-    /// so generated projects reference the local workspace instead of crates.io.
-    fn marigold_cmd() -> Command {
-        let mut cmd = Command::new(cli_binary());
-        cmd.env("MARIGOLD_WORKSPACE_PATH", env!("CARGO_MANIFEST_DIR"));
-        cmd
-    }
-
     fn test_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("marigold_test_{name}"));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("could not create test dir");
         dir
+    }
+
+    /// Create a Command for the marigold CLI with an isolated HOME directory
+    /// so each test gets its own `~/.marigold/` cache (no cross-test races).
+    /// CARGO_HOME is preserved so cargo can find its registry and config.
+    fn marigold_cmd(test_home: &std::path::Path) -> Command {
+        let mut cmd = Command::new(cli_binary());
+        cmd.env("MARIGOLD_WORKSPACE_PATH", env!("CARGO_MANIFEST_DIR"));
+        cmd.env("HOME", test_home);
+        // Preserve CARGO_HOME so cargo can find its registry and config
+        let cargo_home = std::env::var("CARGO_HOME").unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(|h| format!("{h}/.cargo"))
+                .unwrap_or_else(|_| "/root/.cargo".to_string())
+        });
+        cmd.env("CARGO_HOME", cargo_home);
+        cmd
     }
 
     #[test]
@@ -323,7 +332,7 @@ mod tests {
         )
         .expect("could not write test file");
 
-        assert!(marigold_cmd()
+        assert!(marigold_cmd(&dir)
             .args(["run", marigold_file.to_str().unwrap()])
             .status()
             .expect("could not run marigold command")
@@ -351,7 +360,7 @@ mod tests {
         .expect("could not write test file");
 
         // Install to a temporary root instead of ~/.cargo/bin/
-        assert!(marigold_cmd()
+        assert!(marigold_cmd(&dir)
             .env("CARGO_INSTALL_ROOT", &install_root)
             .args(["install", marigold_file.to_str().unwrap()])
             .status()
@@ -375,7 +384,7 @@ mod tests {
         assert!(csv_file.exists());
 
         // Uninstall
-        assert!(marigold_cmd()
+        assert!(marigold_cmd(&dir)
             .env("CARGO_INSTALL_ROOT", &install_root)
             .args(["uninstall", marigold_file.to_str().unwrap()])
             .status()
@@ -404,14 +413,14 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to populate the cache
-        assert!(marigold_cmd()
+        assert!(marigold_cmd(&dir)
             .args(["run", marigold_file.to_str().unwrap()])
             .status()
             .expect("could not run marigold command")
             .success());
 
         // Clean the cache for this file
-        assert!(marigold_cmd()
+        assert!(marigold_cmd(&dir)
             .args(["clean", marigold_file.to_str().unwrap()])
             .status()
             .expect("could not run marigold clean")
@@ -433,14 +442,14 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to populate the cache
-        assert!(marigold_cmd()
+        assert!(marigold_cmd(&dir)
             .args(["run", marigold_file.to_str().unwrap()])
             .status()
             .expect("could not run marigold command")
             .success());
 
         // Clean all caches
-        assert!(marigold_cmd()
+        assert!(marigold_cmd(&dir)
             .args(["clean-all"])
             .status()
             .expect("could not run marigold clean-all")
