@@ -1,0 +1,5 @@
+fn double(i: i32) -> i32 {
+  i * 2
+}
+
+range(1, 4).map(double).write_file("/dev/stdout", csv)

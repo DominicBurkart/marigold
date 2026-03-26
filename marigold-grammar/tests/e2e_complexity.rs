@@ -141,3 +141,44 @@ fn chained_maps() {
         ExactComplexity::from_str("O(2n)").unwrap()
     );
 }
+
+#[test]
+fn map_reports_o1_space() {
+    let result = analyze_file("tests/programs/map_space.marigold");
+    assert_eq!(result.streams.len(), 1);
+    assert_eq!(
+        result.streams[0].space_class,
+        ComplexityClass::O1,
+        "map should report O(1) space"
+    );
+    assert_eq!(
+        result.streams[0].exact_space,
+        ExactComplexity::from_str("O(1)").unwrap(),
+        "map should report exact space O(1)"
+    );
+    assert!(
+        !result.streams[0].collects_input,
+        "map should not collect input"
+    );
+}
+
+#[test]
+fn map_write_file_reports_o1_space() {
+    let result = analyze_file("tests/programs/map_write_file.marigold");
+    assert_eq!(result.streams.len(), 1);
+    assert_eq!(
+        result.streams[0].space_class,
+        ComplexityClass::O1,
+        "map with write_file should report O(1) space"
+    );
+    assert_eq!(
+        result.streams[0].exact_space,
+        ExactComplexity::from_str("O(1)").unwrap(),
+        "map with write_file should report exact space O(1)"
+    );
+    assert_eq!(
+        result.program_cardinality,
+        Cardinality::Exact(BigUint::from(3u64)),
+        "range(1, 4).map(double) should have cardinality 3"
+    );
+}

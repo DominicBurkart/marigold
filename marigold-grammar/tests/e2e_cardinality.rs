@@ -84,6 +84,24 @@ mod exact {
     }
 }
 
+mod exact_map {
+    use super::*;
+
+    #[test]
+    fn map_preserves_cardinality() {
+        let result = analyze_file("tests/programs/card_map.marigold");
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(10u64)),
+            "map should preserve exact cardinality from input"
+        );
+        assert_eq!(
+            result.program_cardinality,
+            Cardinality::Exact(BigUint::from(10u64))
+        );
+    }
+}
+
 mod bounded {
     use super::*;
 
