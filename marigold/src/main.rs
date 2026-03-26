@@ -306,6 +306,16 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
     }
 
+    /// Create a Command for the marigold CLI with isolated HOME and workspace path.
+    /// Each test gets its own HOME so ~/.marigold caches don't interfere across
+    /// parallel tests.
+    fn marigold_cmd(bin: &Path, home: &Path) -> Command {
+        let mut cmd = Command::new(bin);
+        cmd.env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .env("HOME", home);
+        cmd
+    }
+
     #[test]
     fn test_cli_run() {
         let bin = build_cli();
@@ -319,10 +329,9 @@ mod tests {
         )
         .expect("could not write test file");
 
-        let status = Command::new(&bin)
+        let status = marigold_cmd(&bin, &dir)
             .args(["run"])
             .arg(&marigold_file)
-            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold command");
         assert!(status.success());
@@ -350,10 +359,9 @@ mod tests {
         .expect("could not write test file");
 
         // Install to a local temp directory instead of ~/.cargo/bin
-        let status = Command::new(&bin)
+        let status = marigold_cmd(&bin, &dir)
             .args(["install"])
             .arg(&marigold_file)
-            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .env("CARGO_INSTALL_ROOT", &install_root)
             .status()
             .expect("could not run marigold install command");
@@ -377,10 +385,9 @@ mod tests {
         assert!(csv_path.exists());
 
         // Uninstall
-        let status = Command::new(&bin)
+        let status = marigold_cmd(&bin, &dir)
             .args(["uninstall"])
             .arg(&marigold_file)
-            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .env("CARGO_INSTALL_ROOT", &install_root)
             .status()
             .expect("could not run marigold uninstall command");
@@ -404,19 +411,17 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create the cache
-        let status = Command::new(&bin)
+        let status = marigold_cmd(&bin, &dir)
             .args(["run"])
             .arg(&marigold_file)
-            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold command");
         assert!(status.success());
 
         // Clean the cache for this file
-        let status = Command::new(&bin)
+        let status = marigold_cmd(&bin, &dir)
             .args(["clean"])
             .arg(&marigold_file)
-            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold clean command");
         assert!(status.success());
@@ -438,18 +443,16 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create the cache
-        let status = Command::new(&bin)
+        let status = marigold_cmd(&bin, &dir)
             .args(["run"])
             .arg(&marigold_file)
-            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold command");
         assert!(status.success());
 
         // Clean all caches
-        let status = Command::new(&bin)
+        let status = marigold_cmd(&bin, &dir)
             .args(["clean-all"])
-            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold clean-all command");
         assert!(status.success());
