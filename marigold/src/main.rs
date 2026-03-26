@@ -269,111 +269,98 @@ mod tests {
     use std::path::Path;
     use std::process::Command;
 
+    /// Returns the absolute path to the workspace root (parent of the marigold crate).
+    fn workspace_root() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("marigold crate must live inside the workspace")
+            .to_path_buf()
+    }
+
+    /// Runs the marigold CLI via `cargo run` in the workspace, avoiding a global install.
+    /// Sets MARIGOLD_WORKSPACE_PATH so generated projects use local path dependencies
+    /// (no network access required).
+    fn marigold_cmd() -> Command {
+        let ws = workspace_root();
+        let marigold_crate = ws.join("marigold");
+        let mut cmd = Command::new("cargo");
+        cmd.args(["run", "-p", "marigold", "--features", "cli", "--"])
+            .env("MARIGOLD_WORKSPACE_PATH", &marigold_crate)
+            .current_dir(&ws);
+        cmd
+    }
+
     #[test]
     fn test_cli() {
-        install_marigold_cli();
-        test_run();
-        test_install();
-        test_uninstall();
-        test_clean();
+        let tmp = std::env::temp_dir().join("marigold_cli_test");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).expect("could not create temp dir");
+
+        test_run(&tmp);
+        test_analyze(&tmp);
+        test_clean(&tmp);
         test_clean_all();
-        cleanup();
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
-    fn install_marigold_cli() {
-        assert!(Command::new("cargo")
-            .args(["install", "--force", "--path", ".", "-F", "cli"])
-            .spawn()
-            .expect("could not install marigold for test")
-            .wait()
-            .expect("marigold installation process lost")
-            .success())
-    }
+    fn test_run(tmp: &Path) {
+        let marigold_file = tmp.join("test_run.marigold");
+        let csv_file = tmp.join("test_run.csv");
 
-    fn test_run() {
         fs::write(
-            "test_run.marigold",
-            r#"range(0, 3).write_file("test_run.csv", csv)"#,
+            &marigold_file,
+            format!(r#"range(0, 3).write_file("{}", csv)"#, csv_file.display()),
         )
         .expect("could not write test file");
-        assert!(Command::new("marigold")
-            .args(["run", "test_run.marigold"])
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
+
+        let status = marigold_cmd()
+            .args(["run", marigold_file.to_str().unwrap()])
+            .status()
+            .expect("could not run marigold command");
+        assert!(status.success(), "marigold run failed");
+
         assert_eq!(
-            fs::read_to_string("test_run.csv").expect("could not read CSV"),
+            fs::read_to_string(&csv_file).expect("could not read CSV"),
             "0\n1\n2\n"
         );
     }
 
-    fn test_install() {
+    fn test_analyze(tmp: &Path) {
+        let marigold_file = tmp.join("test_analyze.marigold");
+
         fs::write(
-            "test_install.marigold",
-            r#"range(0, 3).write_file("test_install.csv", csv)"#,
+            &marigold_file,
+            r#"range(0, 3).write_file("/dev/null", csv)"#,
         )
         .expect("could not write test file");
 
-        assert!(Command::new("marigold")
-            .args(["install", "test_install.marigold"])
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
+        let output = marigold_cmd()
+            .args(["analyze", marigold_file.to_str().unwrap()])
+            .output()
+            .expect("could not run marigold analyze");
+        assert!(output.status.success(), "marigold analyze failed");
 
-        assert!(!Path::new("test_install.csv").exists());
-
-        assert!(Command::new("test_install")
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
-
-        assert!(Path::new("test_install.csv").exists());
+        let json: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("analyze output is not valid JSON");
+        assert_eq!(json["program_cardinality"], "3");
     }
 
-    fn test_uninstall() {
-        assert!(Command::new("marigold")
-            .args(["uninstall", "test_install.marigold"])
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
-    }
+    fn test_clean(tmp: &Path) {
+        let marigold_file = tmp.join("test_run.marigold");
 
-    fn test_clean() {
-        assert!(Command::new("marigold")
-            .args(["clean", "test_run.marigold"])
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
+        let status = marigold_cmd()
+            .args(["clean", marigold_file.to_str().unwrap()])
+            .status()
+            .expect("could not run marigold clean");
+        assert!(status.success(), "marigold clean failed");
     }
 
     fn test_clean_all() {
-        assert!(Command::new("marigold")
+        let status = marigold_cmd()
             .args(["clean-all"])
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
-    }
-
-    fn cleanup() {
-        for file in &[
-            "test_run.marigold",
-            "test_run.csv",
-            "test_install.marigold",
-            "test_install.csv",
-        ] {
-            std::fs::remove_file(file).expect("could not delete filee");
-        }
+            .status()
+            .expect("could not run marigold clean-all");
+        assert!(status.success(), "marigold clean-all failed");
     }
 }
