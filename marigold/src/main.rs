@@ -266,114 +266,194 @@ tokio = {{ version = "1", features = ["full"]}}
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
 
+    /// Build the marigold CLI binary and return its path.
+    fn build_cli() -> PathBuf {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let status = Command::new("cargo")
+            .args(["build", "--manifest-path"])
+            .arg(manifest_dir.join("Cargo.toml"))
+            .args(["--features", "cli"])
+            .status()
+            .expect("could not build marigold CLI");
+        assert!(status.success(), "failed to build marigold CLI");
+        manifest_dir
+            .parent()
+            .unwrap()
+            .join("target")
+            .join("debug")
+            .join("marigold")
+    }
+
+    /// Create a temporary directory for test artifacts.
+    fn test_tmp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "marigold_test_{}_{}_{}",
+            name,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("could not create test temp directory");
+        dir
+    }
+
+    fn marigold_workspace_path() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
+    }
+
     #[test]
-    fn test_cli() {
-        install_marigold_cli();
-        test_run();
-        test_install();
-        test_uninstall();
-        test_clean();
-        test_clean_all();
-        cleanup();
-    }
+    fn test_cli_run() {
+        let bin = build_cli();
+        let dir = test_tmp_dir("run");
+        let csv_path = dir.join("test_run.csv");
+        let marigold_file = dir.join("test_run.marigold");
 
-    fn install_marigold_cli() {
-        assert!(Command::new("cargo")
-            .args(["install", "--force", "--path", ".", "-F", "cli"])
-            .spawn()
-            .expect("could not install marigold for test")
-            .wait()
-            .expect("marigold installation process lost")
-            .success())
-    }
-
-    fn test_run() {
         fs::write(
-            "test_run.marigold",
-            r#"range(0, 3).write_file("test_run.csv", csv)"#,
+            &marigold_file,
+            format!(r#"range(0, 3).write_file("{}", csv)"#, csv_path.display()),
         )
         .expect("could not write test file");
-        assert!(Command::new("marigold")
-            .args(["run", "test_run.marigold"])
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
+
+        let status = Command::new(&bin)
+            .args(["run"])
+            .arg(&marigold_file)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold command");
+        assert!(status.success());
+
         assert_eq!(
-            fs::read_to_string("test_run.csv").expect("could not read CSV"),
+            fs::read_to_string(&csv_path).expect("could not read CSV"),
             "0\n1\n2\n"
         );
+
+        fs::remove_dir_all(&dir).ok();
     }
 
-    fn test_install() {
+    #[test]
+    fn test_cli_install_and_uninstall() {
+        let bin = build_cli();
+        let dir = test_tmp_dir("install");
+        let install_root = test_tmp_dir("install_root");
+        let csv_path = dir.join("test_install.csv");
+        let marigold_file = dir.join("test_install.marigold");
+
         fs::write(
-            "test_install.marigold",
-            r#"range(0, 3).write_file("test_install.csv", csv)"#,
+            &marigold_file,
+            format!(r#"range(0, 3).write_file("{}", csv)"#, csv_path.display()),
         )
         .expect("could not write test file");
 
-        assert!(Command::new("marigold")
-            .args(["install", "test_install.marigold"])
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
+        // Install to a local temp directory instead of ~/.cargo/bin
+        let status = Command::new(&bin)
+            .args(["install"])
+            .arg(&marigold_file)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .env("CARGO_INSTALL_ROOT", &install_root)
+            .status()
+            .expect("could not run marigold install command");
+        assert!(status.success());
 
-        assert!(!Path::new("test_install.csv").exists());
+        assert!(!csv_path.exists());
 
-        assert!(Command::new("test_install")
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
+        // Run the installed binary from the local install root
+        let installed_bin = install_root.join("bin").join("test_install");
+        assert!(
+            installed_bin.exists(),
+            "installed binary not found at {}",
+            installed_bin.display()
+        );
 
-        assert!(Path::new("test_install.csv").exists());
+        let status = Command::new(&installed_bin)
+            .status()
+            .expect("could not run installed binary");
+        assert!(status.success());
+
+        assert!(csv_path.exists());
+
+        // Uninstall
+        let status = Command::new(&bin)
+            .args(["uninstall"])
+            .arg(&marigold_file)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .env("CARGO_INSTALL_ROOT", &install_root)
+            .status()
+            .expect("could not run marigold uninstall command");
+        assert!(status.success());
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&install_root).ok();
     }
 
-    fn test_uninstall() {
-        assert!(Command::new("marigold")
-            .args(["uninstall", "test_install.marigold"])
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
+    #[test]
+    fn test_cli_clean() {
+        let bin = build_cli();
+        let dir = test_tmp_dir("clean");
+        let csv_path = dir.join("test_clean.csv");
+        let marigold_file = dir.join("test_clean.marigold");
+
+        fs::write(
+            &marigold_file,
+            format!(r#"range(0, 3).write_file("{}", csv)"#, csv_path.display()),
+        )
+        .expect("could not write test file");
+
+        // Run first to create the cache
+        let status = Command::new(&bin)
+            .args(["run"])
+            .arg(&marigold_file)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold command");
+        assert!(status.success());
+
+        // Clean the cache for this file
+        let status = Command::new(&bin)
+            .args(["clean"])
+            .arg(&marigold_file)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold clean command");
+        assert!(status.success());
+
+        fs::remove_dir_all(&dir).ok();
     }
 
-    fn test_clean() {
-        assert!(Command::new("marigold")
-            .args(["clean", "test_run.marigold"])
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
-    }
+    #[test]
+    fn test_cli_clean_all() {
+        let bin = build_cli();
+        let dir = test_tmp_dir("clean_all");
+        let csv_path = dir.join("test_clean_all.csv");
+        let marigold_file = dir.join("test_clean_all.marigold");
 
-    fn test_clean_all() {
-        assert!(Command::new("marigold")
+        fs::write(
+            &marigold_file,
+            format!(r#"range(0, 3).write_file("{}", csv)"#, csv_path.display()),
+        )
+        .expect("could not write test file");
+
+        // Run first to create the cache
+        let status = Command::new(&bin)
+            .args(["run"])
+            .arg(&marigold_file)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold command");
+        assert!(status.success());
+
+        // Clean all caches
+        let status = Command::new(&bin)
             .args(["clean-all"])
-            .spawn()
-            .expect("could not run marigold command")
-            .wait()
-            .expect("marigold command lost")
-            .success());
-    }
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold clean-all command");
+        assert!(status.success());
 
-    fn cleanup() {
-        for file in &[
-            "test_run.marigold",
-            "test_run.csv",
-            "test_install.marigold",
-            "test_install.csv",
-        ] {
-            std::fs::remove_file(file).expect("could not delete filee");
-        }
+        fs::remove_dir_all(&dir).ok();
     }
 }
