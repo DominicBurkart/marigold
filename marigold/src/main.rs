@@ -268,11 +268,13 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
+    use std::sync::LazyLock;
 
-    /// Build the marigold binary via `cargo build` and return its path.
+    /// Build the marigold binary exactly once via `cargo build` and return its path.
     /// Unlike `cargo install`, this does not write to `~/.cargo/bin/`
     /// and works in sandboxed environments.
-    fn build_marigold_binary() -> PathBuf {
+    /// Note: assumes the default debug build profile (target/debug/).
+    static BINARY: LazyLock<PathBuf> = LazyLock::new(|| {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap();
@@ -283,7 +285,7 @@ mod tests {
             .expect("could not build marigold");
         assert!(status.success(), "failed to build marigold binary");
         workspace_root.join("target/debug/marigold")
-    }
+    });
 
     /// Create an isolated temp directory for a test, avoiding any writes
     /// to the working directory or user home.
@@ -300,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_run() {
-        let binary = build_marigold_binary();
+        let binary = &*BINARY;
         let tmp = create_temp_dir("run");
         let csv_file = tmp.join("test_run.csv");
 
@@ -329,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_install_and_uninstall() {
-        let binary = build_marigold_binary();
+        let binary = &*BINARY;
         let tmp = create_temp_dir("install");
         let install_root = tmp.join("cargo_root");
         fs::create_dir_all(&install_root).expect("could not create install root");
@@ -377,13 +379,17 @@ mod tests {
             .status()
             .expect("could not run marigold uninstall");
         assert!(status.success(), "marigold uninstall failed");
+        assert!(
+            !installed_binary.exists(),
+            "installed binary should be removed after uninstall"
+        );
 
         let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn test_clean() {
-        let binary = build_marigold_binary();
+        let binary = &*BINARY;
         let tmp = create_temp_dir("clean");
         let csv_file = tmp.join("test_clean.csv");
 
@@ -425,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_clean_all() {
-        let binary = build_marigold_binary();
+        let binary = &*BINARY;
         let tmp = create_temp_dir("clean_all");
         let csv_file = tmp.join("test_clean_all.csv");
 
