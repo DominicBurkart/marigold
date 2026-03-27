@@ -21,7 +21,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn map_with_named_function() {
+    async fn map_with_external_rust_function() {
         fn double(i: i32) -> i32 {
             i * 2
         }
