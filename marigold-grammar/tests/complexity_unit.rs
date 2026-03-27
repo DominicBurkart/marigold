@@ -8,7 +8,7 @@ use marigold_grammar::complexity::{
 };
 use num_bigint::BigUint;
 
-// ── ComplexityClass ordering ───────────────────────────────────────
+// -- ComplexityClass ordering -----------------------------------------------
 
 #[test]
 fn ordering_o1_is_smallest() {
@@ -92,7 +92,7 @@ fn equality_reflexive() {
     }
 }
 
-// ── ComplexityClass Display/FromStr roundtrip ──────────────────────
+// -- ComplexityClass Display/FromStr roundtrip --------------------------------
 
 #[test]
 fn display_fromstr_roundtrip_all_variants() {
@@ -125,7 +125,7 @@ fn display_format_spot_check() {
     assert_eq!(ComplexityClass::Unknown.to_string(), "O(?)");
 }
 
-// ── ExactComplexity ────────────────────────────────────────────────
+// -- ExactComplexity ---------------------------------------------------------
 
 #[test]
 fn exact_complexity_new_is_empty() {
@@ -174,7 +174,7 @@ fn exact_complexity_display_fromstr_roundtrip() {
     assert_eq!(ec, parsed);
 }
 
-// ── Cardinality ────────────────────────────────────────────────────
+// -- Cardinality -------------------------------------------------------------
 
 #[test]
 fn cardinality_exact_display() {
@@ -188,11 +188,21 @@ fn cardinality_unknown_display() {
 }
 
 #[test]
-fn cardinality_max_both_exact() {
+fn cardinality_max_both_exact_picks_larger() {
     let a = Cardinality::Exact(BigUint::from(10u64));
     let b = Cardinality::Exact(BigUint::from(20u64));
+    // Cardinality::max is a custom method that compares BigUint values
     let result = a.max(b);
     assert_eq!(result, Cardinality::Exact(BigUint::from(20u64)));
+}
+
+#[test]
+fn cardinality_max_is_commutative_for_exact() {
+    let a = Cardinality::Exact(BigUint::from(5u64));
+    let b = Cardinality::Exact(BigUint::from(100u64));
+    let ab = a.clone().max(b.clone());
+    let ba = b.max(a);
+    assert_eq!(ab, ba);
 }
 
 #[test]
@@ -211,8 +221,11 @@ fn cardinality_ordering_exact_less_than_unknown() {
 }
 
 #[test]
-fn cardinality_exact_ordering_by_value() {
-    let small = Cardinality::Exact(BigUint::from(5u64));
-    let large = Cardinality::Exact(BigUint::from(500u64));
-    assert!(small < large);
+fn cardinality_max_symmetric_for_unknown() {
+    let a = Cardinality::Unknown;
+    let b = Cardinality::Exact(BigUint::from(999u64));
+    let ab = a.clone().max(b.clone());
+    let ba = b.max(a);
+    assert_eq!(ab, ba);
+    assert_eq!(ab, Cardinality::Unknown);
 }

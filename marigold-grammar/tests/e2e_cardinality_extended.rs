@@ -66,7 +66,8 @@ fn inline_filter_bounded() {
 
 #[test]
 fn inline_fold_cardinality_is_one() {
-    let result = analyze("range(0, 10).fold(0, |a, b| a + b).return");
+    // Fold in grammar uses named function references
+    let result = analyze("range(0, 10).fold(0, add).return");
     assert_eq!(
         result.streams[0].cardinality,
         Cardinality::Exact(BigUint::from(1u64)),

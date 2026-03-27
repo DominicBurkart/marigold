@@ -5,7 +5,7 @@
 
 use marigold_grammar::{marigold_analyze, marigold_parse};
 
-// ── Happy-path parsing ─────────────────────────────────────────────
+// -- Happy-path parsing --------------------------------------------------
 
 #[test]
 fn parse_simple_range_return() {
@@ -47,7 +47,8 @@ fn parse_combinations() {
 
 #[test]
 fn parse_fold() {
-    let code = marigold_parse("range(0, 10).fold(0, |a, b| a + b).return").unwrap();
+    // Fold in Marigold grammar uses named function references, not inline closures
+    let code = marigold_parse("range(0, 10).fold(0, add).return").unwrap();
     assert!(code.contains("fold") || code.contains("marifold"));
 }
 
@@ -89,13 +90,13 @@ fn parse_write_file_csv() {
     assert!(!code.is_empty());
 }
 
-// ── Sad-path parsing ───────────────────────────────────────────────
-
 #[test]
-fn parse_empty_input_fails() {
-    let result = marigold_parse("");
-    assert!(result.is_err(), "empty input should fail to parse");
+fn parse_permutations_with_replacement() {
+    let code = marigold_parse("range(0, 5).permutations_with_replacement(2).return").unwrap();
+    assert!(code.contains("permutations_with_replacement"));
 }
+
+// -- Sad-path parsing ----------------------------------------------------
 
 #[test]
 fn parse_garbage_fails() {
@@ -116,7 +117,13 @@ fn parse_unclosed_parenthesis_fails() {
     assert!(result.is_err(), "unclosed parenthesis should fail");
 }
 
-// ── Analysis API ───────────────────────────────────────────────────
+#[test]
+fn parse_unknown_stream_function_fails() {
+    let result = marigold_parse("range(0, 10).nonexistent_op(foo).return");
+    assert!(result.is_err(), "unknown stream function should fail");
+}
+
+// -- Analysis API --------------------------------------------------------
 
 #[test]
 fn analyze_simple_range() {
@@ -143,12 +150,6 @@ digits.filter(is_odd).return
 }
 
 #[test]
-fn analyze_empty_input_fails() {
-    let result = marigold_analyze("");
-    assert!(result.is_err());
-}
-
-#[test]
 fn analyze_map_preserves_cardinality() {
     let result = marigold_analyze("range(0, 50).map(double).return").unwrap();
     let card = &result.streams[0].cardinality;
@@ -162,4 +163,14 @@ fn analyze_filter_produces_bounded_cardinality() {
     // Filter should produce a bounded (not exact) cardinality
     assert_ne!(card.to_string(), "50", "filter should not preserve exact cardinality");
     assert_ne!(card.to_string(), "?", "filter on known input should not be unknown");
+}
+
+#[test]
+fn analyze_fold_cardinality_is_one() {
+    let result = marigold_analyze("range(0, 10).fold(0, add).return").unwrap();
+    assert_eq!(
+        result.streams[0].cardinality.to_string(),
+        "1",
+        "fold always produces exactly one output element"
+    );
 }

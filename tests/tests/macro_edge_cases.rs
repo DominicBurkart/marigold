@@ -40,12 +40,16 @@ async fn inclusive_range_single_element() {
 #[tokio::test]
 async fn fold_sum() {
     let r = m!(
+        fn add(acc: i32, x: i32) -> i32 {
+            acc + x
+        }
+
         range(1, =5)
-            .fold(0, |acc, x| acc + x)
+            .fold(0, add)
             .return
     )
     .await
-    .collect::<Vec<_>>()
+    .collect::<Vec<i32>>()
     .await;
     assert_eq!(r, vec![15], "1+2+3+4+5 = 15");
 }
@@ -53,12 +57,16 @@ async fn fold_sum() {
 #[tokio::test]
 async fn fold_empty_stream_returns_init() {
     let r = m!(
+        fn keep(acc: i32, _x: i32) -> i32 {
+            acc
+        }
+
         range(0, 0)
-            .fold(42, |acc, _x| acc)
+            .fold(42, keep)
             .return
     )
     .await
-    .collect::<Vec<_>>()
+    .collect::<Vec<i32>>()
     .await;
     assert_eq!(r, vec![42], "fold over empty stream should yield the initial value");
 }
@@ -208,4 +216,31 @@ async fn large_range_count() {
     assert_eq!(r.len(), 1000);
     assert_eq!(r[0], 0);
     assert_eq!(r[999], 999);
+}
+
+#[tokio::test]
+async fn permutations_with_replacement_single_element() {
+    let r = m!(
+        range(0, 1)
+            .permutations_with_replacement(2)
+            .return
+    )
+    .await
+    .collect::<Vec<_>>()
+    .await;
+    assert_eq!(r, vec![[0i32, 0]]);
+}
+
+#[tokio::test]
+async fn combinations_k_equals_n() {
+    // C(3,3) = 1 combination
+    let r = m!(
+        range(0, 3)
+            .combinations(3)
+            .return
+    )
+    .await
+    .collect::<Vec<_>>()
+    .await;
+    assert_eq!(r, vec![[0i32, 1, 2]]);
 }
