@@ -107,6 +107,16 @@ mod bounded {
     }
 
     #[test]
+    fn take_while() {
+        let result = analyze_file("tests/programs/card_take_while.marigold");
+        assert!(
+            matches!(result.streams[0].cardinality, Cardinality::Bounded(_)),
+            "take_while should produce bounded cardinality, got {:?}",
+            result.streams[0].cardinality
+        );
+    }
+
+    #[test]
     fn filter_map() {
         let result = analyze_file("tests/programs/card_filter_map.marigold");
         assert!(

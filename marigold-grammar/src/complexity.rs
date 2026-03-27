@@ -803,9 +803,10 @@ fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
 fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Symbolic {
     match kind {
         StreamFunctionKind::Map | StreamFunctionKind::OkOrPanic => cardinality,
-        StreamFunctionKind::Filter | StreamFunctionKind::FilterMap | StreamFunctionKind::Ok => {
-            Symbolic::Filtered(Box::new(cardinality))
-        }
+        StreamFunctionKind::Filter
+        | StreamFunctionKind::FilterMap
+        | StreamFunctionKind::TakeWhile
+        | StreamFunctionKind::Ok => Symbolic::Filtered(Box::new(cardinality)),
         StreamFunctionKind::Permutations(k) => Symbolic::Permutations {
             n: Box::new(cardinality),
             k: *k,
@@ -838,6 +839,7 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
         StreamFunctionKind::Map
         | StreamFunctionKind::Filter
         | StreamFunctionKind::FilterMap
+        | StreamFunctionKind::TakeWhile
         | StreamFunctionKind::Fold
         | StreamFunctionKind::Ok
         | StreamFunctionKind::OkOrPanic => ComplexityClass::O1,
@@ -936,6 +938,7 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
             }
             StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
             StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
+            StreamFunctionKind::TakeWhile => "take_while(...)".to_string(),
             StreamFunctionKind::Fold => "fold(...)".to_string(),
             StreamFunctionKind::Ok => "ok()".to_string(),
             StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),

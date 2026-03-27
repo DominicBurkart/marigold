@@ -162,6 +162,82 @@ mod tests {
     // }
 
     #[tokio::test]
+    async fn test_take_while_basic() {
+        fn less_than_4(i: &i32) -> bool {
+            *i < 4
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 10)
+                .take_while(less_than_4)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![0, 1, 2, 3]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_take_while_stops_at_first_failure() {
+        fn less_than_3(i: &i32) -> bool {
+            *i < 3
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 10)
+                .take_while(less_than_3)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![0, 1, 2]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_take_while_always_true() {
+        fn always_true(_i: &i32) -> bool {
+            true
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 5)
+                .take_while(always_true)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![0, 1, 2, 3, 4]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_take_while_always_false() {
+        fn always_false(_i: &i32) -> bool {
+            false
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 5)
+                .take_while(always_false)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            Vec::<i32>::new()
+        );
+    }
+
+    #[tokio::test]
     async fn test_select_all_multiple_streams() {
         let result = m!(
             select_all(range(0, 3), range(10, 13)).return
