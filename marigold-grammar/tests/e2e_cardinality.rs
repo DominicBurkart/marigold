@@ -75,6 +75,15 @@ mod exact {
     }
 
     #[test]
+    fn map_preserves_cardinality() {
+        let result = analyze_file("tests/programs/card_map.marigold");
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(3u64))
+        );
+    }
+
+    #[test]
     fn keep_first_n() {
         let result = analyze_file("tests/programs/card_keep_first_n.marigold");
         assert_eq!(
