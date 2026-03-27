@@ -1,0 +1,1 @@
+range(0, 3).permutations_with_replacement(2).return
