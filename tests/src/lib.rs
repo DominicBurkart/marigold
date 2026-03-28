@@ -162,6 +162,57 @@ mod tests {
     // }
 
     #[tokio::test]
+    async fn test_enumerate() {
+        let result = m!(
+            range(10, 13)
+                .enumerate()
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![(0usize, 10i32), (1, 11), (2, 12)]);
+    }
+
+    #[tokio::test]
+    async fn test_enumerate_after_filter() {
+        fn is_even(i: i32) -> bool {
+            i % 2 == 0
+        }
+
+        let result = m!(
+            range(0, 6)
+                .filter(is_even)
+                .enumerate()
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // After filter: [0, 2, 4], then enumerate from 0
+        assert_eq!(result, vec![(0usize, 0i32), (1, 2), (2, 4)]);
+    }
+
+    #[tokio::test]
+    async fn test_enumerate_with_negative_values() {
+        fn negate(v: i32) -> i32 {
+            -v
+        }
+
+        let result = m!(
+            range(1, 4)
+                .map(negate)
+                .enumerate()
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // Index always starts at 0 regardless of negative values
+        assert_eq!(result, vec![(0usize, -1i32), (1, -2), (2, -3)]);
+    }
+
+    #[tokio::test]
     async fn test_select_all_multiple_streams() {
         let result = m!(
             select_all(range(0, 3), range(10, 13)).return

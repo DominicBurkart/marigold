@@ -802,7 +802,9 @@ fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
 
 fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Symbolic {
     match kind {
-        StreamFunctionKind::Map | StreamFunctionKind::OkOrPanic => cardinality,
+        StreamFunctionKind::Map | StreamFunctionKind::Enumerate | StreamFunctionKind::OkOrPanic => {
+            cardinality
+        }
         StreamFunctionKind::Filter | StreamFunctionKind::FilterMap | StreamFunctionKind::Ok => {
             Symbolic::Filtered(Box::new(cardinality))
         }
@@ -836,6 +838,7 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
         | StreamFunctionKind::Combinations(_) => ComplexityClass::ON,
         StreamFunctionKind::KeepFirstN(_) => ComplexityClass::O1,
         StreamFunctionKind::Map
+        | StreamFunctionKind::Enumerate
         | StreamFunctionKind::Filter
         | StreamFunctionKind::FilterMap
         | StreamFunctionKind::Fold
@@ -928,6 +931,7 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
     funs.iter()
         .map(|f| match &f.kind {
             StreamFunctionKind::Map => "map(...)".to_string(),
+            StreamFunctionKind::Enumerate => "enumerate()".to_string(),
             StreamFunctionKind::Filter => "filter(...)".to_string(),
             StreamFunctionKind::FilterMap => "filter_map(...)".to_string(),
             StreamFunctionKind::Permutations(k) => format!("permutations({k})"),
@@ -1365,6 +1369,21 @@ mod tests {
     fn test_keep_first_n_space_o1() {
         assert_eq!(
             space_for_kind(&StreamFunctionKind::KeepFirstN(5)),
+            ComplexityClass::O1
+        );
+    }
+
+    #[test]
+    fn test_enumerate_preserves_cardinality() {
+        let card = Symbolic::Constant(BigUint::from(100u64));
+        let result = propagate_cardinality(card.clone(), &StreamFunctionKind::Enumerate);
+        assert_eq!(result, card);
+    }
+
+    #[test]
+    fn test_enumerate_space_o1() {
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Enumerate),
             ComplexityClass::O1
         );
     }
@@ -2013,6 +2032,7 @@ mod proptests {
         fn test_streaming_ops_always_o1_space(_dummy in 0..1i32) {
             let streaming_ops = vec![
                 StreamFunctionKind::Map,
+                StreamFunctionKind::Enumerate,
                 StreamFunctionKind::Filter,
                 StreamFunctionKind::FilterMap,
                 StreamFunctionKind::Fold,

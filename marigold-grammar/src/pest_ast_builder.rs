@@ -917,6 +917,7 @@ impl PestAstBuilder {
                 )
             }
             Rule::fold_fn => (StreamFunctionKind::Fold, Self::build_fold_fn(inner)?),
+            Rule::enumerate_fn => (StreamFunctionKind::Enumerate, "enumerate()".to_string()),
             Rule::ok_fn => (
                 StreamFunctionKind::Ok,
                 "filter(|r| futures::future::ready(r.is_ok())).map(|r| r.unwrap())".to_string(),

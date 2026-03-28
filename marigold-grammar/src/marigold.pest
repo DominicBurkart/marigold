@@ -360,6 +360,7 @@ stream_function = {
     filter_fn |
     filter_map_fn |
     map_fn |
+    enumerate_fn |
     fold_fn |
     ok_fn |
     ok_or_panic_fn
@@ -403,6 +404,11 @@ keep_first_n_fn = { "keep_first_n(" ~ free_text_literal ~ "," ~ free_text_identi
 // Argument 1: Initial accumulator value
 // Argument 2: Rust closure(acc, item) -> new_acc
 fold_fn = { "fold(" ~ free_text_literal ~ "," ~ free_text_identifier ~ ")" }
+
+// enumerate() - Pair each item with its zero-based index
+// Transforms Stream<T> -> Stream<(usize, T)>
+// No arguments; index always starts at 0
+enumerate_fn = { "enumerate()" }
 
 // ok() - Extract value from Result, skip errors
 // Transforms Stream<Result<T, E>> -> Stream<T>

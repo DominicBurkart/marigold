@@ -1804,4 +1804,51 @@ mod function_grammar_tests {
         assert!(code.contains("x: i32"), "param type i32 should be present");
         assert!(code.contains("-> i32"), "return type i32 should be present");
     }
+
+    #[test]
+    fn test_enumerate_parses() {
+        let result = parse_marigold("range(0, 10).enumerate().return");
+        assert!(
+            result.is_ok(),
+            "range(0, 10).enumerate().return should parse successfully: {:?}",
+            result
+        );
+        let code = result.unwrap();
+        assert!(
+            code.contains("enumerate()"),
+            "Generated code should contain enumerate(): {}",
+            code
+        );
+    }
+
+    #[test]
+    fn test_enumerate_after_filter_parses() {
+        let result = parse_marigold(
+            "fn is_even(x: i32) -> bool { x % 2 == 0 } range(0, 10).filter(is_even).enumerate().return",
+        );
+        assert!(
+            result.is_ok(),
+            "enumerate after filter should parse successfully: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_enumerate_analyze() {
+        let result = PestParser::analyze("range(10, 13).enumerate().return");
+        assert!(result.is_ok(), "analyze should succeed: {:?}", result);
+        let analysis = result.unwrap();
+        // Enumerate preserves cardinality: range(10, 13) has 3 elements
+        assert_eq!(
+            analysis.program_cardinality.to_string(),
+            "3",
+            "enumerate should preserve cardinality"
+        );
+        // Enumerate should have O(1) space
+        assert_eq!(
+            analysis.program_space,
+            crate::complexity::ComplexityClass::O1,
+            "enumerate should have O(1) space"
+        );
+    }
 }
