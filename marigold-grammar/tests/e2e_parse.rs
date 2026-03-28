@@ -12,7 +12,10 @@ fn parse_simple_range_return() {
     let code = marigold_parse("range(0, 10).return").unwrap();
     assert!(!code.is_empty(), "parsed code should be non-empty");
     // The output should contain Rust stream infrastructure
-    assert!(code.contains("marigold_impl"), "output should reference marigold_impl");
+    assert!(
+        code.contains("marigold_impl"),
+        "output should reference marigold_impl"
+    );
 }
 
 #[test]
@@ -161,8 +164,16 @@ fn analyze_filter_produces_bounded_cardinality() {
     let result = marigold_analyze("range(0, 50).filter(f).return").unwrap();
     let card = &result.streams[0].cardinality;
     // Filter should produce a bounded (not exact) cardinality
-    assert_ne!(card.to_string(), "50", "filter should not preserve exact cardinality");
-    assert_ne!(card.to_string(), "?", "filter on known input should not be unknown");
+    assert_ne!(
+        card.to_string(),
+        "50",
+        "filter should not preserve exact cardinality"
+    );
+    assert_ne!(
+        card.to_string(),
+        "?",
+        "filter on known input should not be unknown"
+    );
 }
 
 #[test]

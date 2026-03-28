@@ -3,9 +3,7 @@
 
 use std::str::FromStr;
 
-use marigold_grammar::complexity::{
-    Cardinality, ComplexityClass, ExactComplexity,
-};
+use marigold_grammar::complexity::{Cardinality, ComplexityClass, ExactComplexity};
 use num_bigint::BigUint;
 
 // -- ComplexityClass ordering -----------------------------------------------
@@ -31,12 +29,7 @@ fn ordering_chain() {
         ComplexityClass::Unknown,
     ];
     for w in chain.windows(2) {
-        assert!(
-            w[0] < w[1],
-            "{:?} should be less than {:?}",
-            w[0],
-            w[1]
-        );
+        assert!(w[0] < w[1], "{:?} should be less than {:?}", w[0], w[1]);
     }
 }
 
@@ -161,7 +154,11 @@ fn exact_complexity_merge_combines_terms() {
     assert_eq!(a.simplified(), ComplexityClass::ON);
     // Display should show the combined coefficient
     let display = a.to_string();
-    assert!(display.contains("3n"), "merged display should show 3n, got: {}", display);
+    assert!(
+        display.contains("3n"),
+        "merged display should show 3n, got: {}",
+        display
+    );
 }
 
 #[test]
@@ -169,8 +166,8 @@ fn exact_complexity_display_fromstr_roundtrip() {
     let mut ec = ExactComplexity::new();
     ec.add_work(ComplexityClass::ON, 2);
     let s = ec.to_string();
-    let parsed = ExactComplexity::from_str(&s)
-        .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", s, e));
+    let parsed =
+        ExactComplexity::from_str(&s).unwrap_or_else(|e| panic!("Failed to parse '{}': {}", s, e));
     assert_eq!(ec, parsed);
 }
 

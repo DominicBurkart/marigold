@@ -68,7 +68,11 @@ async fn fold_empty_stream_returns_init() {
     .await
     .collect::<Vec<i32>>()
     .await;
-    assert_eq!(r, vec![42], "fold over empty stream should yield the initial value");
+    assert_eq!(
+        r,
+        vec![42],
+        "fold over empty stream should yield the initial value"
+    );
 }
 
 #[tokio::test]
@@ -107,7 +111,10 @@ async fn filter_rejects_all() {
     .await
     .collect::<Vec<_>>()
     .await;
-    assert!(r.is_empty(), "filter that rejects everything should yield empty stream");
+    assert!(
+        r.is_empty(),
+        "filter that rejects everything should yield empty stream"
+    );
 }
 
 #[tokio::test]

@@ -5,8 +5,7 @@ use num_bigint::BigUint;
 use num_traits::Zero;
 
 fn analyze(source: &str) -> marigold_grammar::complexity::ProgramComplexity {
-    marigold_grammar::marigold_analyze(source)
-        .unwrap_or_else(|e| panic!("Failed to analyze: {e}"))
+    marigold_grammar::marigold_analyze(source).unwrap_or_else(|e| panic!("Failed to analyze: {e}"))
 }
 
 fn analyze_file(path: &str) -> marigold_grammar::complexity::ProgramComplexity {
