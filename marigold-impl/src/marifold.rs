@@ -50,4 +50,48 @@ mod tests {
             vec![10]
         );
     }
+
+    #[tokio::test]
+    async fn fold_empty_stream_returns_init() {
+        let result = futures::stream::iter(Vec::<i32>::new())
+            .marifold(42, |acc, x| async move { acc + x })
+            .await
+            .collect::<Vec<i32>>()
+            .await;
+        assert_eq!(result, vec![42], "folding an empty stream should return the initial value");
+    }
+
+    #[tokio::test]
+    async fn fold_single_element() {
+        let result = futures::stream::iter(vec![5])
+            .marifold(10, |acc, x| async move { acc + x })
+            .await
+            .collect::<Vec<i32>>()
+            .await;
+        assert_eq!(result, vec![15]);
+    }
+
+    #[tokio::test]
+    async fn fold_string_concatenation() {
+        let result = futures::stream::iter(vec!["hello", " ", "world"])
+            .marifold(String::new(), |mut acc, x| async move {
+                acc.push_str(x);
+                acc
+            })
+            .await
+            .collect::<Vec<String>>()
+            .await;
+        assert_eq!(result, vec!["hello world"]);
+    }
+
+    #[tokio::test]
+    async fn fold_always_produces_single_output() {
+        let result = futures::stream::iter(0..100)
+            .marifold(0i64, |acc, x| async move { acc + x })
+            .await
+            .collect::<Vec<i64>>()
+            .await;
+        assert_eq!(result.len(), 1, "marifold should always produce exactly one output");
+        assert_eq!(result[0], 4950);
+    }
 }

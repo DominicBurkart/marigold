@@ -73,4 +73,36 @@ mod tests {
             ]
         );
     }
+
+    #[tokio::test]
+    async fn collect_and_apply_empty_stream() {
+        let result = futures::stream::iter(Vec::<i32>::new())
+            .collect_and_apply(|v| v.len())
+            .await;
+        assert_eq!(result, 0, "applying to empty stream should yield empty vec");
+    }
+
+    #[tokio::test]
+    async fn collect_and_apply_transforms_to_different_type() {
+        let result = futures::stream::iter(vec![1, 2, 3, 4, 5])
+            .collect_and_apply(|v| v.iter().sum::<i32>())
+            .await;
+        assert_eq!(result, 15);
+    }
+
+    #[tokio::test]
+    async fn collect_and_apply_single_element() {
+        let result = futures::stream::iter(vec![99])
+            .collect_and_apply(|v| v)
+            .await;
+        assert_eq!(result, vec![99]);
+    }
+
+    #[tokio::test]
+    async fn collect_and_apply_preserves_order() {
+        let result = futures::stream::iter(vec![5, 3, 1, 4, 2])
+            .collect_and_apply(|v| v)
+            .await;
+        assert_eq!(result, vec![5, 3, 1, 4, 2], "collected values should preserve stream order");
+    }
 }
