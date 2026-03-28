@@ -1,6 +1,3 @@
-use regex::Regex;
-use std::str::FromStr;
-
 const MAX_CUSTOM_TYPE_SIZE: usize = 9_999;
 const MAX_TYPE_REFERENCE_SIZE: usize = 256;
 
@@ -205,13 +202,7 @@ impl StreamVariableNode {
     }
 
     pub fn runner_code(&self) -> String {
-        let variable_name = &self.variable_name;
-        format!(
-            "{{
-                let runner_future = Box::pin({variable_name}.run());
-                ::marigold::marigold_impl::multi_consumer_stream::RunFutureAsStream::new(runner_future)
-            }}"
-        )
+        runner_code(&self.variable_name)
     }
 }
 
@@ -242,14 +233,19 @@ impl StreamVariableFromPriorStreamVariableNode {
     }
 
     pub fn runner_code(&self) -> String {
-        let variable_name = &self.variable_name;
-        format!(
-            "{{
+        runner_code(&self.variable_name)
+    }
+}
+
+/// Generate runner code for a stream variable. Shared by both
+/// StreamVariableNode and StreamVariableFromPriorStreamVariableNode.
+fn runner_code(variable_name: &str) -> String {
+    format!(
+        "{{
                 let runner_future = Box::pin({variable_name}.run());
                 ::marigold::marigold_impl::multi_consumer_stream::RunFutureAsStream::new(runner_future)
             }}"
-        )
-    }
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -444,61 +440,6 @@ pub enum Type {
     Option(Box<Type>),
     BoundedInt { min: BoundExpr, max: BoundExpr },
     BoundedUint { min: BoundExpr, max: BoundExpr },
-}
-
-impl FromStr for Type {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Type, ()> {
-        let s = s.trim();
-        match s {
-            "u8" => Ok(Type::U8),
-            "u16" => Ok(Type::U16),
-            "u32" => Ok(Type::U32),
-            "u64" => Ok(Type::U64),
-            "u128" => Ok(Type::U128),
-            "usize" => Ok(Type::USize),
-            "i8" => Ok(Type::I8),
-            "i16" => Ok(Type::I16),
-            "i32" => Ok(Type::I32),
-            "i64" => Ok(Type::I64),
-            "i128" => Ok(Type::I128),
-            "isize" => Ok(Type::ISize),
-            "f32" => Ok(Type::F32),
-            "f64" => Ok(Type::F64),
-            "bool" => Ok(Type::Bool),
-            "char" => Ok(Type::Char),
-            _ => {
-                lazy_static! {
-                    static ref OPTIONAL: Regex =
-                        Regex::new(r"Option[\s]*<[\s]*(.+?)[\s]*>").unwrap();
-                    static ref STRING: Regex = Regex::new(r"string_([0-9_A-Za-z]+)").unwrap();
-                }
-
-                if let Some(optional_def) = OPTIONAL.captures(s) {
-                    if let Ok(internal_type) = Type::from_str(
-                        optional_def
-                            .get(1)
-                            .expect("Could not get internal type from Option")
-                            .as_str(),
-                    ) {
-                        return Ok(Type::Option(Box::new(internal_type)));
-                    }
-                } else if let Some(string_def) = STRING.captures(s) {
-                    let size_str = string_def
-                        .get(1)
-                        .expect("Could not find size definition for string field");
-                    let size = u32::from_str(size_str.as_str())
-                        .expect("Could not parse string size in struct. Must be parsable as U32.");
-                    return Ok(Type::Str(size));
-                }
-                Ok(Type::Custom(
-                    arrayvec::ArrayString::<MAX_CUSTOM_TYPE_SIZE>::from(s)
-                        .expect("type too big for Marigold"),
-                ))
-            }
-        }
-    }
 }
 
 impl Type {
@@ -739,97 +680,6 @@ impl EnumDeclarationNode {
             enum_rep.push('}');
         }
         enum_rep
-    }
-}
-
-pub fn parse_enum(enum_name: String, enum_contents: String) -> TypedExpression {
-    lazy_static! {
-        static ref ENUM_RE: Regex = Regex::new(r#"\{[\s]*(?P<variant>(?P<variant_name>[\w]+)[\s]*=[\s]*("(?P<serialized_value>[^"]+)"),?[\s]*)*(?P<default_variant>default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,?[\s]*)?\}"#).unwrap();
-        static ref VARIANT_RE: Regex = Regex::new(r#"(?P<variant_name>[\w]+)[\s]*=[\s]*("(?P<serialized_value>[^"]+)"),?"#).unwrap();
-        static ref DEFAULT_VARIANT_RE: Regex = Regex::new(r#"default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,?[\s]*"#).unwrap();
-    }
-
-    fn get_variants(enum_str: &str) -> Vec<(String, Option<String>)> {
-        VARIANT_RE
-            .captures_iter(enum_str)
-            .map(|c| {
-                (
-                    c.name("variant_name").unwrap().as_str().to_string(),
-                    c.name("serialized_value").map(|v| v.as_str().to_string()),
-                )
-            })
-            .collect::<Vec<_>>()
-    }
-
-    // first, validate that the enum matches the expected format
-    let cap = ENUM_RE.captures(&enum_contents);
-    if cap.is_none() {
-        panic!("syntax error while parsing enum {}", enum_name);
-    }
-
-    // find if there is a default variant, checking if there are multiple
-    // defaults declared.
-    if let Some((default_variant_name, maybe_string_size, maybe_serialized_value)) = {
-        let mut default_variants = DEFAULT_VARIANT_RE
-            .captures_iter(&enum_contents)
-            .filter(|v| v.name("default_variant_name").is_some());
-
-        let mut name = None;
-        let mut maybe_string_size = None;
-        let mut maybe_serialized_value = None;
-        if let Some(default_variant) = default_variants.next() {
-            name = Some(
-                default_variant
-                    .name("default_variant_name")
-                    .unwrap()
-                    .as_str()
-                    .to_string(),
-            );
-            maybe_string_size = default_variant
-                .name("default_variant_string_size")
-                .map(|m| {
-                    u32::from_str(m.as_str()).expect("could not parse default enum size as usize")
-                });
-            maybe_serialized_value = default_variant
-                .name("default_variant_serialized_value")
-                .map(|m| m.as_str().to_string());
-        }
-
-        if default_variants.next().is_some() {
-            panic!("Multiple default variants declared in enum {}", enum_name);
-        }
-
-        name.map(|n| (n, maybe_string_size, maybe_serialized_value))
-    } {
-        if maybe_string_size.is_some() && maybe_serialized_value.is_some() {
-            panic!("Error while parsing enum {}: default enum value can contain a serialized value or a string size, but not both", enum_name);
-        }
-
-        TypedExpression::from(EnumDeclarationNode {
-            name: enum_name,
-            variants: get_variants(
-                &enum_contents[0..DEFAULT_VARIANT_RE.find(&enum_contents).unwrap().start()],
-            ),
-            default_variant: Some({
-                if let Some(string_size) = maybe_string_size {
-                    DefaultEnumVariant::Sized(default_variant_name, string_size)
-                } else if let Some(serialized_value) = maybe_serialized_value {
-                    DefaultEnumVariant::WithDefaultValue(default_variant_name, serialized_value)
-                } else {
-                    DefaultEnumVariant::WithDefaultValue(
-                        default_variant_name.clone(),
-                        default_variant_name,
-                    )
-                }
-            }),
-        })
-    } else {
-        // no default variant, this is simpler :)
-        TypedExpression::from(EnumDeclarationNode {
-            name: enum_name,
-            variants: get_variants(&enum_contents),
-            default_variant: None,
-        })
     }
 }
 
