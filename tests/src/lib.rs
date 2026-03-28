@@ -161,6 +161,69 @@ mod tests {
     //     );
     // }
 
+    // === skip tests ===
+
+    #[tokio::test]
+    async fn test_skip_basic() {
+        // Case 1: range(0, 6).skip(3) → [3, 4, 5]
+        let result = m!(
+            range(0, 6)
+                .skip(3)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![3, 4, 5]);
+    }
+
+    #[tokio::test]
+    async fn test_skip_zero_is_noop() {
+        // Case 2: skip(0) is a no-op
+        let result = m!(
+            range(0, 3)
+                .skip(0)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2]);
+    }
+
+    #[tokio::test]
+    async fn test_skip_exceeds_input() {
+        // Case 3: skip(n) where n > input → empty
+        let result = m!(
+            range(0, 3)
+                .skip(10)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_skip_then_filter() {
+        // Case 6: skip + filter chain: range(0, 10).skip(3).filter(less_than_5) → [3, 4]
+        fn less_than_5(i: i32) -> bool {
+            i < 5
+        }
+
+        let result = m!(
+            range(0, 10)
+                .skip(3)
+                .filter(less_than_5)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![3, 4]);
+    }
+
     #[tokio::test]
     async fn test_select_all_multiple_streams() {
         let result = m!(

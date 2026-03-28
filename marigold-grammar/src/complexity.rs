@@ -381,6 +381,7 @@ pub enum Symbolic {
     PermutationsWithReplacement { n: Box<Symbolic>, k: u64 },
     Combinations { n: Box<Symbolic>, k: u64 },
     Min(Box<Symbolic>, Box<Symbolic>),
+    SaturatingSub(Box<Symbolic>, u64),
     Sum(Vec<Symbolic>),
 }
 
@@ -410,6 +411,15 @@ impl Symbolic {
                 let b_val = b.try_evaluate()?;
                 Some(a_val.min(b_val))
             }
+            Symbolic::SaturatingSub(inner, k) => {
+                let inner_val = inner.try_evaluate()?;
+                let k_val = BigUint::from(*k);
+                if inner_val >= k_val {
+                    Some(inner_val - k_val)
+                } else {
+                    Some(BigUint::zero())
+                }
+            }
             Symbolic::Sum(parts) => {
                 let mut total = BigUint::zero();
                 for part in parts {
@@ -429,6 +439,7 @@ impl Symbolic {
             Symbolic::PermutationsWithReplacement { k, .. } => ComplexityClass::OPolynomial(*k),
             Symbolic::Combinations { k, .. } => ComplexityClass::OCombinatorial(*k),
             Symbolic::Min(a, _) => a.classify_as_time(),
+            Symbolic::SaturatingSub(inner, _) => inner.classify_as_time(),
             Symbolic::Sum(parts) => {
                 let mut max_class = ComplexityClass::O1;
                 for part in parts {
@@ -451,6 +462,7 @@ impl Symbolic {
             | Symbolic::PermutationsWithReplacement { n, .. }
             | Symbolic::Combinations { n, .. } => n.contains_unknown(),
             Symbolic::Min(a, b) => a.contains_unknown() || b.contains_unknown(),
+            Symbolic::SaturatingSub(inner, _) => inner.contains_unknown(),
             Symbolic::Sum(parts) => parts.iter().any(|p| p.contains_unknown()),
         }
     }
@@ -477,6 +489,14 @@ impl Symbolic {
                 (Some(v), None) | (None, Some(v)) => Some(v),
                 (None, None) => None,
             },
+            Symbolic::SaturatingSub(inner, k) => inner.upper_bound().map(|v| {
+                let k_val = BigUint::from(*k);
+                if v >= k_val {
+                    v - k_val
+                } else {
+                    BigUint::zero()
+                }
+            }),
             Symbolic::Sum(parts) => {
                 let mut total = BigUint::zero();
                 for part in parts {
@@ -508,6 +528,7 @@ impl fmt::Display for Symbolic {
             Symbolic::PermutationsWithReplacement { n, k } => write!(f, "{n}^{k}"),
             Symbolic::Combinations { n, k } => write!(f, "C({n}, {k})"),
             Symbolic::Min(a, b) => write!(f, "min({a}, {b})"),
+            Symbolic::SaturatingSub(inner, k) => write!(f, "sat({inner}, {k})"),
             Symbolic::Sum(parts) => {
                 let strs: Vec<String> = parts.iter().map(|p| p.to_string()).collect();
                 write!(f, "{}", strs.join(" + "))
@@ -578,6 +599,23 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
             Ok(Symbolic::Min(
                 Box::new(parse_symbolic_pair(a)?),
                 Box::new(parse_symbolic_pair(b)?),
+            ))
+        }
+        Rule::symbolic_sat_sub => {
+            let mut inner = pair.into_inner();
+            let n_pair = inner
+                .next()
+                .ok_or_else(|| "Missing sat first arg".to_string())?;
+            let k_pair = inner
+                .next()
+                .ok_or_else(|| "Missing sat second arg".to_string())?;
+            let k: u64 = k_pair
+                .as_str()
+                .parse()
+                .map_err(|_| "Invalid sat k value".to_string())?;
+            Ok(Symbolic::SaturatingSub(
+                Box::new(parse_symbolic_pair(n_pair)?),
+                k,
             ))
         }
         Rule::symbolic_perm => {
@@ -824,6 +862,7 @@ fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Sy
             Box::new(cardinality),
             Box::new(Symbolic::Constant(BigUint::from(*k))),
         ),
+        StreamFunctionKind::Skip(k) => Symbolic::SaturatingSub(Box::new(cardinality), *k),
         StreamFunctionKind::Fold => Symbolic::Constant(BigUint::one()),
     }
 }
@@ -835,6 +874,7 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
         | StreamFunctionKind::PermutationsWithReplacement(_)
         | StreamFunctionKind::Combinations(_) => ComplexityClass::ON,
         StreamFunctionKind::KeepFirstN(_) => ComplexityClass::O1,
+        StreamFunctionKind::Skip(_) => ComplexityClass::O1,
         StreamFunctionKind::Map
         | StreamFunctionKind::Filter
         | StreamFunctionKind::FilterMap
@@ -936,6 +976,7 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
             }
             StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
             StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
+            StreamFunctionKind::Skip(k) => format!("skip({k})"),
             StreamFunctionKind::Fold => "fold(...)".to_string(),
             StreamFunctionKind::Ok => "ok()".to_string(),
             StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
@@ -1310,6 +1351,36 @@ mod tests {
         let result = propagate_cardinality(card, &StreamFunctionKind::KeepFirstN(5));
         assert!(matches!(result, Symbolic::Min(_, _)));
         assert_eq!(result.try_evaluate(), Some(BigUint::from(5u64)));
+    }
+
+    #[test]
+    fn test_skip_cardinality() {
+        let card = Symbolic::Constant(BigUint::from(100u64));
+        let result = propagate_cardinality(card, &StreamFunctionKind::Skip(3));
+        assert!(matches!(result, Symbolic::SaturatingSub(_, 3)));
+        assert_eq!(result.try_evaluate(), Some(BigUint::from(97u64)));
+    }
+
+    #[test]
+    fn test_skip_cardinality_exceeds_input() {
+        let card = Symbolic::Constant(BigUint::from(3u64));
+        let result = propagate_cardinality(card, &StreamFunctionKind::Skip(10));
+        assert_eq!(result.try_evaluate(), Some(BigUint::from(0u64)));
+    }
+
+    #[test]
+    fn test_skip_zero_is_noop() {
+        let card = Symbolic::Constant(BigUint::from(5u64));
+        let result = propagate_cardinality(card, &StreamFunctionKind::Skip(0));
+        assert_eq!(result.try_evaluate(), Some(BigUint::from(5u64)));
+    }
+
+    #[test]
+    fn test_skip_space_o1() {
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Skip(5)),
+            ComplexityClass::O1
+        );
     }
 
     #[test]
@@ -2110,6 +2181,8 @@ mod proptests {
                 .prop_map(|(s, k)| Symbolic::PermutationsWithReplacement { n: Box::new(s), k }),
             (arb_symbolic_constant(), arb_symbolic_constant())
                 .prop_map(|(a, b)| Symbolic::Min(Box::new(a), Box::new(b))),
+            (arb_symbolic_constant(), 1u64..100)
+                .prop_map(|(s, k)| Symbolic::SaturatingSub(Box::new(s), k)),
             proptest::collection::vec(arb_symbolic_constant(), 2..4).prop_map(Symbolic::Sum),
         ]
     }
@@ -2157,6 +2230,37 @@ mod proptests {
         fn test_cardinality_ordering_is_total(a in arb_cardinality(), b in arb_cardinality()) {
             prop_assert!(a.partial_cmp(&b).is_some());
         }
+    }
+
+    #[test]
+    fn test_analyze_skip_cardinality() {
+        let result = crate::parser::PestParser::analyze("range(0, 6).skip(3).return").unwrap();
+        assert_eq!(result.streams.len(), 1);
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(3u64))
+        );
+        assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
+    }
+
+    #[test]
+    fn test_analyze_skip_exceeds_input() {
+        let result = crate::parser::PestParser::analyze("range(0, 3).skip(10).return").unwrap();
+        assert_eq!(result.streams.len(), 1);
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(0u64))
+        );
+    }
+
+    #[test]
+    fn test_analyze_skip_zero() {
+        let result = crate::parser::PestParser::analyze("range(0, 3).skip(0).return").unwrap();
+        assert_eq!(result.streams.len(), 1);
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(3u64))
+        );
     }
 
     proptest! {

@@ -261,6 +261,7 @@ pub enum StreamFunctionKind {
     PermutationsWithReplacement(u64),
     Combinations(u64),
     KeepFirstN(u64),
+    Skip(u64),
     Fold,
     Ok,
     OkOrPanic,

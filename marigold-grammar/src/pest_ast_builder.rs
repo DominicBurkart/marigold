@@ -916,6 +916,10 @@ impl PestAstBuilder {
                     Self::build_keep_first_n_fn(inner)?,
                 )
             }
+            Rule::skip_fn => {
+                let n = Self::peek_numeric_arg(&inner)?;
+                (StreamFunctionKind::Skip(n), Self::build_skip_fn(inner)?)
+            }
             Rule::fold_fn => (StreamFunctionKind::Fold, Self::build_fold_fn(inner)?),
             Rule::ok_fn => (
                 StreamFunctionKind::Ok,
@@ -1023,6 +1027,15 @@ impl PestAstBuilder {
             .ok_or_else(|| "Missing keep_first_n value function".to_string())?
             .as_str();
         Ok(format!("keep_first_n({n}, {value_fn}).await"))
+    }
+
+    fn build_skip_fn(pair: Pair<Rule>) -> Result<String, String> {
+        let n = pair
+            .into_inner()
+            .next()
+            .ok_or_else(|| "Missing skip count".to_string())?
+            .as_str();
+        Ok(format!("skip({n})"))
     }
 
     fn build_fold_fn(pair: Pair<Rule>) -> Result<String, String> {
@@ -1455,6 +1468,41 @@ mod tests {
         assert!(matches!(&fields[1].1, Type::BoundedUint { .. }));
         assert_eq!(fields[2].1, Type::Str(32));
         assert_eq!(fields[3].1, Type::Bool);
+    }
+
+    #[test]
+    fn test_skip_parses() {
+        let input = "range(0, 10).skip(3).return";
+        let pairs =
+            MarigoldPestParser::parse(Rule::program, input).expect("Failed to parse skip program");
+        let expressions =
+            PestAstBuilder::build_program(pairs).expect("Failed to build AST for skip");
+        assert_eq!(expressions.len(), 1);
+        match &expressions[0] {
+            TypedExpression::UnnamedReturningStream(node) => {
+                assert_eq!(node.inp_and_funs.funs.len(), 1);
+                assert_eq!(node.inp_and_funs.funs[0].kind, StreamFunctionKind::Skip(3));
+                assert_eq!(node.inp_and_funs.funs[0].code, "skip(3)");
+            }
+            _ => panic!("Expected UnnamedReturningStream"),
+        }
+    }
+
+    #[test]
+    fn test_skip_zero_parses() {
+        let input = "range(0, 5).skip(0).return";
+        let pairs =
+            MarigoldPestParser::parse(Rule::program, input).expect("Failed to parse skip(0)");
+        let expressions =
+            PestAstBuilder::build_program(pairs).expect("Failed to build AST for skip(0)");
+        assert_eq!(expressions.len(), 1);
+        match &expressions[0] {
+            TypedExpression::UnnamedReturningStream(node) => {
+                assert_eq!(node.inp_and_funs.funs.len(), 1);
+                assert_eq!(node.inp_and_funs.funs[0].kind, StreamFunctionKind::Skip(0));
+            }
+            _ => panic!("Expected UnnamedReturningStream"),
+        }
     }
 
     fn split_respecting_parens(input: &str) -> Vec<String> {
