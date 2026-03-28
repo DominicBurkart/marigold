@@ -357,6 +357,7 @@ stream_function = {
     permutations_with_replacement_fn |
     combinations_fn |
     keep_first_n_fn |
+    chain_fn |
     filter_fn |
     filter_map_fn |
     map_fn |
@@ -413,6 +414,15 @@ ok_fn = { "ok()" }
 // Transforms Stream<Result<T, E>> -> Stream<T>
 // Like ok() but panics instead of skipping errors
 ok_or_panic_fn = { "ok_or_panic()" }
+
+// chain(stream_expr) - Concatenate another stream after this one
+// Transforms Stream<T> -> Stream<T> by appending all items from the argument stream
+// The argument is a complete stream expression (input function with optional stream functions)
+// Argument: A stream expression (e.g., range(0, 10), range(0, 5).map(double))
+// Example: range(0, 3).chain(range(10, 13)) -> 0, 1, 2, 10, 11, 12
+chain_fn = {
+    "chain(" ~ input_and_maybe_stream_functions ~ ")"
+}
 
 // === Output Functions ===
 //

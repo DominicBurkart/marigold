@@ -153,3 +153,15 @@ fn chained_maps() {
         ExactComplexity::from_str("O(2n)").unwrap()
     );
 }
+
+#[test]
+fn chain_reports_o1_space() {
+    let result = analyze_file("tests/programs/chain_space.marigold");
+    assert_eq!(result.streams.len(), 1);
+    assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
+    assert_eq!(
+        result.streams[0].exact_space,
+        ExactComplexity::from_str("O(1)").unwrap()
+    );
+    assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+}

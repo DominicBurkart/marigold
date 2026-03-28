@@ -185,4 +185,65 @@ mod tests {
         .await;
         assert_eq!(result, vec![0, 1, 2, 3]);
     }
+
+    // Case 1: basic chain preserves order (second stream follows first)
+    #[tokio::test]
+    async fn test_chain_basic() {
+        let result = m!(
+            range(0, 3)
+                .chain(range(10, 13))
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2, 10, 11, 12]);
+    }
+
+    // Case 3: chain with empty first stream
+    #[tokio::test]
+    async fn test_chain_empty_first() {
+        let result = m!(
+            range(0, 0)
+                .chain(range(1, 4))
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    // Case 4: chain with empty second stream
+    #[tokio::test]
+    async fn test_chain_empty_second() {
+        let result = m!(
+            range(1, 4)
+                .chain(range(0, 0))
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    // Case 6: chain followed by filter
+    #[tokio::test]
+    async fn test_chain_then_filter() {
+        fn is_even(i: i32) -> bool {
+            i % 2 == 0
+        }
+
+        let result = m!(
+            range(0, 3)
+                .chain(range(10, 13))
+                .filter(is_even)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 2, 10, 12]);
+    }
 }

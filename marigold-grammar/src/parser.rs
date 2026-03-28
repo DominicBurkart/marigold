@@ -531,6 +531,38 @@ mod tests {
     }
 
     #[test]
+    fn test_parser_chain_basic() {
+        let input = "range(0, 3).chain(range(10, 13)).return";
+        let pest_parser = PestParser::new();
+        let pest_result = pest_parser.parse(input);
+
+        assert!(
+            pest_result.is_ok(),
+            "Pest should parse chain: {:?}",
+            pest_result.err()
+        );
+
+        let pest_output = pest_result.unwrap();
+        assert!(pest_output.contains("chain"));
+    }
+
+    #[test]
+    fn test_parser_chain_with_stream_functions() {
+        let input = "range(0, 3).chain(range(10, 20).map(double)).return";
+        let pest_parser = PestParser::new();
+        let pest_result = pest_parser.parse(input);
+
+        assert!(
+            pest_result.is_ok(),
+            "Pest should parse chain with stream functions in argument: {:?}",
+            pest_result.err()
+        );
+
+        let pest_output = pest_result.unwrap();
+        assert!(pest_output.contains("chain"));
+    }
+
+    #[test]
     fn test_bounded_int_literal_bounds() {
         use pest::Parser;
         let result = MarigoldPestParser::parse(Rule::bounded_int_type, "int[0, 10]");

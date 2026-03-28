@@ -261,6 +261,7 @@ pub enum StreamFunctionKind {
     PermutationsWithReplacement(u64),
     Combinations(u64),
     KeepFirstN(u64),
+    Chain(InputCount, InputVariability),
     Fold,
     Ok,
     OkOrPanic,
@@ -272,7 +273,7 @@ pub struct StreamFunctionNode {
 }
 
 /// Number of inputs
-#[derive(PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum InputCount {
     Known(num_bigint::BigUint),
     Unknown,
@@ -280,7 +281,7 @@ pub enum InputCount {
 
 /// Whether the input is known at compile time (constant),
 /// or whether it is not available until runtime (variable).
-#[derive(PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum InputVariability {
     Constant,
     Variable,

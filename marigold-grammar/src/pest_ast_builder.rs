@@ -916,6 +916,10 @@ impl PestAstBuilder {
                     Self::build_keep_first_n_fn(inner)?,
                 )
             }
+            Rule::chain_fn => {
+                let (kind, code) = Self::build_chain_fn(inner)?;
+                (kind, code)
+            }
             Rule::fold_fn => (StreamFunctionKind::Fold, Self::build_fold_fn(inner)?),
             Rule::ok_fn => (
                 StreamFunctionKind::Ok,
@@ -1042,6 +1046,29 @@ impl PestAstBuilder {
         };
 
         Ok(format!("marifold({number_or_constructor}, |acc, x| futures::future::ready({fun}(acc, x))).await"))
+    }
+
+    fn build_chain_fn(pair: Pair<Rule>) -> Result<(StreamFunctionKind, String), String> {
+        let inner = pair
+            .into_inner()
+            .next()
+            .ok_or_else(|| "Missing chain stream argument".to_string())?;
+
+        if inner.as_rule() != Rule::input_and_maybe_stream_functions {
+            return Err(format!(
+                "Expected input_and_maybe_stream_functions in chain, got: {:?}",
+                inner.as_rule()
+            ));
+        }
+
+        let stream = Self::build_input_and_maybe_stream_functions(inner)?;
+        let input_count = stream.inp.input_count.clone();
+        let variability = stream.inp.variability.clone();
+        let stream_code = stream.code();
+
+        let code = format!("chain({stream_code})");
+
+        Ok((StreamFunctionKind::Chain(input_count, variability), code))
     }
 
     /// Build output function node
