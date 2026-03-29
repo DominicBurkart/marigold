@@ -15,7 +15,7 @@ async-std = []
 
 [dependencies]
 num-traits = "0.2"
-itetools = "0.10.2"
+itertools = "0.10.2"
 num-bigint = "0.4"
 arrayvec = "0.7"
 pest = "2.7"
