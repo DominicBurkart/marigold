@@ -1,0 +1,8 @@
+cores: 4
+Architecture: x86_64
+CPU: Intel(R) Xeon(R) Processor @ 2.10GHz
+Threads per core: 1
+Cores per socket: 4
+Sockets: 1
+Hypervisor: KVM
+Environment: CI (cloud VM)
