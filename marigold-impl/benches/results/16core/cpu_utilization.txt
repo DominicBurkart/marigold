@@ -1,0 +1,6 @@
+    Finished `bench` profile [optimized] target(s) in 0.06s
+     Running benches/cpu_utilization.rs (/tmp/marigold-bench-clean/target/release/deps/cpu_utilization-a5a4f9aa3eb135bc)
+iter 0: wall=1.74s  cpu=25.80s  effective_cores=14.86
+iter 1: wall=1.51s  cpu=22.12s  effective_cores=14.61
+iter 2: wall=1.24s  cpu=17.92s  effective_cores=14.40
+effective_cores: mean=14.62 stddev=0.19

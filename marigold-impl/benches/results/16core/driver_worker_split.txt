@@ -1,0 +1,8 @@
+    Finished `bench` profile [optimized] target(s) in 0.05s
+     Running benches/driver_worker_split.rs (/tmp/marigold-bench-clean/target/release/deps/driver_worker_split-0eb7fe1db2ae1dcf)
+dataset: 22238720 items
+driver_wall_time_s:      1.534
+total_worker_cpu_s:      26.091  (86870 tasks)
+worker_wall_time_s:      0.160
+total_wall_time_s:       1.694
+effective_parallelism:   163.08x  (worker_cpu / parallel_wall)

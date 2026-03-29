@@ -1,0 +1,9 @@
+   Compiling marigold-impl v0.1.17 (/tmp/bench-run/marigold-impl)
+    Finished `bench` profile [optimized] target(s) in 1.11s
+     Running benches/driver_worker_split.rs (/tmp/bench-run/target/release/deps/driver_worker_split-2c0959a7a768e1e7)
+dataset: 22238720 items
+driver_wall_time_s:      1.708
+total_worker_cpu_s:      6.717  (86870 tasks)
+worker_wall_time_s:      0.232
+total_wall_time_s:       1.940
+effective_parallelism:   28.95x  (worker_cpu / parallel_wall)
