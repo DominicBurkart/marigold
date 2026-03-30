@@ -109,6 +109,14 @@ fn arb_input() -> impl Strategy<Value = String> {
     ]
 }
 
+/// Generate an output function string.
+fn arb_output() -> impl Strategy<Value = String> {
+    prop_oneof![
+        3 => Just("return".to_string()),
+        1 => Just("write_file(\"out.csv\", csv)".to_string()),
+    ]
+}
+
 /// Result of generating a program, with metadata for checking invariants.
 #[derive(Debug, Clone)]
 struct GeneratedProgram {
@@ -119,15 +127,21 @@ struct GeneratedProgram {
     /// Note: for named streams, this only reflects the output chain's ops,
     /// not the variable definition's ops, matching `collects_input` semantics.
     stream_output_has_collecting: Vec<bool>,
-    /// Per-stream: whether the last op is a fold (after all other ops).
+    /// Per-stream: whether the effective last op in the full pipeline is a fold.
+    /// For named streams with empty out_chain, this checks var_chain's last op,
+    /// which is correct because the analyzer propagates cardinality through the
+    /// full pipeline (variable definition then output chain).
     stream_ends_with_fold: Vec<bool>,
     /// Per-stream: whether it's purely streaming ops (no collecting, no fold) in the full pipeline.
     stream_only_streaming: Vec<bool>,
+    /// Whether this program uses stream variables. Stream variables add O(n) space for
+    /// buffering, so the O(1) streaming-only space invariant only applies to unnamed streams.
+    uses_stream_variable: bool,
 }
 
-/// Generate an unnamed stream program: `input.chain.return`
+/// Generate an unnamed stream program: `input.chain.{return|write_file}`
 fn arb_unnamed_stream_program() -> impl Strategy<Value = GeneratedProgram> {
-    (arb_input(), arb_stream_fn_chain()).prop_map(|(input, chain)| {
+    (arb_input(), arb_stream_fn_chain(), arb_output()).prop_map(|(input, chain, output)| {
         let has_collecting = chain.iter().any(|f| f.is_collecting);
         let ends_with_fold = chain.last().map_or(false, |f| f.is_fold);
         let only_streaming = chain.iter().all(|f| !f.is_collecting && !f.is_fold);
@@ -136,7 +150,7 @@ fn arb_unnamed_stream_program() -> impl Strategy<Value = GeneratedProgram> {
             .iter()
             .map(|f| format!(".{}", f.text))
             .collect::<String>();
-        let source = format!("{input}{chain_str}.return");
+        let source = format!("{input}{chain_str}.{output}");
 
         GeneratedProgram {
             source,
@@ -144,20 +158,25 @@ fn arb_unnamed_stream_program() -> impl Strategy<Value = GeneratedProgram> {
             stream_output_has_collecting: vec![has_collecting],
             stream_ends_with_fold: vec![ends_with_fold],
             stream_only_streaming: vec![only_streaming],
+            uses_stream_variable: false,
         }
     })
 }
 
-/// Generate a stream variable program: `var = input.chain\nvar.chain.return`
+/// Generate a stream variable program: `var = input.chain\nvar.chain.{return|write_file}`
 fn arb_stream_var_program() -> impl Strategy<Value = GeneratedProgram> {
     (
         arb_input(),
         arb_stream_fn_chain(),
         arb_stream_fn_chain(),
+        arb_output(),
     )
-        .prop_map(|(input, var_chain, out_chain)| {
+        .prop_map(|(input, var_chain, out_chain, output)| {
             // collects_input only reflects the output chain's collecting ops for named streams
             let output_has_collecting = out_chain.iter().any(|f| f.is_collecting);
+            // The analyzer propagates cardinality through var_chain then out_chain.
+            // When out_chain is empty, the variable's final cardinality applies directly,
+            // so checking var_chain.last() via .or() is correct.
             let ends_with_fold = out_chain
                 .last()
                 .or(var_chain.last())
@@ -176,7 +195,7 @@ fn arb_stream_var_program() -> impl Strategy<Value = GeneratedProgram> {
                 .map(|f| format!(".{}", f.text))
                 .collect::<String>();
 
-            let source = format!("my_stream = {input}{var_chain_str}\nmy_stream{out_chain_str}.return");
+            let source = format!("my_stream = {input}{var_chain_str}\nmy_stream{out_chain_str}.{output}");
 
             GeneratedProgram {
                 source,
@@ -184,6 +203,7 @@ fn arb_stream_var_program() -> impl Strategy<Value = GeneratedProgram> {
                 stream_output_has_collecting: vec![output_has_collecting],
                 stream_ends_with_fold: vec![ends_with_fold],
                 stream_only_streaming: vec![only_streaming],
+                uses_stream_variable: true,
             }
         })
 }
@@ -213,6 +233,7 @@ fn arb_multi_consumer_program() -> impl Strategy<Value = GeneratedProgram> {
             // collects_input only reflects each output chain's own collecting ops
             let output_has_collecting_1 = chain1.iter().any(|f| f.is_collecting);
             let output_has_collecting_2 = chain2.iter().any(|f| f.is_collecting);
+            // See comment in arb_stream_var_program for why .or(var_chain.last()) is correct
             let ends_fold_1 = chain1
                 .last()
                 .or(var_chain.last())
@@ -240,6 +261,7 @@ fn arb_multi_consumer_program() -> impl Strategy<Value = GeneratedProgram> {
                 stream_output_has_collecting: vec![output_has_collecting_1, output_has_collecting_2],
                 stream_ends_with_fold: vec![ends_fold_1, ends_fold_2],
                 stream_only_streaming: vec![only_streaming_1, only_streaming_2],
+                uses_stream_variable: true,
             }
         })
 }
@@ -292,6 +314,24 @@ proptest! {
         }
     }
 
+    /// For each stream, space_class >= exact_space.simplified().
+    /// For unnamed streams this is equality; for named streams space_class may be
+    /// raised via .max(var_space), so we check the weaker >= invariant universally.
+    #[test]
+    fn space_class_ge_simplified_exact_space(prog in arb_program()) {
+        let result = marigold_grammar::marigold_analyze(&prog.source).unwrap();
+        for (i, stream) in result.streams.iter().enumerate() {
+            prop_assert!(
+                stream.space_class >= stream.exact_space.simplified(),
+                "Stream {} space_class {:?} < exact_space.simplified() {:?} in program:\n{}",
+                i,
+                stream.space_class,
+                stream.exact_space.simplified(),
+                prog.source
+            );
+        }
+    }
+
     /// program_time >= every stream's time_class.
     #[test]
     fn program_time_dominates_streams(prog in arb_program()) {
@@ -325,11 +365,15 @@ proptest! {
     }
 
     /// Streams with only streaming ops (map, filter, filter_map) have O(1) space.
+    /// Stream variables are excluded: the analyzer adds O(n) space for variable buffering.
     #[test]
-    fn streaming_only_has_o1_space(prog in arb_unnamed_stream_program()) {
+    fn streaming_only_has_o1_space(prog in arb_program()) {
+        if prog.uses_stream_variable {
+            return Ok(());
+        }
         let result = marigold_grammar::marigold_analyze(&prog.source).unwrap();
         for (i, stream) in result.streams.iter().enumerate() {
-            if prog.stream_only_streaming[i] {
+            if i < prog.stream_only_streaming.len() && prog.stream_only_streaming[i] {
                 prop_assert_eq!(
                     stream.space_class.clone(),
                     ComplexityClass::O1,
@@ -397,7 +441,7 @@ proptest! {
     /// Range-based streams with at least 2 elements should have time >= O(n).
     /// (Ranges are generated with count >= 2, so cardinality >= 2.)
     #[test]
-    fn range_programs_have_at_least_on_time(prog in arb_unnamed_stream_program()) {
+    fn range_programs_have_at_least_o_n_time(prog in arb_unnamed_stream_program()) {
         let result = marigold_grammar::marigold_analyze(&prog.source).unwrap();
         for stream in &result.streams {
             prop_assert!(
@@ -408,4 +452,14 @@ proptest! {
             );
         }
     }
+}
+
+/// Targeted regression test: stream variable ending with fold, empty output chain.
+/// Verifies that `var = range(0,5).fold(0, f)\nvar.return` produces cardinality Exact(1).
+#[test]
+fn fold_in_variable_produces_cardinality_one() {
+    let source = "my_var = range(0, 5).fold(0, f)\nmy_var.return";
+    let result = marigold_grammar::marigold_analyze(source).unwrap();
+    assert_eq!(result.streams.len(), 1);
+    assert_eq!(result.streams[0].cardinality, Cardinality::Exact(BigUint::one()));
 }
