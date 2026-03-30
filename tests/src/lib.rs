@@ -186,6 +186,9 @@ mod tests {
             *i < 3
         }
 
+        // Uses range where values AFTER the cutoff (5, 6, 7...) would fail,
+        // but values in between (3, 4) also fail. This doesn't distinguish
+        // take_while from filter. See test_take_while_no_resume for that.
         assert_eq!(
             m!(
                 range(0, 10)
@@ -196,6 +199,28 @@ mod tests {
             .collect::<Vec<_>>()
             .await,
             vec![0, 1, 2]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_take_while_no_resume() {
+        // Distinguishes take_while from filter: predicate fails at 5,
+        // but later values (6, 7, 8, 9) are even and WOULD pass filter.
+        // take_while must stop at 5 and not resume.
+        fn is_even(i: &i32) -> bool {
+            *i % 2 == 0
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 10)
+                .take_while(is_even)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![0]
         );
     }
 

@@ -144,6 +144,18 @@ fn map_reports_o1_space() {
 }
 
 #[test]
+fn take_while_reports_o1_space() {
+    let result = analyze_file("tests/programs/card_take_while.marigold");
+    assert_eq!(result.streams.len(), 1);
+    assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
+    assert_eq!(
+        result.streams[0].exact_space,
+        ExactComplexity::from_str("O(1)").unwrap()
+    );
+    assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+}
+
+#[test]
 fn take_while_pipeline() {
     let result = analyze_file("tests/programs/take_while_pipeline.marigold");
     assert_eq!(result.streams.len(), 1);
@@ -153,6 +165,11 @@ fn take_while_pipeline() {
         ExactComplexity::from_str("O(2n)").unwrap()
     );
     assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
+    // exact_space is O(2) because both take_while and map each contribute O(1)
+    assert_eq!(
+        result.streams[0].exact_space,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
 }
 
 #[test]
