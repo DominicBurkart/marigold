@@ -152,6 +152,9 @@ mod tests {
 
     #[tokio::test]
     async fn run_future_as_stream_yields_none_when_future_completes() {
+        // `RunFutureAsStream<T, O, F>`: T is the stream *item* type (never actually
+        // yielded — the stream always terminates with None), O is the future's output
+        // type. The stream only drives the future to completion.
         let fut = Box::pin(async { 42 });
         let mut stream = RunFutureAsStream::<i32, _, _>::new(fut);
         // When the future is ready, poll_next should return Ready(None)

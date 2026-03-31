@@ -382,13 +382,19 @@ mod tests {
 
     #[tokio::test]
     async fn n_greater_than_stream_length_returns_all_sorted() {
-        let mut result = futures::stream::iter(vec![3, 1, 2])
+        let result = futures::stream::iter(vec![3, 1, 2])
             .keep_first_n(100, |a, b| a.cmp(b))
             .await
             .collect::<Vec<_>>()
             .await;
-        result.sort();
-        assert_eq!(result, vec![1, 2, 3]);
+        // verify descending order
+        for w in result.windows(2) {
+            assert!(w[0] >= w[1]);
+        }
+        // verify all items present
+        let mut result_sorted = result;
+        result_sorted.sort();
+        assert_eq!(result_sorted, vec![1, 2, 3]);
     }
 
     #[tokio::test]
@@ -417,11 +423,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ties_prefer_earlier_stream_position() {
-        // When values compare equal, items earlier in the stream should be kept.
-        // All 1s compare equal; the first three (indices 0,1,2) should be kept
-        // over the last two (indices 3,4). Since output is the same value we
-        // just verify the count is correct.
+    async fn duplicate_values_keeps_correct_count() {
+        // Tests that keep_first_n handles duplicate values correctly.
+        // Note: since all elements are identical, we can only verify count and value,
+        // not stream position preference (which would require distinguishable elements
+        // that compare equal via the comparator but differ by identity).
         let result = futures::stream::iter(vec![1, 1, 1, 1, 1])
             .keep_first_n(3, |a, b| a.cmp(b))
             .await
@@ -470,13 +476,19 @@ mod tests {
 
     #[tokio::test]
     async fn n_equals_stream_length() {
-        let mut result = futures::stream::iter(vec![3, 1, 2])
+        let result = futures::stream::iter(vec![3, 1, 2])
             .keep_first_n(3, |a, b| a.cmp(b))
             .await
             .collect::<Vec<_>>()
             .await;
-        result.sort();
-        assert_eq!(result, vec![1, 2, 3]);
+        // verify descending order
+        for w in result.windows(2) {
+            assert!(w[0] >= w[1]);
+        }
+        // verify all items present
+        let mut result_sorted = result;
+        result_sorted.sort();
+        assert_eq!(result_sorted, vec![1, 2, 3]);
     }
 
 #[cfg(test)]
