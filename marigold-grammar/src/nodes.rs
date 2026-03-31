@@ -164,12 +164,7 @@ impl NamedStreamNode {
         let intermediate = match self.funs.len() {
             0 => "".to_string(),
             _ => format!(
-                ".{}",
-                self.funs
-                    .iter()
-                    .map(|f| f.code.as_str())
-                    .collect::<Vec<_>>()
-                    .join(".")
+                ".",
             ),
         };
         let stream_prefix = &self.out.stream_prefix;
@@ -192,12 +187,7 @@ impl StreamVariableNode {
             0 => "".to_string(),
             _ => {
                 format!(
-                    ".{}",
-                    self.funs
-                        .iter()
-                        .map(|f| f.code.as_str())
-                        .collect::<Vec<_>>()
-                        .join(".")
+                    ".",
                 )
             }
         };
@@ -229,12 +219,7 @@ impl StreamVariableFromPriorStreamVariableNode {
             0 => "".to_string(),
             _ => {
                 format!(
-                    ".{}",
-                    self.funs
-                        .iter()
-                        .map(|f| f.code.as_str())
-                        .collect::<Vec<_>>()
-                        .join(".")
+                    ".",
                 )
             }
         };
@@ -745,9 +730,9 @@ impl EnumDeclarationNode {
 
 pub fn parse_enum(enum_name: String, enum_contents: String) -> TypedExpression {
     lazy_static! {
-        static ref ENUM_RE: Regex = Regex::new(r#"\{[\s]*(?P<variant>(?P<variant_name>[\w]+)[\s]*=[\s]*("(?P<serialized_value>[^"]+)"),?[\s]*)*(?P<default_variant>default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,?[\s]*)?\}"#).unwrap();
+        static ref ENUM_RE: Regex = Regex::new(r#"\{[\s]*(?P<variant>(?P<variant_name>[\w]+)[\s]*=[\s]*("(?P<serialized_value>[^"]+)"),?[\s]*)*(?P<default_variant>default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,[\s]*)?\}"#).unwrap();
         static ref VARIANT_RE: Regex = Regex::new(r#"(?P<variant_name>[\w]+)[\s]*=[\s]*("(?P<serialized_value>[^"]+)"),?"#).unwrap();
-        static ref DEFAULT_VARIANT_RE: Regex = Regex::new(r#"default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,?[\s]*"#).unwrap();
+        static ref DEFAULT_VARIANT_RE: Regex = Regex::new(r#"default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,[\s]*"#).unwrap();
     }
 
     fn get_variants(enum_str: &str) -> Vec<(String, Option<String>)> {
