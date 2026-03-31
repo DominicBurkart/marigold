@@ -63,16 +63,16 @@ echo "  keep_first_n wall time: $kfn_time"
 echo ""
 echo "--- Running cpu_utilization ---"
 CPU_OUT=$(cargo bench --bench cpu_utilization --features tokio 2>&1)
-effective_cores=$(echo "$CPU_OUT" | grep -oP 'effective_cores: mean=\K[\d.]+' | head -1 || echo "unknown")
+effective_cores=$(echo "$CPU_OUT" | sed -n 's/.*effective_cores: mean=\([0-9.]*\).*/\1/p' | head -1 || echo "unknown")
 echo "  effective_cores: $effective_cores"
 
 # ─── 4. driver_worker_split ──────────────────────────────────────────────────
 echo ""
 echo "--- Running driver_worker_split ---"
 DWS_OUT=$(cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation" 2>&1)
-driver_wall=$(echo "$DWS_OUT"  | grep -oP 'driver_wall_time_s:\s+\K[\d.]+' | head -1 || echo "unknown")
-worker_cpu=$(echo "$DWS_OUT"   | grep -oP 'total_worker_cpu_s:\s+\K[\d.]+'  | head -1 || echo "unknown")
-parallel_wall=$(echo "$DWS_OUT"| grep -oP 'worker_wall_time_s:\s+\K[\d.]+'  | head -1 || echo "unknown")
+driver_wall=$(echo "$DWS_OUT"  | sed -n 's/.*driver_wall_time_s:[[:space:]]*\([0-9.]*\).*/\1/p' | head -1 || echo "unknown")
+worker_cpu=$(echo "$DWS_OUT"   | sed -n 's/.*total_worker_cpu_s:[[:space:]]*\([0-9.]*\).*/\1/p'  | head -1 || echo "unknown")
+parallel_wall=$(echo "$DWS_OUT"| sed -n 's/.*worker_wall_time_s:[[:space:]]*\([0-9.]*\).*/\1/p'  | head -1 || echo "unknown")
 echo "  driver_wall:   $driver_wall"
 echo "  worker_cpu:    $worker_cpu"
 echo "  parallel_wall: $parallel_wall"

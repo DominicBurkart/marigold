@@ -28,6 +28,12 @@ set -euo pipefail
 #   # Sanity-check with perf:
 #   perf stat -e task-clock cargo bench --bench keep_first_n
 
+# This script reads /proc/stat and /proc/<pid>/stat — Linux only.
+if [[ ! -f /proc/stat ]]; then
+    echo "error: /proc/stat not found. This script requires Linux." >&2
+    exit 1
+fi
+
 INTERVAL_MS="${1:-100}"
 OUTPUT="${2:-cpu_samples.csv}"
 TARGET_PID="${3:-}"
