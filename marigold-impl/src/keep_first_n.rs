@@ -234,4 +234,40 @@ mod tests {
             vec![9, 7]
         );
     }
+
+    #[tokio::test]
+    async fn test_keep_first_n_more_than_available() {
+        // Request more items than the stream contains; all items should be returned.
+        // The result is in descending order (largest first) because keep_first_n always
+        // returns items sorted max-first, i.e. in reverse comparator order. This is an
+        // implementation detail encoded in the KeepFirstN trait contract.
+        let result = futures::stream::iter(vec![3, 1, 2])
+            .keep_first_n(10, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![3, 2, 1]);
+    }
+
+    #[tokio::test]
+    async fn test_keep_first_n_single_element() {
+        // Keep only 1 element (the largest).
+        let result = futures::stream::iter(vec![5, 3, 8, 1])
+            .keep_first_n(1, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![8]);
+    }
+
+    #[tokio::test]
+    async fn test_keep_first_n_empty_stream() {
+        // Empty stream should return empty results regardless of n.
+        let result = futures::stream::iter(Vec::<i32>::new())
+            .keep_first_n(5, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
 }
