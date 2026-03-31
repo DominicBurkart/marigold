@@ -129,6 +129,7 @@ impl UnnamedStreamNode {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputAndMaybeStreamFunctions {
     pub inp: InputFunctionNode,
     pub funs: Vec<StreamFunctionNode>,
@@ -261,18 +262,20 @@ pub enum StreamFunctionKind {
     PermutationsWithReplacement(u64),
     Combinations(u64),
     KeepFirstN(u64),
+    Chain(Box<InputAndMaybeStreamFunctions>),
     Fold,
     Ok,
     OkOrPanic,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StreamFunctionNode {
     pub kind: StreamFunctionKind,
     pub code: String,
 }
 
 /// Number of inputs
-#[derive(PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum InputCount {
     Known(num_bigint::BigUint),
     Unknown,
@@ -280,12 +283,13 @@ pub enum InputCount {
 
 /// Whether the input is known at compile time (constant),
 /// or whether it is not available until runtime (variable).
-#[derive(PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum InputVariability {
     Constant,
     Variable,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputFunctionNode {
     pub variability: InputVariability,
     pub input_count: InputCount,
@@ -668,13 +672,7 @@ impl EnumDeclarationNode {
                         enum_rep.push_str(format!("{default_name}(::marigold::marigold_impl::arrayvec::ArrayString<{size}>),\n").as_str());
 
                         default_serialized_mapping =
-                            "unknown_value => Other({{
-                                let mut contents = ::marigold::marigold_impl::arrayvec::ArrayString::new();
-                                for c in unknown_value.chars() {{
-                                    contents.try_push(c)?;
-                                }}
-                                contents
-                            }})".to_string();
+                            "unknown_value => Other({{\n                                let mut contents = ::marigold::marigold_impl::arrayvec::ArrayString::new();\n                                for c in unknown_value.chars() {{\n                                    contents.try_push(c)?;\n                                }}\n                                contents\n                            }})".to_string();
                     }
                     DefaultEnumVariant::WithDefaultValue(default_name, serialized_value) => {
                         enum_rep.push_str(format!("#[serde(skip_deserializing, rename = \"{serialized_value}\")]\n{default_name},\n").as_str());
@@ -744,9 +742,9 @@ impl EnumDeclarationNode {
 
 pub fn parse_enum(enum_name: String, enum_contents: String) -> TypedExpression {
     lazy_static! {
-        static ref ENUM_RE: Regex = Regex::new(r#"\{[\s]*(?P<variant>(?P<variant_name>[\w]+)[\s]*=[\s]*("(?P<serialized_value>[^"]+)"),?[\s]*)*(?P<default_variant>default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,?[\s]*)?\}"#).unwrap();
+        static ref ENUM_RE: Regex = Regex::new(r#"\{[\s]*(?P<variant>(?P<variant_name>[\w]+)[\s]*=[\s]*("(?P<serialized_value>[^"]+)"),?[\s]*)*(?P<default_variant>default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,[\s]*)?\}"#).unwrap();
         static ref VARIANT_RE: Regex = Regex::new(r#"(?P<variant_name>[\w]+)[\s]*=[\s]*("(?P<serialized_value>[^"]+)"),?"#).unwrap();
-        static ref DEFAULT_VARIANT_RE: Regex = Regex::new(r#"default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,?[\s]*"#).unwrap();
+        static ref DEFAULT_VARIANT_RE: Regex = Regex::new(r#"default (?P<default_variant_name>[\w]+)(\(string_(?P<default_variant_string_size>[\d]+)\))?[\s]*(=[\s]*"(?P<default_variant_serialized_value>[^"]+)")?,[\s]*"#).unwrap();
     }
 
     fn get_variants(enum_str: &str) -> Vec<(String, Option<String>)> {
