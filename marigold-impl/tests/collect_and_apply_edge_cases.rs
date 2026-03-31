@@ -1,3 +1,5 @@
+//! Edge-case tests for `CollectAndAppliable` (collect_and_apply).
+
 use marigold_impl::CollectAndAppliable;
 
 #[tokio::test]
