@@ -238,6 +238,9 @@ mod tests {
     #[tokio::test]
     async fn test_keep_first_n_more_than_available() {
         // Request more items than the stream contains; all items should be returned.
+        // The result is in descending order (largest first) because keep_first_n always
+        // returns items sorted max-first, i.e. in reverse comparator order. This is an
+        // implementation detail encoded in the KeepFirstN trait contract.
         let result = futures::stream::iter(vec![3, 1, 2])
             .keep_first_n(10, |a, b| a.cmp(b))
             .await
