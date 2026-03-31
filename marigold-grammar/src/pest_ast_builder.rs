@@ -48,627 +48,98 @@ impl PestAstBuilder {
             .ok_or_else(|| "Empty expression".to_string())?;
 
         match inner.as_rule() {
-            Rule::stream => Self::build_stream(inner),
-            Rule::stream_variable_declaration => Self::build_stream_variable_declaration(inner),
-            Rule::struct_decl => Self::build_struct_decl(inner),
-            Rule::enum_decl => Self::build_enum_decl(inner),
-            Rule::fn_decl => Self::build_fn_decl(inner),
-            rule => unreachable!("expr should only contain expression types, got: {:?}", rule),
+            Rule::stream_expr => Ok(Self::build_stream_expr(inner)?.into()),
+            Rule::struct_declaration => Ok(Self::build_struct_declaration(inner)?.into()),
+            Rule::enum_declaration => Ok(crate::nodes::parse_enum(
+                Self::get_identifier(&inner)?,
+                Self::get_enum_body(&inner)?,
+            )),
+            Rule::fn_declaration => Ok(Self::build_fn_declaration(inner)?.into()),
+            _ => Err(format!("Unknown expression type: {:?}", inner.as_rule())),
         }
     }
 
-    /// Build a stream expression (unnamed or named)
-    fn build_stream(pair: Pair<Rule>) -> Result<TypedExpression, String> {
+    fn build_stream_expr(pair: Pair<Rule>) -> Result<impl Into<TypedExpression>, String> {
         let mut inner = pair.into_inner();
-
-        // First element determines if this is unnamed (input_function) or named (identifier)
-        let first = inner.next().ok_or_else(|| "Empty stream".to_string())?;
+        let first = inner
+            .next()
+            .ok_or_else(|| "Empty stream expression".to_string())?;
 
         match first.as_rule() {
-            Rule::input_function => {
-                // Unnamed stream: input_function.stream_function*.output_function
-                let inp = Self::build_input_function(first)?;
-                let mut funs = Vec::new();
-
-                // Collect stream functions
-                while let Some(next) = inner.peek() {
-                    if next.as_rule() == Rule::stream_function {
-                        funs.push(Self::build_stream_function(inner.next().unwrap())?);
-                    } else if next.as_rule() == Rule::output_function {
-                        break;
-                    } else {
-                        inner.next(); // Skip unknown rules
-                    }
-                }
-
-                // Get output function (should be last)
-                let out = Self::build_output_function(
-                    inner
-                        .next()
-                        .ok_or_else(|| "Missing output function".to_string())?,
-                )?;
-
-                Ok(TypedExpression::from(UnnamedStreamNode {
-                    inp_and_funs: InputAndMaybeStreamFunctions { inp, funs },
-                    out,
-                }))
+            Rule::input_and_maybe_stream_functions => {
+                // unnamed stream: input.fns.output
+                let inp_and_funs = Self::build_input_and_maybe_stream_functions(first)?;
+                let out_pair = inner
+                    .next()
+                    .ok_or_else(|| "Missing output function".to_string())?;
+                let out = Self::build_output_function(out_pair)?;
+                Ok(UnnamedStreamNode { inp_and_funs, out })
             }
             Rule::identifier => {
-                // Named stream: variable_name.stream_function*.output_function
+                // named stream variable: var_name.fns?.output
                 let stream_variable = first.as_str().to_string();
                 let mut funs = Vec::new();
+                let mut out = None;
 
-                // Collect stream functions
-                while let Some(next) = inner.peek() {
-                    if next.as_rule() == Rule::stream_function {
-                        funs.push(Self::build_stream_function(inner.next().unwrap())?);
-                    } else if next.as_rule() == Rule::output_function {
-                        break;
-                    } else {
-                        inner.next(); // Skip unknown rules
+                for pair in inner {
+                    match pair.as_rule() {
+                        Rule::stream_function => {
+                            funs.push(Self::build_stream_function(pair)?);
+                        }
+                        Rule::output_function => {
+                            out = Some(Self::build_output_function(pair)?);
+                        }
+                        _ => {
+                            return Err(format!(
+                                "Unexpected rule in named stream: {:?}",
+                                pair.as_rule()
+                            ))
+                        }
                     }
                 }
 
-                // Get output function (should be last)
-                let out = Self::build_output_function(
-                    inner
-                        .next()
-                        .ok_or_else(|| "Missing output function".to_string())?,
-                )?;
-
-                Ok(TypedExpression::from(NamedStreamNode {
+                let out = out.ok_or_else(|| "Missing output function".to_string())?;
+                Ok(NamedStreamNode {
                     stream_variable,
                     funs,
                     out,
-                }))
-            }
-            _ => Err(format!("Unexpected stream start: {:?}", first.as_rule())),
-        }
-    }
-
-    /// Build stream variable declaration
-    fn build_stream_variable_declaration(pair: Pair<Rule>) -> Result<TypedExpression, String> {
-        let mut inner = pair.into_inner();
-
-        // First identifier is the variable name
-        let variable_name = inner
-            .next()
-            .ok_or_else(|| "Missing variable name".to_string())?
-            .as_str()
-            .to_string();
-
-        // Next should be either input_function or identifier (for prior stream variable)
-        let second = inner
-            .next()
-            .ok_or_else(|| "Missing right-hand side of assignment".to_string())?;
-
-        match second.as_rule() {
-            Rule::input_function => {
-                // var = input_function.stream_function*
-                let inp = Self::build_input_function(second)?;
-                let mut funs = Vec::new();
-
-                // Collect stream functions
-                for stream_fn in inner {
-                    if stream_fn.as_rule() == Rule::stream_function {
-                        funs.push(Self::build_stream_function(stream_fn)?);
-                    }
-                }
-
-                Ok(TypedExpression::from(StreamVariableNode {
-                    variable_name,
-                    inp,
-                    funs,
-                }))
-            }
-            Rule::identifier => {
-                // var = other_var.stream_function*
-                let prior_stream_variable = second.as_str().to_string();
-                let mut funs = Vec::new();
-
-                // Collect stream functions
-                for stream_fn in inner {
-                    if stream_fn.as_rule() == Rule::stream_function {
-                        funs.push(Self::build_stream_function(stream_fn)?);
-                    }
-                }
-
-                Ok(TypedExpression::from(
-                    StreamVariableFromPriorStreamVariableNode {
-                        variable_name,
-                        prior_stream_variable,
-                        funs,
-                    },
-                ))
+                })
             }
             _ => Err(format!(
-                "Unexpected assignment source: {:?}",
-                second.as_rule()
+                "Unexpected rule in stream_expr: {:?}",
+                first.as_rule()
             )),
         }
     }
 
-    /// Build struct declaration
-    fn build_struct_decl(pair: Pair<Rule>) -> Result<TypedExpression, String> {
+    pub fn build_input_and_maybe_stream_functions(
+        pair: Pair<Rule>,
+    ) -> Result<InputAndMaybeStreamFunctions, String> {
         let mut inner = pair.into_inner();
 
-        let struct_name = inner
+        let inp_pair = inner
             .next()
-            .ok_or_else(|| "Missing struct name".to_string())?
-            .as_str()
-            .to_string();
+            .ok_or_else(|| "Missing input function".to_string())?;
+        let inp = Self::build_input_function(inp_pair)?;
 
-        let body = inner
-            .next()
-            .ok_or_else(|| "Missing struct body".to_string())?;
-
-        let mut fields = Vec::new();
-        for body_inner in body.into_inner() {
-            if body_inner.as_rule() == Rule::struct_field_list {
-                for field_pair in body_inner.into_inner() {
-                    if field_pair.as_rule() == Rule::struct_field {
-                        fields.push(Self::build_struct_field(field_pair)?);
-                    }
+        let mut funs = Vec::new();
+        for stream_fn_pair in inner {
+            match stream_fn_pair.as_rule() {
+                Rule::stream_function => {
+                    funs.push(Self::build_stream_function(stream_fn_pair)?);
                 }
-            }
-        }
-
-        Ok(TypedExpression::from(StructDeclarationNode {
-            name: struct_name,
-            fields,
-        }))
-    }
-
-    fn build_struct_field(pair: Pair<Rule>) -> Result<(String, Type), String> {
-        let mut inner = pair.into_inner();
-        let name = inner
-            .next()
-            .ok_or_else(|| "Missing field name".to_string())?
-            .as_str()
-            .to_string();
-        let field_type_pair = inner
-            .next()
-            .ok_or_else(|| "Missing field type".to_string())?;
-        let ty = Self::build_field_type(field_type_pair)?;
-        Ok((name, ty))
-    }
-
-    fn build_field_type(pair: Pair<Rule>) -> Result<Type, String> {
-        let inner = pair
-            .into_inner()
-            .next()
-            .ok_or_else(|| "Empty field_type".to_string())?;
-
-        match inner.as_rule() {
-            Rule::optional_type => {
-                let inner_field_type = inner
-                    .into_inner()
-                    .next()
-                    .ok_or_else(|| "Missing inner type for Option".to_string())?;
-                let inner_ty = Self::build_field_type(inner_field_type)?;
-                Ok(Type::Option(Box::new(inner_ty)))
-            }
-            Rule::bounded_int_type => {
-                let mut exprs = inner.into_inner();
-                let min = Self::build_bound_expr(
-                    exprs
-                        .next()
-                        .ok_or_else(|| "Missing min in boundedInt".to_string())?,
-                )?;
-                let max = Self::build_bound_expr(
-                    exprs
-                        .next()
-                        .ok_or_else(|| "Missing max in boundedInt".to_string())?,
-                )?;
-                Ok(Type::BoundedInt { min, max })
-            }
-            Rule::bounded_uint_type => {
-                let mut exprs = inner.into_inner();
-                let min = Self::build_bound_expr(
-                    exprs
-                        .next()
-                        .ok_or_else(|| "Missing min in boundedUint".to_string())?,
-                )?;
-                let max = Self::build_bound_expr(
-                    exprs
-                        .next()
-                        .ok_or_else(|| "Missing max in boundedUint".to_string())?,
-                )?;
-                Ok(Type::BoundedUint { min, max })
-            }
-            Rule::string_type => {
-                let s = inner.as_str();
-                let size_str = s
-                    .strip_prefix("string_")
-                    .ok_or_else(|| format!("Invalid string type: {}", s))?;
-                let size: u32 = size_str
-                    .parse()
-                    .map_err(|_| format!("Invalid string size: {}", size_str))?;
-                Ok(Type::Str(size))
-            }
-            Rule::primitive_type => {
-                let s = inner.as_str();
-                match s {
-                    "u8" => Ok(Type::U8),
-                    "u16" => Ok(Type::U16),
-                    "u32" => Ok(Type::U32),
-                    "u64" => Ok(Type::U64),
-                    "u128" => Ok(Type::U128),
-                    "usize" => Ok(Type::USize),
-                    "i8" => Ok(Type::I8),
-                    "i16" => Ok(Type::I16),
-                    "i32" => Ok(Type::I32),
-                    "i64" => Ok(Type::I64),
-                    "i128" => Ok(Type::I128),
-                    "isize" => Ok(Type::ISize),
-                    "f32" => Ok(Type::F32),
-                    "f64" => Ok(Type::F64),
-                    "bool" => Ok(Type::Bool),
-                    "char" => Ok(Type::Char),
-                    _ => Err(format!("Unknown primitive type: {}", s)),
-                }
-            }
-            Rule::type_expr => {
-                let s = Self::type_expr_to_string(inner);
-                Ok(Type::Custom(
-                    arrayvec::ArrayString::from(&s)
-                        .map_err(|_| format!("Type name too long: {}", s))?,
-                ))
-            }
-            rule => Err(format!("Unexpected field type rule: {:?}", rule)),
-        }
-    }
-
-    fn build_bound_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
-        let inner = pair
-            .into_inner()
-            .next()
-            .ok_or_else(|| "Empty bound_expr".to_string())?;
-        Self::build_bound_additive_expr(inner)
-    }
-
-    fn build_bound_additive_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
-        let mut inner = pair.into_inner();
-        let first = inner
-            .next()
-            .ok_or_else(|| "Empty additive expr".to_string())?;
-        let mut left = Self::build_bound_multiplicative_expr(first)?;
-
-        while let Some(op_pair) = inner.next() {
-            let op = match op_pair.as_str().trim() {
-                "+" => ArithOp::Add,
-                "-" => ArithOp::Sub,
-                s => return Err(format!("Unknown additive op: {}", s)),
-            };
-            let right_pair = inner
-                .next()
-                .ok_or_else(|| "Missing right operand in additive expr".to_string())?;
-            let right = Self::build_bound_multiplicative_expr(right_pair)?;
-            left = BoundExpr::BinaryOp {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            };
-        }
-
-        Ok(left)
-    }
-
-    fn build_bound_multiplicative_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
-        let mut inner = pair.into_inner();
-        let first = inner
-            .next()
-            .ok_or_else(|| "Empty multiplicative expr".to_string())?;
-        let mut left = Self::build_bound_unary_expr(first)?;
-
-        while let Some(op_pair) = inner.next() {
-            let op = match op_pair.as_str().trim() {
-                "*" => ArithOp::Mul,
-                "/" => ArithOp::Div,
-                s => return Err(format!("Unknown multiplicative op: {}", s)),
-            };
-            let right_pair = inner
-                .next()
-                .ok_or_else(|| "Missing right operand in multiplicative expr".to_string())?;
-            let right = Self::build_bound_unary_expr(right_pair)?;
-            left = BoundExpr::BinaryOp {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            };
-        }
-
-        Ok(left)
-    }
-
-    fn build_bound_unary_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
-        let inner: Vec<_> = pair.into_inner().collect();
-
-        if inner.len() == 1 {
-            let child = inner.into_iter().next().unwrap();
-            match child.as_rule() {
-                Rule::bound_unary_expr => {
-                    let expr = Self::build_bound_unary_expr(child)?;
-                    return Ok(BoundExpr::BinaryOp {
-                        left: Box::new(BoundExpr::Literal(0)),
-                        op: ArithOp::Sub,
-                        right: Box::new(expr),
-                    });
-                }
-                Rule::bound_primary_expr => {
-                    return Self::build_bound_primary_expr(child);
-                }
-                rule => return Err(format!("Unexpected rule in unary expr: {:?}", rule)),
-            }
-        }
-
-        Err(format!(
-            "Unexpected number of children in unary expr: {}",
-            inner.len()
-        ))
-    }
-
-    fn build_bound_primary_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
-        let inner = pair
-            .into_inner()
-            .next()
-            .ok_or_else(|| "Empty primary expr".to_string())?;
-
-        match inner.as_rule() {
-            Rule::bound_expr => Self::build_bound_expr(inner),
-            Rule::bound_type_ref => {
-                let mut parts = inner.into_inner();
-                let type_name = parts
-                    .next()
-                    .ok_or_else(|| "Missing type name".to_string())?
-                    .as_str();
-                let method = parts
-                    .next()
-                    .ok_or_else(|| "Missing method name".to_string())?
-                    .as_str();
-                let op = match method {
-                    "len" => BoundOp::Len,
-                    "min" => BoundOp::Min,
-                    "max" => BoundOp::Max,
-                    "cardinality" => BoundOp::Cardinality,
-                    _ => return Err(format!("Unknown bound method: {}", method)),
-                };
-                Ok(BoundExpr::TypeReference(
-                    arrayvec::ArrayString::from(type_name)
-                        .map_err(|_| format!("Type name too long: {}", type_name))?,
-                    op,
-                ))
-            }
-            Rule::bound_literal => {
-                let s: String = inner.as_str().chars().filter(|&c| c != '_').collect();
-                let val: i128 = s
-                    .parse()
-                    .map_err(|_| format!("Invalid bound literal: {}", inner.as_str()))?;
-                Ok(BoundExpr::Literal(val))
-            }
-            rule => Err(format!("Unexpected primary expr rule: {:?}", rule)),
-        }
-    }
-
-    fn type_expr_to_string(pair: Pair<Rule>) -> String {
-        let mut result = String::new();
-        for inner in pair.into_inner() {
-            match inner.as_rule() {
-                Rule::type_identifier => {
-                    result.push_str(inner.as_str());
-                }
-                Rule::generic_params => {
-                    result.push('<');
-                    let params: Vec<String> = inner
-                        .into_inner()
-                        .filter(|p| p.as_rule() == Rule::type_expr)
-                        .map(Self::type_expr_to_string)
-                        .collect();
-                    result.push_str(&params.join(", "));
-                    result.push('>');
-                }
-                _ => {}
-            }
-        }
-        result
-    }
-
-    /// Build enum declaration
-    fn build_enum_decl(pair: Pair<Rule>) -> Result<TypedExpression, String> {
-        let mut inner = pair.into_inner();
-
-        let enum_name = inner
-            .next()
-            .ok_or_else(|| "Missing enum name".to_string())?
-            .as_str()
-            .to_string();
-
-        let body = inner
-            .next()
-            .ok_or_else(|| "Missing enum body".to_string())?;
-
-        let mut variants = Vec::new();
-        let mut default_variant = None;
-
-        for body_inner in body.into_inner() {
-            match body_inner.as_rule() {
-                Rule::enum_variant_list => {
-                    for variant_pair in body_inner.into_inner() {
-                        if variant_pair.as_rule() == Rule::enum_variant {
-                            variants.push(Self::parse_enum_variant(variant_pair)?);
-                        }
-                    }
-                }
-                Rule::default_variant => {
-                    default_variant = Some(Self::parse_default_variant(body_inner)?);
-                }
-                _ => {}
-            }
-        }
-
-        Ok(TypedExpression::from(EnumDeclarationNode {
-            name: enum_name,
-            variants,
-            default_variant,
-        }))
-    }
-
-    fn parse_enum_variant(pair: Pair<Rule>) -> Result<(String, Option<String>), String> {
-        let mut inner = pair.into_inner();
-
-        let variant_name = inner
-            .next()
-            .ok_or_else(|| "Missing variant name".to_string())?
-            .as_str()
-            .to_string();
-
-        let serialized_value = inner.next().and_then(|p| {
-            if p.as_rule() == Rule::enum_value {
-                p.into_inner().next().map(|qs| {
-                    let s = qs.as_str();
-                    s[1..s.len() - 1].to_string()
-                })
-            } else {
-                None
-            }
-        });
-
-        Ok((variant_name, serialized_value))
-    }
-
-    fn parse_default_variant(pair: Pair<Rule>) -> Result<DefaultEnumVariant, String> {
-        let mut inner = pair.into_inner();
-
-        let default_name = inner
-            .next()
-            .ok_or_else(|| "Missing default variant name".to_string())?
-            .as_str()
-            .to_string();
-
-        if let Some(next) = inner.next() {
-            match next.as_rule() {
-                Rule::default_variant_type => {
-                    let type_expr = next
-                        .into_inner()
-                        .next()
-                        .ok_or_else(|| "Missing type in default variant".to_string())?;
-                    let type_str = Self::type_expr_to_string(type_expr);
-                    if let Some(size_str) = type_str.strip_prefix("string_") {
-                        let size = size_str
-                            .parse::<u32>()
-                            .map_err(|_| "Invalid string size".to_string())?;
-                        Ok(DefaultEnumVariant::Sized(default_name, size))
-                    } else {
-                        Err(format!(
-                            "Default variant type must be string_N, got: {}",
-                            type_str
-                        ))
-                    }
-                }
-                Rule::enum_value => {
-                    let value = next
-                        .into_inner()
-                        .next()
-                        .ok_or_else(|| "Missing serialization value".to_string())?
-                        .as_str();
-                    let value_str = value[1..value.len() - 1].to_string();
-                    Ok(DefaultEnumVariant::WithDefaultValue(
-                        default_name,
-                        value_str,
+                _ => {
+                    return Err(format!(
+                        "Unexpected rule in input_and_maybe_stream_functions: {:?}",
+                        stream_fn_pair.as_rule()
                     ))
                 }
-                _ => Ok(DefaultEnumVariant::WithDefaultValue(
-                    default_name.clone(),
-                    default_name,
-                )),
-            }
-        } else {
-            Ok(DefaultEnumVariant::WithDefaultValue(
-                default_name.clone(),
-                default_name,
-            ))
-        }
-    }
-
-    /// Build function declaration
-    fn build_fn_decl(pair: Pair<Rule>) -> Result<TypedExpression, String> {
-        let mut inner = pair.into_inner();
-
-        let name = inner
-            .next()
-            .ok_or_else(|| "Missing function name".to_string())?
-            .as_str()
-            .to_string();
-
-        // Collect parameters
-        let mut parameters = Vec::new();
-        let mut return_type_parts = Vec::new();
-        let mut body = String::new();
-
-        for item in inner {
-            match item.as_rule() {
-                Rule::fn_param_list => {
-                    for param in item.into_inner() {
-                        if param.as_rule() == Rule::fn_param {
-                            parameters.push(Self::parse_fn_param(param)?);
-                        }
-                    }
-                }
-                Rule::fn_return_type => {
-                    for part in item.into_inner() {
-                        return_type_parts.push(Self::translate_marigold_type(part.as_str()));
-                    }
-                }
-                Rule::fn_body => {
-                    let raw = item.as_str();
-                    body = raw[1..raw.len() - 1].to_string();
-                }
-                _ => {}
             }
         }
 
-        let output_type = return_type_parts.join(" ");
-
-        Ok(TypedExpression::from(FnDeclarationNode {
-            name,
-            parameters,
-            output_type,
-            body,
-        }))
+        Ok(InputAndMaybeStreamFunctions { inp, funs })
     }
 
-    fn translate_marigold_type(type_str: &str) -> String {
-        if let Some(size_str) = type_str.strip_prefix("string_") {
-            if size_str.chars().all(|c| c.is_ascii_digit()) && !size_str.is_empty() {
-                return format!("::marigold::marigold_impl::arrayvec::ArrayString<{size_str}>");
-            }
-        }
-        type_str.to_string()
-    }
-
-    fn parse_fn_param(pair: Pair<Rule>) -> Result<(String, String), String> {
-        let mut parts = pair.into_inner();
-        let param_name = parts
-            .next()
-            .ok_or_else(|| "Missing parameter name".to_string())?
-            .as_str()
-            .to_string();
-
-        let mut param_type = String::new();
-        for part in parts {
-            match part.as_rule() {
-                Rule::fn_param_ref => param_type.push('&'),
-                Rule::fn_param_type | Rule::free_text_identifier => {
-                    param_type.push_str(&Self::translate_marigold_type(part.as_str()));
-                }
-                _ => {}
-            }
-        }
-
-        Ok((param_name, param_type))
-    }
-
-    /// Build input function node
     fn build_input_function(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
         let inner = pair
             .into_inner()
@@ -676,121 +147,142 @@ impl PestAstBuilder {
             .ok_or_else(|| "Empty input function".to_string())?;
 
         match inner.as_rule() {
-            Rule::range_input => Self::build_range_input(inner),
-            Rule::read_file_csv_input => Self::build_read_file_csv_input(inner),
-            Rule::select_all_input => Self::build_select_all_input(inner),
+            Rule::range_fn => Self::build_range_fn(inner),
+            Rule::select_all_fn => Self::build_select_all_fn(inner),
+            #[cfg(feature = "io")]
+            Rule::read_file_fn => Self::build_read_file_fn(inner),
             _ => Err(format!("Unknown input function: {:?}", inner.as_rule())),
         }
     }
 
-    /// Build range input function
-    fn build_range_input(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
+    fn build_range_fn(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
         let mut inner = pair.into_inner();
-        let n1 = inner
-            .next()
-            .ok_or_else(|| "Missing range start".to_string())?
-            .as_str();
 
-        let next = inner
+        let start_pair = inner
+            .next()
+            .ok_or_else(|| "Missing range start".to_string())?;
+        let start_str = start_pair.as_str().trim();
+
+        let end_pair_wrapper = inner
             .next()
             .ok_or_else(|| "Missing range end".to_string())?;
 
-        let (inclusive, n2) = if next.as_rule() == Rule::inclusive_marker {
-            let n2 = inner
-                .next()
-                .ok_or_else(|| "Missing range end after =".to_string())?
-                .as_str();
-            (true, n2)
-        } else {
-            (false, next.as_str())
+        let (end_str, inclusive) = match end_pair_wrapper.as_rule() {
+            Rule::inclusive_range_end => {
+                let end_inner = end_pair_wrapper
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| "Missing inclusive range value".to_string())?;
+                (end_inner.as_str().trim().to_string(), true)
+            }
+            _ => (end_pair_wrapper.as_str().trim().to_string(), false),
         };
 
-        let end_val = n2
-            .parse::<num_bigint::BigInt>()
-            .map_err(|e| format!("Could not parse range end: {}", e))?;
-        let start_val = n1
-            .parse::<num_bigint::BigInt>()
-            .map_err(|e| format!("Could not parse range start: {}", e))?;
+        let start: i64 = start_str
+            .parse()
+            .map_err(|_| format!("Invalid range start: {start_str}"))?;
+        let end: i64 = end_str
+            .parse()
+            .map_err(|_| format!("Invalid range end: {end_str}"))?;
 
         let count = if inclusive {
-            (end_val - &start_val + num_bigint::BigInt::from(1u32))
-                .to_biguint()
-                .ok_or_else(|| "Range count is negative".to_string())?
+            if end >= start {
+                (end - start + 1) as u64
+            } else {
+                0u64
+            }
+        } else if end > start {
+            (end - start) as u64
         } else {
-            (end_val - &start_val)
-                .to_biguint()
-                .ok_or_else(|| "Range count is negative".to_string())?
+            0u64
         };
 
-        let range_expr = if inclusive {
-            format!("::marigold::marigold_impl::futures::stream::iter({n1}..={n2})")
+        let code = if inclusive {
+            format!("::marigold::marigold_impl::futures::stream::iter(({start}..={end})")
         } else {
-            format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})")
+            format!("::marigold::marigold_impl::futures::stream::iter(({start}..{end})")
         };
+        let code = format!("{code}.map(|v| v as _));");
 
         Ok(InputFunctionNode {
             variability: InputVariability::Constant,
-            input_count: InputCount::Known(count),
-            code: range_expr,
+            input_count: InputCount::Known(num_bigint::BigUint::from(count)),
+            code,
         })
     }
 
-    fn build_read_file_csv_input(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
+    fn build_select_all_fn(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
+        let streams: Result<Vec<_>, _> = pair
+            .into_inner()
+            .filter(|p| p.as_rule() == Rule::input_and_maybe_stream_functions)
+            .map(|p| {
+                let stream = Self::build_input_and_maybe_stream_functions(p)?;
+                Ok(stream.code())
+            })
+            .collect();
+        let streams = streams?;
+
+        let code = format!(
+            "::marigold::marigold_impl::futures::stream::select_all(vec![{}]);",
+            streams
+                .iter()
+                .map(|s| format!("Box::pin({s})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        Ok(InputFunctionNode {
+            variability: InputVariability::Variable,
+            input_count: InputCount::Unknown,
+            code,
+        })
+    }
+
+    #[cfg(feature = "io")]
+    fn build_read_file_fn(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
+        use std::str::FromStr;
+
         let mut inner = pair.into_inner();
 
-        // Extract path (quoted_string) - keep quotes for LALRPOP compatibility
         let path = inner
             .next()
-            .ok_or_else(|| "Missing path in read_file".to_string())?
-            .as_str();
+            .ok_or_else(|| "Missing read_file path".to_string())?;
+        let path_str = path.as_str().trim_matches('"');
 
-        // Extract struct type (free_text_identifier)
-        // Note: Pest only captures non-literal tokens, so we skip "csv", "struct", "=" literals
-        let deserialization_struct = inner
+        let format_pair = inner
             .next()
-            .ok_or_else(|| "Missing struct type in read_file".to_string())?
-            .as_str();
+            .ok_or_else(|| "Missing read_file format".to_string())?;
+        let format_str = format_pair.as_str();
 
-        // Check for optional infer_compression parameter (boolean_value)
-        let infer_compression = inner.next().map(|p| p.as_str() == "true");
+        // Parse optional struct type
+        let mut struct_type = None;
+        let mut compression = "none".to_string();
 
-        // Determine whether to use gzip compression
-        let use_gzip = match infer_compression {
-            Some(false) => false, // Explicitly disabled
-            Some(true) | None => {
-                // Auto-detect from file extension (check if path ends with .gz")
-                // Strip quotes from path to check extension
-                let path_without_quotes = &path[1..path.len() - 1];
-                path_without_quotes.ends_with(".gz")
+        for option_pair in inner {
+            let option_str = option_pair.as_str();
+            if option_str.starts_with("struct=") {
+                struct_type = Some(option_str.trim_start_matches("struct=").to_string());
+            } else if option_str.starts_with("compression=") {
+                compression = option_str
+                    .trim_start_matches("compression=")
+                    .to_string();
             }
-        };
+        }
 
-        // Generate code based on compression
-        let code = if use_gzip {
-            format!(
-                "
-           ::marigold::marigold_impl::csv_async::AsyncDeserializer::from_reader(
-             ::marigold::marigold_impl::async_compression::tokio::bufread::GzipDecoder::new(
-              ::marigold::marigold_impl::tokio::io::BufReader::new(
-                ::marigold::marigold_impl::tokio::fs::File::open({path})
-                  .await
-                  .expect(\"Marigold could not open file\")
-              )
-             ).compat()
-           ).into_deserialize::<{deserialization_struct}>()
-           "
-            )
-        } else {
-            format!(
-                "
-           ::marigold::marigold_impl::csv_async::AsyncDeserializer::from_reader(
-              ::marigold::marigold_impl::tokio::fs::File::open({path})
-               .await
-               .expect(\"Marigold could not open file\")
-               .compat()
-           ).into_deserialize::<{deserialization_struct}>()
-           "
-            )
+        let struct_name =
+            struct_type.ok_or_else(|| "read_file requires struct= parameter".to_string())?;
+
+        let code = match format_str {
+            "csv" => match compression.as_str() {
+                "none" => format!(
+                    "::marigold::marigold_impl::read_csv::<{struct_name}, _>(std::path::PathBuf::from(\"{path_str}\"));"
+                ),
+                "gz" => format!(
+                    "::marigold::marigold_impl::read_csv_gz::<{struct_name}, _>(std::path::PathBuf::from(\"{path_str}\"));"
+                ),
+                other => return Err(format!("Unknown compression format: {other}")),
+            },
+            other => return Err(format!("Unknown read_file format: {other}")),
         };
 
         Ok(InputFunctionNode {
@@ -800,81 +292,6 @@ impl PestAstBuilder {
         })
     }
 
-    /// Build select_all input
-    fn build_select_all_input(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
-        let mut streams: Vec<InputAndMaybeStreamFunctions> = Vec::new();
-
-        for inner in pair.into_inner() {
-            if inner.as_rule() == Rule::input_and_maybe_stream_functions {
-                let stream = Self::build_input_and_maybe_stream_functions(inner)?;
-                streams.push(stream);
-            }
-        }
-
-        if streams.is_empty() {
-            return Err("select_all requires at least one stream".to_string());
-        }
-
-        let variability = crate::type_aggregation::aggregate_input_variability(
-            streams.iter().map(|s| s.inp.variability.clone()),
-        );
-        let input_count = crate::type_aggregation::aggregate_input_count(
-            streams.iter().map(|s| s.inp.input_count.clone()),
-        );
-
-        let stream_code = streams
-            .iter()
-            .map(|stream| {
-                let code = stream.code();
-                format!("::marigold::marigold_impl::run_stream::run_stream({code})")
-            })
-            .collect::<Vec<_>>()
-            .join(",\n");
-
-        let code = format!(
-            "::marigold::marigold_impl::futures::prelude::stream::select_all::select_all([{stream_code}])"
-        );
-
-        Ok(InputFunctionNode {
-            variability,
-            input_count,
-            code,
-        })
-    }
-
-    /// Build input_and_maybe_stream_functions node
-    fn build_input_and_maybe_stream_functions(
-        pair: Pair<Rule>,
-    ) -> Result<InputAndMaybeStreamFunctions, String> {
-        let mut inner = pair.into_inner();
-
-        let inp = Self::build_input_function(inner.next().ok_or_else(|| {
-            "Missing input function in input_and_maybe_stream_functions".to_string()
-        })?)?;
-
-        let mut funs = Vec::new();
-        for item in inner {
-            if item.as_rule() == Rule::stream_function {
-                funs.push(Self::build_stream_function(item)?);
-            }
-        }
-
-        Ok(InputAndMaybeStreamFunctions { inp, funs })
-    }
-
-    fn peek_numeric_arg(pair: &Pair<Rule>) -> Result<u64, String> {
-        let first_inner = pair
-            .clone()
-            .into_inner()
-            .next()
-            .ok_or_else(|| "Missing numeric argument".to_string())?;
-        first_inner
-            .as_str()
-            .parse::<u64>()
-            .map_err(|e| format!("Could not parse numeric argument: {}", e))
-    }
-
-    /// Build stream function node
     fn build_stream_function(pair: Pair<Rule>) -> Result<StreamFunctionNode, String> {
         let inner = pair
             .into_inner()
@@ -884,42 +301,30 @@ impl PestAstBuilder {
         let (kind, code) = match inner.as_rule() {
             Rule::map_fn => (StreamFunctionKind::Map, Self::build_map_fn(inner)?),
             Rule::filter_fn => (StreamFunctionKind::Filter, Self::build_filter_fn(inner)?),
-            Rule::filter_map_fn => (
-                StreamFunctionKind::FilterMap,
-                Self::build_filter_map_fn(inner)?,
-            ),
+            Rule::filter_map_fn => {
+                (StreamFunctionKind::FilterMap, Self::build_filter_map_fn(inner)?)
+            }
             Rule::permutations_fn => {
-                let n = Self::peek_numeric_arg(&inner)?;
-                (
-                    StreamFunctionKind::Permutations(n),
-                    Self::build_permutations_fn(inner)?,
-                )
+                let (n, code) = Self::build_permutations_fn(inner)?;
+                (StreamFunctionKind::Permutations(n), code)
             }
             Rule::permutations_with_replacement_fn => {
-                let n = Self::peek_numeric_arg(&inner)?;
-                (
-                    StreamFunctionKind::PermutationsWithReplacement(n),
-                    Self::build_permutations_with_replacement_fn(inner)?,
-                )
+                let (n, code) = Self::build_permutations_with_replacement_fn(inner)?;
+                (StreamFunctionKind::PermutationsWithReplacement(n), code)
             }
             Rule::combinations_fn => {
-                let n = Self::peek_numeric_arg(&inner)?;
-                (
-                    StreamFunctionKind::Combinations(n),
-                    Self::build_combinations_fn(inner)?,
-                )
+                let (n, code) = Self::build_combinations_fn(inner)?;
+                (StreamFunctionKind::Combinations(n), code)
             }
             Rule::keep_first_n_fn => {
-                let n = Self::peek_numeric_arg(&inner)?;
+                let (n, code) = Self::build_keep_first_n_fn(inner)?;
                 (
                     StreamFunctionKind::KeepFirstN(n),
-                    Self::build_keep_first_n_fn(inner)?,
-                )
+                    Self::build_keep_first_n_fn(inner.clone())?.1,
+                );
+                (StreamFunctionKind::KeepFirstN(n), code)
             }
-            Rule::chain_fn => {
-                let (kind, code) = Self::build_chain_fn(inner)?;
-                (kind, code)
-            }
+            Rule::chain_fn => Self::build_chain_fn(inner)?,
             Rule::fold_fn => (StreamFunctionKind::Fold, Self::build_fold_fn(inner)?),
             Rule::ok_fn => (
                 StreamFunctionKind::Ok,
@@ -955,97 +360,82 @@ impl PestAstBuilder {
             .next()
             .ok_or_else(|| "Missing filter function".to_string())?
             .as_str();
-
-        #[cfg(not(any(feature = "tokio", feature = "async-std")))]
-        return Ok(format!(
-            "filter(|v| ::marigold::marigold_impl::futures::future::ready({filter_fn}(v.clone())))"
-        ));
-
-        #[cfg(any(feature = "tokio", feature = "async-std"))]
-        return Ok(format!("map(|v| async move {{ if {filter_fn}(v) {{ Some(v) }} else {{ None }} }}).buffered(std::cmp::max(2 * (::marigold::marigold_impl::num_cpus::get() - 1), 2)).filter_map(|v| v)"));
+        Ok(format!("filter(|v| futures::future::ready({filter_fn}(*v)))"))
     }
 
     fn build_filter_map_fn(pair: Pair<Rule>) -> Result<String, String> {
-        let filter_map_fn = pair
+        let fn_name = pair
             .into_inner()
             .next()
             .ok_or_else(|| "Missing filter_map function".to_string())?
             .as_str();
 
-        #[cfg(not(any(feature = "tokio", feature = "async-std")))]
-        return Ok(format!(
-            "filter_map(|v| ::marigold::marigold_impl::futures::future::ready({filter_map_fn}(v)))"
-        ));
-
         #[cfg(any(feature = "tokio", feature = "async-std"))]
-        return Ok(format!(
-            "filter_map(|v| async move {{ {filter_map_fn}(v) }})"
-        ));
+        return Ok(format!("filter_map(|v| async move {{ {fn_name}(v) }})"));
+
+        #[cfg(not(any(feature = "tokio", feature = "async-std")))]
+        return Ok(format!("filter_map(|v| futures::future::ready({fn_name}(v)))"));
     }
 
-    fn build_permutations_fn(pair: Pair<Rule>) -> Result<String, String> {
-        let n = pair
+    fn build_permutations_fn(pair: Pair<Rule>) -> Result<(u64, String), String> {
+        let k_str = pair
             .into_inner()
             .next()
-            .ok_or_else(|| "Missing permutations size".to_string())?
-            .as_str();
-        Ok(format!(
-            "permutations({n}).await.map(|v| <[_; {n}]>::try_from(v).unwrap())"
-        ))
+            .ok_or_else(|| "Missing permutations k".to_string())?
+            .as_str()
+            .trim();
+        let k: u64 = k_str
+            .parse()
+            .map_err(|_| format!("Invalid permutations k: {k_str}"))?;
+        let code = format!("permutations({k})");
+        Ok((k, code))
     }
 
-    fn build_permutations_with_replacement_fn(pair: Pair<Rule>) -> Result<String, String> {
-        let n = pair
+    fn build_permutations_with_replacement_fn(pair: Pair<Rule>) -> Result<(u64, String), String> {
+        let k_str = pair
             .into_inner()
             .next()
-            .ok_or_else(|| "Missing permutations_with_replacement size".to_string())?
-            .as_str();
-        Ok(format!(
-            "permutations_with_replacement({n}).await.map(|v| <[_; {n}]>::try_from(v).unwrap())"
-        ))
+            .ok_or_else(|| "Missing permutations_with_replacement k".to_string())?
+            .as_str()
+            .trim();
+        let k: u64 = k_str
+            .parse()
+            .map_err(|_| format!("Invalid permutations_with_replacement k: {k_str}"))?;
+        let code = format!("permutations_with_replacement({k})");
+        Ok((k, code))
     }
 
-    fn build_combinations_fn(pair: Pair<Rule>) -> Result<String, String> {
-        let n = pair
+    fn build_combinations_fn(pair: Pair<Rule>) -> Result<(u64, String), String> {
+        let k_str = pair
             .into_inner()
             .next()
-            .ok_or_else(|| "Missing combinations size".to_string())?
-            .as_str();
-        Ok(format!(
-            "combinations({n}).await.map(|v| <[_; {n}]>::try_from(v).unwrap())"
-        ))
+            .ok_or_else(|| "Missing combinations k".to_string())?
+            .as_str()
+            .trim();
+        let k: u64 = k_str
+            .parse()
+            .map_err(|_| format!("Invalid combinations k: {k_str}"))?;
+        let code = format!("combinations({k})");
+        Ok((k, code))
     }
 
-    fn build_keep_first_n_fn(pair: Pair<Rule>) -> Result<String, String> {
+    fn build_keep_first_n_fn(pair: Pair<Rule>) -> Result<(u64, String), String> {
         let mut inner = pair.into_inner();
-        let n = inner
+        let n_str = inner
             .next()
-            .ok_or_else(|| "Missing keep_first_n size".to_string())?
-            .as_str();
-        let value_fn = inner
+            .ok_or_else(|| "Missing keep_first_n n".to_string())?
+            .as_str()
+            .trim();
+        let sort_fn = inner
             .next()
-            .ok_or_else(|| "Missing keep_first_n value function".to_string())?
-            .as_str();
-        Ok(format!("keep_first_n({n}, {value_fn}).await"))
-    }
-
-    fn build_fold_fn(pair: Pair<Rule>) -> Result<String, String> {
-        let mut inner = pair.into_inner();
-        let state = inner
-            .next()
-            .ok_or_else(|| "Missing fold state".to_string())?
-            .as_str();
-        let fun = inner
-            .next()
-            .ok_or_else(|| "Missing fold function".to_string())?
-            .as_str();
-
-        let number_or_constructor = match state.trim().parse::<f64>() {
-            Ok(_) => state.to_string(),
-            Err(_) => format!("{state}()"),
-        };
-
-        Ok(format!("marifold({number_or_constructor}, |acc, x| futures::future::ready({fun}(acc, x))).await"))
+            .ok_or_else(|| "Missing keep_first_n sort function".to_string())?
+            .as_str()
+            .trim();
+        let n: u64 = n_str
+            .parse()
+            .map_err(|_| format!("Invalid keep_first_n n: {n_str}"))?;
+        let code = format!("keep_first_n({n}, {sort_fn})");
+        Ok((n, code))
     }
 
     fn build_chain_fn(pair: Pair<Rule>) -> Result<(StreamFunctionKind, String), String> {
@@ -1062,13 +452,9 @@ impl PestAstBuilder {
         }
 
         let stream = Self::build_input_and_maybe_stream_functions(inner)?;
-        let input_count = stream.inp.input_count.clone();
-        let variability = stream.inp.variability.clone();
-        let stream_code = stream.code();
+        let code = format!("chain({})", stream.code());
 
-        let code = format!("chain({stream_code})");
-
-        Ok((StreamFunctionKind::Chain(input_count, variability), code))
+        Ok((StreamFunctionKind::Chain(Box::new(stream)), code))
     }
 
     /// Build output function node
@@ -1088,440 +474,236 @@ impl PestAstBuilder {
                 // Parse write_file(path, format[, compression=none|gz])
                 let mut inner_pairs = inner.into_inner();
 
-                // Extract path (quoted_string) - keep quotes for LALRPOP compatibility
                 let path_pair = inner_pairs
                     .next()
-                    .ok_or_else(|| "Missing path in write_file".to_string())?;
-                let path = path_pair.as_str();
+                    .ok_or_else(|| "Missing write_file path".to_string())?;
+                let path_str = path_pair.as_str().trim_matches('"');
 
-                // Extract format (write_file_format)
                 let format_pair = inner_pairs
                     .next()
-                    .ok_or_else(|| "Missing format in write_file".to_string())?;
-                let format = format_pair.as_str();
+                    .ok_or_else(|| "Missing write_file format".to_string())?;
+                let format_str = format_pair.as_str();
 
-                // Only "csv" format is currently supported
-                if format != "csv" {
-                    return Err(format!("Unsupported write_file format: {}", format));
+                let mut compression = "none".to_string();
+                for option_pair in inner_pairs {
+                    let option_str = option_pair.as_str();
+                    if option_str.starts_with("compression=") {
+                        compression = option_str
+                            .trim_start_matches("compression=")
+                            .to_string();
+                    }
                 }
 
-                // Extract optional compression (write_file_compression)
-                let compression = if let Some(compression_pair) = inner_pairs.next() {
-                    // compression_pair is write_file_compression, get its inner compression_type
-                    let compression_type = compression_pair
-                        .into_inner()
-                        .next()
-                        .ok_or_else(|| "Missing compression type".to_string())?;
-                    Some(compression_type.as_str())
-                } else {
-                    None
-                };
-
-                // Determine whether to use gzip based on compression parameter or .gz extension
-                let use_gzip = match compression {
-                    Some("gz") => true,
-                    Some("none") => false,
-                    None => path.ends_with(".gz\""), // Auto-detect from extension
-                    Some(other) => {
-                        return Err(format!("Invalid compression type: {}", other));
+                let (stream_prefix, stream_postfix) = match (format_str, compression.as_str()) {
+                    ("csv", "none") => (
+                        format!("::marigold::marigold_impl::write_csv(Box::pin("),
+                        format!("), \"{path_str}\").await;"),
+                    ),
+                    ("csv", "gz") => (
+                        format!("::marigold::marigold_impl::write_csv_gz(Box::pin("),
+                        format!("), \"{path_str}\").await;"),
+                    ),
+                    (fmt, comp) => {
+                        return Err(format!(
+                            "Unknown write_file format/compression combination: {fmt}/{comp}"
+                        ))
                     }
                 };
 
-                // Generate stream_prefix and stream_postfix based on compression
-                if use_gzip {
-                    Self::generate_write_file_with_gzip(path)
-                } else {
-                    Self::generate_write_file_no_compression(path)
-                }
-            }
-            _ => Err(format!("Unknown output function: {:?}", inner.as_rule())),
-        }
-    }
-
-    fn generate_write_file_with_gzip(path: &str) -> Result<OutputFunctionNode, String> {
-        Ok(OutputFunctionNode {
-            stream_prefix: format!(
-                "{{
-          if let Some(parent) = ::std::path::Path::new({path}).parent() {{
-            ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
-              .await
-              .expect(\"could not create parent directory for output file\");
-          }}
-
-          static WRITER: ::marigold::marigold_impl::once_cell::sync::OnceCell<
-            ::marigold::marigold_impl::tokio::sync::Mutex<
-              ::marigold::marigold_impl::csv_async::AsyncSerializer<
-                  ::marigold::marigold_impl::tokio_util::compat::Compat<
-                    ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder<
-                        ::marigold::marigold_impl::writer::Writer
-                    >
-                  >
-              >
-            >
-          > = ::marigold::marigold_impl::once_cell::sync::OnceCell::new();
-
-          WRITER.set(
-            ::marigold::marigold_impl::tokio::sync::Mutex::new(
-              ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
-                ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder::new(
-                  ::marigold::marigold_impl::writer::Writer::file(
-                    ::marigold::marigold_impl::tokio::fs::File::create({path})
-                       .await
-                       .expect(\"Could not write to file\")
-                  )
-                )
-                .compat_write()
-              )
-            )
-          ).expect(\"Could not put CSV writer into OnceCell\");
-
-          let mut stream_to_write =
-
-         "
-            ),
-            stream_postfix: "
-            ;
-            stream_to_write.filter_map(
-              |v| async move {
-                WRITER
-                  .get()
-                  .expect(\"Could not get CSV writer from OnceCell\")
-                  .lock()
-                  .await
-                  .serialize(v)
-                  .await
-                  .expect(\"could not write record to CSV\");
-                None
-              }
-            ).chain(
-              // after the stream is complete, flush the writer.
-              ::marigold::marigold_impl::futures::stream::iter(0..1)
-                .filter_map(|_v| async {
-                  let mut serializer_guard = WRITER
-                    .get() // gets Mutex<...>
-                    .expect(\"Could not get CSV writer from OnceCell\")
-                    .lock()
-                    .await;
-                  let mut serializer = std::mem::replace(
-                    &mut *serializer_guard,
-                    ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
-                      ::marigold::marigold_impl::async_compression::tokio::write::GzipEncoder::new(
-                        ::marigold::marigold_impl::writer::Writer::vector()
-                      )
-                      .compat_write()
-                    )
-                  );
-                  serializer
-                    .into_inner()
-                    .await
-                    .expect(\"Could not get underlying writer from serializer\")
-                    .get_mut()
-                    .shutdown()
-                    .await
-                    .expect(\"Could not shut down underlying writer\");
-                  None
+                Ok(OutputFunctionNode {
+                    stream_prefix,
+                    stream_postfix,
+                    returning: false,
                 })
-            )
-        }"
-            .to_string(),
-            returning: false,
-        })
-    }
-
-    fn generate_write_file_no_compression(path: &str) -> Result<OutputFunctionNode, String> {
-        Ok(OutputFunctionNode {
-            stream_prefix: format!(
-                "{{
-            if let Some(parent) = ::std::path::Path::new({path}).parent() {{
-              ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
-                .await
-                .expect(\"could not create parent directory for output file\");
-            }}
-
-            static WRITER: ::marigold::marigold_impl::once_cell::sync::OnceCell<
-              ::marigold::marigold_impl::tokio::sync::Mutex<
-                ::marigold::marigold_impl::csv_async::AsyncSerializer<
-                  ::marigold::marigold_impl::tokio_util::compat::Compat<
-                    ::marigold::marigold_impl::writer::Writer
-                  >
-                >
-              >
-            > = ::marigold::marigold_impl::once_cell::sync::OnceCell::new();
-
-            WRITER.set(
-              ::marigold::marigold_impl::tokio::sync::Mutex::new(
-                ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
-                  ::marigold::marigold_impl::writer::Writer::file(
-                    ::marigold::marigold_impl::tokio::fs::File::create({path})
-                       .await
-                       .expect(\"Could not write to file\")
-                  )
-                  .compat_write()
-                )
-              )
-            ).expect(\"Could not put CSV writer into OnceCell\");
-
-            let mut stream_to_write =
-
-           "
-            ),
-            stream_postfix: "
-              ;
-              stream_to_write.filter_map(
-                |v| async move {
-                  WRITER
-                    .get()
-                    .expect(\"Could not get CSV writer from OnceCell\")
-                    .lock()
-                    .await
-                    .serialize(v)
-                    .await
-                    .expect(\"could not write record to CSV\");
-                  None
-                }
-              ).chain(
-                // after the stream is complete, flush the writer.
-                ::marigold::marigold_impl::futures::stream::iter(0..1)
-                  .filter_map(|_v| async {
-                      let mut serializer_guard = WRITER
-                        .get() // gets Mutex<...>
-                        .expect(\"Could not get CSV writer from OnceCell\")
-                        .lock()
-                        .await;
-                      let mut serializer = std::mem::replace(
-                        &mut *serializer_guard,
-                        ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
-                            ::marigold::marigold_impl::writer::Writer::vector()
-                              .compat_write()
-                        )
-                      );
-                      serializer
-                        .into_inner()
-                        .await
-                        .expect(\"Could not get underlying writer from serializer\")
-                        .get_mut()
-                        .shutdown()
-                        .await
-                        .expect(\"Could not shut down underlying writer\");
-                      None
-                  })
-              )
-          }"
-            .to_string(),
-            returning: false,
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::parser::{MarigoldPestParser, Rule};
-    use pest::Parser;
-
-    fn parse_struct(input: &str) -> Result<TypedExpression, String> {
-        let pairs =
-            MarigoldPestParser::parse(Rule::struct_decl, input).map_err(|e| e.to_string())?;
-        let pair = pairs.into_iter().next().unwrap();
-        PestAstBuilder::build_struct_decl(pair)
-    }
-
-    fn get_fields(expr: TypedExpression) -> Vec<(String, Type)> {
-        match expr {
-            TypedExpression::StructDeclaration(node) => node.fields,
-            _ => panic!("Expected StructDeclaration"),
+            }
+            _ => Err(format!(
+                "Unknown output function: {:?}",
+                inner.as_rule()
+            )),
         }
     }
 
-    #[test]
-    fn test_struct_with_primitives() {
-        let fields = get_fields(parse_struct("struct Foo { x: u32, y: bool }").unwrap());
-        assert_eq!(
-            fields,
-            vec![("x".to_string(), Type::U32), ("y".to_string(), Type::Bool),]
-        );
+    fn build_fold_fn(pair: Pair<Rule>) -> Result<String, String> {
+        let mut inner = pair.into_inner();
+
+        let initial_value = inner
+            .next()
+            .ok_or_else(|| "Missing fold initial value".to_string())?
+            .as_str()
+            .trim()
+            .to_string();
+
+        let fun_pair = inner
+            .next()
+            .ok_or_else(|| "Missing fold function".to_string())?;
+        let fun = fun_pair.as_str().trim();
+
+        let number_or_constructor = if initial_value
+            .chars()
+            .next()
+            .map(|c| c.is_alphabetic() || c == '_')
+            .unwrap_or(false)
+        {
+            // It's a constructor or variable name, call it as a function
+            format!("{initial_value}()")
+        } else {
+            initial_value.clone()
+        };
+
+        Ok(format!("marifold({number_or_constructor}, |acc, x| futures::future::ready({fun}(acc, x))).await"))
     }
 
-    #[test]
-    fn test_struct_with_bounded_int() {
-        let fields = get_fields(parse_struct("struct Foo { v: int[0, 100] }").unwrap());
-        assert_eq!(fields.len(), 1);
-        assert!(matches!(
-            &fields[0].1,
-            Type::BoundedInt {
-                min: BoundExpr::Literal(0),
-                max: BoundExpr::Literal(100)
-            }
-        ));
-    }
+    fn build_struct_declaration(pair: Pair<Rule>) -> Result<StructDeclarationNode, String> {
+        let mut inner = pair.into_inner();
 
-    #[test]
-    fn test_struct_with_bounded_uint() {
-        let fields = get_fields(parse_struct("struct Foo { v: uint[0, 255] }").unwrap());
-        assert_eq!(fields.len(), 1);
-        assert!(matches!(
-            &fields[0].1,
-            Type::BoundedUint {
-                min: BoundExpr::Literal(0),
-                max: BoundExpr::Literal(255)
-            }
-        ));
-    }
+        let name_pair = inner
+            .next()
+            .ok_or_else(|| "Missing struct name".to_string())?;
+        let name = name_pair.as_str().to_string();
 
-    #[test]
-    fn test_struct_with_negative_bounded_int() {
-        let fields = get_fields(parse_struct("struct Foo { v: int[-128, 127] }").unwrap());
-        match &fields[0].1 {
-            Type::BoundedInt { min, max } => {
-                assert_eq!(
-                    *min,
-                    BoundExpr::BinaryOp {
-                        left: Box::new(BoundExpr::Literal(0)),
-                        op: ArithOp::Sub,
-                        right: Box::new(BoundExpr::Literal(128)),
-                    }
-                );
-                assert_eq!(*max, BoundExpr::Literal(127));
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
-
-    #[test]
-    fn test_struct_with_both_negative_bounds() {
-        let fields = get_fields(parse_struct("struct Foo { v: int[-1000, -1] }").unwrap());
-        match &fields[0].1 {
-            Type::BoundedInt { min, max } => {
-                assert!(matches!(
-                    min,
-                    BoundExpr::BinaryOp {
-                        op: ArithOp::Sub,
-                        ..
-                    }
-                ));
-                assert!(matches!(
-                    max,
-                    BoundExpr::BinaryOp {
-                        op: ArithOp::Sub,
-                        ..
-                    }
-                ));
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
-
-    #[test]
-    fn test_struct_with_type_reference_bound() {
-        let fields = get_fields(parse_struct("struct Foo { v: int[0, MyEnum.len()] }").unwrap());
-        match &fields[0].1 {
-            Type::BoundedInt { min, max } => {
-                assert_eq!(*min, BoundExpr::Literal(0));
-                assert!(matches!(max, BoundExpr::TypeReference(_, BoundOp::Len)));
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
-
-    #[test]
-    fn test_struct_with_arithmetic_bound() {
-        let fields =
-            get_fields(parse_struct("struct Foo { v: int[0, MyEnum.len() - 1] }").unwrap());
-        match &fields[0].1 {
-            Type::BoundedInt { max, .. } => {
-                assert!(matches!(
-                    max,
-                    BoundExpr::BinaryOp {
-                        op: ArithOp::Sub,
-                        ..
-                    }
-                ));
-            }
-            _ => panic!("Expected BoundedInt"),
-        }
-    }
-
-    #[test]
-    fn test_struct_with_optional_field() {
-        let fields = get_fields(parse_struct("struct Foo { v: Option<u32> }").unwrap());
-        assert_eq!(
-            fields,
-            vec![("v".to_string(), Type::Option(Box::new(Type::U32)))]
-        );
-    }
-
-    #[test]
-    fn test_struct_with_string_field() {
-        let fields = get_fields(parse_struct("struct Foo { name: string_64 }").unwrap());
-        assert_eq!(fields, vec![("name".to_string(), Type::Str(64))]);
-    }
-
-    #[test]
-    fn test_struct_with_custom_type() {
-        let fields = get_fields(parse_struct("struct Foo { data: MyCustomType }").unwrap());
-        assert_eq!(fields.len(), 1);
-        assert!(matches!(&fields[0].1, Type::Custom(_)));
-    }
-
-    #[test]
-    fn test_struct_trailing_comma() {
-        let fields = get_fields(parse_struct("struct Foo { x: u32, y: u64, }").unwrap());
-        assert_eq!(fields.len(), 2);
-    }
-
-    #[test]
-    fn test_struct_mixed_fields() {
-        let fields = get_fields(
-            parse_struct(
-                "struct Pixel { r: uint[0, 255], g: uint[0, 255], name: string_32, active: bool }",
-            )
-            .unwrap(),
-        );
-        assert_eq!(fields.len(), 4);
-        assert!(matches!(&fields[0].1, Type::BoundedUint { .. }));
-        assert!(matches!(&fields[1].1, Type::BoundedUint { .. }));
-        assert_eq!(fields[2].1, Type::Str(32));
-        assert_eq!(fields[3].1, Type::Bool);
-    }
-
-    fn split_respecting_parens(input: &str) -> Vec<String> {
-        let mut result = Vec::new();
-        let mut current = String::new();
-        let mut paren_depth: usize = 0;
-        let mut bracket_depth: usize = 0;
-
-        for ch in input.chars() {
-            match ch {
-                '(' => {
-                    paren_depth += 1;
-                    current.push(ch);
-                }
-                ')' => {
-                    paren_depth = paren_depth.saturating_sub(1);
-                    current.push(ch);
-                }
-                '[' => {
-                    bracket_depth += 1;
-                    current.push(ch);
-                }
-                ']' => {
-                    bracket_depth = bracket_depth.saturating_sub(1);
-                    current.push(ch);
-                }
-                ',' if paren_depth == 0 && bracket_depth == 0 => {
-                    result.push(current.clone());
-                    current.clear();
+        let mut fields = Vec::new();
+        for field_pair in inner {
+            match field_pair.as_rule() {
+                Rule::struct_field => {
+                    let mut field_inner = field_pair.into_inner();
+                    let field_name = field_inner
+                        .next()
+                        .ok_or_else(|| "Missing field name".to_string())?
+                        .as_str()
+                        .to_string();
+                    let field_type_pair = field_inner
+                        .next()
+                        .ok_or_else(|| "Missing field type".to_string())?;
+                    let field_type = Self::build_field_type(field_type_pair)?;
+                    fields.push((field_name, field_type));
                 }
                 _ => {
-                    current.push(ch);
+                    return Err(format!(
+                        "Unexpected rule in struct: {:?}",
+                        field_pair.as_rule()
+                    ))
                 }
             }
         }
 
-        if !current.is_empty() {
-            result.push(current);
+        Ok(StructDeclarationNode { name, fields })
+    }
+
+    fn build_field_type(pair: Pair<Rule>) -> Result<crate::nodes::Type, String> {
+        use std::str::FromStr;
+        match pair.as_rule() {
+            Rule::bounded_int_type => {
+                let mut inner = pair.into_inner();
+                let min_pair = inner
+                    .next()
+                    .ok_or_else(|| "Missing bounded int min".to_string())?;
+                let max_pair = inner
+                    .next()
+                    .ok_or_else(|| "Missing bounded int max".to_string())?;
+                let min = Self::build_bound_expr(min_pair)?;
+                let max = Self::build_bound_expr(max_pair)?;
+                Ok(crate::nodes::Type::BoundedInt { min, max })
+            }
+            Rule::bounded_uint_type => {
+                let mut inner = pair.into_inner();
+                let min_pair = inner
+                    .next()
+                    .ok_or_else(|| "Missing bounded uint min".to_string())?;
+                let max_pair = inner
+                    .next()
+                    .ok_or_else(|| "Missing bounded uint max".to_string())?;
+                let min = Self::build_bound_expr(min_pair)?;
+                let max = Self::build_bound_expr(max_pair)?;
+                Ok(crate::nodes::Type::BoundedUint { min, max })
+            }
+            Rule::field_type => {
+                let type_str = pair.as_str();
+                crate::nodes::Type::from_str(type_str)
+                    .map_err(|_| format!("Unknown field type: {type_str}"))
+            }
+            _ => {
+                let type_str = pair.as_str();
+                crate::nodes::Type::from_str(type_str)
+                    .map_err(|_| format!("Unknown field type rule: {type_str}"))
+            }
+        }
+    }
+
+    fn build_bound_expr(
+        pair: Pair<Rule>,
+    ) -> Result<crate::nodes::BoundExpr, String> {
+        crate::bound_expr::build_bound_expr(pair)
+    }
+
+    fn get_identifier(pair: &Pair<Rule>) -> Result<String, String> {
+        pair.clone()
+            .into_inner()
+            .find(|p| p.as_rule() == Rule::identifier)
+            .map(|p| p.as_str().to_string())
+            .ok_or_else(|| format!("Missing identifier in {:?}", pair.as_rule()))
+    }
+
+    fn get_enum_body(pair: &Pair<Rule>) -> Result<String, String> {
+        pair.clone()
+            .into_inner()
+            .find(|p| p.as_rule() == Rule::enum_body)
+            .map(|p| p.as_str().to_string())
+            .ok_or_else(|| "Missing enum body".to_string())
+    }
+
+    fn build_fn_declaration(pair: Pair<Rule>) -> Result<FnDeclarationNode, String> {
+        let mut inner = pair.into_inner();
+
+        let name_pair = inner
+            .next()
+            .ok_or_else(|| "Missing fn name".to_string())?;
+        let name = name_pair.as_str().to_string();
+
+        let mut parameters = Vec::new();
+        let mut output_type = String::new();
+        let mut body = String::new();
+
+        for pair in inner {
+            match pair.as_rule() {
+                Rule::fn_param => {
+                    let mut param_inner = pair.into_inner();
+                    let param_name = param_inner
+                        .next()
+                        .ok_or_else(|| "Missing param name".to_string())?
+                        .as_str()
+                        .to_string();
+                    let param_type = param_inner
+                        .next()
+                        .ok_or_else(|| "Missing param type".to_string())?
+                        .as_str()
+                        .to_string();
+                    parameters.push((param_name, param_type));
+                }
+                Rule::fn_return_type => {
+                    output_type = pair
+                        .into_inner()
+                        .next()
+                        .ok_or_else(|| "Missing return type".to_string())?
+                        .as_str()
+                        .to_string();
+                }
+                Rule::fn_body => {
+                    body = pair.as_str().to_string();
+                }
+                _ => {
+                    return Err(format!(
+                        "Unexpected rule in fn declaration: {:?}",
+                        pair.as_rule()
+                    ))
+                }
+            }
         }
 
-        result
+        Ok(FnDeclarationNode {
+            name,
+            parameters,
+            output_type,
+            body,
+        })
     }
 }
