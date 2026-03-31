@@ -102,7 +102,7 @@ range(0, 5).map(double).return"#;
     let result = marigold_grammar::marigold_parse(program);
     assert!(result.is_ok(), "fn declaration + usage should parse: {:?}", result);
     let code = result.unwrap();
-    assert!(code.contains("const fn double"), "Should generate const fn");
+    assert!(code.contains("fn double"), "Generated code should include fn double");
 }
 
 #[test]

@@ -18,7 +18,8 @@ async fn keep_first_n_exceeds_stream_length() {
         .await
         .collect::<Vec<_>>()
         .await;
-    // Should return all elements sorted
+    // Should return all elements sorted in descending order: the comparator a.cmp(b) ranks
+    // greater values first, so keep_first_n returns elements greatest-first.
     assert_eq!(result, vec![3, 2, 1]);
 }
 
@@ -44,7 +45,7 @@ async fn keep_first_n_all_equal() {
 }
 
 #[tokio::test]
-async fn keep_first_n_descending_order() {
+async fn keep_first_n_reversed_comparator_keeps_smallest() {
     // Keep 3 smallest by reversing the comparator
     let result = futures::stream::iter(vec![5, 3, 8, 1, 9, 2])
         .keep_first_n(3, |a: &i32, b: &i32| b.cmp(a)) // reversed: keep smallest
@@ -71,5 +72,6 @@ async fn keep_first_n_exactly_n() {
         .await
         .collect::<Vec<_>>()
         .await;
+    // Returns all elements sorted greatest-first (comparator a.cmp(b) ranks greater values first).
     assert_eq!(result, vec![3, 2, 1]);
 }

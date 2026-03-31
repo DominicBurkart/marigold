@@ -376,6 +376,7 @@ mod tests {
         .collect::<Vec<_>>()
         .await;
 
+        // select_all ordering is non-deterministic, so sort before comparing.
         let mut sorted = result.clone();
         sorted.sort();
         assert_eq!(sorted, vec![0, 1, 10, 11, 20, 21]);

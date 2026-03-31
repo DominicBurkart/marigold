@@ -1,5 +1,3 @@
-use marigold_grammar::nodes::{InputCount, InputVariability};
-
 // We can't directly call the private type_aggregation module, but we can
 // test the public API that uses it (complexity analysis) to validate
 // aggregation behavior through e2e tests.
