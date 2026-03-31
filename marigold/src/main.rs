@@ -119,7 +119,7 @@ version = "0.0.1"
 serde = "1"
 tokio = {{ version = "1", features = ["full"]}}
 {marigold_dep}
-        "#
+"#
         ),
     )?;
 
@@ -143,8 +143,11 @@ fn clean_all_cache(cache_root: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Invokes `cargo run` or `cargo install`. These are the only two supported commands.
+/// For `run`: passes `--manifest-path` and optionally `--release`.
+/// For `install`: passes `--path` (ignores `release`).
 #[cfg(feature = "cli")]
-fn invoke_cargo(
+fn invoke_cargo_run_or_install(
     command: &str,
     path: &std::path::Path,
     release: bool,
@@ -291,9 +294,9 @@ fn main() -> Result<()> {
     );
 
     let exit_status = if command == "run" {
-        invoke_cargo("run", &manifest_path, !unoptimized)?
+        invoke_cargo_run_or_install("run", &manifest_path, !unoptimized)?
     } else {
-        invoke_cargo(
+        invoke_cargo_run_or_install(
             "install",
             &marigold_cache_directory.join(&program_name),
             false,
@@ -529,10 +532,8 @@ mod cache_tests {
         let manifest =
             prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None).unwrap();
         fs::remove_dir_all(tmp.path().join("prog")).unwrap();
-        let result = invoke_cargo("run", &manifest, false);
-        assert!(
-            result.is_err() || result.is_ok(),
-            "should not panic regardless of outcome"
-        );
+        let result = invoke_cargo_run_or_install("run", &manifest, false);
+        // cargo cannot find the manifest (we deleted it), so it should propagate an error
+        assert!(result.is_err(), "expected error when cache dir was removed");
     }
 }
