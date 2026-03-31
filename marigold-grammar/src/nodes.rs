@@ -129,6 +129,7 @@ impl UnnamedStreamNode {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputAndMaybeStreamFunctions {
     pub inp: InputFunctionNode,
     pub funs: Vec<StreamFunctionNode>,
@@ -164,7 +165,12 @@ impl NamedStreamNode {
         let intermediate = match self.funs.len() {
             0 => "".to_string(),
             _ => format!(
-                ".",
+                ".{}",
+                self.funs
+                    .iter()
+                    .map(|f| f.code.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".")
             ),
         };
         let stream_prefix = &self.out.stream_prefix;
@@ -187,7 +193,12 @@ impl StreamVariableNode {
             0 => "".to_string(),
             _ => {
                 format!(
-                    ".",
+                    ".{}",
+                    self.funs
+                        .iter()
+                        .map(|f| f.code.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".")
                 )
             }
         };
@@ -219,7 +230,12 @@ impl StreamVariableFromPriorStreamVariableNode {
             0 => "".to_string(),
             _ => {
                 format!(
-                    ".",
+                    ".{}",
+                    self.funs
+                        .iter()
+                        .map(|f| f.code.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".")
                 )
             }
         };
@@ -246,12 +262,13 @@ pub enum StreamFunctionKind {
     PermutationsWithReplacement(u64),
     Combinations(u64),
     KeepFirstN(u64),
-    Chain(InputCount, InputVariability),
+    Chain(Box<InputAndMaybeStreamFunctions>),
     Fold,
     Ok,
     OkOrPanic,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StreamFunctionNode {
     pub kind: StreamFunctionKind,
     pub code: String,
@@ -272,6 +289,7 @@ pub enum InputVariability {
     Variable,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputFunctionNode {
     pub variability: InputVariability,
     pub input_count: InputCount,
@@ -654,13 +672,7 @@ impl EnumDeclarationNode {
                         enum_rep.push_str(format!("{default_name}(::marigold::marigold_impl::arrayvec::ArrayString<{size}>),\n").as_str());
 
                         default_serialized_mapping =
-                            "unknown_value => Other({{
-                                let mut contents = ::marigold::marigold_impl::arrayvec::ArrayString::new();
-                                for c in unknown_value.chars() {{
-                                    contents.try_push(c)?;
-                                }}
-                                contents
-                            }})".to_string();
+                            "unknown_value => Other({{\n                                let mut contents = ::marigold::marigold_impl::arrayvec::ArrayString::new();\n                                for c in unknown_value.chars() {{\n                                    contents.try_push(c)?;\n                                }}\n                                contents\n                            }})".to_string();
                     }
                     DefaultEnumVariant::WithDefaultValue(default_name, serialized_value) => {
                         enum_rep.push_str(format!("#[serde(skip_deserializing, rename = \"{serialized_value}\")]\n{default_name},\n").as_str());
