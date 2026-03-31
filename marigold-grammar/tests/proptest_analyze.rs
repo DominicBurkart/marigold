@@ -96,9 +96,8 @@ fn arb_range_input() -> impl Strategy<Value = String> {
 
 /// Generate a select_all input with 2-3 ranges.
 fn arb_select_all_input() -> impl Strategy<Value = String> {
-    proptest::collection::vec(arb_range_input(), 2..4).prop_map(|ranges| {
-        format!("select_all({})", ranges.join(", "))
-    })
+    proptest::collection::vec(arb_range_input(), 2..4)
+        .prop_map(|ranges| format!("select_all({})", ranges.join(", ")))
 }
 
 /// Generate an input function string.
@@ -195,7 +194,8 @@ fn arb_stream_var_program() -> impl Strategy<Value = GeneratedProgram> {
                 .map(|f| format!(".{}", f.text))
                 .collect::<String>();
 
-            let source = format!("my_stream = {input}{var_chain_str}\nmy_stream{out_chain_str}.{output}");
+            let source =
+                format!("my_stream = {input}{var_chain_str}\nmy_stream{out_chain_str}.{output}");
 
             GeneratedProgram {
                 source,
@@ -258,7 +258,10 @@ fn arb_multi_consumer_program() -> impl Strategy<Value = GeneratedProgram> {
             GeneratedProgram {
                 source,
                 expected_stream_count: 2,
-                stream_output_has_collecting: vec![output_has_collecting_1, output_has_collecting_2],
+                stream_output_has_collecting: vec![
+                    output_has_collecting_1,
+                    output_has_collecting_2,
+                ],
                 stream_ends_with_fold: vec![ends_fold_1, ends_fold_2],
                 stream_only_streaming: vec![only_streaming_1, only_streaming_2],
                 uses_stream_variable: true,
@@ -461,5 +464,8 @@ fn fold_in_variable_produces_cardinality_one() {
     let source = "my_var = range(0, 5).fold(0, f)\nmy_var.return";
     let result = marigold_grammar::marigold_analyze(source).unwrap();
     assert_eq!(result.streams.len(), 1);
-    assert_eq!(result.streams[0].cardinality, Cardinality::Exact(BigUint::one()));
+    assert_eq!(
+        result.streams[0].cardinality,
+        Cardinality::Exact(BigUint::one())
+    );
 }
