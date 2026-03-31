@@ -25,6 +25,14 @@ impl Writer {
             inner: WriteTarget::Vector(Box::pin(Vec::new())),
         }
     }
+
+    /// Consumes the writer and returns the written bytes if this is a vector writer.
+    pub fn into_bytes(self) -> Option<Vec<u8>> {
+        match self.inner {
+            WriteTarget::Vector(v) => Some(*Pin::into_inner(v)),
+            WriteTarget::File(_) => None,
+        }
+    }
 }
 
 impl tokio::io::AsyncWrite for Writer {
@@ -72,12 +80,13 @@ mod tests {
         writer.write_all(b"world").await.unwrap();
         writer.flush().await.unwrap();
         writer.shutdown().await.unwrap();
+        assert_eq!(writer.into_bytes().unwrap(), b"hello world");
     }
 
     #[tokio::test]
     async fn file_writer_roundtrip() {
         let dir = std::env::temp_dir();
-        let path = dir.join("marigold_writer_test.txt");
+        let path = dir.join(format!("marigold_writer_test_{}.txt", std::process::id()));
 
         let f = tokio::fs::File::create(&path).await.unwrap();
         let mut writer = Writer::file(f);
