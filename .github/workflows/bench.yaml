@@ -18,6 +18,8 @@ jobs:
       working-directory: marigold-impl
     - run:           cargo bench --bench pipeline_stages --features tokio
       working-directory: marigold-impl
+    - run:           cargo bench --bench map_filter_utilization --features tokio
+      working-directory: marigold-impl
     - run:           cargo bench --bench cpu_utilization --features tokio
       working-directory: marigold-impl
     - run:           cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation"
