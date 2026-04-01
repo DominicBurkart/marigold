@@ -165,7 +165,6 @@ impl NamedStreamNode {
             0 => "".to_string(),
             _ => format!(
                 ".",
-                // wait, this is wrong — let me check the original
             ),
         };
         let stream_prefix = &self.out.stream_prefix;
