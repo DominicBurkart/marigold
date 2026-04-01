@@ -89,11 +89,16 @@ mod tests {
 
         // Every output is a valid permutation of the input (same multiset of values).
         let mut input_sorted = vec![1, 2, 3];
-        input_sorted.sort();
+        input_sorted.sort_unstable();
         for perm in &result {
             let mut p = perm.clone();
-            p.sort();
-            assert_eq!(p, input_sorted, "permutation {:?} contains unexpected values", perm);
+            p.sort_unstable();
+            assert_eq!(
+                p,
+                input_sorted,
+                "permutation {:?} contains unexpected values",
+                perm
+            );
         }
 
         // All permutations are distinct.
