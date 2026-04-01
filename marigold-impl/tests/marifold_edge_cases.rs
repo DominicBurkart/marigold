@@ -8,7 +8,8 @@ async fn fold_empty_stream() {
         .await
         .collect::<Vec<i32>>()
         .await;
-    // Empty stream fold returns the initial accumulator
+    // marifold always emits exactly one value: the final accumulator. It wraps the underlying
+    // fold in futures::stream::once, so even an empty input produces one item (the init value).
     assert_eq!(result, vec![0]);
 }
 
