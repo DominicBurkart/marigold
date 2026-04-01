@@ -110,16 +110,7 @@ fn prepare_cache(
     std::fs::write(
         &manifest_path,
         format!(
-            r#"[package]
-name = "{program_name}"
-edition = "{RUST_EDITION}"
-version = "0.0.1"
-
-[dependencies]
-serde = "1"
-tokio = {{ version = "1", features = ["full"]}}
-{marigold_dep}
-"
+            "[package]\nname = \"{program_name}\"\nedition = \"{RUST_EDITION}\"\nversion = \"0.0.1\"\n\n[dependencies]\nserde = \"1\"\ntokio = {{ version = \"1\", features = [\"full\"]}}\n{marigold_dep}\n"
         ),
     )?;
 
@@ -451,8 +442,7 @@ mod tests {
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        // dirs::cache_dir() resolves to $HOME/.cache on Linux
-        let cache_dir = tmp.join(".cache/marigold/test_clean");
+        let cache_dir = tmp.join(".marigold/test_clean");
         assert!(cache_dir.exists(), "cache should exist after run");
 
         // Clean
@@ -494,8 +484,7 @@ mod tests {
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        // dirs::cache_dir() resolves to $HOME/.cache on Linux
-        let cache_root = tmp.join(".cache/marigold");
+        let cache_root = tmp.join(".marigold");
         assert!(cache_root.exists(), "cache should exist after run");
 
         // Clean all
