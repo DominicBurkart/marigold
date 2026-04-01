@@ -110,7 +110,9 @@ mod tests {
     // Without a spawning async runtime the `run()` future and the `collect()` future must
     // be polled together; otherwise `run()` blocks on a full channel while the receiver
     // is not yet being polled, causing a deadlock.
-    async fn run_and_collect_one(source: impl Stream<Item = i32> + Unpin + Send + 'static) -> Vec<i32> {
+    async fn run_and_collect_one(
+        source: impl Stream<Item = i32> + Unpin + Send + 'static,
+    ) -> Vec<i32> {
         let mut mcs = MultiConsumerStream::new(source);
         let rx = mcs.get();
         futures::join!(mcs.run(), rx.collect::<Vec<i32>>()).1
