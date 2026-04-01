@@ -119,7 +119,7 @@ version = "0.0.1"
 serde = "1"
 tokio = {{ version = "1", features = ["full"]}}
 {marigold_dep}
-"#
+"
         ),
     )?;
 
@@ -451,7 +451,8 @@ mod tests {
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        let cache_dir = tmp.join(".marigold/test_clean");
+        // dirs::cache_dir() resolves to $HOME/.cache on Linux
+        let cache_dir = tmp.join(".cache/marigold/test_clean");
         assert!(cache_dir.exists(), "cache should exist after run");
 
         // Clean
@@ -493,7 +494,8 @@ mod tests {
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        let cache_root = tmp.join(".marigold");
+        // dirs::cache_dir() resolves to $HOME/.cache on Linux
+        let cache_root = tmp.join(".cache/marigold");
         assert!(cache_root.exists(), "cache should exist after run");
 
         // Clean all
