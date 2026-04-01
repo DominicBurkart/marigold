@@ -334,7 +334,7 @@ input_and_maybe_stream_functions = {
 //
 // # Categories
 //
-// **Filtering**: filter, filter_map, keep_first_n
+// **Filtering**: filter, filter_map, keep_first_n, take
 // **Mapping**: map
 // **Combinatorics**: permutations, permutations_with_replacement, combinations
 // **Folding**: fold
@@ -357,6 +357,7 @@ stream_function = {
     permutations_with_replacement_fn |
     combinations_fn |
     keep_first_n_fn |
+    take_fn |
     filter_fn |
     filter_map_fn |
     map_fn |
@@ -397,6 +398,12 @@ combinations_fn = { "combinations(" ~ free_text_literal ~ ")" }
 // Argument 1: stream variable name
 // Argument 2: n (usize) - number of items to keep
 keep_first_n_fn = { "keep_first_n(" ~ free_text_literal ~ "," ~ free_text_identifier ~ ")" }
+
+// take(n) - Take only the first n items from the stream
+// Transforms Stream<T> -> Stream<T>, yielding at most n items
+// Argument: n (u64) - maximum number of items to emit
+// Equivalent to Rust's StreamExt::take(n)
+take_fn = { "take(" ~ free_text_literal ~ ")" }
 
 // fold(init, closure) - Reduce stream to single value
 // Transforms Stream<T> -> Stream<Acc> where Acc = closure(Acc, T)
