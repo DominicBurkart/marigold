@@ -106,15 +106,21 @@ mod tests {
     use super::*;
     use futures::stream::StreamExt;
 
+    // Helper: run the MultiConsumerStream and collect from a single receiver concurrently.
+    // Without a spawning async runtime the `run()` future and the `collect()` future must
+    // be polled together; otherwise `run()` blocks on a full channel while the receiver
+    // is not yet being polled, causing a deadlock.
+    async fn run_and_collect_one(source: impl Stream<Item = i32> + Unpin + Send + 'static) -> Vec<i32> {
+        let mut mcs = MultiConsumerStream::new(source);
+        let rx = mcs.get();
+        futures::join!(mcs.run(), rx.collect::<Vec<i32>>()).1
+    }
+
     #[tokio::test]
     async fn single_consumer_receives_all_items() {
         let source = futures::stream::iter(vec![1, 2, 3]);
-        let mut mcs = MultiConsumerStream::new(source);
-        let rx = mcs.get();
-        mcs.run().await;
-
-        let collected: Vec<i32> = rx.collect().await;
-        assert_eq!(collected, vec![1, 2, 3]);
+        let result = run_and_collect_one(source).await;
+        assert_eq!(result, vec![1, 2, 3]);
     }
 
     #[tokio::test]
@@ -123,10 +129,14 @@ mod tests {
         let mut mcs = MultiConsumerStream::new(source);
         let rx1 = mcs.get();
         let rx2 = mcs.get();
-        mcs.run().await;
-
-        let (r1, r2): (Vec<i32>, Vec<i32>) =
-            futures::future::join(rx1.collect(), rx2.collect()).await;
+        // run() and both collects must be driven concurrently to avoid a channel
+        // backpressure deadlock (BUFFER_SIZE = 1 means run() blocks as soon as the
+        // buffer fills up if the receivers are not being polled).
+        let (_, r1, r2): ((), Vec<i32>, Vec<i32>) = futures::join!(
+            mcs.run(),
+            rx1.collect::<Vec<i32>>(),
+            rx2.collect::<Vec<i32>>(),
+        );
         assert_eq!(r1, vec![10, 20, 30]);
         assert_eq!(r2, vec![10, 20, 30]);
     }
@@ -134,12 +144,8 @@ mod tests {
     #[tokio::test]
     async fn empty_stream_produces_no_items() {
         let source = futures::stream::iter(Vec::<i32>::new());
-        let mut mcs = MultiConsumerStream::new(source);
-        let rx = mcs.get();
-        mcs.run().await;
-
-        let collected: Vec<i32> = rx.collect().await;
-        assert!(collected.is_empty());
+        let result = run_and_collect_one(source).await;
+        assert!(result.is_empty());
     }
 
     #[tokio::test]
