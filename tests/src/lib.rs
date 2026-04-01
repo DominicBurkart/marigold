@@ -185,4 +185,37 @@ mod tests {
         .await;
         assert_eq!(result, vec![0, 1, 2, 3]);
     }
+
+    #[tokio::test]
+    async fn test_take_basic() {
+        let result = m!(
+            range(0, 10).take(5).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[tokio::test]
+    async fn test_take_more_than_cardinality() {
+        let result = m!(
+            range(0, 3).take(100).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2]);
+    }
+
+    #[tokio::test]
+    async fn test_take_zero() {
+        let result = m!(
+            range(0, 10).take(0).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![] as Vec<i32>);
+    }
 }
