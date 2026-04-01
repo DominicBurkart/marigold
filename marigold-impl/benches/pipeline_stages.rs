@@ -30,7 +30,7 @@ fn bench_pipeline_stages(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("pipeline_stages");
     group.sample_size(10);
-    group.measurement_time(Duration::from_secs(30));
+    group.measurement_time(Duration::from_secs(10));
 
     group.bench_function("range_8_only", |b| {
         b.iter(|| rt.block_on(async { futures::stream::iter(0u16..8).collect::<Vec<_>>().await }))
@@ -48,8 +48,6 @@ fn bench_pipeline_stages(c: &mut Criterion) {
         })
     });
 
-    group.measurement_time(Duration::from_secs(60));
-
     group.bench_function("combinations_512_k3", |b| {
         b.iter_batched(
             || pwr_items.to_vec(),
@@ -66,7 +64,7 @@ fn bench_pipeline_stages(c: &mut Criterion) {
         )
     });
 
-    group.measurement_time(Duration::from_secs(120));
+    group.measurement_time(Duration::from_secs(20));
 
     group.bench_function("full_pipeline_range8_pwr3_comb3_kfn20", |b| {
         b.iter(|| {
