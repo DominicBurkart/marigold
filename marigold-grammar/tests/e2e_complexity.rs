@@ -60,6 +60,27 @@ mod left_right {
     }
 }
 
+#[test]
+fn no_fn_decl_assumes_false() {
+    let result = analyze_file("tests/programs/no_fn_decl.marigold");
+    assert!(!result.assumes_o1_user_fns);
+}
+
+#[test]
+fn with_fn_decl_assumes_true() {
+    let result = analyze_file("tests/programs/with_fn_decl.marigold");
+    assert!(result.assumes_o1_user_fns);
+}
+
+#[test]
+fn assumes_o1_user_fns_serde_roundtrip() {
+    let result = analyze_file("tests/programs/with_fn_decl.marigold");
+    let json = serde_json::to_string(&result).expect("serialize");
+    let deserialized: marigold_grammar::complexity::ProgramComplexity =
+        serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(result.assumes_o1_user_fns, deserialized.assumes_o1_user_fns);
+}
+
 fn analyze_file(path: &str) -> marigold_grammar::complexity::ProgramComplexity {
     let source =
         std::fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
