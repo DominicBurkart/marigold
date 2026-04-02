@@ -928,9 +928,19 @@ mod tests {
         assert_eq!(select_smallest_unsigned_type(65536), "u32");
     }
 
+    /// Compile-time totality check for `TypedExpression` variants.
+    ///
+    /// This test ensures that every variant of `TypedExpression` is explicitly
+    /// constructed, so adding a new variant without updating downstream match
+    /// arms is caught at test time. When you add a new variant:
+    ///   1. Add a dummy construction of it to the `variants` vec below.
+    ///   2. Bump `EXPECTED_TYPED_EXPRESSION_VARIANTS` by one.
+    ///
+    /// To verify this test catches missing variants, temporarily add a dummy
+    /// variant to the enum and confirm the test fails.
     #[test]
     fn test_typed_expression_variant_count() {
-        const EXPECTED_VARIANT_COUNT: usize = 9;
+        const EXPECTED_TYPED_EXPRESSION_VARIANTS: usize = 9;
 
         let dummy_inp = InputFunctionNode {
             variability: InputVariability::Constant,
@@ -1012,12 +1022,22 @@ mod tests {
             }),
         ];
 
-        assert_eq!(variants.len(), EXPECTED_VARIANT_COUNT);
+        assert_eq!(variants.len(), EXPECTED_TYPED_EXPRESSION_VARIANTS);
     }
 
+    /// Compile-time totality check for `StreamFunctionKind` variants.
+    ///
+    /// This test ensures that every variant of `StreamFunctionKind` is
+    /// explicitly listed, so adding a new variant without updating downstream
+    /// match arms is caught at test time. When you add a new variant:
+    ///   1. Add it to the `variants` vec below.
+    ///   2. Bump `EXPECTED_STREAM_FUNCTION_KIND_VARIANTS` by one.
+    ///
+    /// To verify this test catches missing variants, temporarily add a dummy
+    /// variant to the enum and confirm the test fails.
     #[test]
     fn test_stream_function_kind_variant_count() {
-        const EXPECTED_VARIANT_COUNT: usize = 10;
+        const EXPECTED_STREAM_FUNCTION_KIND_VARIANTS: usize = 10;
 
         let variants: Vec<StreamFunctionKind> = vec![
             StreamFunctionKind::Map,
@@ -1032,6 +1052,6 @@ mod tests {
             StreamFunctionKind::OkOrPanic,
         ];
 
-        assert_eq!(variants.len(), EXPECTED_VARIANT_COUNT);
+        assert_eq!(variants.len(), EXPECTED_STREAM_FUNCTION_KIND_VARIANTS);
     }
 }
