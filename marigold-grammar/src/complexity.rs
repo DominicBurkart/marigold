@@ -2198,18 +2198,15 @@ mod proptests {
         let total = 10_000;
         let mut unknown_count = 0u64;
         for _ in 0..total {
-            let value = strategy
-                .new_tree(&mut runner)
-                .unwrap()
-                .current();
+            let value = strategy.new_tree(&mut runner).unwrap().current();
             if value == Symbolic::Unknown {
                 unknown_count += 1;
             }
         }
-        // With 10% weight we expect ~1000 unknowns; assert at least 1% as a floor.
+        // With 10% weight we expect ~1000 unknowns; assert at least 5% as a safe floor.
         assert!(
-            unknown_count * 100 >= total,
-            "Unknown appeared {unknown_count}/{total} times, expected >= 10%"
+            unknown_count * 100 >= total * 5,
+            "Unknown appeared {unknown_count}/{total} times, expected >= 5%"
         );
     }
 
@@ -2224,14 +2221,21 @@ mod proptests {
         }
     }
 
+    proptest! {
+        #[test]
+        fn test_symbolic_with_unknown_does_not_panic_on_upper_bound(sym in arb_symbolic()) {
+            let _ = sym.upper_bound();
+            let _ = sym.try_evaluate();
+        }
+    }
+
     #[test]
     fn test_analyze_does_not_panic_with_declarations() {
         use crate::nodes::*;
 
         fn make_struct_decl(n: usize) -> TypedExpression {
-            let fields: Vec<(String, Type)> = (0..n)
-                .map(|i| (format!("field_{i}"), Type::I32))
-                .collect();
+            let fields: Vec<(String, Type)> =
+                (0..n).map(|i| (format!("field_{i}"), Type::I32)).collect();
             TypedExpression::StructDeclaration(StructDeclarationNode {
                 name: "TestStruct".to_string(),
                 fields,
@@ -2239,9 +2243,8 @@ mod proptests {
         }
 
         fn make_enum_decl(n: usize) -> TypedExpression {
-            let variants: Vec<(String, Option<String>)> = (0..n)
-                .map(|i| (format!("Variant{i}"), None))
-                .collect();
+            let variants: Vec<(String, Option<String>)> =
+                (0..n).map(|i| (format!("Variant{i}"), None)).collect();
             TypedExpression::EnumDeclaration(EnumDeclarationNode {
                 name: "TestEnum".to_string(),
                 variants,
