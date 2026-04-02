@@ -2236,7 +2236,12 @@ mod proptests {
         ];
         for i in 0..chain.len() {
             for j in (i + 1)..chain.len() {
-                assert!(chain[i] < chain[j], "{:?} should be < {:?}", chain[i], chain[j]);
+                assert!(
+                    chain[i] < chain[j],
+                    "{:?} should be < {:?}",
+                    chain[i],
+                    chain[j]
+                );
             }
         }
     }
