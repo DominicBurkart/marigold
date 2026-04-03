@@ -13,7 +13,7 @@
 //! - **Real-world**: Examples from integration tests
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use marigold_grammar::parser::{MarigoldParser, PestParser};
+use marigold_grammar::parser::PestParser;
 
 /// Benchmark simple range with return
 fn bench_simple_range_return(c: &mut Criterion) {
