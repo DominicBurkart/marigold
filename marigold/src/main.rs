@@ -134,13 +134,17 @@ fn clean_all_cache(cache_root: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Invoke `cargo run` (with `--manifest-path`) or `cargo install` (with `--path`).
-/// Only these two commands are supported; the `release` flag is only meaningful for `run`.
 #[cfg(feature = "cli")]
-fn invoke_cargo_run_or_install(
-    command: &str,
+enum CargoInvocation {
+    Run { release: bool },
+    Install,
+}
+
+/// Invoke `cargo run` (with `--manifest-path`) or `cargo install` (with `--path`).
+#[cfg(feature = "cli")]
+fn invoke_cargo(
+    invocation: CargoInvocation,
     path: &std::path::Path,
-    release: bool,
 ) -> Result<std::process::ExitStatus> {
     use std::process::Command;
 
@@ -148,23 +152,24 @@ fn invoke_cargo_run_or_install(
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("Marigold could not parse cache path as utf-8"))?;
 
-    let status = if command == "run" {
-        if release {
-            Command::new("cargo")
-                .args([command, "--release", "--manifest-path", path_str])
-                .spawn()?
-                .wait()?
-        } else {
-            Command::new("cargo")
-                .args([command, "--manifest-path", path_str])
-                .spawn()?
-                .wait()?
+    let status = match invocation {
+        CargoInvocation::Run { release } => {
+            if release {
+                Command::new("cargo")
+                    .args(["run", "--release", "--manifest-path", path_str])
+                    .spawn()?
+                    .wait()?
+            } else {
+                Command::new("cargo")
+                    .args(["run", "--manifest-path", path_str])
+                    .spawn()?
+                    .wait()?
+            }
         }
-    } else {
-        Command::new("cargo")
-            .args([command, "--path", path_str])
+        CargoInvocation::Install => Command::new("cargo")
+            .args(["install", "--path", path_str])
             .spawn()?
-            .wait()?
+            .wait()?,
     };
 
     Ok(status)
@@ -212,6 +217,18 @@ fn main() -> Result<()> {
             .unwrap_or(file_name);
         file_name
     };
+
+    // Validate program_name against Cargo package name rules: ^[a-z][a-z0-9_]*$
+    if !program_name.starts_with(|c: char| c.is_ascii_lowercase())
+        || !program_name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
+        anyhow::bail!(
+            "invalid program name '{}': must start with a lowercase letter and contain only [a-z0-9_]",
+            program_name
+        );
+    }
 
     let command = match args.command {
         Some(ref command) => match command {
@@ -284,12 +301,11 @@ fn main() -> Result<()> {
     );
 
     let exit_status = if command == "run" {
-        invoke_cargo_run_or_install("run", &manifest_path, !unoptimized)?
+        invoke_cargo(CargoInvocation::Run { release: !unoptimized }, &manifest_path)?
     } else {
-        invoke_cargo_run_or_install(
-            "install",
+        invoke_cargo(
+            CargoInvocation::Install,
             &marigold_cache_directory.join(&program_name),
-            false,
         )?
     };
 
@@ -437,18 +453,21 @@ mod tests {
         let status = Command::new(&binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        let cache_dir = tmp.join(".marigold/test_clean");
+        // dirs::cache_dir() on Linux resolves to $XDG_CACHE_HOME (defaulting to $HOME/.cache)
+        let cache_dir = tmp.join(".cache/marigold/test_clean");
         assert!(cache_dir.exists(), "cache should exist after run");
 
         // Clean
         let status = Command::new(&binary)
             .args(["clean", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold clean");
@@ -479,18 +498,21 @@ mod tests {
         let status = Command::new(&binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        let cache_root = tmp.join(".marigold");
+        // dirs::cache_dir() on Linux resolves to $XDG_CACHE_HOME (defaulting to $HOME/.cache)
+        let cache_root = tmp.join(".cache/marigold");
         assert!(cache_root.exists(), "cache should exist after run");
 
         // Clean all
         let status = Command::new(&binary)
             .args(["clean-all"])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold clean-all");
@@ -573,6 +595,17 @@ mod cache_tests {
     #[test]
     fn test_prepare_cache_readonly_parent() {
         use std::os::unix::fs::PermissionsExt;
+        // Root can write to read-only directories, so skip this test when running as root.
+        let is_root = std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim() == "0")
+            .unwrap_or(false);
+        if is_root {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o444)).unwrap();
         let result = prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None);
@@ -616,10 +649,13 @@ mod cache_tests {
         let manifest =
             prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None).unwrap();
         fs::remove_dir_all(tmp.path().join("prog")).unwrap();
-        let result = invoke_cargo_run_or_install("run", &manifest, false);
+        // cargo spawns successfully but exits non-zero because the manifest is missing;
+        // invoke_cargo returns Ok(failing_status), not Err.
+        let status = invoke_cargo(CargoInvocation::Run { release: false }, &manifest)
+            .expect("cargo should spawn successfully");
         assert!(
-            result.is_err(),
-            "expected error when cache dir was removed before cargo invocation"
+            !status.success(),
+            "cargo should fail when manifest is missing"
         );
     }
 }
