@@ -1,0 +1,1 @@
+read_file("data.csv", csv, struct=Data).permutations(2).return
