@@ -10,7 +10,6 @@
 [![style](https://github.com/DominicBurkart/marigold/workflows/style/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/style.yaml)
 [![wasm](https://github.com/DominicBurkart/marigold/workflows/wasm/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml)
 [![last commit](https://img.shields.io/github/last-commit/dominicburkart/marigold)](https://github.com/DominicBurkart/marigold)
-[![onboarding](https://github.com/DominicBurkart/marigold/workflows/onboarding/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/onboarding.yaml)
 
 Marigold is an imperative, domain-specific language for data pipelining and
 analysis using async streams. It can be used as a standalone language or within
