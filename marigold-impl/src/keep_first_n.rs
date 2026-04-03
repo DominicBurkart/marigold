@@ -19,6 +19,33 @@ where
     ) -> futures::stream::Iter<std::vec::IntoIter<T>>;
 }
 
+/// Fill `heap` from `stream` until the heap reaches capacity `n` or the stream
+/// is exhausted.  Returns `true` when the stream was exhausted before the heap
+/// was full (i.e. there is nothing left to process).
+///
+/// This is the shared "warm-up" phase used by both the parallel
+/// (`tokio`/`async-std`) and the sequential (no-runtime) implementations of
+/// `keep_first_n`.  The only thing that differs between those two paths is what
+/// happens *after* the heap is full, so extracting this loop avoids repeating
+/// the identical fill logic.
+async fn fill_heap_to_capacity<S, T, C>(
+    stream: &mut S,
+    heap: &mut BinaryHeap<T, binary_heap_plus::FnComparator<C>>,
+    n: usize,
+) -> bool
+where
+    S: Stream<Item = T> + Unpin,
+    C: Fn(&T, &T) -> Ordering,
+{
+    while heap.len() < n {
+        match stream.next().await {
+            Some(item) => heap.push(item),
+            None => return true, // stream exhausted before heap is full
+        }
+    }
+    false
+}
+
 #[cfg(any(feature = "tokio", feature = "async-std"))]
 #[async_trait]
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
@@ -75,17 +102,11 @@ where
     let mut first_n =
         BinaryHeap::with_capacity_by(n, move |a, b| indexed_comparator(a, b).reverse());
 
-    // Iterate through values in a single thread until we have seen n values.
-    while first_n.len() < n {
-        if let Some(indexed_item) = indexed_stream.next().await {
-            first_n.push(indexed_item);
-        } else {
-            break;
-        }
-    }
+    // Shared warm-up: fill the heap until it reaches capacity or the stream is exhausted.
+    let exhausted = fill_heap_to_capacity(&mut indexed_stream, &mut first_n, n).await;
 
     // If we have exhausted the stream before reaching n values, we can exit early.
-    if first_n.len() < n {
+    if exhausted {
         return futures::stream::iter(
             first_n
                 .into_sorted_vec()
@@ -179,16 +200,11 @@ where
             Ordering::Greater => Ordering::Less,
         });
 
-        while first_n.len() < n {
-            if let Some(item) = self.next().await {
-                first_n.push(item);
-            } else {
-                break;
-            }
-        }
+        // Shared warm-up: fill the heap until it reaches capacity or the stream is exhausted.
+        let exhausted = fill_heap_to_capacity(&mut self, &mut first_n, n).await;
 
         // If we have exhausted the stream before reaching n values, we can exit early.
-        if first_n.len() < n {
+        if exhausted {
             return futures::stream::iter(first_n.into_sorted_vec().into_iter());
         }
 
