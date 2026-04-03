@@ -183,14 +183,14 @@ fn main() -> Result<()> {
             .as_str(),
     )?;
 
-    const MARIGOLD_VERSION: &str = env!"CARGO_PKG_VERSION");
+    const MARIGOLD_VERSION: &str = env!("CARGO_PKG_VERSION");
 
     let manifest_path = program_project_dir.join("Cargo.toml");
 
     let marigold_dep = if let Ok(workspace_path) = std::env::var("MARIGOLD_WORKSPACE_PATH") {
-        format!(r#"marigold = {{ path = "{workspace_path}", features = ["tokio", "io"]}}\"
+        format!(r#"marigold = {{ path = "{workspace_path}", features = ["tokio", "io"]}}"#)
     } else {
-        format!(r#"marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}\"
+        format!(r#"marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}"#)
     };
 
     std::fs::write(
@@ -482,11 +482,11 @@ mod tests {
         let tmp = create_temp_dir("analyze");
 
         // A simple valid Marigold program: range written to CSV (non-returning terminal).
-        // `analyze` only needs to parse and inspect the pipeline — it does not run it.
+        // `analyze` only needs to parse and inspect the pipeline - it does not run it.
         let marigold_file = tmp.join("test_analyze.marigold");
         fs::write(
             &marigold_file,
-            "range(0, 100).write_file(\"/dev/null\", csv)",
+            r#"range(0, 100).write_file("/dev/null", csv)"#,
         )
         .expect("could not write test file");
 
@@ -544,9 +544,8 @@ mod tests {
         let tmp = create_temp_dir("analyze_invalid");
 
         let marigold_file = tmp.join("invalid.marigold");
-        // Missing `.return` or write terminal — parser should reject this.
-        fs::write(&marigold_file, "range(0, 10")
-            .expect("could not write test file");
+        // Missing closing paren - parser should reject this.
+        fs::write(&marigold_file, "range(0, 10").expect("could not write test file");
 
         let status = Command::new(&binary)
             .args(["analyze", marigold_file.to_str().unwrap()])
@@ -567,7 +566,7 @@ mod tests {
     /// Writer produces the expected newline-separated output format.
     ///
     /// This is the primary integration test for `writer.rs`: it exercises the
-    /// full path from Marigold DSL → compiled Rust → `Writer::file` → disk.
+    /// full path from Marigold DSL -> compiled Rust -> `Writer::file` -> disk.
     #[test]
     fn test_write_file_csv_round_trip() {
         let binary = &*BINARY;
