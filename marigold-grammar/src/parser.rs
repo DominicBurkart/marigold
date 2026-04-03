@@ -60,8 +60,9 @@ impl PestParser {
     ) -> Result<crate::complexity::ProgramComplexity, MarigoldParseError> {
         let pairs = MarigoldPestParser::parse(Rule::program, input)
             .map_err(|e| MarigoldParseError(format!("Parse error: {}", e)))?;
-        let expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)
+        let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)
             .map_err(MarigoldParseError)?;
+        Self::resolve_enum_range_counts(&mut expressions).map_err(MarigoldParseError)?;
         Ok(crate::complexity::analyze_program(&expressions))
     }
 
@@ -72,13 +73,63 @@ impl PestParser {
             .map_err(|e| format!("Parse error: {}", e))?;
 
         // Stage 2: Build AST from parse tree
-        let expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)?;
+        let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)?;
+
+        // Stage 2.5: Validate enum names in range(EnumName) and resolve InputCount::Enum → Known
+        Self::resolve_enum_range_counts(&mut expressions)?;
 
         // Stage 3: Validate bounded types (if any)
         let resolved_bounds = Self::validate_bounded_types(&expressions)?;
 
         // Stage 4: Generate Rust code (replicating LALRPOP logic)
         Self::generate_rust_code(expressions, resolved_bounds)
+    }
+
+    /// Resolve `InputCount::Enum(name)` placeholders produced by `range(EnumName)`.
+    ///
+    /// For each stream whose input count is `Enum(name)`:
+    /// - If `name` is a declared enum in this program, replace with `Known(unit_variant_count)`.
+    /// - Otherwise return a user-friendly error instead of silently emitting invalid Rust.
+    fn resolve_enum_range_counts(
+        expressions: &mut [crate::nodes::TypedExpression],
+    ) -> Result<(), String> {
+        use crate::nodes::{InputCount, TypedExpression};
+        use num_bigint::BigUint;
+
+        // Build name → unit_variant_count from enum declarations in this program.
+        let enum_counts: std::collections::HashMap<String, BigUint> = expressions
+            .iter()
+            .filter_map(|e| match e {
+                TypedExpression::EnumDeclaration(node) => {
+                    let count = BigUint::from(node.unit_variant_count() as u64);
+                    Some((node.name.clone(), count))
+                }
+                _ => None,
+            })
+            .collect();
+
+        for expr in expressions.iter_mut() {
+            let inp = match expr {
+                TypedExpression::UnnamedReturningStream(s) => &mut s.inp_and_funs.inp,
+                TypedExpression::UnnamedNonReturningStream(s) => &mut s.inp_and_funs.inp,
+                TypedExpression::StreamVariable(s) => &mut s.inp,
+                _ => continue,
+            };
+
+            if let InputCount::Enum(ref name) = inp.input_count {
+                let name = name.clone();
+                match enum_counts.get(&name) {
+                    Some(count) => inp.input_count = InputCount::Known(count.clone()),
+                    None => {
+                        return Err(format!(
+                            "range({name}): '{name}' is not a declared enum in this program"
+                        ))
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn validate_bounded_types(
@@ -1088,10 +1139,12 @@ mod negative_tests {
 
     #[test]
     fn test_reject_incomplete_range_single_arg() {
+        // range(10) is rejected: the numeric form requires two args (start, end),
+        // and `10` doesn't qualify as an identifier for the enum form.
         let result = parse_marigold("range(10).return");
         assert!(
             result.is_err(),
-            "Should reject range() with single argument (grammar requires two)"
+            "Should reject range(10) — ambiguous single numeric arg"
         );
     }
 
@@ -1570,6 +1623,50 @@ mod struct_enum_tests {
         assert!(
             code.contains("Words::__marigold_variants()"),
             "Should call __marigold_variants() in stream, got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_enum_range_known_input_count() {
+        // Verify that range(EnumName) resolves to a statically-known InputCount so that
+        // complexity analysis can treat the pipeline correctly.
+        let result = parse_marigold("enum Words { Hello, World, } range(Words).return");
+        assert!(result.is_ok(), "Should parse range(EnumName): {:?}", result);
+        // If InputCount was properly resolved, analyze should return Known cardinality.
+        let complexity = PestParser::analyze("enum Words { Hello, World, } range(Words).return");
+        assert!(
+            complexity.is_ok(),
+            "Complexity analysis should succeed for range(EnumName): {:?}",
+            complexity
+        );
+    }
+
+    #[test]
+    fn test_reject_range_with_numeric_single_arg() {
+        // `range(42)` must not accidentally match the `range(EnumName)` branch:
+        // `free_text_identifier` requires a leading letter/underscore, so a pure
+        // numeric argument is unambiguously rejected at the grammar level.
+        let result = parse_marigold("range(42).return");
+        assert!(
+            result.is_err(),
+            "range(42) should be rejected — a bare number is not a valid identifier"
+        );
+    }
+
+    #[test]
+    fn test_reject_range_with_undeclared_enum() {
+        // `range(NonExistent)` parses grammatically (it looks like an identifier)
+        // but must be rejected during semantic validation when the name is not a
+        // declared enum in the program.
+        let result = parse_marigold("range(NonExistent).return");
+        assert!(
+            result.is_err(),
+            "range(NonExistent) should be rejected when the enum is not declared"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("NonExistent"),
+            "Error message should mention the unknown name, got: {err}"
         );
     }
 }
