@@ -735,7 +735,7 @@ impl PestAstBuilder {
             let enum_name = first.as_str();
             Ok(InputFunctionNode {
                 variability: InputVariability::Constant,
-                input_count: InputCount::Unknown,
+                input_count: InputCount::Enum(enum_name.to_string()),
                 code: format!("::marigold::marigold_impl::futures::stream::iter({enum_name}::__marigold_variants())"),
             })
         }
