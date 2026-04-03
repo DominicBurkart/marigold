@@ -5,6 +5,9 @@ use futures::stream::StreamExt;
 use std::cmp::Ordering;
 use tracing::instrument;
 
+// Batch size for ready_chunks: amortizes spawn overhead (~8,405 ns) over many items (~28 ns each).
+// Measured crossover is ~300 items; 256 is a power-of-2 heuristic just below that. Workloads with
+// heavier comparators would benefit from a smaller value; trivially cheap ones from a larger one.
 #[cfg(any(feature = "tokio", feature = "async-std"))]
 const READY_CHUNK_SIZE: usize = 256;
 

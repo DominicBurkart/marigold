@@ -4,8 +4,8 @@ set -euo pipefail
 # Usage: ./compare_baseline.sh [pre_commit] [post_commit] [output_file]
 #
 # Arguments (optional):
-#   pre_commit   Commit SHA before optimization (default: 3d020a1)
-#   post_commit  Commit SHA after optimization  (default: 1ec3465)
+#   pre_commit   Commit SHA before optimization (default: HEAD~1)
+#   post_commit  Commit SHA after optimization  (default: HEAD)
 #   output_file  Path for the markdown comparison (default: compare_results.md)
 #
 # Captures metrics at both commits and writes a structured before/after
@@ -13,7 +13,7 @@ set -euo pipefail
 #
 # Must be run from the marigold-impl directory (or the workspace root).
 # Requires a clean working tree (no uncommitted changes).
-# Requirements: bc, jq
+# Requirements: bc, jq, Bash 4+ (uses mapfile)
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 BENCH_DIR="${REPO_ROOT}/marigold-impl"

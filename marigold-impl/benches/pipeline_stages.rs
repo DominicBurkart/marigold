@@ -7,7 +7,8 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-fn compare_by_sum_nested(a: &[Vec<u16>], b: &[Vec<u16>]) -> Ordering {
+#[allow(clippy::ptr_arg)] // Must use &Vec to match KeepFirstN's Fn(&T, &T) bound where T = Vec<Vec<u16>>
+fn compare_by_sum_nested(a: &Vec<Vec<u16>>, b: &Vec<Vec<u16>>) -> Ordering {
     let sa: u32 = a.iter().flatten().map(|&x| x as u32).sum();
     let sb: u32 = b.iter().flatten().map(|&x| x as u32).sum();
     sa.cmp(&sb)
