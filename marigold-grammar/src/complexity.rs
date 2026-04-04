@@ -2097,20 +2097,31 @@ mod proptests {
         (1u64..1000).prop_map(|n| Symbolic::Constant(BigUint::from(n)))
     }
 
+    /// Weighted leaf: 90% Constant, 10% Unknown.
+    fn arb_symbolic_leaf() -> impl Strategy<Value = Symbolic> {
+        prop_oneof![
+            9 => arb_symbolic_constant(),
+            1 => Just(Symbolic::Unknown),
+        ]
+    }
+
     fn arb_symbolic() -> impl Strategy<Value = Symbolic> {
         prop_oneof![
-            arb_symbolic_constant(),
+            arb_symbolic_leaf(),
             Just(Symbolic::Unknown),
-            arb_symbolic_constant().prop_map(|s| Symbolic::Filtered(Box::new(s))),
-            (arb_symbolic_constant(), 1u64..5)
+            arb_symbolic_leaf().prop_map(|s| Symbolic::Filtered(Box::new(s))),
+            (arb_symbolic_leaf(), 1u64..5)
                 .prop_map(|(s, k)| Symbolic::Permutations { n: Box::new(s), k }),
-            (arb_symbolic_constant(), 1u64..5)
+            (arb_symbolic_leaf(), 1u64..5)
                 .prop_map(|(s, k)| Symbolic::Combinations { n: Box::new(s), k }),
+            // PermutationsWithReplacement display format (`n^k`) requires a constant
+            // for the base, since the grammar rule `symbolic_perm_rep` only accepts
+            // `symbolic_constant ~ "^" ~ number`.
             (arb_symbolic_constant(), 1u64..4)
                 .prop_map(|(s, k)| Symbolic::PermutationsWithReplacement { n: Box::new(s), k }),
-            (arb_symbolic_constant(), arb_symbolic_constant())
+            (arb_symbolic_leaf(), arb_symbolic_leaf())
                 .prop_map(|(a, b)| Symbolic::Min(Box::new(a), Box::new(b))),
-            proptest::collection::vec(arb_symbolic_constant(), 2..4).prop_map(Symbolic::Sum),
+            proptest::collection::vec(arb_symbolic_leaf(), 2..5).prop_map(Symbolic::Sum),
         ]
     }
 
@@ -2174,6 +2185,128 @@ mod proptests {
             let s = sym.to_string();
             let parsed = Symbolic::from_str(&s).unwrap();
             prop_assert_eq!(sym, parsed);
+        }
+    }
+
+    #[test]
+    fn test_arb_symbolic_unknown_frequency() {
+        use proptest::strategy::ValueTree;
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::default();
+        let strategy = arb_symbolic_leaf();
+        let total = 10_000;
+        let mut unknown_count = 0u64;
+        for _ in 0..total {
+            let value = strategy.new_tree(&mut runner).unwrap().current();
+            if value == Symbolic::Unknown {
+                unknown_count += 1;
+            }
+        }
+        // With 10% weight we expect ~1000 unknowns; assert at least 5% as a safe floor.
+        assert!(
+            unknown_count * 100 >= total * 5,
+            "Unknown appeared {unknown_count}/{total} times, expected >= 5%"
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn test_sum_of_constants_try_evaluate(
+            parts in proptest::collection::vec(arb_symbolic_constant(), 2..5)
+        ) {
+            let expected: BigUint = parts.iter().map(|p| p.try_evaluate().unwrap()).sum();
+            let sum = Symbolic::Sum(parts);
+            prop_assert_eq!(sum.try_evaluate(), Some(expected));
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_symbolic_with_unknown_does_not_panic_on_upper_bound(sym in arb_symbolic()) {
+            let _ = sym.upper_bound();
+            let _ = sym.try_evaluate();
+        }
+    }
+
+    #[test]
+    fn test_analyze_does_not_panic_with_declarations() {
+        use crate::nodes::*;
+
+        fn make_struct_decl(n: usize) -> TypedExpression {
+            let fields: Vec<(String, Type)> =
+                (0..n).map(|i| (format!("field_{i}"), Type::I32)).collect();
+            TypedExpression::StructDeclaration(StructDeclarationNode {
+                name: "TestStruct".to_string(),
+                fields,
+            })
+        }
+
+        fn make_enum_decl(n: usize) -> TypedExpression {
+            let variants: Vec<(String, Option<String>)> =
+                (0..n).map(|i| (format!("Variant{i}"), None)).collect();
+            TypedExpression::EnumDeclaration(EnumDeclarationNode {
+                name: "TestEnum".to_string(),
+                variants,
+                default_variant: None,
+            })
+        }
+
+        fn make_fn_decl() -> TypedExpression {
+            TypedExpression::FnDeclaration(FnDeclarationNode {
+                name: "test_fn".to_string(),
+                parameters: vec![("x".to_string(), "i32".to_string())],
+                output_type: "i32".to_string(),
+                body: "x".to_string(),
+            })
+        }
+
+        fn make_stream() -> TypedExpression {
+            TypedExpression::UnnamedReturningStream(UnnamedStreamNode {
+                inp_and_funs: InputAndMaybeStreamFunctions {
+                    inp: InputFunctionNode {
+                        variability: InputVariability::Constant,
+                        input_count: InputCount::Known(BigUint::from(10u64)),
+                        code: "range(0, 10)".to_string(),
+                    },
+                    funs: vec![],
+                },
+                out: OutputFunctionNode {
+                    stream_prefix: String::new(),
+                    stream_postfix: ".return".to_string(),
+                    returning: true,
+                },
+            })
+        }
+
+        // Test 512 different combinations of declarations interspersed with streams.
+        // We use a simple deterministic pattern varying the declaration types and counts.
+        for i in 0..512u32 {
+            let mut expressions: Vec<TypedExpression> = Vec::new();
+
+            // Add declarations based on bit pattern of i
+            if i & 1 != 0 {
+                expressions.push(make_struct_decl(((i >> 1) % 3 + 1) as usize));
+            }
+            if i & 2 != 0 {
+                expressions.push(make_enum_decl(((i >> 2) % 3 + 1) as usize));
+            }
+            if i & 4 != 0 {
+                expressions.push(make_fn_decl());
+            }
+            // Always include at least one stream expression
+            expressions.push(make_stream());
+            // Sometimes add declarations after stream
+            if i & 8 != 0 {
+                expressions.push(make_struct_decl(2));
+            }
+            if i & 16 != 0 {
+                expressions.push(make_enum_decl(1));
+                expressions.push(make_fn_decl());
+            }
+
+            // Must not panic
+            let _result = analyze_program(&expressions);
         }
     }
 }
