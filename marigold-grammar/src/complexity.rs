@@ -2176,4 +2176,73 @@ mod proptests {
             prop_assert_eq!(sym, parsed);
         }
     }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1000))]
+
+        #[test]
+        fn test_simplify_idempotence(ec in arb_exact_complexity()) {
+            let s = ec.simplified();
+            let mut ec2 = ExactComplexity::new();
+            ec2.add_work(s.clone(), 1);
+            prop_assert_eq!(s, ec2.simplified());
+        }
+
+        #[test]
+        fn test_merge_commutativity(a in arb_exact_complexity(), b in arb_exact_complexity()) {
+            let mut ab = a.clone();
+            ab.merge(&b);
+            let mut ba = b.clone();
+            ba.merge(&a);
+            prop_assert_eq!(ab, ba);
+        }
+
+        #[test]
+        fn test_ordering_transitivity(
+            a in arb_complexity_class(),
+            b in arb_complexity_class(),
+            c in arb_complexity_class(),
+        ) {
+            if a <= b && b <= c {
+                prop_assert!(a <= c);
+            }
+        }
+    }
+
+    #[test]
+    fn test_identity() {
+        assert_eq!(ExactComplexity::new().simplified(), ComplexityClass::O1);
+
+        let mut ec = ExactComplexity::new();
+        ec.add_work(ComplexityClass::ON, 1);
+        let before = ec.clone();
+        ec.merge(&ExactComplexity::new());
+        assert_eq!(ec, before);
+    }
+
+    #[test]
+    fn test_ordering_chain() {
+        let chain = [
+            ComplexityClass::O1,
+            ComplexityClass::OLogN,
+            ComplexityClass::ON,
+            ComplexityClass::ONLogN,
+            ComplexityClass::OPolynomial(2),
+            ComplexityClass::OPolynomial(3),
+            ComplexityClass::OCombinatorial(2),
+            ComplexityClass::OPermutational(2),
+            ComplexityClass::OFactorial,
+            ComplexityClass::Unknown,
+        ];
+        for i in 0..chain.len() {
+            for j in (i + 1)..chain.len() {
+                assert!(
+                    chain[i] < chain[j],
+                    "{:?} should be < {:?}",
+                    chain[i],
+                    chain[j]
+                );
+            }
+        }
+    }
 }
