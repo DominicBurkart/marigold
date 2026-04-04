@@ -883,6 +883,10 @@ impl PestAstBuilder {
 
         let (kind, code) = match inner.as_rule() {
             Rule::map_fn => (StreamFunctionKind::Map, Self::build_map_fn(inner)?),
+            Rule::take_while_fn => (
+                StreamFunctionKind::TakeWhile,
+                Self::build_take_while_fn(inner)?,
+            ),
             Rule::filter_fn => (StreamFunctionKind::Filter, Self::build_filter_fn(inner)?),
             Rule::filter_map_fn => (
                 StreamFunctionKind::FilterMap,
@@ -959,6 +963,18 @@ impl PestAstBuilder {
 
         #[cfg(any(feature = "tokio", feature = "async-std"))]
         return Ok(format!("map(|v| async move {{ if {filter_fn}(v) {{ Some(v) }} else {{ None }} }}).buffered(std::cmp::max(2 * (::marigold::marigold_impl::num_cpus::get() - 1), 2)).filter_map(|v| v)"));
+    }
+
+    fn build_take_while_fn(pair: Pair<Rule>) -> Result<String, String> {
+        let take_while_fn = pair
+            .into_inner()
+            .next()
+            .ok_or_else(|| "Missing take_while function".to_string())?
+            .as_str();
+
+        Ok(format!(
+            "take_while(|v| ::marigold::marigold_impl::futures::future::ready({take_while_fn}(v)))"
+        ))
     }
 
     fn build_filter_map_fn(pair: Pair<Rule>) -> Result<String, String> {

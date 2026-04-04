@@ -39,6 +39,11 @@ fn arb_streaming_fn() -> impl Strategy<Value = StreamFn> {
             is_collecting: false,
             is_fold: false,
         }),
+        arb_identifier().prop_map(|id| StreamFn {
+            text: format!("take_while({id})"),
+            is_collecting: false,
+            is_fold: false,
+        }),
     ]
 }
 

@@ -107,6 +107,37 @@ mod bounded {
     }
 
     #[test]
+    fn take_while() {
+        use marigold_grammar::complexity::Symbolic;
+
+        let result = analyze_file("tests/programs/card_take_while.marigold");
+        // take_while should produce a bounded cardinality with the input
+        // cardinality (10) as the upper bound
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Bounded(Symbolic::Filtered(Box::new(Symbolic::Constant(
+                BigUint::from(10u64)
+            )))),
+            "take_while on range(0,10) should be Bounded(Filtered(Constant(10)))"
+        );
+    }
+
+    #[test]
+    fn take_while_then_map() {
+        use marigold_grammar::complexity::Symbolic;
+
+        let result = analyze_file("tests/programs/card_take_while_map.marigold");
+        // map preserves cardinality, so take_while+map should remain Bounded(Filtered(Constant(10)))
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Bounded(Symbolic::Filtered(Box::new(Symbolic::Constant(
+                BigUint::from(10u64)
+            )))),
+            "take_while+map on range(0,10) should be Bounded(Filtered(Constant(10)))"
+        );
+    }
+
+    #[test]
     fn filter_map() {
         let result = analyze_file("tests/programs/card_filter_map.marigold");
         assert!(
