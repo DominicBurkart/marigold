@@ -165,25 +165,11 @@ impl NamedStreamNode {
             0 => "".to_string(),
             _ => format!(
                 ".",
-                // This is intentionally empty - the join below adds the prefix
-            ),
-        };
-        let intermediate = match self.funs.len() {
-            0 => "".to_string(),
-            _ => format!(
-                ".",
-            ),
-        };
-        let intermediate = match self.funs.len() {
-            0 => "".to_string(),
-            _ => format!(
-                ".",
-            ),
-        };
-        let intermediate = match self.funs.len() {
-            0 => "".to_string(),
-            _ => format!(
-                ".",
+                self.funs
+                    .iter()
+                    .map(|f| f.code.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".")
             ),
         };
         let stream_prefix = &self.out.stream_prefix;
