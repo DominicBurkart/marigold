@@ -37,8 +37,9 @@ mod tests {
     use super::Combinable;
     use futures::stream::StreamExt;
 
+    /// C(3,2) produces exactly the three expected pairs.
     #[tokio::test]
-    async fn combinations() {
+    async fn combinations_c3_2() {
         assert_eq!(
             futures::stream::iter(vec![1, 2, 3])
                 .combinations(2)
@@ -46,6 +47,63 @@ mod tests {
                 .collect::<Vec<_>>()
                 .await,
             vec![vec![1, 2], vec![1, 3], vec![2, 3],]
+        );
+    }
+
+    /// Empty input stream yields no combinations for any k.
+    #[tokio::test]
+    async fn combinations_empty_input() {
+        let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
+            .combinations(2)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty(), "expected no combinations from empty input");
+    }
+
+    /// A single-element stream with k=1 yields exactly that one element as a
+    /// length-1 combination.
+    #[tokio::test]
+    async fn combinations_single_item() {
+        let result = futures::stream::iter(vec![42])
+            .combinations(1)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![vec![42]]);
+    }
+
+    /// No combination appears more than once in the output.
+    #[tokio::test]
+    async fn combinations_no_duplicates() {
+        let result = futures::stream::iter(vec![1, 2, 3, 4])
+            .combinations(2)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+
+        // C(4,2) = 6 combinations.
+        assert_eq!(result.len(), 6);
+
+        // Every combination is unique.
+        let mut seen = std::collections::HashSet::new();
+        for combo in &result {
+            let inserted = seen.insert(combo.clone());
+            assert!(inserted, "duplicate combination found: {:?}", combo);
+        }
+    }
+
+    /// Choosing k larger than the stream length produces no combinations.
+    #[tokio::test]
+    async fn combinations_k_larger_than_input() {
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2])
+            .combinations(5)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(
+            result.is_empty(),
+            "expected no combinations when k > input length"
         );
     }
 }
