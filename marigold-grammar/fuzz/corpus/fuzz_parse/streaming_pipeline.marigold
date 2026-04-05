@@ -1,0 +1,1 @@
+range(0, 100).map(double).filter(is_odd).return
