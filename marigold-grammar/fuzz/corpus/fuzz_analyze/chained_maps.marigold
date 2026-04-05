@@ -1,0 +1,1 @@
+range(0, 3).map(to_sensor).map(get_reading).return
