@@ -1,0 +1,6 @@
+enum Status {
+    Active = "active",
+    Inactive = "inactive",
+    default Unknown = "unknown",
+}
+range(Status).return
