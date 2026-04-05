@@ -11,6 +11,50 @@ use tracing::instrument;
 #[cfg(any(feature = "tokio", feature = "async-std"))]
 const READY_CHUNK_SIZE: usize = 256;
 
+/// Fills `heap` by pulling items from `stream` until the heap holds `n` items or the stream is
+/// exhausted. Returns `true` when the stream was exhausted before `n` items were collected
+/// (i.e. the caller can skip the remaining-items processing pass).
+async fn fill_heap<Item, Cmp>(
+    stream: &mut (impl Stream<Item = Item> + Unpin),
+    heap: &mut BinaryHeap<Item, binary_heap_plus::FnComparator<Cmp>>,
+    n: usize,
+) -> bool
+where
+    Item: Clone,
+    Cmp: Fn(&Item, &Item) -> Ordering + Clone + Send + 'static,
+{
+    while heap.len() < n {
+        if let Some(item) = stream.next().await {
+            heap.push(item);
+        } else {
+            return true;
+        }
+    }
+    false
+}
+
+/// Drains `heap` via `into_sorted_vec`, applies `map_fn` to each item, and returns a
+/// `futures::stream::Iter` over the resulting `Vec<T>`. This consolidates the identical
+/// drain-and-wrap pattern that appears at both the early-exit point and the final collection
+/// point in each cfg branch.
+fn heap_into_stream<Item, T, Cmp, MapFn>(
+    heap: BinaryHeap<Item, binary_heap_plus::FnComparator<Cmp>>,
+    map_fn: MapFn,
+) -> futures::stream::Iter<std::vec::IntoIter<T>>
+where
+    Item: Clone,
+    Cmp: Fn(&Item, &Item) -> Ordering + Clone + Send + 'static,
+    MapFn: Fn(Item) -> T,
+{
+    futures::stream::iter(
+        heap.into_sorted_vec()
+            .into_iter()
+            .map(map_fn)
+            .collect::<Vec<_>>()
+            .into_iter(),
+    )
+}
+
 #[async_trait]
 pub trait KeepFirstN<T, F>
 where
@@ -81,25 +125,12 @@ where
     let mut first_n =
         BinaryHeap::with_capacity_by(n, move |a, b| indexed_comparator(a, b).reverse());
 
-    // Iterate through values in a single thread until we have seen n values.
-    while first_n.len() < n {
-        if let Some(indexed_item) = indexed_stream.next().await {
-            first_n.push(indexed_item);
-        } else {
-            break;
-        }
-    }
+    // Fill the heap sequentially until we have n items or exhaust the stream.
+    let exhausted = fill_heap(&mut indexed_stream, &mut first_n, n).await;
 
     // If we have exhausted the stream before reaching n values, we can exit early.
-    if first_n.len() < n {
-        return futures::stream::iter(
-            first_n
-                .into_sorted_vec()
-                .into_iter()
-                .map(|(_idx, item)| item) // Unwrap indices
-                .collect::<Vec<_>>()
-                .into_iter(),
-        );
+    if exhausted {
+        return heap_into_stream(first_n, |(_idx, item)| item);
     }
 
     // Otherwise, we can check each remaining value in the stream against the smallest
@@ -166,15 +197,11 @@ where
     }
     #[cfg(not(feature = "bench-instrumentation"))]
     parallel_work.await;
-    futures::stream::iter(
+    heap_into_stream(
         std::sync::Arc::try_unwrap(first_n_mutex)
             .expect("Dangling references to mutex")
-            .into_inner()
-            .into_sorted_vec()
-            .into_iter()
-            .map(|(_idx, item)| item) // Unwrap indices
-            .collect::<Vec<_>>()
-            .into_iter(),
+            .into_inner(),
+        |(_idx, item)| item,
     )
 }
 
@@ -199,17 +226,12 @@ where
             Ordering::Greater => Ordering::Less,
         });
 
-        while first_n.len() < n {
-            if let Some(item) = self.next().await {
-                first_n.push(item);
-            } else {
-                break;
-            }
-        }
+        // Fill the heap sequentially until we have n items or exhaust the stream.
+        let exhausted = fill_heap(&mut self, &mut first_n, n).await;
 
         // If we have exhausted the stream before reaching n values, we can exit early.
-        if first_n.len() < n {
-            return futures::stream::iter(first_n.into_sorted_vec().into_iter());
+        if exhausted {
+            return heap_into_stream(first_n, |item| item);
         }
 
         // Otherwise, we can check each remaining value in the stream against the smallest
@@ -232,7 +254,7 @@ where
         )
         .await;
 
-        futures::stream::iter(first_n_mutex.into_inner().into_sorted_vec().into_iter())
+        heap_into_stream(first_n_mutex.into_inner(), |item| item)
     }
 }
 
