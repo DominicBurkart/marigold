@@ -10,8 +10,23 @@ jobs:
     name:            Benches
     runs-on:         ubuntu-latest
     steps:
-    - uses:          actions/checkout@v2
-    - uses:          actions-rs/toolchain@v1
+    - uses:          actions/checkout@v4
+    - uses:          dtolnay/rust-toolchain@stable
+    - run:           cargo bench --bench keep_first_n --features tokio
+      working-directory: marigold-impl
+    - run:           cargo bench --bench per_item_costs --features tokio
+      working-directory: marigold-impl
+    - run:           cargo bench --bench pipeline_stages --features tokio
+      working-directory: marigold-impl
+    - run:           cargo bench --bench cpu_utilization --features tokio
+      working-directory: marigold-impl
+    - run:           cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation"
+      working-directory: marigold-impl
+    - run:           cargo bench --bench color_picker_bench --features tokio
+      working-directory: examples/color-palette-picker
+    - uses:          actions/upload-artifact@v4
+      if:            always()
       with:
-          toolchain: stable
-    - run:           cargo bench
+        name:        criterion-reports
+        path:        target/criterion/
+        if-no-files-found: ignore
