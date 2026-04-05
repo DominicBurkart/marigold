@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 001a370c186e25fa6b3f08778ba615deb464753b0342045205823de2fdc255de # shrinks to prog = GeneratedProgram { source: "range(0, 2).return", expected_stream_count: 1, stream_output_has_collecting: [false], stream_ends_with_fold: [false], stream_only_streaming: [true], uses_stream_variable: false }
+cc 4dc3e0bade65271b5c8ca0f1062e9997a4c51d7d852bf4dea9a414f8f8f99905 # shrinks to prog = GeneratedProgram { source: "range(0, 2).filter(f).map(f).return", expected_stream_count: 1, stream_output_has_collecting: [false], stream_ends_with_fold: [false], stream_only_streaming: [true], uses_stream_variable: false }
