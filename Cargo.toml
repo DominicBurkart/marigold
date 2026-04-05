@@ -10,6 +10,10 @@ members = [
   "examples/select-all",
   "examples/stateful",
   "examples/bounded-types",
-  "tests"
+  "tests",
+  "verification"
 ]
 resolver = "2"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
