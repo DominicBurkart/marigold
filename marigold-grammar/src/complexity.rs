@@ -2554,8 +2554,9 @@ mod proptests {
         }
 
         // Also test via the parser for end-to-end coverage
-        let result =
-            crate::parser::PestParser::analyze("select_all(range(0, 5), range(0, 15), range(0, 30)).return");
+        let result = crate::parser::PestParser::analyze(
+            "select_all(range(0, 5), range(0, 15), range(0, 30)).return",
+        );
         assert!(result.is_ok(), "select_all with 3 streams should parse");
         let result = result.unwrap();
         assert_eq!(result.streams.len(), 1);
