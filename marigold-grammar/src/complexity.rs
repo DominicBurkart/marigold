@@ -791,6 +791,7 @@ pub struct ProgramComplexity {
     pub program_space: ComplexityClass,
     pub program_exact_space: ExactComplexity,
     pub program_cardinality: Cardinality,
+    #[serde(default)]
     pub assumes_o1_user_fns: bool,
 }
 
