@@ -7,6 +7,7 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[allow(clippy::ptr_arg)] // Must use &Vec to match KeepFirstN's Fn(&T, &T) bound where T = Vec<Vec<u16>>
 fn compare_by_sum_nested(a: &Vec<Vec<u16>>, b: &Vec<Vec<u16>>) -> Ordering {
     let sa: u32 = a.iter().flatten().map(|&x| x as u32).sum();
     let sb: u32 = b.iter().flatten().map(|&x| x as u32).sum();
@@ -30,7 +31,7 @@ fn bench_pipeline_stages(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("pipeline_stages");
     group.sample_size(10);
-    group.measurement_time(Duration::from_secs(30));
+    group.measurement_time(Duration::from_secs(10));
 
     group.bench_function("range_8_only", |b| {
         b.iter(|| rt.block_on(async { futures::stream::iter(0u16..8).collect::<Vec<_>>().await }))
@@ -48,8 +49,6 @@ fn bench_pipeline_stages(c: &mut Criterion) {
         })
     });
 
-    group.measurement_time(Duration::from_secs(60));
-
     group.bench_function("combinations_512_k3", |b| {
         b.iter_batched(
             || pwr_items.to_vec(),
@@ -66,7 +65,7 @@ fn bench_pipeline_stages(c: &mut Criterion) {
         )
     });
 
-    group.measurement_time(Duration::from_secs(120));
+    group.measurement_time(Duration::from_secs(20));
 
     group.bench_function("full_pipeline_range8_pwr3_comb3_kfn20", |b| {
         b.iter(|| {

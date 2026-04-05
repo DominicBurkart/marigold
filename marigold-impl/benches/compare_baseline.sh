@@ -4,8 +4,8 @@ set -euo pipefail
 # Usage: ./compare_baseline.sh [pre_commit] [post_commit] [output_file]
 #
 # Arguments (optional):
-#   pre_commit   Commit SHA before optimization (default: 3d020a1)
-#   post_commit  Commit SHA after optimization  (default: 1ec3465)
+#   pre_commit   Commit SHA before optimization (default: HEAD~1)
+#   post_commit  Commit SHA after optimization  (default: HEAD)
 #   output_file  Path for the markdown comparison (default: compare_results.md)
 #
 # Captures metrics at both commits and writes a structured before/after
@@ -13,14 +13,14 @@ set -euo pipefail
 #
 # Must be run from the marigold-impl directory (or the workspace root).
 # Requires a clean working tree (no uncommitted changes).
-# Requirements: bc, jq
+# Requirements: bc, jq, Bash 4+ (uses mapfile)
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 BENCH_DIR="${REPO_ROOT}/marigold-impl"
 SCRIPT_DIR="${REPO_ROOT}/marigold-impl/benches"
 
-PRE_COMMIT="${1:-3d020a1}"
-POST_COMMIT="${2:-1ec3465}"
+PRE_COMMIT="${1:-HEAD~1}"
+POST_COMMIT="${2:-HEAD}"
 OUTPUT="${3:-compare_results.md}"
 
 command -v jq >/dev/null 2>&1 || { echo "error: jq is required" >&2; exit 1; }
@@ -75,15 +75,15 @@ collect_metrics() {
     local cpu_out
     cpu_out=$(cargo bench --bench cpu_utilization --features tokio 2>&1)
     local effective_cores
-    effective_cores=$(echo "$cpu_out" | grep -oP 'effective_cores: mean=\K[\d.]+' | head -1 || echo "unknown")
+    effective_cores=$(echo "$cpu_out" | sed -n 's/.*effective_cores: mean=\([0-9.]*\).*/\1/p' | head -1 || echo "unknown")
 
     echo "  running driver_worker_split..." >&2
     local dws_out
     dws_out=$(cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation" 2>&1)
     local driver_wall worker_cpu parallel_wall
-    driver_wall=$(echo "$dws_out"  | grep -oP 'driver_wall_time_s:\s+\K[\d.]+' | head -1 || echo "unknown")
-    worker_cpu=$(echo "$dws_out"   | grep -oP 'total_worker_cpu_s:\s+\K[\d.]+'  | head -1 || echo "unknown")
-    parallel_wall=$(echo "$dws_out"| grep -oP 'worker_wall_time_s:\s+\K[\d.]+'  | head -1 || echo "unknown")
+    driver_wall=$(echo "$dws_out"  | sed -n 's/.*driver_wall_time_s:[[:space:]]*\([0-9.]*\).*/\1/p' | head -1 || echo "unknown")
+    worker_cpu=$(echo "$dws_out"   | sed -n 's/.*total_worker_cpu_s:[[:space:]]*\([0-9.]*\).*/\1/p'  | head -1 || echo "unknown")
+    parallel_wall=$(echo "$dws_out"| sed -n 's/.*worker_wall_time_s:[[:space:]]*\([0-9.]*\).*/\1/p'  | head -1 || echo "unknown")
 
     printf '%s\n' \
         "$spawn_ns" "$iter_ns" "$joinhandle_ns" "$arc_ns" \

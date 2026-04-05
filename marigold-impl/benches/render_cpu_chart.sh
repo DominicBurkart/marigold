@@ -11,6 +11,12 @@ set -euo pipefail
 #   ./render_cpu_chart.sh cpu_samples.csv
 #   ./render_cpu_chart.sh cpu_samples.csv 50
 
+# This script uses mapfile and associative arrays — requires Bash 4+.
+if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+    echo "error: Bash 4+ required (found Bash ${BASH_VERSION})." >&2
+    exit 1
+fi
+
 CSV="${1:?Usage: $0 <csv_file> [max_points]}"
 MAX_POINTS="${2:-50}"
 

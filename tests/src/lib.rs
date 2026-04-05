@@ -21,6 +21,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn map_with_external_rust_function() {
+        fn double(i: i32) -> i32 {
+            i * 2
+        }
+
+        let r = m!(
+            range(1, 4)
+                .map(double)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(r, vec![2, 4, 6]);
+    }
+
+    #[tokio::test]
     async fn chained_permutations_and_combinations() {
         let r = m!(
             range(0, 2)
@@ -156,5 +173,16 @@ mod tests {
         let mut sorted = result.clone();
         sorted.sort();
         assert_eq!(sorted, vec![0, 1, 2, 10, 11, 12]);
+    }
+
+    #[tokio::test]
+    async fn test_inclusive_range() {
+        let result = m!(
+            range(0, =3).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2, 3]);
     }
 }
