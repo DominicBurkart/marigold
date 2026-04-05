@@ -2374,3 +2374,98 @@ mod proptests {
         }
     }
 }
+
+#[cfg(test)]
+mod scaling_oracle_tests {
+    use super::*;
+    use num_bigint::BigUint;
+
+    // ── Cardinality consistency tests ──────────────────────────────────
+
+    #[test]
+    fn symbolic_constant_evaluates_to_n() {
+        for n in [10u64, 100, 1000] {
+            let sym = Symbolic::Constant(BigUint::from(n));
+            let result = sym.try_evaluate().expect("Constant should evaluate");
+            assert_eq!(result, BigUint::from(n), "O(n) cardinality at n={n}");
+        }
+    }
+
+    #[test]
+    fn symbolic_permutations_k2_evaluates_correctly() {
+        for n in [5u64, 10, 20, 50] {
+            let sym = Symbolic::Permutations {
+                n: Box::new(Symbolic::Constant(BigUint::from(n))),
+                k: 2,
+            };
+            let result = sym.try_evaluate().expect("P(n,2) should evaluate");
+            let expected = BigUint::from(n * (n - 1));
+            assert_eq!(result, expected, "P({n},2) should be {}", n * (n - 1));
+        }
+    }
+
+    #[test]
+    fn symbolic_combinations_k2_evaluates_correctly() {
+        for n in [5u64, 10, 20, 50] {
+            let sym = Symbolic::Combinations {
+                n: Box::new(Symbolic::Constant(BigUint::from(n))),
+                k: 2,
+            };
+            let result = sym.try_evaluate().expect("C(n,2) should evaluate");
+            let expected = BigUint::from(n * (n - 1) / 2);
+            assert_eq!(result, expected, "C({n},2) should be {}", n * (n - 1) / 2);
+        }
+    }
+
+    // ── Analyzer stability tests ──────────────────────────────────────
+
+    #[test]
+    fn range_return_consistently_classifies_as_on() {
+        for n in [10u64, 100, 1000] {
+            let program = format!("range(0, {n}).return");
+            let result = crate::marigold_analyze(&program)
+                .unwrap_or_else(|e| panic!("failed to analyze range(0,{n}).return: {e}"));
+            assert_eq!(
+                result.program_time,
+                ComplexityClass::ON,
+                "range(0,{n}).return should be O(n)"
+            );
+        }
+    }
+
+    #[test]
+    fn range_permutations2_return_consistent_classification() {
+        let mut observed = Vec::new();
+        for n in [10u64, 100, 1000] {
+            let program = format!("range(0, {n}).permutations(2).return");
+            let result = crate::marigold_analyze(&program)
+                .unwrap_or_else(|e| panic!("failed to analyze permutations program: {e}"));
+            observed.push(result.program_time.clone());
+        }
+        // All sizes should yield the same complexity class
+        for cls in &observed {
+            assert_eq!(
+                cls, &observed[0],
+                "permutations(2) classification should be stable across input sizes"
+            );
+        }
+    }
+
+    #[test]
+    fn range_combinations2_return_consistent_classification() {
+        let mut observed = Vec::new();
+        for n in [10u64, 100, 1000] {
+            let program = format!("range(0, {n}).combinations(2).return");
+            let result = crate::marigold_analyze(&program)
+                .unwrap_or_else(|e| panic!("failed to analyze combinations program: {e}"));
+            observed.push(result.program_time.clone());
+        }
+        // All sizes should yield the same complexity class
+        for cls in &observed {
+            assert_eq!(
+                cls, &observed[0],
+                "combinations(2) classification should be stable across input sizes"
+            );
+        }
+    }
+}
