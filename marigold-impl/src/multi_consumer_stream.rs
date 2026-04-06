@@ -142,8 +142,10 @@ mod tests {
         mcs.run().await;
 
         // Collect from both receivers concurrently so neither blocks the other.
-        let (items_a, items_b) =
-            tokio::join!(receiver_a.collect::<Vec<i32>>(), receiver_b.collect::<Vec<i32>>());
+        let (items_a, items_b) = tokio::join!(
+            receiver_a.collect::<Vec<i32>>(),
+            receiver_b.collect::<Vec<i32>>()
+        );
 
         assert_eq!(items_a, vec![1, 2, 3]);
         assert_eq!(items_b, vec![1, 2, 3]);
@@ -169,7 +171,11 @@ mod tests {
         mcs.run().await;
 
         let items: Vec<i32> = receiver.collect().await;
-        assert!(items.is_empty(), "Expected no items from empty stream, got: {:?}", items);
+        assert!(
+            items.is_empty(),
+            "Expected no items from empty stream, got: {:?}",
+            items
+        );
     }
 
     /// A single consumer receives all items from a larger stream, verifying

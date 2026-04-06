@@ -50,28 +50,19 @@ fn assert_parse_fails(src: &str) {
 /// A simple range + map pipeline should produce code that references `map`.
 #[test]
 fn parse_simple_range_map() {
-    assert_parse_contains(
-        "range(0, 5).map(double).return",
-        &["map"],
-    );
+    assert_parse_contains("range(0, 5).map(double).return", &["map"]);
 }
 
 /// A range + filter pipeline should produce code that references `filter`.
 #[test]
 fn parse_filter() {
-    assert_parse_contains(
-        "range(0, 10).filter(is_positive).return",
-        &["filter"],
-    );
+    assert_parse_contains("range(0, 10).filter(is_positive).return", &["filter"]);
 }
 
 /// A range + fold pipeline should produce code that references `fold`.
 #[test]
 fn parse_fold() {
-    assert_parse_contains(
-        "range(0, 10).fold(0, accumulate).return",
-        &["fold"],
-    );
+    assert_parse_contains("range(0, 10).fold(0, accumulate).return", &["fold"]);
 }
 
 /// Minimal range-to-return pipeline — the simplest possible valid program.
@@ -213,10 +204,7 @@ fn parse_combinations() {
 /// filter_map pipeline should produce code that references `filter_map`.
 #[test]
 fn parse_filter_map() {
-    assert_parse_contains(
-        "range(0, 10).filter_map(to_even).return",
-        &["filter_map"],
-    );
+    assert_parse_contains("range(0, 10).filter_map(to_even).return", &["filter_map"]);
 }
 
 /// A multi-consumer program: one stream variable consumed by two output streams.
