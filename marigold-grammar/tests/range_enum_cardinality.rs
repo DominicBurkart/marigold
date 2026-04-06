@@ -108,9 +108,8 @@ fn range_enum_with_default_value_variant() {
 fn range_enum_sized_default_not_counted() {
     // Color: Red, Green, + default Other(string_64)  [Sized].
     // Correct unit_variant_count = 2; the Sized default is NOT a unit variant.
-    let source =
-        std::fs::read_to_string("tests/programs/card_range_enum_sized_default.marigold")
-            .expect("Failed to read card_range_enum_sized_default.marigold");
+    let source = std::fs::read_to_string("tests/programs/card_range_enum_sized_default.marigold")
+        .expect("Failed to read card_range_enum_sized_default.marigold");
 
     match marigold_grammar::marigold_analyze(&source) {
         Ok(result) => {
