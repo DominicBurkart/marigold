@@ -178,6 +178,19 @@ where
     )
 }
 
+// Why two separate impl blocks instead of a shared helper?
+//
+// The multithreaded path (tokio/async-std) wraps items in `(usize, T)` index tuples so that
+// equal-comparing items can be tie-broken deterministically (earlier-in-stream wins). Spawned
+// tasks share the heap behind an `Arc<Mutex<...>>`. The single-threaded path works directly
+// with plain `T` values (no index) and uses `for_each_concurrent` without spawning—there is no
+// cross-task sharing so `Arc` is unnecessary and the tie-breaking index is an unnecessary cost.
+//
+// Reconciling these two designs into a single generic helper would require either:
+//   (a) always paying the index-wrapping cost in the single-threaded path, or
+//   (b) a helper generic over the wrapper type, which adds more complexity than it removes.
+// The duplication of the fill-heap / early-exit / replace-minimum skeleton is therefore an
+// intentional trade-off for clarity and performance in each execution environment.
 #[async_trait]
 #[cfg(not(any(feature = "tokio", feature = "async-std")))]
 impl<SInput, T, F> KeepFirstN<T, F> for SInput
