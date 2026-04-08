@@ -800,48 +800,186 @@ fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
     }
 }
 
-fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Symbolic {
+/// Declarative table capturing the semantics of each `StreamFunctionKind`.
+///
+/// Adding a new variant to `StreamFunctionKind` requires updating exactly one
+/// place: the exhaustive match inside [`semantics_for`].
+pub struct StreamFunctionSemantics {
+    pub cardinality_transform: fn(Symbolic, &StreamFunctionKind) -> Symbolic,
+    pub time_class: fn(&Symbolic, &StreamFunctionKind) -> ComplexityClass,
+    pub space_class: fn(&Symbolic, &StreamFunctionKind) -> ComplexityClass,
+    pub collects_input: bool,
+    pub description: fn(&StreamFunctionKind) -> String,
+}
+
+/// Returns the full semantic descriptor for the given stream function kind.
+///
+/// The match is **exhaustive** (no wildcard `_` arm) so that adding a new
+/// `StreamFunctionKind` variant produces a compile error until this function
+/// is updated.
+pub fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantics {
     match kind {
-        StreamFunctionKind::Map | StreamFunctionKind::OkOrPanic => cardinality,
-        StreamFunctionKind::Filter | StreamFunctionKind::FilterMap | StreamFunctionKind::Ok => {
-            Symbolic::Filtered(Box::new(cardinality))
-        }
-        StreamFunctionKind::Permutations(k) => Symbolic::Permutations {
-            n: Box::new(cardinality),
-            k: *k,
+        StreamFunctionKind::Map => StreamFunctionSemantics {
+            cardinality_transform: |card, _| card,
+            time_class: |card, _| cardinality_to_time_class(card),
+            space_class: |_, _| ComplexityClass::O1,
+            collects_input: false,
+            description: |_| "map(...)".to_string(),
         },
-        StreamFunctionKind::PermutationsWithReplacement(k) => {
-            Symbolic::PermutationsWithReplacement {
-                n: Box::new(cardinality),
-                k: *k,
-            }
-        }
-        StreamFunctionKind::Combinations(k) => Symbolic::Combinations {
-            n: Box::new(cardinality),
-            k: *k,
+        StreamFunctionKind::Filter => StreamFunctionSemantics {
+            cardinality_transform: |card, _| Symbolic::Filtered(Box::new(card)),
+            time_class: |card, _| cardinality_to_time_class(card),
+            space_class: |_, _| ComplexityClass::O1,
+            collects_input: false,
+            description: |_| "filter(...)".to_string(),
         },
-        StreamFunctionKind::KeepFirstN(k) => Symbolic::Min(
-            Box::new(cardinality),
-            Box::new(Symbolic::Constant(BigUint::from(*k))),
-        ),
-        StreamFunctionKind::Fold => Symbolic::Constant(BigUint::one()),
+        StreamFunctionKind::FilterMap => StreamFunctionSemantics {
+            cardinality_transform: |card, _| Symbolic::Filtered(Box::new(card)),
+            time_class: |card, _| cardinality_to_time_class(card),
+            space_class: |_, _| ComplexityClass::O1,
+            collects_input: false,
+            description: |_| "filter_map(...)".to_string(),
+        },
+        StreamFunctionKind::Permutations(_) => StreamFunctionSemantics {
+            cardinality_transform: |card, kind| {
+                if let StreamFunctionKind::Permutations(k) = kind {
+                    Symbolic::Permutations {
+                        n: Box::new(card),
+                        k: *k,
+                    }
+                } else {
+                    unreachable!()
+                }
+            },
+            time_class: |_, kind| {
+                if let StreamFunctionKind::Permutations(k) = kind {
+                    ComplexityClass::OPermutational(*k)
+                } else {
+                    unreachable!()
+                }
+            },
+            space_class: |card, _| cardinality_to_time_class(card),
+            collects_input: true,
+            description: |kind| {
+                if let StreamFunctionKind::Permutations(k) = kind {
+                    format!("permutations({k})")
+                } else {
+                    unreachable!()
+                }
+            },
+        },
+        StreamFunctionKind::PermutationsWithReplacement(_) => StreamFunctionSemantics {
+            cardinality_transform: |card, kind| {
+                if let StreamFunctionKind::PermutationsWithReplacement(k) = kind {
+                    Symbolic::PermutationsWithReplacement {
+                        n: Box::new(card),
+                        k: *k,
+                    }
+                } else {
+                    unreachable!()
+                }
+            },
+            time_class: |_, kind| {
+                if let StreamFunctionKind::PermutationsWithReplacement(k) = kind {
+                    ComplexityClass::OPolynomial(*k)
+                } else {
+                    unreachable!()
+                }
+            },
+            space_class: |card, _| cardinality_to_time_class(card),
+            collects_input: true,
+            description: |kind| {
+                if let StreamFunctionKind::PermutationsWithReplacement(k) = kind {
+                    format!("permutations_with_replacement({k})")
+                } else {
+                    unreachable!()
+                }
+            },
+        },
+        StreamFunctionKind::Combinations(_) => StreamFunctionSemantics {
+            cardinality_transform: |card, kind| {
+                if let StreamFunctionKind::Combinations(k) = kind {
+                    Symbolic::Combinations {
+                        n: Box::new(card),
+                        k: *k,
+                    }
+                } else {
+                    unreachable!()
+                }
+            },
+            time_class: |_, kind| {
+                if let StreamFunctionKind::Combinations(k) = kind {
+                    ComplexityClass::OCombinatorial(*k)
+                } else {
+                    unreachable!()
+                }
+            },
+            space_class: |card, _| cardinality_to_time_class(card),
+            collects_input: true,
+            description: |kind| {
+                if let StreamFunctionKind::Combinations(k) = kind {
+                    format!("combinations({k})")
+                } else {
+                    unreachable!()
+                }
+            },
+        },
+        StreamFunctionKind::KeepFirstN(_) => StreamFunctionSemantics {
+            cardinality_transform: |card, kind| {
+                if let StreamFunctionKind::KeepFirstN(k) = kind {
+                    Symbolic::Min(
+                        Box::new(card),
+                        Box::new(Symbolic::Constant(BigUint::from(*k))),
+                    )
+                } else {
+                    unreachable!()
+                }
+            },
+            time_class: |card, _| cardinality_to_time_class(card),
+            space_class: |_, _| ComplexityClass::O1,
+            collects_input: false,
+            description: |kind| {
+                if let StreamFunctionKind::KeepFirstN(k) = kind {
+                    format!("keep_first_n({k}, ...)")
+                } else {
+                    unreachable!()
+                }
+            },
+        },
+        StreamFunctionKind::Fold => StreamFunctionSemantics {
+            cardinality_transform: |_, _| Symbolic::Constant(BigUint::one()),
+            time_class: |card, _| cardinality_to_time_class(card),
+            space_class: |_, _| ComplexityClass::O1,
+            collects_input: false,
+            description: |_| "fold(...)".to_string(),
+        },
+        StreamFunctionKind::Ok => StreamFunctionSemantics {
+            cardinality_transform: |card, _| Symbolic::Filtered(Box::new(card)),
+            time_class: |card, _| cardinality_to_time_class(card),
+            space_class: |_, _| ComplexityClass::O1,
+            collects_input: false,
+            description: |_| "ok()".to_string(),
+        },
+        StreamFunctionKind::OkOrPanic => StreamFunctionSemantics {
+            cardinality_transform: |card, _| card,
+            time_class: |card, _| cardinality_to_time_class(card),
+            space_class: |_, _| ComplexityClass::O1,
+            collects_input: false,
+            description: |_| "ok_or_panic()".to_string(),
+        },
     }
+}
+
+fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Symbolic {
+    (semantics_for(kind).cardinality_transform)(cardinality, kind)
 }
 
 #[cfg(test)]
 fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
-    match kind {
-        StreamFunctionKind::Permutations(_)
-        | StreamFunctionKind::PermutationsWithReplacement(_)
-        | StreamFunctionKind::Combinations(_) => ComplexityClass::ON,
-        StreamFunctionKind::KeepFirstN(_) => ComplexityClass::O1,
-        StreamFunctionKind::Map
-        | StreamFunctionKind::Filter
-        | StreamFunctionKind::FilterMap
-        | StreamFunctionKind::Fold
-        | StreamFunctionKind::Ok
-        | StreamFunctionKind::OkOrPanic => ComplexityClass::O1,
-    }
+    // Use a concrete cardinality so that cardinality_to_time_class returns ON
+    // (matching the original hard-coded match that returned ON for collectors).
+    let card = Symbolic::Constant(BigUint::from(10u64));
+    (semantics_for(kind).space_class)(&card, kind)
 }
 
 fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
@@ -861,21 +999,11 @@ fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
 }
 
 fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
-    match kind {
-        StreamFunctionKind::Permutations(k) => ComplexityClass::OPermutational(*k),
-        StreamFunctionKind::PermutationsWithReplacement(k) => ComplexityClass::OPolynomial(*k),
-        StreamFunctionKind::Combinations(k) => ComplexityClass::OCombinatorial(*k),
-        _ => cardinality_to_time_class(cardinality),
-    }
+    (semantics_for(kind).time_class)(cardinality, kind)
 }
 
 fn step_space_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
-    match kind {
-        StreamFunctionKind::Permutations(_)
-        | StreamFunctionKind::PermutationsWithReplacement(_)
-        | StreamFunctionKind::Combinations(_) => cardinality_to_time_class(cardinality),
-        _ => ComplexityClass::O1,
-    }
+    (semantics_for(kind).space_class)(cardinality, kind)
 }
 
 fn analyze_stream_fns(
@@ -895,12 +1023,7 @@ fn analyze_stream_fns(
         let space_work = step_space_class(&cardinality, &f.kind);
         exact_space.add_work(space_work, 1);
 
-        if matches!(
-            f.kind,
-            StreamFunctionKind::Permutations(_)
-                | StreamFunctionKind::PermutationsWithReplacement(_)
-                | StreamFunctionKind::Combinations(_)
-        ) {
+        if semantics_for(&f.kind).collects_input {
             collects = true;
         }
         cardinality = propagate_cardinality(cardinality, &f.kind);
@@ -926,20 +1049,7 @@ fn analyze_stream_fns(
 
 fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
     funs.iter()
-        .map(|f| match &f.kind {
-            StreamFunctionKind::Map => "map(...)".to_string(),
-            StreamFunctionKind::Filter => "filter(...)".to_string(),
-            StreamFunctionKind::FilterMap => "filter_map(...)".to_string(),
-            StreamFunctionKind::Permutations(k) => format!("permutations({k})"),
-            StreamFunctionKind::PermutationsWithReplacement(k) => {
-                format!("permutations_with_replacement({k})")
-            }
-            StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
-            StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
-            StreamFunctionKind::Fold => "fold(...)".to_string(),
-            StreamFunctionKind::Ok => "ok()".to_string(),
-            StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
-        })
+        .map(|f| (semantics_for(&f.kind).description)(&f.kind))
         .collect::<Vec<_>>()
         .join(".")
 }
@@ -1935,6 +2045,86 @@ mod tests {
                 expected_multi,
                 "roundtrip for {class:?}"
             );
+        }
+    }
+
+    #[test]
+    fn test_semantics_table_covers_all_stream_function_kinds() {
+        // Construct every variant of StreamFunctionKind and exercise all
+        // fields of the returned StreamFunctionSemantics.  This ensures the
+        // exhaustive match compiles and every closure is callable.
+        let all_kinds = vec![
+            StreamFunctionKind::Map,
+            StreamFunctionKind::Filter,
+            StreamFunctionKind::FilterMap,
+            StreamFunctionKind::Permutations(3),
+            StreamFunctionKind::PermutationsWithReplacement(3),
+            StreamFunctionKind::Combinations(2),
+            StreamFunctionKind::KeepFirstN(5),
+            StreamFunctionKind::Fold,
+            StreamFunctionKind::Ok,
+            StreamFunctionKind::OkOrPanic,
+        ];
+
+        let card = Symbolic::Constant(BigUint::from(10u64));
+
+        for kind in &all_kinds {
+            let sem = semantics_for(kind);
+
+            // cardinality_transform must return a valid Symbolic
+            let new_card = (sem.cardinality_transform)(card.clone(), kind);
+            assert!(
+                !format!("{new_card}").is_empty(),
+                "cardinality_transform returned empty display for {kind:?}"
+            );
+
+            // time_class must return a valid ComplexityClass
+            let _tc = (sem.time_class)(&card, kind);
+
+            // space_class must return a valid ComplexityClass
+            let _sc = (sem.space_class)(&card, kind);
+
+            // description must return a non-empty string
+            let desc = (sem.description)(kind);
+            assert!(
+                !desc.is_empty(),
+                "description returned empty string for {kind:?}"
+            );
+
+            // collects_input is just a bool -- touch it to prove the field exists
+            let _ = sem.collects_input;
+        }
+    }
+
+    #[test]
+    fn test_collects_input_implies_non_o1_space() {
+        // Cross-field consistency: if a kind collects input then its space
+        // class must NOT be O(1) (it needs at least O(n) to buffer).
+        let all_kinds = vec![
+            StreamFunctionKind::Map,
+            StreamFunctionKind::Filter,
+            StreamFunctionKind::FilterMap,
+            StreamFunctionKind::Permutations(3),
+            StreamFunctionKind::PermutationsWithReplacement(3),
+            StreamFunctionKind::Combinations(2),
+            StreamFunctionKind::KeepFirstN(5),
+            StreamFunctionKind::Fold,
+            StreamFunctionKind::Ok,
+            StreamFunctionKind::OkOrPanic,
+        ];
+
+        let card = Symbolic::Constant(BigUint::from(10u64));
+
+        for kind in &all_kinds {
+            let sem = semantics_for(kind);
+            if sem.collects_input {
+                let sc = (sem.space_class)(&card, kind);
+                assert_ne!(
+                    sc,
+                    ComplexityClass::O1,
+                    "kind {kind:?} collects_input but has O(1) space"
+                );
+            }
         }
     }
 }
