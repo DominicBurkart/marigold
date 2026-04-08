@@ -864,7 +864,13 @@ fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> Complex
         StreamFunctionKind::Permutations(k) => ComplexityClass::OPermutational(*k),
         StreamFunctionKind::PermutationsWithReplacement(k) => ComplexityClass::OPolynomial(*k),
         StreamFunctionKind::Combinations(k) => ComplexityClass::OCombinatorial(*k),
-        _ => cardinality_to_time_class(cardinality),
+        StreamFunctionKind::Map
+        | StreamFunctionKind::Filter
+        | StreamFunctionKind::FilterMap
+        | StreamFunctionKind::KeepFirstN(_)
+        | StreamFunctionKind::Fold
+        | StreamFunctionKind::Ok
+        | StreamFunctionKind::OkOrPanic => cardinality_to_time_class(cardinality),
     }
 }
 
@@ -876,7 +882,13 @@ fn step_space_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> Comple
         StreamFunctionKind::Permutations(_)
         | StreamFunctionKind::PermutationsWithReplacement(_)
         | StreamFunctionKind::Combinations(_) => cardinality_to_time_class(cardinality),
-        _ => ComplexityClass::O1,
+        StreamFunctionKind::Map
+        | StreamFunctionKind::Filter
+        | StreamFunctionKind::FilterMap
+        | StreamFunctionKind::KeepFirstN(_)
+        | StreamFunctionKind::Fold
+        | StreamFunctionKind::Ok
+        | StreamFunctionKind::OkOrPanic => ComplexityClass::O1,
     }
 }
 
