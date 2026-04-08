@@ -39,6 +39,9 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
+        if n == 0 {
+            return futures::stream::iter(vec![].into_iter());
+        }
         // use the reverse ordering so that the smallest value is always the first to pop.
         let first_n = BinaryHeap::with_capacity_by(n, move |a, b| sorted_by(a, b).reverse());
         impl_keep_first_n(self, first_n, n, sorted_by).await
@@ -192,6 +195,9 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
+        if n == 0 {
+            return futures::stream::iter(vec![].into_iter());
+        }
         // use the reverse ordering so that the smallest value is always the first to pop.
         let mut first_n = BinaryHeap::with_capacity_by(n, |a, b| match sorted_by(a, b) {
             Ordering::Less => Ordering::Greater,
