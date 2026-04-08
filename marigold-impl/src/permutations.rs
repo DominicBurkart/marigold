@@ -6,19 +6,22 @@ use tracing::instrument;
 
 #[async_trait]
 pub trait Permutable<T: Clone> {
+    /// Returns a stream of all k-permutations of items from this stream.
+    /// Eagerly collects the input stream before computing permutations.
     async fn permutations(
         self,
         k: usize,
     ) -> futures::stream::Iter<Permutations<std::vec::IntoIter<T>>>;
 
+    /// Returns a stream of all k-permutations with replacement (i.e. the
+    /// cartesian product of the stream with itself k times).
+    /// Eagerly collects the input stream before computing permutations.
     async fn permutations_with_replacement(
         self,
         k: usize,
     ) -> futures::stream::Iter<itertools::structs::MultiProduct<std::vec::IntoIter<T>>>;
 }
 
-/// This is a glue trait to allow streams to use Permutable in itertools.
-/// The current implementation eagerly consumes the parent stream.
 #[async_trait]
 impl<T, SInput> Permutable<T> for SInput
 where
