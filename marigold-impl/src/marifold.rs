@@ -50,4 +50,43 @@ mod tests {
             vec![10]
         );
     }
+
+    /// Folding over an empty stream returns the initial state wrapped in a single-item stream.
+    #[tokio::test]
+    async fn empty_stream_returns_init() {
+        let result = futures::stream::iter(Vec::<i32>::new())
+            .marifold(42i32, |acc, x| async move { acc + x })
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![42]);
+    }
+
+    /// The output is always exactly one item regardless of how many items the input has.
+    #[tokio::test]
+    async fn always_produces_exactly_one_item() {
+        for n in [0usize, 1, 10, 1000] {
+            let count = futures::stream::iter(0..n)
+                .marifold(0usize, |acc, _| async move { acc + 1 })
+                .await
+                .collect::<Vec<_>>()
+                .await
+                .len();
+            assert_eq!(count, 1, "expected 1 output item for input of length {n}");
+        }
+    }
+
+    /// State can be a non-numeric type such as a Vec accumulator (string building).
+    #[tokio::test]
+    async fn non_numeric_string_accumulator() {
+        let result = futures::stream::iter(vec!["a", "b", "c"])
+            .marifold(String::new(), |mut acc, s| async move {
+                acc.push_str(s);
+                acc
+            })
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec!["abc"]);
+    }
 }
