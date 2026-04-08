@@ -4,6 +4,8 @@ use futures::stream::StreamExt;
 use futures::Future;
 use tracing::instrument;
 
+/// Adapter that wraps `StreamExt::fold` so it returns a single-item stream
+/// containing the final accumulated state.
 #[async_trait]
 pub trait Marifold<SInput, State, F, Fut> {
     async fn marifold(
@@ -13,8 +15,6 @@ pub trait Marifold<SInput, State, F, Fut> {
     ) -> futures::stream::Once<futures::stream::Fold<SInput, Fut, State, F>>;
 }
 
-/// This is an adapter trait that allows fold from StreamExt to return a Stream
-/// with a single value (the state after the parent stream has been exhausted).
 #[async_trait]
 impl<State, SInput, T, F, Fut> Marifold<SInput, State, F, Fut> for SInput
 where
