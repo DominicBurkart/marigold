@@ -73,4 +73,32 @@ mod tests {
             ]
         );
     }
+
+    /// An empty stream yields an empty Vec to the applied function.
+    #[tokio::test]
+    async fn empty_stream_yields_empty_vec() {
+        let result = futures::stream::iter(Vec::<i32>::new())
+            .collect_and_apply(|v| v)
+            .await;
+        assert!(result.is_empty());
+    }
+
+    /// The applied function may transform the element type (Vec<T> -> U where U != Vec<T>).
+    #[tokio::test]
+    async fn function_can_change_output_type() {
+        let sum: i64 = futures::stream::iter(vec![1i32, 2, 3, 4])
+            .collect_and_apply(|v| v.into_iter().map(|x| x as i64).sum())
+            .await;
+        assert_eq!(sum, 10);
+    }
+
+    /// Applying `Vec::len` documents that collect_and_apply passes the full collected
+    /// slice and the function receives exactly as many items as were in the stream.
+    #[tokio::test]
+    async fn function_receives_all_items() {
+        let count = futures::stream::iter(0..100)
+            .collect_and_apply(|v| v.len())
+            .await;
+        assert_eq!(count, 100);
+    }
 }
