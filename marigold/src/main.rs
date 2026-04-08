@@ -470,4 +470,136 @@ mod tests {
 
         let _ = fs::remove_dir_all(&tmp);
     }
+
+    /// Verify that `marigold analyze` exits successfully and emits valid JSON
+    /// with the expected top-level fields produced by `marigold_grammar::marigold_analyze`.
+    ///
+    /// The program `range(0, 3).write_file("...", csv)` is a single-stream pipeline;
+    /// the JSON output must therefore contain a `streams` array with one element.
+    #[test]
+    fn test_analyze_command() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("analyze");
+
+        // A simple valid Marigold program: range written to CSV (non-returning terminal).
+        // `analyze` only needs to parse and inspect the pipeline - it does not run it.
+        let marigold_file = tmp.join("test_analyze.marigold");
+        fs::write(
+            &marigold_file,
+            r#"range(0, 100).write_file("/dev/null", csv)"#,
+        )
+        .expect("could not write test file");
+
+        let output = Command::new(&binary)
+            .args(["analyze", marigold_file.to_str().unwrap()])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .output()
+            .expect("could not run marigold analyze");
+
+        assert!(
+            output.status.success(),
+            "marigold analyze failed: stderr = {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8(output.stdout).expect("stdout was not valid UTF-8");
+
+        // The output must be valid JSON.
+        let json: serde_json::Value =
+            serde_json::from_str(&stdout).expect("analyze output was not valid JSON");
+
+        // ProgramComplexity always contains a `streams` array.
+        assert!(
+            json.get("streams").is_some(),
+            "JSON output missing 'streams' field; got: {json}"
+        );
+        assert!(
+            json["streams"].is_array(),
+            "'streams' field should be a JSON array; got: {}",
+            json["streams"]
+        );
+
+        // Our single-stream program must produce exactly one stream entry.
+        assert_eq!(
+            json["streams"].as_array().unwrap().len(),
+            1,
+            "expected exactly 1 stream in analyze output; got: {json}"
+        );
+
+        // The top-level program_time complexity field must be present.
+        assert!(
+            json.get("program_time").is_some(),
+            "JSON output missing 'program_time' field; got: {json}"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Verify that `marigold analyze` exits with a non-zero status code when
+    /// given a syntactically invalid program, and does not panic.
+    #[test]
+    fn test_analyze_command_rejects_invalid_program() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("analyze_invalid");
+
+        let marigold_file = tmp.join("invalid.marigold");
+        // Missing closing paren - parser should reject this.
+        fs::write(&marigold_file, "range(0, 10").expect("could not write test file");
+
+        let status = Command::new(&binary)
+            .args(["analyze", marigold_file.to_str().unwrap()])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold analyze");
+
+        assert!(
+            !status.success(),
+            "marigold analyze should fail on invalid input but exited with success"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Verify that `marigold run` correctly writes a CSV file and that the
+    /// Writer produces the expected newline-separated output format.
+    ///
+    /// This is the primary integration test for `writer.rs`: it exercises the
+    /// full path from Marigold DSL -> compiled Rust -> `Writer::file` -> disk.
+    #[test]
+    fn test_write_file_csv_round_trip() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("writer_csv");
+        let csv_file = tmp.join("output.csv");
+
+        // Write integers 0..5 to a CSV file.
+        let marigold_file = tmp.join("writer_test.marigold");
+        fs::write(
+            &marigold_file,
+            format!(r#"range(0, 5).write_file("{}", csv)"#, csv_file.display()),
+        )
+        .expect("could not write marigold program");
+
+        let status = Command::new(&binary)
+            .args(["run", marigold_file.to_str().unwrap()])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold");
+
+        assert!(status.success(), "marigold run failed for writer test");
+
+        // Verify the CSV was created.
+        assert!(csv_file.exists(), "CSV output file was not created by write_file");
+
+        // Verify content: each integer on its own line, no trailing garbage.
+        let content = fs::read_to_string(&csv_file).expect("could not read CSV output");
+        assert_eq!(
+            content, "0\n1\n2\n3\n4\n",
+            "CSV file content did not match expected output"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }
