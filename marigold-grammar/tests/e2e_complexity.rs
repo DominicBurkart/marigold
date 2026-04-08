@@ -151,7 +151,7 @@ fn map_reports_o1_space() {
         result.streams[0].exact_space,
         ExactComplexity::from_str("O(1)").unwrap()
     );
-    assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+    assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
 }
 
 #[test]
