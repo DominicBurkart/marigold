@@ -218,4 +218,30 @@ mod tests {
         .await;
         assert_eq!(result, vec![0, 1, 2, 3]);
     }
+
+    #[tokio::test]
+    async fn test_take() {
+        let result = m!(
+            range(0, 10)
+                .take(3)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2]);
+    }
+
+    #[tokio::test]
+    async fn test_take_exceeds_input() {
+        let result = m!(
+            range(0, 3)
+                .take(10)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2]);
+    }
 }
