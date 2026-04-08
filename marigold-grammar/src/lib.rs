@@ -103,9 +103,50 @@ pub fn marigold_analyze(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// marigold_parse succeeds on valid programs and produces non-empty Rust source.
     #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+    fn parse_simple_range_return() {
+        let rust = marigold_parse("range(0, 10).return").expect("should parse");
+        assert!(!rust.is_empty(), "parsed output should not be empty");
+    }
+
+    /// marigold_parse succeeds on a pipeline with map and filter.
+    #[test]
+    fn parse_map_filter_pipeline() {
+        let rust = marigold_parse("range(0, 10).map(f).filter(g).return")
+            .expect("map+filter pipeline should parse");
+        assert!(!rust.is_empty());
+    }
+
+    /// marigold_parse succeeds on a fold program.
+    #[test]
+    fn parse_fold_program() {
+        let rust = marigold_parse("range(0, 5).fold(0, f).return")
+            .expect("fold program should parse");
+        assert!(!rust.is_empty());
+    }
+
+    /// marigold_parse returns an error for completely invalid syntax.
+    #[test]
+    fn parse_invalid_syntax_returns_error() {
+        let result = marigold_parse("this is not valid marigold !!!@#$");
+        assert!(result.is_err(), "invalid input should produce a parse error");
+    }
+
+    /// marigold_analyze succeeds on a simple program and reports expected stream count.
+    #[test]
+    fn analyze_simple_range() {
+        let complexity = marigold_analyze("range(0, 10).return").expect("should analyze");
+        assert_eq!(complexity.streams.len(), 1);
+    }
+
+    /// marigold_analyze and marigold_parse both handle the same valid input without panicking.
+    #[test]
+    fn parse_and_analyze_agree_on_valid_input() {
+        let src = "range(0, 100).map(f).return";
+        assert!(marigold_parse(src).is_ok());
+        assert!(marigold_analyze(src).is_ok());
     }
 }
