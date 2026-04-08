@@ -218,4 +218,65 @@ mod tests {
         .await;
         assert_eq!(result, vec![0, 1, 2, 3]);
     }
+
+    /// keep_first_n via the m! macro: range(0,10) keeps the 3 largest values in
+    /// descending order. Documents that the DSL wires keep_first_n end-to-end.
+    #[tokio::test]
+    async fn keep_first_n_via_macro() {
+        let sorter = |a: &i32, b: &i32| a.cmp(b);
+        let result = m!(
+            range(0, 10)
+                .keep_first_n(3, sorter)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // keep_first_n returns results in descending order (max-first)
+        assert_eq!(result, vec![9, 8, 7]);
+    }
+
+    /// Chaining two map calls produces the composition of both functions.
+    /// Documents that successive .map() steps are applied left-to-right.
+    #[tokio::test]
+    async fn chained_maps_compose() {
+        fn add_one(x: i32) -> i32 {
+            x + 1
+        }
+        fn triple(x: i32) -> i32 {
+            x * 3
+        }
+
+        let result = m!(
+            range(0, 4)
+                .map(add_one)
+                .map(triple)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // range(0,4) = [0,1,2,3] -> add_one -> [1,2,3,4] -> triple -> [3,6,9,12]
+        assert_eq!(result, vec![3, 6, 9, 12]);
+    }
+
+    /// fold via the m! macro produces exactly one item containing the accumulated state.
+    /// Documents that marifold/.fold integration with the DSL works end-to-end.
+    #[tokio::test]
+    async fn fold_produces_single_sum() {
+        fn add(acc: i32, x: i32) -> i32 {
+            acc + x
+        }
+
+        let result = m!(
+            range(0, 5)
+                .fold(0, add)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // 0 + 1 + 2 + 3 + 4 = 10
+        assert_eq!(result, vec![10]);
+    }
 }
