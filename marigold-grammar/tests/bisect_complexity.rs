@@ -61,12 +61,12 @@ fn test_git_bisect_detects_memory_regression() {
     );
     let commit_c = write_and_commit(
         dir,
-        "range(0, 100).permutations(3).return",
-        "bad: introduced permutations",
+        "range(0, 100).filter(is_odd).permutations(3).return",
+        "bad: introduced permutations on filtered source",
     );
     let commit_d = write_and_commit(
         dir,
-        "range(0, 100).permutations(3).map(identity).return",
+        "range(0, 100).filter(is_odd).permutations(3).map(identity).return",
         "bad: still has permutations",
     );
 

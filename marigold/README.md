@@ -92,15 +92,15 @@ marigold analyze hello_world.marigold
     {
       "description": "input.write_file(...)",
       "cardinality": "5",
-      "time_class": "O(n)",
-      "exact_time": "O(n)",
+      "time_class": "O(1)",
+      "exact_time": "O(1)",
       "space_class": "O(1)",
       "exact_space": "O(1)",
       "collects_input": false
     }
   ],
-  "program_time": "O(n)",
-  "program_exact_time": "O(n)",
+  "program_time": "O(1)",
+  "program_exact_time": "O(1)",
   "program_space": "O(1)",
   "program_exact_space": "O(1)",
   "program_cardinality": "5"
