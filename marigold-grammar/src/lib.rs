@@ -1,66 +1,27 @@
 #![forbid(unsafe_code)]
 
-//! # Marigold Grammar Library
+//! Grammar and parser infrastructure for the Marigold DSL.
 //!
-//! This crate provides the grammar and parser infrastructure for the Marigold DSL.
-//!
-//! ## Overview
-//!
-//! Marigold is a domain-specific language for expressing stream processing programs in Rust.
-//! This library provides:
-//!
-//! - **Pest-based parser**: Fast, maintainable PEG parser
-//! - **AST definitions**: Complete abstract syntax tree for Marigold programs
-//! - **Code generation**: Transforms Marigold programs into valid Rust code
+//! Provides a [pest]-based parser, AST definitions, and Rust code generation
+//! for Marigold programs.
 //!
 //! ## Quick Start
 //!
-//! Parse a Marigold program:
-//!
 //! ```ignore
-//! use marigold_grammar::parser::parse_marigold;
+//! use marigold_grammar::marigold_parse;
 //!
-//! let code = parse_marigold("range(0, 100).return")?;
+//! let code = marigold_parse("range(0, 100).return")?;
 //! println!("{}", code);
 //! ```
 //!
-//! ## Architecture
+//! ## Modules
 //!
-//! ### Parser
+//! - [`parser`]: entry point; [`parser::parse_marigold`] returns generated Rust code
+//! - [`nodes`]: AST node definitions
+//! - [`pest_ast_builder`]: converts Pest parse trees into the AST
+//! - Grammar file: `src/marigold.pest`
 //!
-//! The [`parser`] module provides the Pest-based parser with a trait abstraction
-//! for extensibility. The factory function [`parser::get_parser()`] returns a
-//! parser instance.
-//!
-//! ### Grammar File
-//!
-//! - **Pest**: `src/marigold.pest` - Defines the complete Marigold language grammar
-//!
-//! ### AST and Code Generation
-//!
-//! - [`nodes`]: AST node definitions for all Marigold constructs
-//! - Code generation: Internal function that transforms AST to Rust code
-//! - [`pest_ast_builder`]: Transforms Pest parse trees into the AST
-//!
-//! ## Testing & Validation
-//!
-//! The parser implementation is validated through:
-//!
-//! - **Unit tests** in each module covering specific functionality
-//! - **Negative tests** ensuring invalid syntax is properly rejected
-//! - **Integration tests** using real-world example programs
-//!
-//! ## Feature Flags
-//!
-//! - `io`: I/O features (available in other crates)
-//! - `tokio`: Tokio runtime integration (available in other crates)
-//! - `async-std`: async-std runtime integration (available in other crates)
-//!
-//! ## Performance Characteristics
-//!
-//! - **Parsing**: Completes in < 1ms for typical programs
-//! - **Code generation**: Dominates runtime, scales with program complexity
-//! - **Binary size**: Pest parser adds ~40KB to binary size
+//! [pest]: https://pest.rs
 
 #[macro_use]
 extern crate lazy_static;
@@ -78,18 +39,12 @@ mod type_aggregation;
 
 pub mod pest_ast_builder;
 
-/// Convenience function for parsing Marigold code
+/// Parse a Marigold program and return generated Rust code.
 ///
-/// This is an alias for [`parser::parse_marigold`] that uses the appropriate parser
-/// based on feature flags. It's the recommended entry point for most use cases.
-///
-/// # Examples
+/// Alias for [`parser::parse_marigold`].
 ///
 /// ```ignore
-/// use marigold_grammar::marigold_parse;
-///
-/// let code = marigold_parse("range(0, 100).return")?;
-/// // code is now valid Rust code ready to compile
+/// let code = marigold_grammar::marigold_parse("range(0, 100).return")?;
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
@@ -103,9 +58,50 @@ pub fn marigold_analyze(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// marigold_parse succeeds on valid programs and produces non-empty Rust source.
     #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+    fn parse_simple_range_return() {
+        let rust = marigold_parse("range(0, 10).return").expect("should parse");
+        assert!(!rust.is_empty(), "parsed output should not be empty");
+    }
+
+    /// marigold_parse succeeds on a pipeline with map and filter.
+    #[test]
+    fn parse_map_filter_pipeline() {
+        let rust = marigold_parse("range(0, 10).map(f).filter(g).return")
+            .expect("map+filter pipeline should parse");
+        assert!(!rust.is_empty());
+    }
+
+    /// marigold_parse succeeds on a fold program.
+    #[test]
+    fn parse_fold_program() {
+        let rust = marigold_parse("range(0, 5).fold(0, f).return")
+            .expect("fold program should parse");
+        assert!(!rust.is_empty());
+    }
+
+    /// marigold_parse returns an error for completely invalid syntax.
+    #[test]
+    fn parse_invalid_syntax_returns_error() {
+        let result = marigold_parse("this is not valid marigold !!!@#$");
+        assert!(result.is_err(), "invalid input should produce a parse error");
+    }
+
+    /// marigold_analyze succeeds on a simple program and reports expected stream count.
+    #[test]
+    fn analyze_simple_range() {
+        let complexity = marigold_analyze("range(0, 10).return").expect("should analyze");
+        assert_eq!(complexity.streams.len(), 1);
+    }
+
+    /// marigold_analyze and marigold_parse both handle the same valid input without panicking.
+    #[test]
+    fn parse_and_analyze_agree_on_valid_input() {
+        let src = "range(0, 100).map(f).return";
+        assert!(marigold_parse(src).is_ok());
+        assert!(marigold_analyze(src).is_ok());
     }
 }

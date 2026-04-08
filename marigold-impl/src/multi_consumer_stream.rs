@@ -100,3 +100,74 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
         (0, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream::StreamExt;
+
+    // --- MultiConsumerStream ---
+
+    /// A single consumer receives every item from the source stream.
+    #[tokio::test]
+    async fn single_consumer_receives_all_items() {
+        let source = futures::stream::iter(vec![1u32, 2, 3]);
+        let mut mcs = MultiConsumerStream::new(source);
+        let mut rx = mcs.get();
+        mcs.run().await;
+
+        let got = rx.collect::<Vec<_>>().await;
+        assert_eq!(got, vec![1, 2, 3]);
+    }
+
+    /// Two consumers each independently receive every item (fan-out invariant).
+    #[tokio::test]
+    async fn two_consumers_each_receive_all_items() {
+        let source = futures::stream::iter(vec![10u32, 20, 30]);
+        let mut mcs = MultiConsumerStream::new(source);
+        let mut rx1 = mcs.get();
+        let mut rx2 = mcs.get();
+        mcs.run().await;
+
+        let got1 = rx1.collect::<Vec<_>>().await;
+        let got2 = rx2.collect::<Vec<_>>().await;
+        assert_eq!(got1, vec![10, 20, 30]);
+        assert_eq!(got2, vec![10, 20, 30]);
+    }
+
+    /// An empty source produces no items for any consumer and terminates cleanly.
+    #[tokio::test]
+    async fn empty_source_terminates_consumers() {
+        let source = futures::stream::iter(Vec::<u32>::new());
+        let mut mcs = MultiConsumerStream::new(source);
+        let mut rx = mcs.get();
+        mcs.run().await;
+
+        let got = rx.collect::<Vec<_>>().await;
+        assert!(got.is_empty());
+    }
+
+    // --- RunFutureAsStream ---
+
+    /// RunFutureAsStream always produces zero items: it drives the future as a side
+    /// effect and signals stream termination when the future resolves.
+    #[tokio::test]
+    async fn run_future_as_stream_emits_no_items() {
+        let fut = Box::pin(async { /* side-effecting future that returns () */ });
+        let stream: RunFutureAsStream<u32, (), _> = RunFutureAsStream::new(fut);
+        let items = stream.collect::<Vec<u32>>().await;
+        assert!(
+            items.is_empty(),
+            "RunFutureAsStream should always produce an empty item sequence"
+        );
+    }
+
+    /// size_hint reports (0, None) because the number of items is unknown until
+    /// the future resolves (and in practice it is always zero items).
+    #[test]
+    fn run_future_as_stream_size_hint_is_zero_none() {
+        let fut = Box::pin(async {});
+        let stream: RunFutureAsStream<u32, (), _> = RunFutureAsStream::new(fut);
+        assert_eq!(stream.size_hint(), (0, None));
+    }
+}
