@@ -741,6 +741,10 @@ impl PestAstBuilder {
         }
     }
 
+    // This code generates an async CSV IO pipeline using csv_async, tokio,
+    // and async_compression. It is the unverified *shell*; per-row encode/
+    // decode delegates to `marigold_impl::csv_core`, which is formally
+    // verified. See dev_docs/aeneas/README.md.
     fn build_read_file_csv_input(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
         let mut inner = pair.into_inner();
 
@@ -1063,6 +1067,10 @@ impl PestAstBuilder {
                 stream_postfix: "".to_string(),
                 returning: true,
             }),
+            // This code generates an async CSV IO pipeline using csv_async, tokio,
+            // and async_compression. It is the unverified *shell*; per-row encode/
+            // decode delegates to `marigold_impl::csv_core`, which is formally
+            // verified. See dev_docs/aeneas/README.md.
             Rule::write_file_fn => {
                 // Parse write_file(path, format[, compression=none|gz])
                 let mut inner_pairs = inner.into_inner();

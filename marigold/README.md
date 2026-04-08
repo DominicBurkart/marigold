@@ -120,3 +120,15 @@ Marigold supports async tracing, e.g. with tokio-console.
 
 Marigold's CI builds against aarch64, arm, WASM, and x86 targets, and builds
 the x86 target in mac and windows environments.
+
+## Verification
+
+Marigold uses a tiered verification strategy. See
+[`TESTING.md`](TESTING.md) for the decision tree agents and contributors
+follow when choosing how to test new code.
+
+The pure-sync row-level CSV core in `marigold-impl/src/csv_core.rs` is
+formally verified via the [Aeneas](https://github.com/AeneasVerif/aeneas)
+toolchain with proofs in Lean 4. See
+[`dev_docs/aeneas/README.md`](dev_docs/aeneas/README.md) for the
+shell/core architecture, invariants, and agent workflows.

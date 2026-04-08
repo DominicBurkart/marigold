@@ -1,3 +1,11 @@
+//! Unverified async IO shell for CSV output.
+//!
+//! Row-level encoding logic lives in [`crate::csv_core`] and is formally
+//! verified via Aeneas+Lean. This `Writer` is the async IO surface and
+//! is intentionally *not* formally verified — it touches `tokio::fs` and
+//! trait objects which Aeneas does not support. See
+//! `dev_docs/aeneas/README.md` for the shell/core architecture.
+
 use std::io::Error;
 use std::pin::Pin;
 
