@@ -791,6 +791,7 @@ pub struct ProgramComplexity {
     pub program_space: ComplexityClass,
     pub program_exact_space: ExactComplexity,
     pub program_cardinality: Cardinality,
+    pub assumes_o1_user_fns: bool,
 }
 
 fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
@@ -951,6 +952,7 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
         String,
         (Symbolic, ComplexityClass, ExactComplexity, ExactComplexity),
     > = std::collections::HashMap::new();
+    let mut has_fn_declaration = false;
 
     for expr in expressions {
         match expr {
@@ -997,6 +999,9 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
                     v.variable_name.clone(),
                     (current_card, space, var_exact_time, var_exact_space),
                 );
+            }
+            TypedExpression::FnDeclaration(_) => {
+                has_fn_declaration = true;
             }
             _ => {}
         }
@@ -1072,6 +1077,7 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
         program_space,
         program_exact_space,
         program_cardinality,
+        assumes_o1_user_fns: has_fn_declaration,
     }
 }
 
