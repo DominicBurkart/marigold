@@ -27,7 +27,7 @@ impl Writer {
     }
 
     /// Consumes the writer and returns the written bytes if this is a vector writer.
-    pub fn into_bytes(self) -> Option<Vec<u8>> {
+    pub(crate) fn into_bytes(self) -> Option<Vec<u8>> {
         match self.inner {
             WriteTarget::Vector(v) => Some(*Pin::into_inner(v)),
             WriteTarget::File(_) => None,

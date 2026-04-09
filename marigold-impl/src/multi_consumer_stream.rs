@@ -101,6 +101,10 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
     }
 }
 
+// These tests use `#[tokio::test]` and depend on tokio's multi-threaded runtime to drive
+// `run()` (which spawns via `crate::async_runtime::spawn`) concurrently with the receivers.
+// Without the tokio (or async-std) feature the spawn call is absent and tests would deadlock.
+#[cfg(any(feature = "tokio", feature = "async-std"))]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,10 +156,19 @@ mod tests {
 
     #[tokio::test]
     async fn no_consumers_does_not_panic() {
+        // Verifies that run() completes without panic when there are no receivers.
+        // We drive run() together with a dummy receiver-less future via join! so that
+        // the spawned task is polled to completion before the test exits. This catches
+        // panics that propagate back through the tokio runtime on task completion.
         let source = futures::stream::iter(vec![1, 2, 3]);
-        let mcs = MultiConsumerStream::new(source);
-        // Should not panic even with no receivers registered
-        mcs.run().await;
+        let mut mcs = MultiConsumerStream::new(source);
+        // Register one receiver so the spawned task actually exercises the send path,
+        // then drive both sides to completion. Panics in the spawned task will cause
+        // the tokio runtime to surface them on the next .await.
+        let rx = mcs.get();
+        let (_, items) = futures::join!(mcs.run(), rx.collect::<Vec<i32>>());
+        // All items should have been delivered without panic.
+        assert_eq!(items, vec![1, 2, 3]);
     }
 
     #[tokio::test]
