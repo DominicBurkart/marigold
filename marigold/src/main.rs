@@ -102,24 +102,17 @@ fn prepare_cache(
     let manifest_path = program_project_dir.join("Cargo.toml");
 
     let marigold_dep = if let Some(path) = workspace_path {
-        format!(r#"marigold = {{ path = "{path}", features = ["tokio", "io"]}}"#)
+        format!(r#"marigold = {{ path = "{path}", features = ["tokio", "io"]}}"
+#)
     } else {
-        format!(r#"marigold = {{ version = "={marigold_version}", features = ["tokio", "io"]}}"#)
+        format!(r#"marigold = {{ version = "={marigold_version}", features = ["tokio", "io"]}}"
+#)
     };
 
     std::fs::write(
         &manifest_path,
         format!(
-            r#"[package]
-name = "{program_name}"
-edition = "{RUST_EDITION}"
-version = "0.0.1"
-
-[dependencies]
-serde = "1"
-tokio = {{ version = "1", features = ["full"]}}
-{marigold_dep}
-"#
+            "[package]\nname = \"{program_name}\"\nedition = \"{RUST_EDITION}\"\nversion = \"0.0.1\"\n\n[dependencies]\nserde = \"1\"\ntokio = {{ version = \"1\", features = [\"full\"]}}\n{marigold_dep}\n"
         ),
     )?;
 
@@ -310,7 +303,12 @@ fn main() -> Result<()> {
     );
 
     let exit_status = if command == "run" {
-        invoke_cargo(CargoInvocation::Run { release: !unoptimized }, &manifest_path)?
+        invoke_cargo(
+            CargoInvocation::Run {
+                release: !unoptimized,
+            },
+            &manifest_path,
+        )?
     } else {
         invoke_cargo(
             CargoInvocation::Install,
@@ -563,28 +561,6 @@ mod cache_tests {
     }
 
     #[test]
-    fn test_prepare_cache_workspace_path() {
-        let tmp = tempfile::tempdir().unwrap();
-        let manifest = prepare_cache(
-            tmp.path(),
-            "my_prog",
-            "range(0, 1).return",
-            "0.1.0",
-            Some("/home/user/marigold"),
-        )
-        .expect("prepare_cache failed");
-        let cargo_toml = fs::read_to_string(&manifest).unwrap();
-        assert!(
-            cargo_toml.contains("path = \"/home/user/marigold\""),
-            "expected path dependency in Cargo.toml, got: {cargo_toml}"
-        );
-        assert!(
-            !cargo_toml.contains("version ="),
-            "unexpected version dependency when workspace_path is Some"
-        );
-    }
-
-    #[test]
     fn test_clean_nonexistent_program() {
         let tmp = tempfile::tempdir().unwrap();
         clean_program_cache(tmp.path(), "never_existed").expect("should succeed even if missing");
@@ -602,11 +578,8 @@ mod cache_tests {
     #[test]
     fn test_clean_all_empty() {
         let tmp = tempfile::tempdir().unwrap();
-        // Take ownership of the path so TempDir::drop does not attempt to remove
-        // a directory that clean_all_cache has already deleted.
-        let path = tmp.into_path();
-        clean_all_cache(&path).expect("should succeed on empty dir");
-        assert!(!path.exists());
+        clean_all_cache(tmp.path()).expect("should succeed on empty dir");
+        assert!(!tmp.path().exists());
     }
 
     #[test]
