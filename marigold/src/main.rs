@@ -561,6 +561,23 @@ mod cache_tests {
     }
 
     #[test]
+    fn test_prepare_cache_workspace_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest =
+            prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", Some("/fake/path"))
+                .expect("prepare_cache failed with workspace_path");
+        let cargo_toml = fs::read_to_string(&manifest).unwrap();
+        assert!(
+            cargo_toml.contains("path ="),
+            "expected `path =` dependency when workspace_path is Some; got:\n{cargo_toml}"
+        );
+        assert!(
+            !cargo_toml.contains("version ="),
+            "expected no `version =` dependency when workspace_path is Some; got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
     fn test_clean_nonexistent_program() {
         let tmp = tempfile::tempdir().unwrap();
         clean_program_cache(tmp.path(), "never_existed").expect("should succeed even if missing");
@@ -578,8 +595,12 @@ mod cache_tests {
     #[test]
     fn test_clean_all_empty() {
         let tmp = tempfile::tempdir().unwrap();
-        clean_all_cache(tmp.path()).expect("should succeed on empty dir");
-        assert!(!tmp.path().exists());
+        // Consume the TempDir into a plain PathBuf so that TempDir::drop does not
+        // attempt remove_dir_all on a path that clean_all_cache already removed,
+        // which would produce a spurious error in debug builds.
+        let path = tmp.into_path();
+        clean_all_cache(&path).expect("should succeed on empty dir");
+        assert!(!path.exists());
     }
 
     #[test]
