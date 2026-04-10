@@ -49,10 +49,9 @@ is upstream Aeneas tooling drift, follow
   Aeneas extraction and `lake build`.
 - [`aeneas-version.txt`](aeneas-version.txt): pinned upstream SHA.
 - [`proofs/CsvCore.lean`](proofs/CsvCore.lean): the Lean theorems.
-- [`ci/aeneas.yaml`](ci/aeneas.yaml): GitHub Actions workflow template.
-  A repo maintainer must copy this file into `.github/workflows/`
-  manually to activate it; the GitHub App used by this session lacks
-  the `workflows` permission required to push workflow files.
+- [`.github/workflows/aeneas.yaml`](../../.github/workflows/aeneas.yaml):
+  GitHub Actions workflow that builds Aeneas + Charon at the pinned SHA,
+  runs extraction, and builds the Lean proofs.
 
 ## MVP status
 

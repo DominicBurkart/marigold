@@ -36,8 +36,7 @@ the property you care about, and add higher tiers when they apply.
   - Location: `dev_docs/aeneas/proofs/`.
   - Architecture: see `dev_docs/aeneas/README.md` for the shell/core split.
   - Run: `cd dev_docs/aeneas/proofs && lake build`.
-  - CI: `dev_docs/aeneas/ci/aeneas.yaml` (template; install manually
-    into `.github/workflows/`).
+  - CI: `.github/workflows/aeneas.yaml`.
 - **Out of scope (future)**: concurrency invariants belong in loom; memory
   safety of `unsafe` belongs in miri. Neither is wired up yet.
 
