@@ -27,6 +27,8 @@ impl Writer {
     }
 
     /// Consumes the writer and returns the written bytes if this is a vector writer.
+    /// Only used in tests; gated to avoid a dead_code clippy warning in non-test builds.
+    #[cfg(test)]
     pub(crate) fn into_bytes(self) -> Option<Vec<u8>> {
         match self.inner {
             WriteTarget::Vector(v) => Some(*Pin::into_inner(v)),
