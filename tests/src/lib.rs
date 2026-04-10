@@ -218,4 +218,70 @@ mod tests {
         .await;
         assert_eq!(result, vec![0, 1, 2, 3]);
     }
+
+    /// fold accumulates the stream using a named function.
+    #[tokio::test]
+    async fn test_fold_sum() {
+        fn add(acc: i32, x: i32) -> i32 {
+            acc + x
+        }
+
+        let result: Vec<i32> = m!(
+            range(1, =5)
+                .fold(0, add)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![15]);
+    }
+
+    /// fold on an empty range emits the initial accumulator unchanged.
+    #[tokio::test]
+    async fn test_fold_empty_range() {
+        fn identity(acc: i32, _x: i32) -> i32 {
+            acc
+        }
+
+        let result: Vec<i32> = m!(
+            range(0, 0)
+                .fold(42, identity)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![42]);
+    }
+
+    /// keep_first_n returns the N largest values (descending) using a named comparator.
+    #[tokio::test]
+    async fn test_keep_first_n_top3() {
+        fn by_value(a: &i32, b: &i32) -> std::cmp::Ordering {
+            a.cmp(b)
+        }
+
+        let result: Vec<i32> = m!(
+            range(0, 10)
+                .keep_first_n(3, by_value)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![9, 8, 7]);
+    }
+
+    /// range with n == 1 yields exactly one element.
+    #[tokio::test]
+    async fn test_single_element_range() {
+        let result: Vec<i32> = m!(
+            range(5, 6).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![5]);
+    }
 }

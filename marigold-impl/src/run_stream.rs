@@ -40,12 +40,30 @@ mod tests {
     use futures::stream::StreamExt;
 
     #[tokio::test]
-    async fn combinations() {
+    async fn run_stream_preserves_items() {
         assert_eq!(
             run_stream(futures::stream::iter(0_u32..3_u32))
                 .collect::<Vec<_>>()
                 .await,
             vec![0_u32, 1_u32, 2_u32]
+        );
+    }
+
+    #[tokio::test]
+    async fn run_stream_empty() {
+        let result = run_stream(futures::stream::iter(std::iter::empty::<u32>()))
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_stream_single_item() {
+        assert_eq!(
+            run_stream(futures::stream::iter(std::iter::once(42_u32)))
+                .collect::<Vec<_>>()
+                .await,
+            vec![42_u32]
         );
     }
 }

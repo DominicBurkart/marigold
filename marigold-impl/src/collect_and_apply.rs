@@ -31,7 +31,7 @@ mod tests {
     use super::CollectAndAppliable;
 
     #[tokio::test]
-    async fn collect_and_apply() {
+    async fn collect_and_apply_identity() {
         assert_eq!(
             futures::stream::iter(1..=3).collect_and_apply(|x| x).await,
             vec![1, 2, 3]
@@ -39,7 +39,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn permutations_with_replacement() {
+    async fn collect_and_apply_empty_stream() {
+        let result: Vec<i32> = futures::stream::iter(std::iter::empty::<i32>())
+            .collect_and_apply(|x| x)
+            .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn collect_and_apply_transformation() {
+        // Verify the function receives the fully-collected vector, not a stream.
+        let sum = futures::stream::iter(1..=5i32)
+            .collect_and_apply(|v| v.into_iter().sum::<i32>())
+            .await;
+        assert_eq!(sum, 15);
+    }
+
+    /// Demonstrates that collect_and_apply can return a future (e.g., for lazy generators).
+    #[tokio::test]
+    async fn collect_and_apply_returns_async_generator() {
         use futures::StreamExt;
         use genawaiter;
 

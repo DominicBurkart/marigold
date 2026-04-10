@@ -38,7 +38,7 @@ mod tests {
     use futures::stream::StreamExt;
 
     #[tokio::test]
-    async fn combinations() {
+    async fn combinations_k2_from_3() {
         assert_eq!(
             futures::stream::iter(vec![1, 2, 3])
                 .combinations(2)
@@ -47,5 +47,35 @@ mod tests {
                 .await,
             vec![vec![1, 2], vec![1, 3], vec![2, 3],]
         );
+    }
+
+    #[tokio::test]
+    async fn combinations_k_equals_n_yields_one_result() {
+        let result = futures::stream::iter(vec![1, 2, 3])
+            .combinations(3)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![vec![1, 2, 3]]);
+    }
+
+    #[tokio::test]
+    async fn combinations_k_greater_than_n_yields_nothing() {
+        let result = futures::stream::iter(vec![1, 2])
+            .combinations(5)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn combinations_k0_yields_one_empty_vec() {
+        let result = futures::stream::iter(vec![1, 2, 3])
+            .combinations(0)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![vec![]]);
     }
 }

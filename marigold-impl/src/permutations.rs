@@ -57,7 +57,7 @@ mod tests {
     use futures::stream::StreamExt;
 
     #[tokio::test]
-    async fn permutations() {
+    async fn permutations_k2_from_3() {
         assert_eq!(
             futures::stream::iter(vec![1, 2, 3])
                 .permutations(2)
@@ -76,7 +76,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn permutations_with_replacement() {
+    async fn permutations_k_equals_n_yields_all_orderings() {
+        let mut result = futures::stream::iter(vec![1, 2])
+            .permutations(2)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        result.sort();
+        assert_eq!(result, vec![vec![1, 2], vec![2, 1]]);
+    }
+
+    #[tokio::test]
+    async fn permutations_k0_yields_one_empty_vec() {
+        let result = futures::stream::iter(vec![1, 2, 3])
+            .permutations(0)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![vec![]]);
+    }
+
+    #[tokio::test]
+    async fn permutations_with_replacement_k2_from_3() {
         assert_eq!(
             futures::stream::iter(vec![0, 1, 2])
                 .permutations_with_replacement(2)
@@ -95,5 +116,16 @@ mod tests {
                 vec![2, 2],
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn permutations_with_replacement_count() {
+        // n=3, k=3 → 3^3 = 27 results
+        let result = futures::stream::iter(vec![0u32, 1, 2])
+            .permutations_with_replacement(3)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result.len(), 27);
     }
 }
