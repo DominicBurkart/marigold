@@ -1,66 +1,23 @@
 #![forbid(unsafe_code)]
 
-//! # Marigold Grammar Library
+//! Grammar, parser, and code-generation for the Marigold DSL.
 //!
-//! This crate provides the grammar and parser infrastructure for the Marigold DSL.
+//! The main entry point is [`marigold_parse`], which takes a Marigold program string and
+//! returns generated Rust code. [`marigold_analyze`] returns static complexity information
+//! without generating code.
 //!
-//! ## Overview
+//! ## Module overview
 //!
-//! Marigold is a domain-specific language for expressing stream processing programs in Rust.
-//! This library provides:
+//! | Module | Purpose |
+//! |--------|---------|
+//! | [`parser`] | Pest-based PEG parser and `MarigoldParser` trait |
+//! | [`nodes`] | AST node types for all Marigold constructs |
+//! | [`pest_ast_builder`] | Converts Pest parse trees into AST nodes |
+//! | [`complexity`] | Static complexity analysis (time/space/cardinality) |
+//! | [`bound_resolution`] | Resolves symbolic bounds in bounded-integer types |
+//! | [`symbol_table`] | Tracks declared enums and struct fields for bound resolution |
 //!
-//! - **Pest-based parser**: Fast, maintainable PEG parser
-//! - **AST definitions**: Complete abstract syntax tree for Marigold programs
-//! - **Code generation**: Transforms Marigold programs into valid Rust code
-//!
-//! ## Quick Start
-//!
-//! Parse a Marigold program:
-//!
-//! ```ignore
-//! use marigold_grammar::parser::parse_marigold;
-//!
-//! let code = parse_marigold("range(0, 100).return")?;
-//! println!("{}", code);
-//! ```
-//!
-//! ## Architecture
-//!
-//! ### Parser
-//!
-//! The [`parser`] module provides the Pest-based parser with a trait abstraction
-//! for extensibility. The factory function [`parser::get_parser()`] returns a
-//! parser instance.
-//!
-//! ### Grammar File
-//!
-//! - **Pest**: `src/marigold.pest` - Defines the complete Marigold language grammar
-//!
-//! ### AST and Code Generation
-//!
-//! - [`nodes`]: AST node definitions for all Marigold constructs
-//! - Code generation: Internal function that transforms AST to Rust code
-//! - [`pest_ast_builder`]: Transforms Pest parse trees into the AST
-//!
-//! ## Testing & Validation
-//!
-//! The parser implementation is validated through:
-//!
-//! - **Unit tests** in each module covering specific functionality
-//! - **Negative tests** ensuring invalid syntax is properly rejected
-//! - **Integration tests** using real-world example programs
-//!
-//! ## Feature Flags
-//!
-//! - `io`: I/O features (available in other crates)
-//! - `tokio`: Tokio runtime integration (available in other crates)
-//! - `async-std`: async-std runtime integration (available in other crates)
-//!
-//! ## Performance Characteristics
-//!
-//! - **Parsing**: Completes in < 1ms for typical programs
-//! - **Code generation**: Dominates runtime, scales with program complexity
-//! - **Binary size**: Pest parser adds ~40KB to binary size
+//! The grammar itself lives in `src/marigold.pest`.
 
 #[macro_use]
 extern crate lazy_static;
@@ -78,23 +35,17 @@ mod type_aggregation;
 
 pub mod pest_ast_builder;
 
-/// Convenience function for parsing Marigold code
-///
-/// This is an alias for [`parser::parse_marigold`] that uses the appropriate parser
-/// based on feature flags. It's the recommended entry point for most use cases.
-///
-/// # Examples
+/// Parse a Marigold program and return the generated Rust code.
 ///
 /// ```ignore
-/// use marigold_grammar::marigold_parse;
-///
-/// let code = marigold_parse("range(0, 100).return")?;
-/// // code is now valid Rust code ready to compile
+/// let code = marigold_grammar::marigold_parse("range(0, 100).return")?;
+/// // code is async Rust ready to compile
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
 }
 
+/// Parse a Marigold program and return its static complexity analysis without generating code.
 pub fn marigold_analyze(
     s: &str,
 ) -> Result<complexity::ProgramComplexity, parser::MarigoldParseError> {
@@ -104,8 +55,8 @@ pub fn marigold_analyze(
 #[cfg(test)]
 mod tests {
     #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+    fn parse_returns_async_rust() {
+        let code = super::marigold_parse("range(0, 5).return").expect("should parse");
+        assert!(code.contains("async"));
     }
 }
