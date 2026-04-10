@@ -10,6 +10,7 @@ if [[ $# -eq 0 ]]; then
 fi
 
 regressions=()
+improvements=()
 no_baseline=0
 
 for file in "$@"; do
@@ -27,13 +28,23 @@ for file in "$@"; do
     while IFS= read -r result; do
         bench=$(echo "$result" | cut -d'|' -f1)
         pct=$(echo "$result" | cut -d'|' -f2)
-        int_pct=$(printf '%.0f' "$pct" 2>/dev/null || echo "$pct" | cut -d. -f1)
-        if (( int_pct > THRESHOLD )); then
+        kind=$(echo "$result" | cut -d'|' -f3)
+        # Use LC_NUMERIC=C so printf always uses '.' as the decimal separator
+        # regardless of the runner locale. The cut fallback handles the rare
+        # case where printf is unavailable.
+        int_pct=$(LC_NUMERIC=C printf '%.0f' "$pct" 2>/dev/null || echo "$pct" | cut -d. -f1)
+        if [[ "$kind" == "improvement" ]]; then
+            improvements+=("${bench}: ${pct}% improvement [${file}]")
+        elif (( int_pct > THRESHOLD )); then
             regressions+=("${bench}: +${pct}% regression (threshold: ${THRESHOLD}%) [${file}]")
         else
             echo "ok: ${bench} regressed ${pct}% (within ${THRESHOLD}% threshold)"
         fi
     done < <(awk '
+        /^Benchmarking / {
+            bench = substr($0, 14)
+            sub(/[[:space:]]*$/, "", bench)
+        }
         /Performance has regressed/ {
             pct = ""
             for (i = NR-1; i >= NR-5 && i >= 1; i--) {
@@ -43,11 +54,20 @@ for file in "$@"; do
                 }
             }
             if (pct != "") {
-                print bench "|" pct
+                print bench "|" pct "|regression"
             }
         }
-        /^[A-Za-z]/ && !/time:|change:|Performance|thrpt:|slope:|mean:|std|median|MAD|outliers|regression|Benchmarking/ {
-            bench = $1
+        /Performance has improved/ {
+            pct = ""
+            for (i = NR-1; i >= NR-5 && i >= 1; i--) {
+                if (match(lines[i], /-[0-9]+\.[0-9]+%/)) {
+                    pct = substr(lines[i], RSTART+1, RLENGTH-2)
+                    break
+                }
+            }
+            if (pct != "") {
+                print bench "|" pct "|improvement"
+            }
         }
         { lines[NR] = $0 }
     ' "$file")
@@ -55,6 +75,13 @@ done
 
 echo ""
 echo "=== Bench regression check ==="
+
+if [[ ${#improvements[@]} -gt 0 ]]; then
+    echo "Improvements (${#improvements[@]} benchmark(s)):"
+    for imp in "${improvements[@]}"; do
+        echo "  + $imp"
+    done
+fi
 
 if [[ ${#regressions[@]} -gt 0 ]]; then
     echo "FAILED: ${#regressions[@]} benchmark(s) exceeded ${THRESHOLD}% threshold:"
