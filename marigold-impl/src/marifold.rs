@@ -50,4 +50,66 @@ mod tests {
             vec![10]
         );
     }
+
+    /// An empty stream produces exactly one item: the initial accumulator value.
+    #[tokio::test]
+    async fn empty_stream_returns_init() {
+        let result = futures::stream::iter(Vec::<i32>::new())
+            .marifold(99i32, |acc, x| async move { acc + x })
+            .await
+            .collect::<Vec<i32>>()
+            .await;
+        assert_eq!(result, vec![99]);
+    }
+
+    /// A single-element stream folds correctly with the initial value.
+    #[tokio::test]
+    async fn single_element_fold() {
+        let result = futures::stream::iter(vec![7i32])
+            .marifold(3i32, |acc, x| async move { acc + x })
+            .await
+            .collect::<Vec<i32>>()
+            .await;
+        assert_eq!(result, vec![10]);
+    }
+
+    /// The output is always a stream of exactly one element, regardless of input length.
+    #[tokio::test]
+    async fn output_is_always_single_element() {
+        for n in [0usize, 1, 10, 100] {
+            let count = futures::stream::iter(0..n)
+                .marifold(0usize, |acc, _| async move { acc + 1 })
+                .await
+                .collect::<Vec<_>>()
+                .await
+                .len();
+            assert_eq!(count, 1, "expected exactly 1 output item for n={n}");
+        }
+    }
+
+    /// Non-commutative fold (subtraction) validates that ordering is preserved.
+    #[tokio::test]
+    async fn non_commutative_fold_preserves_order() {
+        // 0 - 1 - 2 - 3 = -6
+        let result = futures::stream::iter(1i32..=3)
+            .marifold(0i32, |acc, x| async move { acc - x })
+            .await
+            .collect::<Vec<i32>>()
+            .await;
+        assert_eq!(result, vec![-6]);
+    }
+
+    /// String concatenation confirms the fold works with non-numeric state.
+    #[tokio::test]
+    async fn string_accumulation() {
+        let result = futures::stream::iter(vec!["b", "c", "d"])
+            .marifold("a".to_string(), |mut acc, x| async move {
+                acc.push_str(x);
+                acc
+            })
+            .await
+            .collect::<Vec<String>>()
+            .await;
+        assert_eq!(result, vec!["abcd"]);
+    }
 }
