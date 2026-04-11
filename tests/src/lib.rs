@@ -218,4 +218,86 @@ mod tests {
         .await;
         assert_eq!(result, vec![0, 1, 2, 3]);
     }
+
+    // combinations via m!
+    // Note: the m! macro generates fixed-size array outputs for combinations;
+    // type annotations use array syntax [T; k].
+
+    /// Combinations of range(0, 4) choose 2 should yield C(4,2) = 6 items.
+    #[tokio::test]
+    async fn test_combinations_count() {
+        let result = m!(
+            range(0, 4).combinations(2).return
+        )
+        .await
+        .collect::<Vec<[i32; 2]>>()
+        .await;
+        assert_eq!(result.len(), 6);
+    }
+
+    /// Combinations in lexicographic order from range(0, 3) choose 2.
+    #[tokio::test]
+    async fn test_combinations_values() {
+        let result = m!(
+            range(0, 3).combinations(2).return
+        )
+        .await
+        .collect::<Vec<[i32; 2]>>()
+        .await;
+        assert_eq!(result, [[0i32, 1], [0, 2], [1, 2]]);
+    }
+
+    // keep_first_n via m!
+    // Note: the m! macro grammar requires a named comparator function, not an inline closure.
+
+    /// keep_first_n retains the N largest elements in descending order.
+    #[tokio::test]
+    async fn test_keep_first_n_largest() {
+        let by_value = |a: &i32, b: &i32| a.cmp(b);
+        let result = m!(
+            range(0, 10).keep_first_n(3, by_value).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![9, 8, 7]);
+    }
+
+    /// keep_first_n when n >= stream length returns all items in descending order.
+    #[tokio::test]
+    async fn test_keep_first_n_larger_than_stream() {
+        let by_value = |a: &i32, b: &i32| a.cmp(b);
+        let result = m!(
+            range(0, 4).keep_first_n(10, by_value).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![3, 2, 1, 0]);
+    }
+
+    // chained map + filter via m!
+
+    /// Applying map then filter composes correctly end-to-end.
+    #[tokio::test]
+    async fn test_map_then_filter() {
+        fn double(v: i32) -> i32 {
+            v * 2
+        }
+        fn is_gt_four(v: i32) -> bool {
+            v > 4
+        }
+
+        let result = m!(
+            range(0, 6)
+                .map(double)
+                .filter(is_gt_four)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // doubled: 0,2,4,6,8,10  then filtered >4: 6,8,10
+        assert_eq!(result, vec![6, 8, 10]);
+    }
 }
