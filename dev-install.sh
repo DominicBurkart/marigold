@@ -3,7 +3,7 @@
 # Run from the repo root: sh dev-install.sh
 set -eu
 
-MSRV="1.70"
+MSRV=$(grep '^rust-version' marigold/Cargo.toml | sed 's/.*= *"\(.*\)"/\1/')
 
 version_ge() {
     v1=$(printf '%s' "$1" | cut -d'-' -f1)
@@ -46,6 +46,9 @@ cargo install cargo-audit --quiet
 
 echo "Installing cargo-deny..."
 cargo install cargo-deny --quiet
+
+echo "Installing cargo-tarpaulin..."
+cargo install cargo-tarpaulin --quiet
 
 # 3. Validate build -----------------------------------------------------------
 echo "Building workspace (all features)..."
