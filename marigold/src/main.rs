@@ -102,9 +102,7 @@ fn prepare_cache(
     let manifest_path = program_project_dir.join("Cargo.toml");
 
     let marigold_dep = if let Some(path) = workspace_path {
-        format!(
-            "marigold = {{ path = \"{path}\", features = [\"tokio\", \"io\"]}}\n"
-        )
+        format!("marigold = {{ path = \"{path}\", features = [\"tokio\", \"io\"]}}\n")
     } else {
         format!(
             "marigold = {{ version = \"={marigold_version}\", features = [\"tokio\", \"io\"]}}\n"
