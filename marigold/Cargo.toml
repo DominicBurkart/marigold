@@ -2,6 +2,7 @@
 name = "marigold"
 version = "0.1.17"
 edition = "2021"
+rust-version = "1.70"
 authors = ["Dominic <code@dominic.computer>"]
 description = "The Marigold Programming Language."
 license = "Apache-2.0 OR MIT"
