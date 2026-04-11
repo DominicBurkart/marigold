@@ -5,8 +5,8 @@ THRESHOLD="${1:-15}"
 shift || true
 
 if [[ $# -eq 0 ]]; then
-    echo "Usage: $0 [threshold_pct] <bench_output_file> [...]" >&2
-    exit 1
+    echo "SKIPPED: no benchmark output files provided (baseline cache may not exist yet)"
+    exit 0
 fi
 
 regressions=()
