@@ -825,6 +825,13 @@ fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Sy
             Box::new(Symbolic::Constant(BigUint::from(*k))),
         ),
         StreamFunctionKind::Fold => Symbolic::Constant(BigUint::one()),
+        StreamFunctionKind::Chain(ref count, ref variability) => {
+            let chain_card = match (variability, count) {
+                (InputVariability::Constant, InputCount::Known(n)) => Symbolic::Constant(n.clone()),
+                _ => Symbolic::Unknown,
+            };
+            Symbolic::Sum(vec![cardinality, chain_card])
+        }
     }
 }
 
@@ -840,7 +847,8 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
         | StreamFunctionKind::FilterMap
         | StreamFunctionKind::Fold
         | StreamFunctionKind::Ok
-        | StreamFunctionKind::OkOrPanic => ComplexityClass::O1,
+        | StreamFunctionKind::OkOrPanic
+        | StreamFunctionKind::Chain(_, _) => ComplexityClass::O1,
     }
 }
 
@@ -938,6 +946,7 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
             }
             StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
             StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
+            StreamFunctionKind::Chain(_, _) => "chain(...)".to_string(),
             StreamFunctionKind::Fold => "fold(...)".to_string(),
             StreamFunctionKind::Ok => "ok()".to_string(),
             StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
@@ -1367,6 +1376,28 @@ mod tests {
     fn test_keep_first_n_space_o1() {
         assert_eq!(
             space_for_kind(&StreamFunctionKind::KeepFirstN(5)),
+            ComplexityClass::O1
+        );
+    }
+
+    #[test]
+    fn test_chain_cardinality_sum() {
+        let card = Symbolic::Constant(BigUint::from(10u64));
+        let chain_kind = StreamFunctionKind::Chain(
+            InputCount::Known(BigUint::from(20u64)),
+            InputVariability::Constant,
+        );
+        let result = propagate_cardinality(card, &chain_kind);
+        assert_eq!(result.try_evaluate(), Some(BigUint::from(30u64)));
+    }
+
+    #[test]
+    fn test_chain_space_o1() {
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Chain(
+                InputCount::Known(BigUint::from(10u64)),
+                InputVariability::Constant
+            )),
             ComplexityClass::O1
         );
     }
@@ -2036,6 +2067,10 @@ mod proptests {
                 StreamFunctionKind::Fold,
                 StreamFunctionKind::Ok,
                 StreamFunctionKind::OkOrPanic,
+                StreamFunctionKind::Chain(
+                    InputCount::Known(BigUint::from(10u64)),
+                    InputVariability::Constant,
+                ),
             ];
             for op in &streaming_ops {
                 prop_assert_eq!(space_for_kind(op), ComplexityClass::O1);

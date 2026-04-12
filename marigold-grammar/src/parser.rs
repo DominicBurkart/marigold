@@ -582,6 +582,38 @@ mod tests {
     }
 
     #[test]
+    fn test_parser_chain_basic() {
+        let input = "range(0, 3).chain(range(10, 13)).return";
+        let pest_parser = PestParser::new();
+        let pest_result = pest_parser.parse(input);
+
+        assert!(
+            pest_result.is_ok(),
+            "Pest should parse chain: {:?}",
+            pest_result.err()
+        );
+
+        let pest_output = pest_result.unwrap();
+        assert!(pest_output.contains("chain"));
+    }
+
+    #[test]
+    fn test_parser_chain_with_stream_functions() {
+        let input = "range(0, 3).chain(range(10, 20).map(double)).return";
+        let pest_parser = PestParser::new();
+        let pest_result = pest_parser.parse(input);
+
+        assert!(
+            pest_result.is_ok(),
+            "Pest should parse chain with stream functions in argument: {:?}",
+            pest_result.err()
+        );
+
+        let pest_output = pest_result.unwrap();
+        assert!(pest_output.contains("chain"));
+    }
+
+    #[test]
     fn test_bounded_int_literal_bounds() {
         use pest::Parser;
         let result = MarigoldPestParser::parse(Rule::bounded_int_type, "int[0, 10]");
@@ -1436,6 +1468,24 @@ mod negative_tests {
         assert!(
             result.is_err(),
             "Should reject select_all with invalid input function"
+        );
+    }
+
+    #[test]
+    fn test_reject_chain_no_argument() {
+        let result = parse_marigold("range(0, 3).chain().return");
+        assert!(
+            result.is_err(),
+            "chain() with no argument should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_reject_chain_numeric_argument() {
+        let result = parse_marigold("range(0, 3).chain(42).return");
+        assert!(
+            result.is_err(),
+            "chain(42) should be rejected — a bare number is not a valid stream expression"
         );
     }
 }
