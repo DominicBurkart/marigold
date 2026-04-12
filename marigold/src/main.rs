@@ -112,7 +112,16 @@ fn prepare_cache(
     std::fs::write(
         &manifest_path,
         format!(
-            "[package]\nname = \"{program_name}\"\nedition = \"{RUST_EDITION}\"\nversion = \"0.0.1\"\n\n[dependencies]\nserde = \"1\"\ntokio = {{ version = \"1\", features = [\"full\"]}}\n{marigold_dep}\n"
+            r#"[package]
+name = "{program_name}"
+edition = "{RUST_EDITION}"
+version = "0.0.1"
+
+[dependencies]
+serde = "1"
+tokio = {{ version = "1", features = ["full"]}}
+{marigold_dep}
+"#
         ),
     )?;
 
