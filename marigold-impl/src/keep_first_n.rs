@@ -195,6 +195,12 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
+        // NOTE: tests for this non-tokio path are not included in this PR because all
+        // test harness entries (`#[tokio::test]` / `Runtime::new()`) exercise the tokio
+        // impl above. The n=0 guard here is logically identical to the tokio path and is
+        // covered by code review. A dedicated non-tokio n=0 test (plain `#[test]`, no
+        // runtime) would require compiling without tokio/async-std features; that is left
+        // as a follow-up.
         if n == 0 {
             return futures::stream::iter(vec![].into_iter());
         }
@@ -361,7 +367,6 @@ mod tests {
 
         assert_eq!(result, expected);
     }
-}
     #[tokio::test]
     async fn n_zero_returns_empty() {
         assert_eq!(
@@ -496,6 +501,7 @@ mod tests {
         result_sorted.sort();
         assert_eq!(result_sorted, vec![1, 2, 3]);
     }
+}
 
 #[cfg(test)]
 mod proptests {
