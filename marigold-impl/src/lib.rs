@@ -1,3 +1,16 @@
+//! Runtime implementation components for the Marigold DSL.
+//!
+//! ## Re-exported crates
+//!
+//! Several external crates are re-exported from this crate (e.g. `arrayvec`,
+//! `futures`, `genawaiter`, `once_cell`). This is intentional: macro-generated
+//! code emitted by `marigold-macros` references these crates through the stable
+//! path `marigold_impl::…` rather than requiring each generated program to
+//! declare them as direct Cargo dependencies.
+//!
+//! **Consumers of the `marigold` crate should not depend on these re-exports
+//! directly.** They are an implementation detail of the code-generation pipeline
+//! and may change between releases.
 #![forbid(unsafe_code)]
 
 pub use futures;
@@ -17,50 +30,32 @@ pub use keep_first_n::KeepFirstN;
 pub use marifold::Marifold;
 pub use permutations::Permutable;
 
-pub use futures::StreamExt;
-
-// The items below are re-exported solely for use by marigold-macros codegen, which emits
-// fully-qualified paths like `::marigold::marigold_impl::arrayvec::ArrayString`. They are
-// NOT part of the public API. Use the upstream crates directly in your own code.
-#[doc(hidden)]
 pub use arrayvec;
-#[doc(hidden)]
+pub use futures::StreamExt;
 pub use gen_nested_iter_yield;
-#[doc(hidden)]
 pub use genawaiter;
-#[doc(hidden)]
 pub use once_cell;
 
 #[cfg(any(feature = "tokio", feature = "async-std"))]
-#[doc(hidden)]
 pub use num_cpus;
 
 #[cfg(feature = "io")]
-#[doc(hidden)]
 pub use async_compression;
 #[cfg(feature = "io")]
-#[doc(hidden)]
 pub use csv_async;
 #[cfg(feature = "io")]
-#[doc(hidden)]
 pub use flate2;
 #[cfg(feature = "io")]
-#[doc(hidden)]
 pub use serde;
 #[cfg(feature = "io")]
-#[doc(hidden)]
 pub use tokio;
 #[cfg(feature = "io")]
-#[doc(hidden)]
 pub use tokio::io::AsyncWriteExt;
 #[cfg(feature = "io")]
-#[doc(hidden)]
 pub use tokio_util;
 #[cfg(feature = "io")]
-#[doc(hidden)]
 pub use tokio_util::compat::TokioAsyncReadCompatExt;
 #[cfg(feature = "io")]
-#[doc(hidden)]
 pub use tokio_util::compat::TokioAsyncWriteCompatExt;
 #[cfg(feature = "io")]
 pub mod writer;
