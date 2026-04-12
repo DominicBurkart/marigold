@@ -847,12 +847,8 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
 }
 
 fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
-    if let Some(v) = cardinality.try_evaluate() {
-        return if v <= BigUint::one() {
-            ComplexityClass::O1
-        } else {
-            ComplexityClass::ON
-        };
+    if cardinality.try_evaluate().is_some() {
+        return ComplexityClass::O1;
     }
     let base = cardinality.classify_as_time();
     if base == ComplexityClass::O1 {
@@ -863,6 +859,9 @@ fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
 }
 
 fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
+    if cardinality.try_evaluate().is_some() {
+        return ComplexityClass::O1;
+    }
     match kind {
         StreamFunctionKind::Permutations(k) => ComplexityClass::OPermutational(*k),
         StreamFunctionKind::PermutationsWithReplacement(k) => ComplexityClass::OPolynomial(*k),
@@ -872,6 +871,9 @@ fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> Complex
 }
 
 fn step_space_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
+    if cardinality.try_evaluate().is_some() {
+        return ComplexityClass::O1;
+    }
     match kind {
         StreamFunctionKind::Permutations(_)
         | StreamFunctionKind::PermutationsWithReplacement(_)
@@ -1397,7 +1399,7 @@ mod tests {
             crate::parser::PestParser::analyze("range(0, 100).map(double).filter(is_odd).return")
                 .unwrap();
         assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+        assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
         assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
         assert!(!result.streams[0].collects_input);
     }
@@ -1407,7 +1409,7 @@ mod tests {
         let result =
             crate::parser::PestParser::analyze("range(0, 100).permutations(3).return").unwrap();
         assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].space_class, ComplexityClass::ON);
+        assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
         assert!(result.streams[0].collects_input);
     }
 
@@ -1430,7 +1432,7 @@ mod tests {
             result.streams[0].cardinality,
             Cardinality::Exact(BigUint::one())
         );
-        assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+        assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
         assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
     }
 
@@ -1460,7 +1462,7 @@ mod tests {
         let input = "fn identity(x: i32) -> i32 { x }\nrange(0, 10).map(identity).return\nrange(0, 10).permutations(2).return";
         let result = crate::parser::PestParser::analyze(input).unwrap();
         assert_eq!(result.streams.len(), 2);
-        assert_eq!(result.program_space, ComplexityClass::ON);
+        assert_eq!(result.program_space, ComplexityClass::O1);
     }
 
     #[test]
@@ -1468,7 +1470,7 @@ mod tests {
         let result =
             crate::parser::PestParser::analyze("range(0, 10).combinations(2).return").unwrap();
         assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].space_class, ComplexityClass::ON);
+        assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
         assert!(result.streams[0].collects_input);
     }
 
@@ -1488,7 +1490,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].space_class, ComplexityClass::ON);
+        assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
         assert!(result.streams[0].collects_input);
     }
 
@@ -1993,21 +1995,37 @@ mod proptests {
         }
 
         #[test]
-        fn test_combinatoric_step_work_always_asymptotic(k in 1..10u64, n_val in 1u64..1000) {
-            for cardinality in &[Symbolic::Constant(BigUint::from(n_val)), Symbolic::Unknown] {
-                prop_assert_eq!(
-                    step_work_class(cardinality, &StreamFunctionKind::Permutations(k)),
-                    ComplexityClass::OPermutational(k)
-                );
-                prop_assert_eq!(
-                    step_work_class(cardinality, &StreamFunctionKind::PermutationsWithReplacement(k)),
-                    ComplexityClass::OPolynomial(k)
-                );
-                prop_assert_eq!(
-                    step_work_class(cardinality, &StreamFunctionKind::Combinations(k)),
-                    ComplexityClass::OCombinatorial(k)
-                );
-            }
+        fn test_combinatoric_step_work_constant_is_o1(k in 1..10u64, n_val in 1u64..1000) {
+            let cardinality = Symbolic::Constant(BigUint::from(n_val));
+            prop_assert_eq!(
+                step_work_class(&cardinality, &StreamFunctionKind::Permutations(k)),
+                ComplexityClass::O1
+            );
+            prop_assert_eq!(
+                step_work_class(&cardinality, &StreamFunctionKind::PermutationsWithReplacement(k)),
+                ComplexityClass::O1
+            );
+            prop_assert_eq!(
+                step_work_class(&cardinality, &StreamFunctionKind::Combinations(k)),
+                ComplexityClass::O1
+            );
+        }
+
+        #[test]
+        fn test_combinatoric_step_work_unknown_is_asymptotic(k in 1..10u64) {
+            let cardinality = Symbolic::Unknown;
+            prop_assert_eq!(
+                step_work_class(&cardinality, &StreamFunctionKind::Permutations(k)),
+                ComplexityClass::OPermutational(k)
+            );
+            prop_assert_eq!(
+                step_work_class(&cardinality, &StreamFunctionKind::PermutationsWithReplacement(k)),
+                ComplexityClass::OPolynomial(k)
+            );
+            prop_assert_eq!(
+                step_work_class(&cardinality, &StreamFunctionKind::Combinations(k)),
+                ComplexityClass::OCombinatorial(k)
+            );
         }
     }
 

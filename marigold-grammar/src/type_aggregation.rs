@@ -18,7 +18,9 @@ pub fn aggregate_input_count<I: IntoIterator<Item = nodes::InputCount>>(
     let mut total_count: num_bigint::BigUint = 0_u32.into();
     for count in counts.into_iter() {
         match count {
-            nodes::InputCount::Unknown => return nodes::InputCount::Unknown,
+            nodes::InputCount::Unknown | nodes::InputCount::Enum(_) => {
+                return nodes::InputCount::Unknown
+            }
             nodes::InputCount::Known(known_count) => total_count += known_count,
         }
     }
