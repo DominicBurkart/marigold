@@ -204,9 +204,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_take_while_no_resume() {
-        // Distinguishes take_while from filter: predicate fails at 5,
-        // but later values (6, 7, 8, 9) are even and WOULD pass filter.
-        // take_while must stop at 5 and not resume.
+        // Distinguishes take_while from filter: predicate fails at 1 (first odd),
+        // but later values (2, 4, 6, 8) are even and WOULD pass filter.
+        // take_while must stop at 1 and not resume.
         fn is_even(i: &i32) -> bool {
             *i % 2 == 0
         }

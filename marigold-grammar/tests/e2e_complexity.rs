@@ -157,6 +157,11 @@ fn take_while_reports_o1_space() {
 
 #[test]
 fn take_while_pipeline() {
+    // Note: `take_while_pipeline.marigold` and `card_take_while_map.marigold` contain
+    // identical program source by coincidence (same operations, different range).
+    // They are read by different test harnesses (complexity vs. cardinality) and are
+    // intentionally kept as separate files — a content change to one does not imply
+    // a change to the other.
     let result = analyze_file("tests/programs/take_while_pipeline.marigold");
     assert_eq!(result.streams.len(), 1);
     assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
