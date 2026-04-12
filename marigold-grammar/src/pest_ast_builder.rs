@@ -635,45 +635,54 @@ impl PestAstBuilder {
     /// Build range input function
     fn build_range_input(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
         let mut inner = pair.into_inner();
-        let n1 = next_pair(&mut inner, "Missing range start")?.as_str();
+        let first = next_pair(&mut inner, "Missing range argument")?;
 
-        let next = next_pair(&mut inner, "Missing range end")?;
+        if let Some(next) = inner.next() {
+            let n1 = first.as_str();
 
-        let (inclusive, n2) = if next.as_rule() == Rule::inclusive_marker {
-            let n2 = next_pair(&mut inner, "Missing range end after =")?.as_str();
-            (true, n2)
+            let (inclusive, n2) = if next.as_rule() == Rule::inclusive_marker {
+                let n2 = next_pair(&mut inner, "Missing range end after =")?.as_str();
+                (true, n2.to_owned())
+            } else {
+                (false, next.as_str().to_owned())
+            };
+
+            let end_val = n2
+                .parse::<num_bigint::BigInt>()
+                .map_err(|e| format!("Could not parse range end: {}", e))?;
+            let start_val = n1
+                .parse::<num_bigint::BigInt>()
+                .map_err(|e| format!("Could not parse range start: {}", e))?;
+
+            let count = if inclusive {
+                (end_val - &start_val + num_bigint::BigInt::from(1u32))
+                    .to_biguint()
+                    .ok_or_else(|| "Range count is negative".to_string())?
+            } else {
+                (end_val - &start_val)
+                    .to_biguint()
+                    .ok_or_else(|| "Range count is negative".to_string())?
+            };
+
+            let range_expr = if inclusive {
+                format!("::marigold::marigold_impl::futures::stream::iter({n1}..={n2})")
+            } else {
+                format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})")
+            };
+
+            Ok(InputFunctionNode {
+                variability: InputVariability::Constant,
+                input_count: InputCount::Known(count),
+                code: range_expr,
+            })
         } else {
-            (false, next.as_str())
-        };
-
-        let end_val = n2
-            .parse::<num_bigint::BigInt>()
-            .map_err(|e| format!("Could not parse range end: {}", e))?;
-        let start_val = n1
-            .parse::<num_bigint::BigInt>()
-            .map_err(|e| format!("Could not parse range start: {}", e))?;
-
-        let count = if inclusive {
-            (end_val - &start_val + num_bigint::BigInt::from(1u32))
-                .to_biguint()
-                .ok_or_else(|| "Range count is negative".to_string())?
-        } else {
-            (end_val - &start_val)
-                .to_biguint()
-                .ok_or_else(|| "Range count is negative".to_string())?
-        };
-
-        let range_expr = if inclusive {
-            format!("::marigold::marigold_impl::futures::stream::iter({n1}..={n2})")
-        } else {
-            format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})")
-        };
-
-        Ok(InputFunctionNode {
-            variability: InputVariability::Constant,
-            input_count: InputCount::Known(count),
-            code: range_expr,
-        })
+            let enum_name = first.as_str();
+            Ok(InputFunctionNode {
+                variability: InputVariability::Constant,
+                input_count: InputCount::Enum(enum_name.to_string()),
+                code: format!("::marigold::marigold_impl::futures::stream::iter({enum_name}::__marigold_variants())"),
+            })
+        }
     }
 
     fn build_read_file_csv_input(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
