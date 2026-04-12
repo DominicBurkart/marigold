@@ -96,3 +96,4 @@ else
     echo "PASSED: all benchmarks within ${THRESHOLD}% threshold"
     exit 0
 fi
+# test
