@@ -1,3 +1,16 @@
+//! Runtime implementation components for the Marigold DSL.
+//!
+//! ## Re-exported crates
+//!
+//! Several external crates are re-exported from this crate (e.g. `arrayvec`,
+//! `futures`, `genawaiter`, `once_cell`). This is intentional: macro-generated
+//! code emitted by `marigold-macros` references these crates through the stable
+//! path `marigold_impl::…` rather than requiring each generated program to
+//! declare them as direct Cargo dependencies.
+//!
+//! **Consumers of the `marigold` crate should not depend on these re-exports
+//! directly.** They are an implementation detail of the code-generation pipeline
+//! and may change between releases.
 #![forbid(unsafe_code)]
 
 pub use futures;

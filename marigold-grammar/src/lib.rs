@@ -65,8 +65,6 @@
 #[macro_use]
 extern crate lazy_static;
 
-extern crate proc_macro;
-
 pub use itertools;
 
 pub mod bound_resolution;
