@@ -791,6 +791,25 @@ pub struct ProgramComplexity {
     pub program_space: ComplexityClass,
     pub program_exact_space: ExactComplexity,
     pub program_cardinality: Cardinality,
+    /// `true` if the program contains at least one `fn` declaration node.
+    ///
+    /// The analyzer treats every user-provided function as `O(1)` when
+    /// computing stream complexity (see issue #132). This flag surfaces
+    /// the assumption to downstream consumers so they can apply their own
+    /// judgement.
+    ///
+    /// ## Limitations
+    ///
+    /// - **Presence-only**: the flag is set when *any* `FnDeclaration`
+    ///   node is observed anywhere in the program, regardless of whether
+    ///   a stream actually calls it. A program that declares a helper
+    ///   and never calls it will still have `assumes_o1_user_fns: true`.
+    /// - **Call-site blind**: the flag does **not** check call-site usage.
+    ///   A program that references a user function declared in a separate
+    ///   file / earlier in a session (i.e. no `FnDeclaration` node in
+    ///   `expressions`) will have `assumes_o1_user_fns: false` even
+    ///   though the same O(1) assumption applies to those calls. Do not
+    ///   treat `false` as a guarantee of no hidden complexity assumptions.
     #[serde(default)]
     pub assumes_o1_user_fns: bool,
 }
@@ -806,12 +825,33 @@ fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
 ///
 /// Adding a new variant to `StreamFunctionKind` requires updating exactly one
 /// place: the exhaustive match inside [`semantics_for`].
+///
+/// ## Invariants
+///
+/// - **All closures must be non-capturing.** The fields use bare `fn`
+///   pointers, not `Box<dyn Fn>`, so adding a capturing closure to any arm
+///   will produce a confusing type error. If captured state becomes
+///   necessary, switch every field to `Box<dyn Fn>` (at the cost of an
+///   allocation per `semantics_for` call).
+/// - **Parameter for parameterised kinds is lifted into [`param`].** For
+///   parameterised variants (`Permutations(k)`, `PermutationsWithReplacement(k)`,
+///   `Combinations(k)`, `KeepFirstN(k)`), the `k` value is stored in
+///   [`param`] and passed to the closures as a `u64`. Non-parameterised
+///   variants store `0` and the closures ignore that argument. This keeps
+///   every closure a pure `fn(..., u64) -> T` that never needs to
+///   re-inspect the `StreamFunctionKind`, which in turn eliminates the
+///   `unreachable!()` fallback arms that an earlier design required.
+///
+/// [`param`]: StreamFunctionSemantics::param
 pub struct StreamFunctionSemantics {
-    pub cardinality_transform: fn(Symbolic, &StreamFunctionKind) -> Symbolic,
-    pub time_class: fn(&Symbolic, &StreamFunctionKind) -> ComplexityClass,
-    pub space_class: fn(&Symbolic, &StreamFunctionKind) -> ComplexityClass,
+    /// Lifted parameter for parameterised kinds (`Permutations(k)`, etc.);
+    /// `0` for unparameterised variants.
+    pub param: u64,
+    pub cardinality_transform: fn(Symbolic, u64) -> Symbolic,
+    pub time_class: fn(&Symbolic, u64) -> ComplexityClass,
+    pub space_class: fn(&Symbolic, u64) -> ComplexityClass,
     pub collects_input: bool,
-    pub description: fn(&StreamFunctionKind) -> String,
+    pub description: fn(u64) -> String,
 }
 
 /// Returns the full semantic descriptor for the given stream function kind.
@@ -822,6 +862,7 @@ pub struct StreamFunctionSemantics {
 pub fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantics {
     match kind {
         StreamFunctionKind::Map => StreamFunctionSemantics {
+            param: 0,
             cardinality_transform: |card, _| card,
             time_class: |card, _| cardinality_to_time_class(card),
             space_class: |_, _| ComplexityClass::O1,
@@ -829,6 +870,7 @@ pub fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantics {
             description: |_| "map(...)".to_string(),
         },
         StreamFunctionKind::Filter => StreamFunctionSemantics {
+            param: 0,
             cardinality_transform: |card, _| Symbolic::Filtered(Box::new(card)),
             time_class: |card, _| cardinality_to_time_class(card),
             space_class: |_, _| ComplexityClass::O1,
@@ -836,119 +878,61 @@ pub fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantics {
             description: |_| "filter(...)".to_string(),
         },
         StreamFunctionKind::FilterMap => StreamFunctionSemantics {
+            param: 0,
             cardinality_transform: |card, _| Symbolic::Filtered(Box::new(card)),
             time_class: |card, _| cardinality_to_time_class(card),
             space_class: |_, _| ComplexityClass::O1,
             collects_input: false,
             description: |_| "filter_map(...)".to_string(),
         },
-        StreamFunctionKind::Permutations(_) => StreamFunctionSemantics {
-            cardinality_transform: |card, kind| {
-                if let StreamFunctionKind::Permutations(k) = kind {
-                    Symbolic::Permutations {
-                        n: Box::new(card),
-                        k: *k,
-                    }
-                } else {
-                    unreachable!()
-                }
+        StreamFunctionKind::Permutations(k) => StreamFunctionSemantics {
+            param: *k,
+            cardinality_transform: |card, k| Symbolic::Permutations {
+                n: Box::new(card),
+                k,
             },
-            time_class: |_, kind| {
-                if let StreamFunctionKind::Permutations(k) = kind {
-                    ComplexityClass::OPermutational(*k)
-                } else {
-                    unreachable!()
-                }
-            },
+            time_class: |_, k| ComplexityClass::OPermutational(k),
             space_class: |card, _| cardinality_to_time_class(card),
             collects_input: true,
-            description: |kind| {
-                if let StreamFunctionKind::Permutations(k) = kind {
-                    format!("permutations({k})")
-                } else {
-                    unreachable!()
-                }
-            },
+            description: |k| format!("permutations({k})"),
         },
-        StreamFunctionKind::PermutationsWithReplacement(_) => StreamFunctionSemantics {
-            cardinality_transform: |card, kind| {
-                if let StreamFunctionKind::PermutationsWithReplacement(k) = kind {
-                    Symbolic::PermutationsWithReplacement {
-                        n: Box::new(card),
-                        k: *k,
-                    }
-                } else {
-                    unreachable!()
-                }
+        StreamFunctionKind::PermutationsWithReplacement(k) => StreamFunctionSemantics {
+            param: *k,
+            cardinality_transform: |card, k| Symbolic::PermutationsWithReplacement {
+                n: Box::new(card),
+                k,
             },
-            time_class: |_, kind| {
-                if let StreamFunctionKind::PermutationsWithReplacement(k) = kind {
-                    ComplexityClass::OPolynomial(*k)
-                } else {
-                    unreachable!()
-                }
-            },
+            time_class: |_, k| ComplexityClass::OPolynomial(k),
             space_class: |card, _| cardinality_to_time_class(card),
             collects_input: true,
-            description: |kind| {
-                if let StreamFunctionKind::PermutationsWithReplacement(k) = kind {
-                    format!("permutations_with_replacement({k})")
-                } else {
-                    unreachable!()
-                }
-            },
+            description: |k| format!("permutations_with_replacement({k})"),
         },
-        StreamFunctionKind::Combinations(_) => StreamFunctionSemantics {
-            cardinality_transform: |card, kind| {
-                if let StreamFunctionKind::Combinations(k) = kind {
-                    Symbolic::Combinations {
-                        n: Box::new(card),
-                        k: *k,
-                    }
-                } else {
-                    unreachable!()
-                }
+        StreamFunctionKind::Combinations(k) => StreamFunctionSemantics {
+            param: *k,
+            cardinality_transform: |card, k| Symbolic::Combinations {
+                n: Box::new(card),
+                k,
             },
-            time_class: |_, kind| {
-                if let StreamFunctionKind::Combinations(k) = kind {
-                    ComplexityClass::OCombinatorial(*k)
-                } else {
-                    unreachable!()
-                }
-            },
+            time_class: |_, k| ComplexityClass::OCombinatorial(k),
             space_class: |card, _| cardinality_to_time_class(card),
             collects_input: true,
-            description: |kind| {
-                if let StreamFunctionKind::Combinations(k) = kind {
-                    format!("combinations({k})")
-                } else {
-                    unreachable!()
-                }
-            },
+            description: |k| format!("combinations({k})"),
         },
-        StreamFunctionKind::KeepFirstN(_) => StreamFunctionSemantics {
-            cardinality_transform: |card, kind| {
-                if let StreamFunctionKind::KeepFirstN(k) = kind {
-                    Symbolic::Min(
-                        Box::new(card),
-                        Box::new(Symbolic::Constant(BigUint::from(*k))),
-                    )
-                } else {
-                    unreachable!()
-                }
+        StreamFunctionKind::KeepFirstN(k) => StreamFunctionSemantics {
+            param: *k,
+            cardinality_transform: |card, k| {
+                Symbolic::Min(
+                    Box::new(card),
+                    Box::new(Symbolic::Constant(BigUint::from(k))),
+                )
             },
             time_class: |card, _| cardinality_to_time_class(card),
             space_class: |_, _| ComplexityClass::O1,
             collects_input: false,
-            description: |kind| {
-                if let StreamFunctionKind::KeepFirstN(k) = kind {
-                    format!("keep_first_n({k}, ...)")
-                } else {
-                    unreachable!()
-                }
-            },
+            description: |k| format!("keep_first_n({k}, ...)"),
         },
         StreamFunctionKind::Fold => StreamFunctionSemantics {
+            param: 0,
             cardinality_transform: |_, _| Symbolic::Constant(BigUint::one()),
             time_class: |card, _| cardinality_to_time_class(card),
             space_class: |_, _| ComplexityClass::O1,
@@ -956,6 +940,7 @@ pub fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantics {
             description: |_| "fold(...)".to_string(),
         },
         StreamFunctionKind::Ok => StreamFunctionSemantics {
+            param: 0,
             cardinality_transform: |card, _| Symbolic::Filtered(Box::new(card)),
             time_class: |card, _| cardinality_to_time_class(card),
             space_class: |_, _| ComplexityClass::O1,
@@ -963,6 +948,7 @@ pub fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantics {
             description: |_| "ok()".to_string(),
         },
         StreamFunctionKind::OkOrPanic => StreamFunctionSemantics {
+            param: 0,
             cardinality_transform: |card, _| card,
             time_class: |card, _| cardinality_to_time_class(card),
             space_class: |_, _| ComplexityClass::O1,
@@ -973,15 +959,31 @@ pub fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantics {
 }
 
 fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Symbolic {
-    (semantics_for(kind).cardinality_transform)(cardinality, kind)
+    let sem = semantics_for(kind);
+    (sem.cardinality_transform)(cardinality, sem.param)
 }
 
+/// Hard-coded expected `space_class` per kind, used only by tests.
+///
+/// Decoupled from [`semantics_for`] on purpose: an earlier version probed
+/// `semantics_for(kind).space_class` with a magic `Constant(10)` cardinality,
+/// which silently coupled test correctness to the magnitude of the probe
+/// (a probe of `0` or `1` would route through `cardinality_to_time_class`
+/// and return `O1`, making the test vacuous for collectors).
 #[cfg(test)]
 fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
-    // Use a concrete cardinality so that cardinality_to_time_class returns ON
-    // (matching the original hard-coded match that returned ON for collectors).
-    let card = Symbolic::Constant(BigUint::from(10u64));
-    (semantics_for(kind).space_class)(&card, kind)
+    match kind {
+        StreamFunctionKind::Permutations(_)
+        | StreamFunctionKind::PermutationsWithReplacement(_)
+        | StreamFunctionKind::Combinations(_) => ComplexityClass::ON,
+        StreamFunctionKind::Map
+        | StreamFunctionKind::Filter
+        | StreamFunctionKind::FilterMap
+        | StreamFunctionKind::KeepFirstN(_)
+        | StreamFunctionKind::Fold
+        | StreamFunctionKind::Ok
+        | StreamFunctionKind::OkOrPanic => ComplexityClass::O1,
+    }
 }
 
 fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
@@ -1001,11 +1003,13 @@ fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
 }
 
 fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
-    (semantics_for(kind).time_class)(cardinality, kind)
+    let sem = semantics_for(kind);
+    (sem.time_class)(cardinality, sem.param)
 }
 
 fn step_space_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
-    (semantics_for(kind).space_class)(cardinality, kind)
+    let sem = semantics_for(kind);
+    (sem.space_class)(cardinality, sem.param)
 }
 
 fn analyze_stream_fns(
@@ -1051,7 +1055,10 @@ fn analyze_stream_fns(
 
 fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
     funs.iter()
-        .map(|f| (semantics_for(&f.kind).description)(&f.kind))
+        .map(|f| {
+            let sem = semantics_for(&f.kind);
+            (sem.description)(sem.param)
+        })
         .collect::<Vec<_>>()
         .join(".")
 }
@@ -1110,6 +1117,10 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
                 );
             }
             TypedExpression::FnDeclaration(_) => {
+                // Flag is set if *any* fn declaration is present in the
+                // program; does not check call-site usage. See the
+                // `assumes_o1_user_fns` rustdoc on `ProgramComplexity`
+                // for the full limitation.
                 has_fn_declaration = true;
             }
             _ => {}
@@ -2079,20 +2090,20 @@ mod tests {
             let sem = semantics_for(kind);
 
             // cardinality_transform must return a valid Symbolic
-            let new_card = (sem.cardinality_transform)(card.clone(), kind);
+            let new_card = (sem.cardinality_transform)(card.clone(), sem.param);
             assert!(
                 !format!("{new_card}").is_empty(),
                 "cardinality_transform returned empty display for {kind:?}"
             );
 
             // time_class must return a valid ComplexityClass
-            let _tc = (sem.time_class)(&card, kind);
+            let _tc = (sem.time_class)(&card, sem.param);
 
             // space_class must return a valid ComplexityClass
-            let _sc = (sem.space_class)(&card, kind);
+            let _sc = (sem.space_class)(&card, sem.param);
 
             // description must return a non-empty string
-            let desc = (sem.description)(kind);
+            let desc = (sem.description)(sem.param);
             assert!(
                 !desc.is_empty(),
                 "description returned empty string for {kind:?}"
@@ -2125,7 +2136,7 @@ mod tests {
         for kind in &all_kinds {
             let sem = semantics_for(kind);
             if sem.collects_input {
-                let sc = (sem.space_class)(&card, kind);
+                let sc = (sem.space_class)(&card, sem.param);
                 assert_ne!(
                     sc,
                     ComplexityClass::O1,
@@ -2303,9 +2314,13 @@ mod proptests {
     }
 
     fn arb_symbolic() -> impl Strategy<Value = Symbolic> {
+        // NOTE: `Symbolic::Unknown` is *only* generated via `arb_symbolic_leaf`.
+        // A prior version of this strategy also included a direct
+        // `Just(Symbolic::Unknown)` arm, which double-counted Unknown and
+        // made `test_arb_symbolic_unknown_frequency` understate the true
+        // frequency in `arb_symbolic` compositions.
         prop_oneof![
             arb_symbolic_leaf(),
-            Just(Symbolic::Unknown),
             arb_symbolic_leaf().prop_map(|s| Symbolic::Filtered(Box::new(s))),
             (arb_symbolic_leaf(), 1u64..5)
                 .prop_map(|(s, k)| Symbolic::Permutations { n: Box::new(s), k }),
@@ -2388,9 +2403,16 @@ mod proptests {
     #[test]
     fn test_arb_symbolic_unknown_frequency() {
         use proptest::strategy::ValueTree;
-        use proptest::test_runner::TestRunner;
+        use proptest::test_runner::{Config, TestRng, TestRunner};
 
-        let mut runner = TestRunner::default();
+        // Seed the RNG deterministically so failures are reproducible.
+        // A fresh checkout, a different `PROPTEST_SEED`, or a different
+        // `proptest.toml` must not change the outcome of this frequency
+        // smoke-test.
+        const SEED: [u8; 32] = [0x5Eu8; 32];
+        let rng = TestRng::from_seed(proptest::test_runner::RngAlgorithm::ChaCha, &SEED);
+        let mut runner = TestRunner::new_with_rng(Config::default(), rng);
+
         let strategy = arb_symbolic_leaf();
         let total = 10_000;
         let mut unknown_count = 0u64;
@@ -2423,6 +2445,43 @@ mod proptests {
         fn test_symbolic_with_unknown_does_not_panic_on_upper_bound(sym in arb_symbolic()) {
             let _ = sym.upper_bound();
             let _ = sym.try_evaluate();
+        }
+    }
+
+    /// Strategy that always includes at least one `Constant` and at least
+    /// one `Unknown` in the generated `Symbolic::Sum`, so the `Sum(mixed)`
+    /// path is deterministically exercised (issue #131 criterion 2:
+    /// "generate `Symbolic::Sum` with mixed `Constant` and `Unknown`
+    /// children").
+    fn arb_mixed_sum() -> impl Strategy<Value = Symbolic> {
+        (
+            proptest::collection::vec(arb_symbolic_constant(), 1..4),
+            1usize..4,
+        )
+            .prop_map(|(constants, unknown_count)| {
+                let mut parts = constants;
+                for _ in 0..unknown_count {
+                    parts.push(Symbolic::Unknown);
+                }
+                Symbolic::Sum(parts)
+            })
+    }
+
+    proptest! {
+        /// Mixed-child `Sum`: at least one `Constant` and one `Unknown`.
+        /// `try_evaluate` must return `None` (Unknown poisons the sum),
+        /// but `upper_bound` must not panic and neither must `Display`.
+        #[test]
+        fn test_sum_mixed_constant_unknown_behaves(sym in arb_mixed_sum()) {
+            // try_evaluate must be None because at least one child is Unknown.
+            prop_assert_eq!(sym.try_evaluate(), None);
+            // upper_bound may be None or Some; either is acceptable as long as
+            // it does not panic.
+            let _ = sym.upper_bound();
+            // Display must round-trip through FromStr.
+            let s = sym.to_string();
+            let parsed = Symbolic::from_str(&s).unwrap();
+            prop_assert_eq!(sym, parsed);
         }
     }
 
@@ -2504,8 +2563,13 @@ mod proptests {
         }
     }
 
+    /// Deterministic coverage test for `select_all`. Not a proptest —
+    /// exhaustively iterates `num_streams in 2..=5` and checks the
+    /// cardinality prediction for each, then parses a fixed end-to-end
+    /// program. Renamed from `test_analyze_select_all_proptest_coverage`
+    /// because the old name implied randomised property-based testing.
     #[test]
-    fn test_analyze_select_all_proptest_coverage() {
+    fn test_analyze_select_all_coverage() {
         use crate::nodes::*;
 
         // Build select_all programs with varying numbers of sub-streams
@@ -2568,8 +2632,16 @@ mod proptests {
     }
 }
 
+// NOTE: wall-clock scaling tests for issue #135 live in
+// `tests/src/lib.rs::scaling_tests` (they need `#[ignore]`, ≥3 input
+// sizes, and `std::time::Instant` measurement, which belong in the
+// integration test crate). The tests in this module are unit-level
+// checks on the `Symbolic` cardinality algebra and on analyzer
+// stability, not growth-rate measurements — reflected in the module
+// name `cardinality_and_analyzer_stability_tests`.
+
 #[cfg(test)]
-mod scaling_oracle_tests {
+mod cardinality_and_analyzer_stability_tests {
     use super::*;
     use num_bigint::BigUint;
 

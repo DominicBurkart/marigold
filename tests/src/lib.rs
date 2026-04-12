@@ -2,6 +2,9 @@
 mod oracle;
 
 #[cfg(test)]
+mod scaling_tests;
+
+#[cfg(test)]
 mod tests {
     use marigold::m;
     use marigold::marigold_impl::StreamExt;

@@ -79,14 +79,25 @@ async fn oracle_permutations() {
 
 #[tokio::test]
 async fn oracle_fold() {
-    let result = marigold_grammar::marigold_analyze("range(0, 100).fold(0, add).return").unwrap();
+    // The analyzer string and the `m!()` body must be structurally
+    // identical programs — otherwise the oracle is comparing the
+    // runtime behaviour of one program to the analyzer's prediction
+    // for a different one. In particular, the `fn add` declaration
+    // is expressed inside the marigold program (via `TypedExpression::
+    // FnDeclaration`) in BOTH places, not as a Rust fn outside `m!()`.
+    let result = marigold_grammar::marigold_analyze(
+        "fn add(a: i32, v: i32) -> i32 { a + v } range(0, 100).fold(0, add).return",
+    )
+    .unwrap();
+    // `fold` is an `UnnamedReturningStream`; with a `FnDeclaration`
+    // ahead of it the stream is still `streams[0]`.
     let predicted = &result.streams[0].cardinality;
 
-    fn add(acc: i32, v: i32) -> i32 {
-        acc + v
-    }
-
     let items: Vec<i32> = m!(
+        fn add(a: i32, v: i32) -> i32 {
+            a + v
+        }
+
         range(0, 100)
             .fold(0, add)
             .return
@@ -103,7 +114,13 @@ async fn oracle_fold() {
 
 #[tokio::test]
 async fn oracle_map() {
-    let result = marigold_grammar::marigold_analyze("range(0, 100).map(double).return").unwrap();
+    // Same design as `oracle_fold`: the `fn double` declaration is part
+    // of the program in BOTH the analyzer input and the `m!()` body so
+    // the analyzer sees the same AST shape the runtime executes.
+    let result = marigold_grammar::marigold_analyze(
+        "fn double(v: i32) -> i32 { v * 2 } range(0, 100).map(double).return",
+    )
+    .unwrap();
     let predicted = &result.streams[0].cardinality;
 
     let items: Vec<i32> = m!(

@@ -1,3 +1,7 @@
-corpus/
+target/
 artifacts/
 coverage/
+# NOTE: do NOT ignore `corpus/`. Seed corpora for every fuzz target are
+# tracked in git so every developer starts from the same baseline and
+# CI can regress against them. Generated crashes/hangs land under
+# `artifacts/` which is ignored above.
