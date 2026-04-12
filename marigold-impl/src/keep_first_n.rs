@@ -39,6 +39,9 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
+        if n == 0 {
+            return futures::stream::iter(vec![].into_iter());
+        }
         // use the reverse ordering so that the smallest value is always the first to pop.
         let first_n = BinaryHeap::with_capacity_by(n, move |a, b| sorted_by(a, b).reverse());
         impl_keep_first_n(self, first_n, n, sorted_by).await
@@ -192,6 +195,15 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
+        // NOTE: tests for this non-tokio path are not included in this PR because all
+        // test harness entries (`#[tokio::test]` / `Runtime::new()`) exercise the tokio
+        // impl above. The n=0 guard here is logically identical to the tokio path and is
+        // covered by code review. A dedicated non-tokio n=0 test (plain `#[test]`, no
+        // runtime) would require compiling without tokio/async-std features; that is left
+        // as a follow-up.
+        if n == 0 {
+            return futures::stream::iter(vec![].into_iter());
+        }
         // use the reverse ordering so that the smallest value is always the first to pop.
         let mut first_n = BinaryHeap::with_capacity_by(n, |a, b| match sorted_by(a, b) {
             Ordering::Less => Ordering::Greater,
@@ -242,7 +254,7 @@ mod tests {
     use futures::stream::StreamExt;
 
     #[tokio::test]
-    async fn keep_first_n() {
+    async fn keep_first_n_chained() {
         assert_eq!(
             futures::stream::iter(1..10)
                 .keep_first_n(5, |a, b| (a % 2).cmp(&(b % 2))) // keep odd numbers
@@ -254,7 +266,6 @@ mod tests {
             vec![9, 7]
         );
     }
-
     #[tokio::test]
     async fn large_stream_correctness() {
         let items: Vec<u64> = (0..10_000).map(|i| (i * 7 + 3) % 10_000).collect();
@@ -355,5 +366,199 @@ mod tests {
             .await;
 
         assert_eq!(result, expected);
+    }
+    #[tokio::test]
+    async fn n_zero_returns_empty() {
+        assert_eq!(
+            futures::stream::iter(vec![1, 2, 3])
+                .keep_first_n(0, |a, b| a.cmp(b))
+                .await
+                .collect::<Vec<_>>()
+                .await,
+            Vec::<i32>::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn keep_first_1_is_max() {
+        assert_eq!(
+            futures::stream::iter(vec![3, 1, 4, 1, 5, 9, 2, 6])
+                .keep_first_n(1, |a, b| a.cmp(b))
+                .await
+                .collect::<Vec<_>>()
+                .await,
+            vec![9]
+        );
+    }
+
+    #[tokio::test]
+    async fn n_greater_than_stream_length_returns_all_sorted() {
+        let result = futures::stream::iter(vec![3, 1, 2])
+            .keep_first_n(100, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        // verify descending order
+        for w in result.windows(2) {
+            assert!(w[0] >= w[1]);
+        }
+        // verify all items present
+        let mut result_sorted = result;
+        result_sorted.sort();
+        assert_eq!(result_sorted, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn empty_stream() {
+        assert_eq!(
+            futures::stream::iter(Vec::<i32>::new())
+                .keep_first_n(5, |a, b| a.cmp(b))
+                .await
+                .collect::<Vec<_>>()
+                .await,
+            Vec::<i32>::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn descending_output_order() {
+        // keep_first_n returns items in descending order (max first)
+        assert_eq!(
+            futures::stream::iter(vec![1, 5, 3, 4, 2])
+                .keep_first_n(3, |a, b| a.cmp(b))
+                .await
+                .collect::<Vec<_>>()
+                .await,
+            vec![5, 4, 3]
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_values_keeps_correct_count() {
+        // Tests that keep_first_n handles duplicate values correctly.
+        // Note: since all elements are identical, we can only verify count and value,
+        // not stream position preference (which would require distinguishable elements
+        // that compare equal via the comparator but differ by identity).
+        let result = futures::stream::iter(vec![1, 1, 1, 1, 1])
+            .keep_first_n(3, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result.len(), 3);
+        assert!(result.iter().all(|&v| v == 1));
+    }
+
+    #[tokio::test]
+    async fn already_sorted_input() {
+        assert_eq!(
+            futures::stream::iter(vec![1, 2, 3, 4, 5])
+                .keep_first_n(2, |a, b| a.cmp(b))
+                .await
+                .collect::<Vec<_>>()
+                .await,
+            vec![5, 4]
+        );
+    }
+
+    #[tokio::test]
+    async fn reverse_sorted_input() {
+        assert_eq!(
+            futures::stream::iter(vec![5, 4, 3, 2, 1])
+                .keep_first_n(2, |a, b| a.cmp(b))
+                .await
+                .collect::<Vec<_>>()
+                .await,
+            vec![5, 4]
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_comparator_keep_smallest() {
+        // Reverse comparator: keep the smallest n values
+        assert_eq!(
+            futures::stream::iter(vec![5, 3, 8, 1, 9, 2])
+                .keep_first_n(3, |a, b| b.cmp(a)) // reversed
+                .await
+                .collect::<Vec<_>>()
+                .await,
+            vec![1, 2, 3]
+        );
+    }
+
+    #[tokio::test]
+    async fn n_equals_stream_length() {
+        let result = futures::stream::iter(vec![3, 1, 2])
+            .keep_first_n(3, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        // verify descending order
+        for w in result.windows(2) {
+            assert!(w[0] >= w[1]);
+        }
+        // verify all items present
+        let mut result_sorted = result;
+        result_sorted.sort();
+        assert_eq!(result_sorted, vec![1, 2, 3]);
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::KeepFirstN;
+    use futures::stream::StreamExt;
+    use proptest::prelude::*;
+
+    /// Helper: run async keep_first_n and return the collected result.
+    fn run_keep_first_n(items: Vec<i32>, n: usize) -> Vec<i32> {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            futures::stream::iter(items)
+                .keep_first_n(n, |a, b| a.cmp(b))
+                .await
+                .collect::<Vec<_>>()
+                .await
+        })
+    }
+
+    proptest! {
+        #[test]
+        fn result_length_is_min_of_n_and_input_len(
+            items in proptest::collection::vec(-1000i32..1000, 0..50),
+            n in 0usize..60,
+        ) {
+            let result = run_keep_first_n(items.clone(), n);
+            prop_assert_eq!(result.len(), std::cmp::min(n, items.len()));
+        }
+
+        #[test]
+        fn result_contains_top_n_values(
+            items in proptest::collection::vec(-1000i32..1000, 1..50),
+            n in 1usize..20,
+        ) {
+            let result = run_keep_first_n(items.clone(), n);
+            // The result set (sorted) should equal the top-n from a naive sort.
+            let mut expected = items;
+            expected.sort();
+            expected.reverse();
+            expected.truncate(n);
+            expected.sort();
+
+            let mut result_sorted = result;
+            result_sorted.sort();
+            prop_assert_eq!(result_sorted, expected);
+        }
+
+        #[test]
+        fn result_is_in_descending_order(
+            items in proptest::collection::vec(-1000i32..1000, 1..50),
+            n in 1usize..20,
+        ) {
+            let result = run_keep_first_n(items, n);
+            for window in result.windows(2) {
+                prop_assert!(window[0] >= window[1],
+                    "Expected descending order, got {:?} before {:?}", window[0], window[1]);
+            }
+        }
     }
 }
