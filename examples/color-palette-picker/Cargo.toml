@@ -23,7 +23,7 @@ path = "../../marigold"
 version = "=0.1.17"
 
 [dev-dependencies]
-criterion = {version="0.3", features=["async_tokio"]}
+criterion = {version="0.5", features=["async_tokio", "html_reports"]}
 
 [[bench]]
 name = "color_picker_bench"
