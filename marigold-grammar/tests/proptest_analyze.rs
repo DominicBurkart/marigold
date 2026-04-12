@@ -446,15 +446,26 @@ proptest! {
         }
     }
 
-    /// Range-based streams with at least 2 elements should have time >= O(n).
-    /// (Ranges are generated with count >= 2, so cardinality >= 2.)
+    /// Range-based streams with constant bounds and no filter ops should have time == O(1).
+    ///
+    /// filter/filter_map produce Symbolic::Filtered cardinality; subsequent steps on Filtered
+    /// see try_evaluate() == None and fall through to O(n).  This is intentional (the number
+    /// of elements that pass the predicate is unknown at compile time even when the source
+    /// cardinality is a constant).  We therefore only check the O(1) invariant for programs
+    /// whose chains contain no filter or filter_map ops.
     #[test]
-    fn range_programs_have_at_least_o_n_time(prog in arb_unnamed_stream_program()) {
+    fn range_programs_with_constant_bounds_have_o1_time(prog in arb_unnamed_stream_program()) {
+        // Skip programs whose pipeline contains filter / filter_map: those intentionally
+        // produce Symbolic::Filtered cardinality, which is treated as O(n) for downstream ops.
+        if prog.source.contains(".filter(") || prog.source.contains(".filter_map(") {
+            return Ok(());
+        }
         let result = marigold_grammar::marigold_analyze(&prog.source).unwrap();
         for stream in &result.streams {
-            prop_assert!(
-                stream.time_class >= ComplexityClass::ON,
-                "Range-based stream should have time >= O(n), got {:?} in program:\n{}",
+            prop_assert_eq!(
+                stream.time_class.clone(),
+                ComplexityClass::O1,
+                "Range-based stream with constant bounds and no filter should have O(1) time, got {:?} in program:\n{}",
                 stream.time_class,
                 prog.source
             );

@@ -289,8 +289,14 @@ input_function = {
 // Returns: Stream<Item = i32>
 // Example: range(0, 100)   -> 0..100
 // Example: range(0, =255)  -> 0..=255
+//
+// range(EnumName) - Iterate over all unit variants of a marigold enum
+// Arguments: EnumName (identifier)
+// Returns: Stream<Item = EnumName>
+// Example: range(MyEnum)
 range_input = {
-    "range(" ~ free_text_literal ~ "," ~ inclusive_marker? ~ free_text_literal ~ ")"
+    "range(" ~ free_text_literal ~ "," ~ inclusive_marker? ~ free_text_literal ~ ")" |
+    "range(" ~ free_text_identifier ~ ")"
 }
 
 inclusive_marker = { "=" }
