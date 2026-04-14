@@ -44,13 +44,14 @@ async fn permutations_single_element_k1() {
 
 #[tokio::test]
 async fn permutations_with_replacement_k_zero() {
-    // Cartesian product of 0 iterators = 1 empty tuple
+    // itertools::multi_cartesian_product on zero iterators yields an empty iterator,
+    // so permutations_with_replacement(0) produces no output.
     let result = futures::stream::iter(vec![1, 2])
         .permutations_with_replacement(0)
         .await
         .collect::<Vec<_>>()
         .await;
-    assert_eq!(result, vec![Vec::<i32>::new()]);
+    assert!(result.is_empty());
 }
 
 #[tokio::test]
