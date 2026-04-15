@@ -41,8 +41,11 @@ impl<
     pub async fn run(mut self) {
         self.senders.shrink_to_fit();
 
-        #[cfg(any(feature = "async-std", feature = "tokio"))]
-        crate::async_runtime::spawn(async move {
+        // The fan-out logic is identical whether or not we spawn a task.
+        // When an async runtime feature is enabled we offload it to a
+        // background task so the caller is not blocked; otherwise we
+        // drive it inline.
+        let fan_out = async move {
             while let Some(v) = self.inner_stream.next().await {
                 let mut futures = self
                     .senders
@@ -52,20 +55,13 @@ impl<
                 while let Some(_result) = futures.next().await {}
             }
             self.senders.iter_mut().for_each(|s| s.disconnect());
-        });
+        };
+
+        #[cfg(any(feature = "async-std", feature = "tokio"))]
+        crate::async_runtime::spawn(fan_out);
 
         #[cfg(not(any(feature = "async-std", feature = "tokio")))]
-        {
-            while let Some(v) = self.inner_stream.next().await {
-                let mut futures = self
-                    .senders
-                    .iter_mut()
-                    .map(|sender| sender.feed(v))
-                    .collect::<FuturesUnordered<_>>();
-                while let Some(_result) = futures.next().await {}
-            }
-            self.senders.iter_mut().for_each(|s| s.disconnect());
-        }
+        fan_out.await;
     }
 }
 
