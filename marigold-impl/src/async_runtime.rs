@@ -9,8 +9,7 @@ where
     tokio::spawn(future)
 }
 
-#[cfg(all(feature = "async-std", not(feature = "tokio")))
-]
+#[cfg(all(feature = "async-std", not(feature = "tokio")))]
 pub fn spawn<T>(future: T) -> async_std::task::JoinHandle<T::Output>
 where
     T: std::future::Future + Send + 'static,
