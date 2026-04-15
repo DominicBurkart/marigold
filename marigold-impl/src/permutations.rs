@@ -17,8 +17,7 @@ pub trait Permutable<T: Clone> {
     ) -> futures::stream::Iter<itertools::structs::MultiProduct<std::vec::IntoIter<T>>>;
 }
 
-/// This is a glue trait to allow streams to use Permutable in itertools.
-/// The current implementation eagerly consumes the parent stream.
+/// Implements [`Permutable`] for any stream, eagerly consuming it to produce permutations.
 #[async_trait]
 impl<T, SInput> Permutable<T> for SInput
 where
