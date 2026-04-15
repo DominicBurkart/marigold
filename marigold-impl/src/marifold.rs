@@ -13,8 +13,8 @@ pub trait Marifold<SInput, State, F, Fut> {
     ) -> futures::stream::Once<futures::stream::Fold<SInput, Fut, State, F>>;
 }
 
-/// This is an adapter trait that allows fold from StreamExt to return a Stream
-/// with a single value (the state after the parent stream has been exhausted).
+/// Implements [`Marifold`] for any stream, wrapping `StreamExt::fold` so the
+/// accumulated state is returned as a single-item stream.
 #[async_trait]
 impl<State, SInput, T, F, Fut> Marifold<SInput, State, F, Fut> for SInput
 where

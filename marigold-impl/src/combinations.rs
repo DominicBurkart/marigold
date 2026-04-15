@@ -12,8 +12,7 @@ pub trait Combinable<T> {
     ) -> futures::stream::Iter<Combinations<std::vec::IntoIter<T>>>;
 }
 
-/// This is a glue trait to allow streams to use Combinable in itertools.
-/// The current implementation eagerly consumes the parent stream.
+/// Implements [`Combinable`] for any stream, eagerly consuming it to produce combinations.
 #[async_trait]
 impl<T, SInput> Combinable<T> for SInput
 where

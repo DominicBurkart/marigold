@@ -40,7 +40,7 @@ mod tests {
     use futures::stream::StreamExt;
 
     #[tokio::test]
-    async fn combinations() {
+    async fn basic() {
         assert_eq!(
             run_stream(futures::stream::iter(0_u32..3_u32))
                 .collect::<Vec<_>>()
