@@ -820,7 +820,7 @@ fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Sy
             n: Box::new(cardinality),
             k: *k,
         },
-        StreamFunctionKind::KeepFirstN(k) => Symbolic::Min(
+        StreamFunctionKind::KeepFirstN(k) | StreamFunctionKind::Take(k) => Symbolic::Min(
             Box::new(cardinality),
             Box::new(Symbolic::Constant(BigUint::from(*k))),
         ),
@@ -834,7 +834,7 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
         StreamFunctionKind::Permutations(_)
         | StreamFunctionKind::PermutationsWithReplacement(_)
         | StreamFunctionKind::Combinations(_) => ComplexityClass::ON,
-        StreamFunctionKind::KeepFirstN(_) => ComplexityClass::O1,
+        StreamFunctionKind::KeepFirstN(_) | StreamFunctionKind::Take(_) => ComplexityClass::O1,
         StreamFunctionKind::Map
         | StreamFunctionKind::Filter
         | StreamFunctionKind::FilterMap
@@ -938,6 +938,7 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
             }
             StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
             StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
+            StreamFunctionKind::Take(k) => format!("take({k})"),
             StreamFunctionKind::Fold => "fold(...)".to_string(),
             StreamFunctionKind::Ok => "ok()".to_string(),
             StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
@@ -1315,6 +1316,22 @@ mod tests {
     }
 
     #[test]
+    fn test_take_cardinality() {
+        let card = Symbolic::Constant(BigUint::from(100u64));
+        let result = propagate_cardinality(card, &StreamFunctionKind::Take(5));
+        assert!(matches!(result, Symbolic::Min(_, _)));
+        assert_eq!(result.try_evaluate(), Some(BigUint::from(5u64)));
+    }
+
+    #[test]
+    fn test_take_exceeds_cardinality() {
+        let card = Symbolic::Constant(BigUint::from(5u64));
+        let result = propagate_cardinality(card, &StreamFunctionKind::Take(10));
+        assert!(matches!(result, Symbolic::Min(_, _)));
+        assert_eq!(result.try_evaluate(), Some(BigUint::from(5u64)));
+    }
+
+    #[test]
     fn test_chained_filters() {
         let card = Symbolic::Constant(BigUint::from(100u64));
         let r1 = propagate_cardinality(card, &StreamFunctionKind::Filter);
@@ -1367,6 +1384,14 @@ mod tests {
     fn test_keep_first_n_space_o1() {
         assert_eq!(
             space_for_kind(&StreamFunctionKind::KeepFirstN(5)),
+            ComplexityClass::O1
+        );
+    }
+
+    #[test]
+    fn test_take_space_o1() {
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Take(5)),
             ComplexityClass::O1
         );
     }
@@ -1478,6 +1503,14 @@ mod tests {
                 .unwrap();
         assert_eq!(result.streams.len(), 1);
         assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
+    }
+
+    #[test]
+    fn test_analyze_take_pipeline() {
+        let result = crate::parser::PestParser::analyze("range(0, 100).take(5).return").unwrap();
+        assert_eq!(result.streams.len(), 1);
+        assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
+        assert!(!result.streams[0].collects_input);
     }
 
     #[test]

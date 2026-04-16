@@ -91,6 +91,24 @@ mod exact {
             Cardinality::Exact(BigUint::from(5u64))
         );
     }
+
+    #[test]
+    fn take() {
+        let result = analyze_file("tests/programs/card_take.marigold");
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(5u64))
+        );
+    }
+
+    #[test]
+    fn take_exceeds() {
+        let result = analyze_file("tests/programs/card_take_exceeds.marigold");
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(5u64))
+        );
+    }
 }
 
 mod bounded {
