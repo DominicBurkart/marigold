@@ -88,6 +88,19 @@ fn prepare_cache(
 ) -> Result<std::path::PathBuf> {
     const RUST_EDITION: &str = "2021";
 
+    // Reject program contents that would escape the marigold::m!(...) invocation.
+    // The generated main.rs wraps contents as: marigold::m!({program_contents}).await
+    // A `})` sequence closes the macro call and ends the async block, allowing
+    // arbitrary Rust injection. Reject such input early.
+    if program_contents.contains("}") && program_contents.contains(")") {
+        // More precise: reject only if `})` appears as a substring.
+        if program_contents.contains("})") {
+            anyhow::bail!(
+                "program contents contain '})' which would escape the macro invocation"
+            );
+        }
+    }
+
     let program_project_dir = cache_root.join(program_name);
     let program_src_dir = program_project_dir.join("src");
 
@@ -475,8 +488,13 @@ mod tests {
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        // dirs::cache_dir() on Linux resolves to $XDG_CACHE_HOME (defaulting to $HOME/.cache)
-        let cache_dir = tmp.join(".cache/marigold/test_clean");
+        // Derive the expected cache path from dirs::cache_dir() so the assertion
+        // is correct on both Linux ($XDG_CACHE_HOME) and macOS ($HOME/Library/Caches).
+        // The test process inherits the same env vars as the subprocess, so
+        // dirs::cache_dir() resolves to the same root here.
+        let cache_dir = dirs::cache_dir()
+            .expect("dirs::cache_dir() must be available in test env")
+            .join("marigold/test_clean");
         assert!(cache_dir.exists(), "cache should exist after run");
 
         // Clean
@@ -520,8 +538,11 @@ mod tests {
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        // dirs::cache_dir() on Linux resolves to $XDG_CACHE_HOME (defaulting to $HOME/.cache)
-        let cache_root = tmp.join(".cache/marigold");
+        // Derive the expected cache root from dirs::cache_dir() so the assertion
+        // is correct on both Linux ($XDG_CACHE_HOME) and macOS ($HOME/Library/Caches).
+        let cache_root = dirs::cache_dir()
+            .expect("dirs::cache_dir() must be available in test env")
+            .join("marigold");
         assert!(cache_root.exists(), "cache should exist after run");
 
         // Clean all
@@ -587,8 +608,11 @@ mod cache_tests {
     #[test]
     fn test_clean_all_empty() {
         let tmp = tempfile::tempdir().unwrap();
-        clean_all_cache(tmp.path()).expect("should succeed on empty dir");
-        assert!(!tmp.path().exists());
+        // Take ownership of the path so TempDir::drop does not attempt to
+        // remove_dir_all a path that clean_all_cache already removed.
+        let path = tmp.into_path();
+        clean_all_cache(&path).expect("should succeed on empty dir");
+        assert!(!path.exists());
     }
 
     #[test]
@@ -672,6 +696,44 @@ mod cache_tests {
         assert!(
             !status.success(),
             "cargo should fail when manifest is missing"
+        );
+    }
+
+    #[test]
+    fn test_prepare_cache_workspace_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = prepare_cache(
+            tmp.path(),
+            "prog",
+            "range(0, 1).return",
+            "0.1.0",
+            Some("/some/path"),
+        )
+        .unwrap();
+        let toml = fs::read_to_string(&manifest).unwrap();
+        assert!(
+            toml.contains("path = \"/some/path\""),
+            "expected path dep in Cargo.toml, got: {toml}"
+        );
+        assert!(
+            !toml.contains("version ="),
+            "should not emit version dep when workspace_path is set, got: {toml}"
+        );
+    }
+
+    #[test]
+    fn test_prepare_cache_rejects_injection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = prepare_cache(
+            tmp.path(),
+            "prog",
+            "range(0, 1).return }).await } fn evil() { ",
+            "0.1.0",
+            None,
+        );
+        assert!(
+            result.is_err(),
+            "prepare_cache should reject program_contents containing '})'"
         );
     }
 }
