@@ -24,7 +24,9 @@
 //! ```
 #![forbid(unsafe_code)]
 
-pub use crate as marigold; // used so that the tests can reference re-exported values
+// Re-exported so that generated macro code inside user crates can reference
+// `::marigold::marigold` and `::marigold::marigold_impl` without additional imports.
+pub use crate as marigold;
 pub use marigold_impl;
 
 pub use marigold_macros::marigold as m;
