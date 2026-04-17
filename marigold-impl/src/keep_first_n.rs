@@ -35,28 +35,22 @@ where
 {
     #[instrument(skip(self, sorted_by))]
     async fn keep_first_n(
-        mut self,
+        self,
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
-        // use the reverse ordering so that the smallest value is always the first to pop.
-        let first_n = BinaryHeap::with_capacity_by(n, move |a, b| sorted_by(a, b).reverse());
-        impl_keep_first_n(self, first_n, n, sorted_by).await
+        impl_keep_first_n(self, n, sorted_by).await
     }
 }
 
-/// Internal logic for keep_first_n. This is in a separate function so that we can get the full
-/// type of the binary heap, which includes a lambda for reversing the ordering fromt the passed
-/// sort_by function. By declaring a new function, we can use generics to describe its type, and
-/// then can use that type while unsafely casting pointers.
+/// Core implementation of keep_first_n.
 ///
 /// This implementation wraps items with their stream index to provide deterministic tie-breaking
 /// when the user's comparison function returns Equal. Lower indices (earlier in stream) are
 /// preferred to ensure consistent results even with parallel processing.
 #[cfg(any(feature = "tokio", feature = "async-std"))]
-async fn impl_keep_first_n<SInput, T, F, FReversed>(
+async fn impl_keep_first_n<SInput, T, F>(
     sinput: SInput,
-    _first_n: BinaryHeap<T, binary_heap_plus::FnComparator<FReversed>>,
     n: usize,
     sorted_by: F,
 ) -> futures::stream::Iter<std::vec::IntoIter<T>>
@@ -64,12 +58,12 @@ where
     SInput: Stream<Item = T> + Send + Unpin + std::marker::Sync + 'static,
     T: Clone + Send + std::marker::Sync + std::fmt::Debug + 'static,
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
-    FReversed: Fn(&T, &T) -> std::cmp::Ordering + Clone + Send + 'static,
 {
     // Add indices to items for deterministic tie-breaking
     let mut indexed_stream = sinput.enumerate();
 
-    // Create a heap that stores (index, item) tuples with tie-breaking comparator
+    // Create a heap that stores (index, item) tuples with tie-breaking comparator.
+    // The heap is min-oriented (reverse of sorted_by) so peek() returns the smallest kept item.
     let indexed_comparator = move |a: &(usize, T), b: &(usize, T)| {
         match sorted_by(&a.1, &b.1) {
             Ordering::Less => Ordering::Less,
