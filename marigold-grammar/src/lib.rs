@@ -49,18 +49,6 @@
 //! - **Unit tests** in each module covering specific functionality
 //! - **Negative tests** ensuring invalid syntax is properly rejected
 //! - **Integration tests** using real-world example programs
-//!
-//! ## Feature Flags
-//!
-//! - `io`: I/O features (available in other crates)
-//! - `tokio`: Tokio runtime integration (available in other crates)
-//! - `async-std`: async-std runtime integration (available in other crates)
-//!
-//! ## Performance Characteristics
-//!
-//! - **Parsing**: Completes in < 1ms for typical programs
-//! - **Code generation**: Dominates runtime, scales with program complexity
-//! - **Binary size**: Pest parser adds ~40KB to binary size
 
 extern crate proc_macro;
 
@@ -75,7 +63,7 @@ mod type_aggregation;
 
 pub mod pest_ast_builder;
 
-/// Convenience function for parsing Marigold code
+/// Convenience function for parsing Marigold code.
 ///
 /// This is an alias for [`parser::parse_marigold`] that uses the appropriate parser
 /// based on feature flags. It's the recommended entry point for most use cases.
@@ -92,17 +80,21 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
 }
 
+/// Convenience function for statically analyzing Marigold program complexity.
+///
+/// Returns a [`complexity::ProgramComplexity`] describing the time and space
+/// complexity of each stream in the program, as well as overall program complexity.
+///
+/// # Examples
+///
+/// ```ignore
+/// use marigold_grammar::marigold_analyze;
+///
+/// let analysis = marigold_analyze("range(0, 5).write_file(\"/dev/stdout\", csv)")?;
+/// println!("{:#?}", analysis);
+/// ```
 pub fn marigold_analyze(
     s: &str,
 ) -> Result<complexity::ProgramComplexity, parser::MarigoldParseError> {
     parser::PestParser::analyze(s)
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
 }
