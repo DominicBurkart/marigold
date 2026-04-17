@@ -42,30 +42,21 @@ impl<
         self.senders.shrink_to_fit();
 
         #[cfg(any(feature = "async-std", feature = "tokio"))]
-        crate::async_runtime::spawn(async move {
-            while let Some(v) = self.inner_stream.next().await {
-                let mut futures = self
-                    .senders
-                    .iter_mut()
-                    .map(|sender| sender.feed(v))
-                    .collect::<FuturesUnordered<_>>();
-                while let Some(_result) = futures.next().await {}
-            }
-            self.senders.iter_mut().for_each(|s| s.disconnect());
-        });
+        crate::async_runtime::spawn(Self::drive(self.inner_stream, self.senders));
 
         #[cfg(not(any(feature = "async-std", feature = "tokio")))]
-        {
-            while let Some(v) = self.inner_stream.next().await {
-                let mut futures = self
-                    .senders
-                    .iter_mut()
-                    .map(|sender| sender.feed(v))
-                    .collect::<FuturesUnordered<_>>();
-                while let Some(_result) = futures.next().await {}
-            }
-            self.senders.iter_mut().for_each(|s| s.disconnect());
+        Self::drive(self.inner_stream, self.senders).await;
+    }
+
+    async fn drive(mut inner_stream: S, mut senders: Vec<Sender<T>>) {
+        while let Some(v) = inner_stream.next().await {
+            let mut futures = senders
+                .iter_mut()
+                .map(|sender| sender.feed(v))
+                .collect::<FuturesUnordered<_>>();
+            while let Some(_result) = futures.next().await {}
         }
+        senders.iter_mut().for_each(|s| s.disconnect());
     }
 }
 

@@ -101,8 +101,14 @@ pub fn marigold_analyze(
 #[cfg(test)]
 mod tests {
     #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+    fn marigold_parse_returns_rust_code() {
+        let code = super::marigold_parse("range(0, 5).return").expect("should parse");
+        assert!(code.contains("async"), "generated code should be async");
+    }
+
+    #[test]
+    fn marigold_analyze_returns_complexity() {
+        let complexity = super::marigold_analyze("range(0, 5).return").expect("should analyze");
+        assert!(!complexity.streams.is_empty(), "should have at least one stream");
     }
 }

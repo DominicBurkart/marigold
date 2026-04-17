@@ -220,17 +220,17 @@ impl PestParser {
 
         let n_returning_streams = returning_stream_vec.len();
 
-        // Generate returning stream variables
-        output.push_str(
-            &returning_stream_vec
-                .iter()
-                .zip(0..n_returning_streams)
-                .map(|(stream_def, i)| {
-                    format!("let returning_stream_{i} = Box::pin({stream_def});\n")
-                })
+        // Helper: emit `let <prefix>_<i> = Box::pin(<def>);\n` for each definition.
+        let emit_pinned_lets = |defs: &[String], prefix: &str| -> String {
+            defs.iter()
+                .enumerate()
+                .map(|(i, def)| format!("let {prefix}_{i} = Box::pin({def});\n"))
                 .collect::<Vec<_>>()
-                .join(""),
-        );
+                .join("")
+        };
+
+        // 4b. Emit returning stream variables
+        output.push_str(&emit_pinned_lets(&returning_stream_vec, "returning_stream"));
 
         // 5. Collect non-returning streams
         let non_returning_streams = expressions
@@ -242,16 +242,7 @@ impl PestParser {
             })
             .collect::<Vec<_>>();
 
-        output.push_str(
-            &non_returning_streams
-                .iter()
-                .enumerate()
-                .map(|(i, stream_def)| {
-                    format!("let non_returning_stream_{i} = Box::pin({stream_def});\n")
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        );
+        output.push_str(&emit_pinned_lets(&non_returning_streams, "non_returning_stream"));
 
         // 6. Collect stream variable runners
         let stream_variable_runners = expressions
@@ -265,42 +256,23 @@ impl PestParser {
             })
             .collect::<Vec<_>>();
 
-        output.push_str(
-            &stream_variable_runners
-                .iter()
-                .enumerate()
-                .map(|(i, stream_def)| {
-                    format!("let stream_variable_runners_{i} = Box::pin({stream_def});\n")
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        );
+        output.push_str(&emit_pinned_lets(&stream_variable_runners, "stream_variable_runners"));
 
         // 7. Build streams array
-        let mut streams_string = "vec![\n".to_string();
-
-        streams_string.push_str(
-            &(0..n_returning_streams)
-                .map(|i| format!("returning_stream_{i},\n"))
-                .collect::<Vec<_>>()
-                .join(""),
-        );
-
-        streams_string.push_str(
-            &(0..non_returning_streams.len())
-                .map(|i| format!("non_returning_stream_{i},\n"))
-                .collect::<Vec<_>>()
-                .join(""),
-        );
-
-        streams_string.push_str(
-            &(0..stream_variable_runners.len())
-                .map(|i| format!("stream_variable_runners_{i},\n"))
-                .collect::<Vec<_>>()
-                .join(""),
-        );
-
-        streams_string.push_str("]\n");
+        let streams_string = {
+            let mut s = "vec![\n".to_string();
+            for i in 0..n_returning_streams {
+                s.push_str(&format!("returning_stream_{i},\n"));
+            }
+            for i in 0..non_returning_streams.len() {
+                s.push_str(&format!("non_returning_stream_{i},\n"));
+            }
+            for i in 0..stream_variable_runners.len() {
+                s.push_str(&format!("stream_variable_runners_{i},\n"));
+            }
+            s.push_str("]\n");
+            s
+        };
 
         // 8. Generate stream array with type inference helper if needed
         if n_returning_streams > 0 {
@@ -381,14 +353,9 @@ impl MarigoldParser for PestParser {
 }
 
 /// Factory function that returns the parser
-pub fn get_parser() -> Box<dyn MarigoldParser> {
-    Box::new(PestParser::new())
-}
-
 /// Convenience function that uses the default parser to parse input
 pub fn parse_marigold(input: &str) -> Result<String, MarigoldParseError> {
-    let parser = get_parser();
-    parser.parse(input)
+    PestParser::parse_input(input).map_err(MarigoldParseError)
 }
 
 #[cfg(test)]
@@ -402,37 +369,9 @@ mod tests {
     }
 
     #[test]
-    fn test_default_parser_selection() {
-        let parser = get_parser();
-        assert_eq!(parser.name(), "Pest");
-    }
-
-    #[test]
-    fn test_parse_marigold_function() {
-        let result = parse_marigold("");
-
-        assert!(result.is_ok());
-
-        let output = result.unwrap();
-        assert!(output.contains("async"));
-    }
-
-    #[test]
-    fn test_pest_parser_basic_functionality() {
-        let parser = PestParser::new();
-
-        let result = parser.parse("");
-        assert!(result.is_ok());
-
-        let output = result.unwrap();
-        assert!(output.contains("async"));
-    }
-
-    #[test]
     fn test_pest_parser_empty_input() {
         let parser = PestParser::new();
         let result = parser.parse("");
-
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("async"));
@@ -440,29 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pest_grammar_basic_parsing() {
-        let _parser = MarigoldPestParser;
-    }
-
-    #[test]
-    fn test_parser_empty_input() {
-        let pest_parser = PestParser::new();
-        let pest_result = pest_parser.parse("");
-
-        assert!(pest_result.is_ok());
-        let pest_output = pest_result.unwrap();
-        assert!(pest_output.contains("async"));
-        assert!(pest_output.contains("use ::marigold::marigold_impl::*"));
-    }
-
-    #[test]
-    fn test_factory_function_consistency() {
-        let parser = get_parser();
-        assert_eq!(parser.name(), "Pest");
-    }
-
-    #[test]
-    fn test_parse_marigold_function_works() {
+    fn test_parse_marigold_function() {
         let result = parse_marigold("");
         assert!(result.is_ok());
         let output = result.unwrap();
