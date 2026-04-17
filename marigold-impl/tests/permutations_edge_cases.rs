@@ -44,14 +44,16 @@ async fn permutations_single_element_k1() {
 
 #[tokio::test]
 async fn permutations_with_replacement_k_zero() {
-    // itertools::multi_cartesian_product on zero iterators yields an empty iterator,
-    // so permutations_with_replacement(0) produces no output.
+    // itertools::multi_cartesian_product called on zero iterators yields one empty
+    // tuple — this is the Cartesian product identity (the product of zero sets is
+    // the singleton set containing the empty tuple). This is the same contract as
+    // permutations(0), which yields vec![vec![]] via itertools::permutations(0).
     let result = futures::stream::iter(vec![1, 2])
         .permutations_with_replacement(0)
         .await
         .collect::<Vec<_>>()
         .await;
-    assert!(result.is_empty());
+    assert_eq!(result, vec![Vec::<i32>::new()]);
 }
 
 #[tokio::test]
