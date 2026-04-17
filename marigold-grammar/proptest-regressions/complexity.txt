@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc cf2b89f25b3d2bb0028f56e5baf52534c9c153863883adc83e56a56005677c68 # shrinks to ec = ExactComplexity { terms: {ONLogK(1): 1, ONLogK(2): 1} }
 cc 1a36c6bf7c8b3434c690424e6fb84041cd9bef77d7e43623ba892934864e54ca # shrinks to ec = ExactComplexity { terms: {ONLogK(1): 1, ONLogK(2): 1} }
+cc 80fd417ac47523a0fc444905d04b4364959b187ad87e835e5897989d041d8d5f # shrinks to sym = PermutationsWithReplacement { n: Unknown, k: 1 }
