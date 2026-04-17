@@ -39,6 +39,7 @@ mod tests {
     use super::Marifold;
     use futures::stream::StreamExt;
 
+    /// Basic fold: sum 0..5 = 10.
     #[tokio::test]
     async fn fold() {
         assert_eq!(
@@ -49,5 +50,41 @@ mod tests {
                 .await,
             vec![10]
         );
+    }
+
+    /// Folding an empty stream returns the initial accumulator as the sole item.
+    #[tokio::test]
+    async fn fold_empty_stream_returns_init() {
+        let result: Vec<i32> = futures::stream::iter(Vec::<i32>::new())
+            .marifold(42, |acc, x| async move { acc + x })
+            .await
+            .collect()
+            .await;
+        assert_eq!(result, vec![42]);
+    }
+
+    /// Folding a single-element stream applies the function exactly once.
+    #[tokio::test]
+    async fn fold_single_element() {
+        let result: Vec<i32> = futures::stream::iter(vec![7i32])
+            .marifold(0, |acc, x| async move { acc + x })
+            .await
+            .collect()
+            .await;
+        assert_eq!(result, vec![7]);
+    }
+
+    /// marifold always produces exactly one output item regardless of input length.
+    #[tokio::test]
+    async fn fold_always_produces_one_item() {
+        for len in [0usize, 1, 10, 100] {
+            let count: usize = futures::stream::iter(vec![1u32; len])
+                .marifold(0u32, |acc, x| async move { acc + x })
+                .await
+                .collect::<Vec<_>>()
+                .await
+                .len();
+            assert_eq!(count, 1, "expected 1 item for input length {len}");
+        }
     }
 }
