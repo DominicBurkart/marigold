@@ -112,9 +112,8 @@ range(0, 5).map(double).return"#;
 
 #[test]
 fn parse_chained_operations() {
-    let result = marigold_grammar::marigold_parse(
-        "range(0, 10).filter(is_even).map(double).return"
-    );
+    let result =
+        marigold_grammar::marigold_parse("range(0, 10).filter(is_even).map(double).return");
     assert!(result.is_ok(), "Chained filter.map should parse: {:?}", result);
 }
 

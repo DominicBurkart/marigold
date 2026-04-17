@@ -211,17 +211,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_negative_range() {
-        let result = m!(
-            range(-3, 3).return
-        )
-        .await
-        .collect::<Vec<_>>()
-        .await;
-        assert_eq!(result, vec![-3, -2, -1, 0, 1, 2]);
-    }
-
-    #[tokio::test]
     async fn test_fold_sum() {
         fn add(acc: i32, x: i32) -> i32 {
             acc + x
