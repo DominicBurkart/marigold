@@ -1463,44 +1463,584 @@ mod tests {
         assert_eq!(fields[3].1, Type::Bool);
     }
 
-    fn split_respecting_parens(input: &str) -> Vec<String> {
-        let mut result = Vec::new();
-        let mut current = String::new();
-        let mut paren_depth: usize = 0;
-        let mut bracket_depth: usize = 0;
+    // === Expression / Program dispatch ===
 
-        for ch in input.chars() {
-            match ch {
-                '(' => {
-                    paren_depth += 1;
-                    current.push(ch);
+    fn parse_expr(input: &str) -> Result<TypedExpression, String> {
+        let pairs = MarigoldPestParser::parse(Rule::expr, input).map_err(|e| e.to_string())?;
+        PestAstBuilder::build_expression(pairs.into_iter().next().unwrap())
+    }
+
+    fn parse_program(input: &str) -> Result<Vec<TypedExpression>, String> {
+        let pairs = MarigoldPestParser::parse(Rule::program, input).map_err(|e| e.to_string())?;
+        PestAstBuilder::build_program(pairs)
+    }
+
+    #[test]
+    fn build_program_collects_all_expressions() {
+        let exprs =
+            parse_program("struct A { x: u32 } struct B { y: bool } range(0, 5).return").unwrap();
+        assert_eq!(exprs.len(), 3);
+        assert!(matches!(exprs[0], TypedExpression::StructDeclaration(_)));
+        assert!(matches!(exprs[1], TypedExpression::StructDeclaration(_)));
+        assert!(matches!(
+            exprs[2],
+            TypedExpression::UnnamedReturningStream(_)
+        ));
+    }
+
+    #[test]
+    fn build_expression_dispatches_to_each_kind() {
+        assert!(matches!(
+            parse_expr("range(0, 3).return").unwrap(),
+            TypedExpression::UnnamedReturningStream(_)
+        ));
+        assert!(matches!(
+            parse_expr("xs = range(0, 3)").unwrap(),
+            TypedExpression::StreamVariable(_)
+        ));
+        assert!(matches!(
+            parse_expr("struct S { a: u32 }").unwrap(),
+            TypedExpression::StructDeclaration(_)
+        ));
+        assert!(matches!(
+            parse_expr("enum E { A, B }").unwrap(),
+            TypedExpression::EnumDeclaration(_)
+        ));
+        assert!(matches!(
+            parse_expr("fn id(x: i32) -> i32 { x }").unwrap(),
+            TypedExpression::FnDeclaration(_)
+        ));
+    }
+
+    // === Stream / output function tests ===
+
+    fn parse_stream(input: &str) -> TypedExpression {
+        parse_expr(input).unwrap()
+    }
+
+    #[test]
+    fn unnamed_stream_with_return_produces_returning_node() {
+        match parse_stream("range(0, 10).return") {
+            TypedExpression::UnnamedReturningStream(node) => {
+                assert!(node.out.returning);
+                assert_eq!(node.out.stream_prefix, "");
+                assert_eq!(node.out.stream_postfix, "");
+            }
+            _ => panic!("Expected UnnamedReturningStream"),
+        }
+    }
+
+    #[test]
+    fn unnamed_stream_with_write_file_csv_is_non_returning() {
+        match parse_stream("range(0, 10).write_file(\"out.csv\", csv)") {
+            TypedExpression::UnnamedNonReturningStream(node) => {
+                assert!(!node.out.returning);
+                assert!(node.out.stream_prefix.contains("WRITER"));
+                assert!(!node.out.stream_prefix.contains("GzipEncoder"));
+            }
+            _ => panic!("Expected UnnamedNonReturningStream"),
+        }
+    }
+
+    #[test]
+    fn write_file_auto_detects_gzip_from_extension() {
+        match parse_stream("range(0, 10).write_file(\"out.csv.gz\", csv)") {
+            TypedExpression::UnnamedNonReturningStream(node) => {
+                assert!(node.out.stream_prefix.contains("GzipEncoder"));
+            }
+            _ => panic!("Expected UnnamedNonReturningStream"),
+        }
+    }
+
+    #[test]
+    fn write_file_explicit_gz_compression_uses_gzip() {
+        match parse_stream("range(0, 10).write_file(\"out.csv\", csv, compression=gz)") {
+            TypedExpression::UnnamedNonReturningStream(node) => {
+                assert!(node.out.stream_prefix.contains("GzipEncoder"));
+            }
+            _ => panic!("Expected UnnamedNonReturningStream"),
+        }
+    }
+
+    #[test]
+    fn write_file_explicit_none_compression_skips_gzip_even_for_gz_extension() {
+        match parse_stream("range(0, 10).write_file(\"out.csv.gz\", csv, compression=none)") {
+            TypedExpression::UnnamedNonReturningStream(node) => {
+                assert!(!node.out.stream_prefix.contains("GzipEncoder"));
+            }
+            _ => panic!("Expected UnnamedNonReturningStream"),
+        }
+    }
+
+    #[test]
+    fn write_file_unsupported_format_errors() {
+        // "json" is parsed as free_text_identifier for write_file_format but rejected
+        // by build_output_function because only "csv" is implemented.
+        let err = match parse_expr("range(0, 10).write_file(\"out.json\", json)") {
+            Err(e) => e,
+            Ok(_) => panic!("expected Err"),
+        };
+        assert!(err.contains("Unsupported write_file format"), "got: {err}");
+    }
+
+    // === Input function tests ===
+
+    #[test]
+    fn exclusive_range_has_known_count_and_excludes_endpoint() {
+        match parse_stream("range(0, 5).return") {
+            TypedExpression::UnnamedReturningStream(node) => {
+                assert!(matches!(
+                    node.inp_and_funs.inp.variability,
+                    InputVariability::Constant
+                ));
+                match &node.inp_and_funs.inp.input_count {
+                    InputCount::Known(n) => {
+                        assert_eq!(n, &num_bigint::BigUint::from(5u32));
+                    }
+                    _ => panic!("expected Known count"),
                 }
-                ')' => {
-                    paren_depth = paren_depth.saturating_sub(1);
-                    current.push(ch);
+                assert!(node.inp_and_funs.inp.code.contains("0..5"));
+                assert!(!node.inp_and_funs.inp.code.contains("0..=5"));
+            }
+            _ => panic!("Expected UnnamedReturningStream"),
+        }
+    }
+
+    #[test]
+    fn inclusive_range_has_count_plus_one() {
+        match parse_stream("range(0, =5).return") {
+            TypedExpression::UnnamedReturningStream(node) => {
+                match &node.inp_and_funs.inp.input_count {
+                    InputCount::Known(n) => {
+                        assert_eq!(n, &num_bigint::BigUint::from(6u32));
+                    }
+                    _ => panic!("expected Known count"),
                 }
-                '[' => {
-                    bracket_depth += 1;
-                    current.push(ch);
+                assert!(node.inp_and_funs.inp.code.contains("0..=5"));
+            }
+            _ => panic!("Expected UnnamedReturningStream"),
+        }
+    }
+
+    #[test]
+    fn enum_range_yields_enum_input_count() {
+        match parse_stream("range(MyEnum).return") {
+            TypedExpression::UnnamedReturningStream(node) => {
+                match &node.inp_and_funs.inp.input_count {
+                    InputCount::Enum(name) => assert_eq!(name, "MyEnum"),
+                    _ => panic!("expected Enum count"),
                 }
-                ']' => {
-                    bracket_depth = bracket_depth.saturating_sub(1);
-                    current.push(ch);
-                }
-                ',' if paren_depth == 0 && bracket_depth == 0 => {
-                    result.push(current.clone());
-                    current.clear();
-                }
-                _ => {
-                    current.push(ch);
+                assert!(node
+                    .inp_and_funs
+                    .inp
+                    .code
+                    .contains("MyEnum::__marigold_variants()"));
+            }
+            _ => panic!("Expected UnnamedReturningStream"),
+        }
+    }
+
+    #[test]
+    fn read_file_csv_default_is_variable_and_unknown_count() {
+        match parse_stream("read_file(\"data.csv\", csv, struct=MyData).return") {
+            TypedExpression::UnnamedReturningStream(node) => {
+                assert!(matches!(
+                    node.inp_and_funs.inp.variability,
+                    InputVariability::Variable
+                ));
+                assert!(matches!(
+                    node.inp_and_funs.inp.input_count,
+                    InputCount::Unknown
+                ));
+                assert!(!node.inp_and_funs.inp.code.contains("GzipDecoder"));
+            }
+            _ => panic!("Expected UnnamedReturningStream"),
+        }
+    }
+
+    #[test]
+    fn read_file_csv_auto_detects_gzip_from_gz_extension() {
+        match parse_stream("read_file(\"data.csv.gz\", csv, struct=MyData).return") {
+            TypedExpression::UnnamedReturningStream(node) => {
+                assert!(node.inp_and_funs.inp.code.contains("GzipDecoder"));
+            }
+            _ => panic!("Expected UnnamedReturningStream"),
+        }
+    }
+
+    #[test]
+    fn read_file_csv_with_infer_compression_false_skips_gzip() {
+        match parse_stream(
+            "read_file(\"data.csv.gz\", csv, struct=MyData, infer_compression=false).return",
+        ) {
+            TypedExpression::UnnamedReturningStream(node) => {
+                assert!(!node.inp_and_funs.inp.code.contains("GzipDecoder"));
+            }
+            _ => panic!("Expected UnnamedReturningStream"),
+        }
+    }
+
+    #[test]
+    fn select_all_merges_two_streams() {
+        match parse_stream("select_all(range(0, 3), range(0, 4)).return") {
+            TypedExpression::UnnamedReturningStream(node) => {
+                assert!(node.inp_and_funs.inp.code.contains("select_all"));
+                match &node.inp_and_funs.inp.input_count {
+                    InputCount::Known(n) => assert_eq!(n, &num_bigint::BigUint::from(7u32)),
+                    _ => panic!("expected Known count"),
                 }
             }
+            _ => panic!("Expected UnnamedReturningStream"),
         }
-
-        if !current.is_empty() {
-            result.push(current);
-        }
-
-        result
     }
+
+    #[test]
+    fn select_all_with_variable_source_is_variable() {
+        match parse_stream("select_all(range(0, 3), read_file(\"x.csv\", csv, struct=T)).return") {
+            TypedExpression::UnnamedReturningStream(node) => {
+                assert!(matches!(
+                    node.inp_and_funs.inp.variability,
+                    InputVariability::Variable
+                ));
+                assert!(matches!(
+                    node.inp_and_funs.inp.input_count,
+                    InputCount::Unknown
+                ));
+            }
+            _ => panic!("Expected UnnamedReturningStream"),
+        }
+    }
+
+    // === Stream function tests (uncovered dispatch arms) ===
+
+    #[test]
+    fn stream_function_dispatch_covers_common_kinds() {
+        fn funs(input: &str) -> Vec<StreamFunctionKind> {
+            match parse_stream(input) {
+                TypedExpression::UnnamedReturningStream(node) => {
+                    node.inp_and_funs.funs.into_iter().map(|f| f.kind).collect()
+                }
+                _ => panic!("Expected UnnamedReturningStream"),
+            }
+        }
+        assert_eq!(
+            funs("range(0, 10).map(f).return"),
+            vec![StreamFunctionKind::Map]
+        );
+        assert_eq!(
+            funs("range(0, 10).filter(p).return"),
+            vec![StreamFunctionKind::Filter]
+        );
+        assert_eq!(
+            funs("range(0, 10).filter_map(fm).return"),
+            vec![StreamFunctionKind::FilterMap]
+        );
+        assert_eq!(
+            funs("range(0, 10).fold(0, add).return"),
+            vec![StreamFunctionKind::Fold]
+        );
+        assert_eq!(
+            funs("range(0, 10).permutations(2).return"),
+            vec![StreamFunctionKind::Permutations(2)]
+        );
+        assert_eq!(
+            funs("range(0, 10).permutations_with_replacement(3).return"),
+            vec![StreamFunctionKind::PermutationsWithReplacement(3)]
+        );
+        assert_eq!(
+            funs("range(0, 10).combinations(2).return"),
+            vec![StreamFunctionKind::Combinations(2)]
+        );
+        assert_eq!(
+            funs("range(0, 10).keep_first_n(3, v).return"),
+            vec![StreamFunctionKind::KeepFirstN(3)]
+        );
+    }
+
+    #[test]
+    fn ok_and_ok_or_panic_stream_functions_are_recognized() {
+        fn funs(input: &str) -> Vec<StreamFunctionKind> {
+            match parse_stream(input) {
+                TypedExpression::UnnamedReturningStream(node) => {
+                    node.inp_and_funs.funs.into_iter().map(|f| f.kind).collect()
+                }
+                _ => panic!("Expected UnnamedReturningStream"),
+            }
+        }
+        let ok = funs("read_file(\"x.csv\", csv, struct=T).ok().return");
+        assert_eq!(ok, vec![StreamFunctionKind::Ok]);
+        let ok_or_panic = funs("read_file(\"x.csv\", csv, struct=T).ok_or_panic().return");
+        assert_eq!(ok_or_panic, vec![StreamFunctionKind::OkOrPanic]);
+    }
+
+    #[test]
+    fn fold_with_non_numeric_state_wraps_in_constructor_call() {
+        match parse_stream("range(0, 3).fold(MyState, step).return") {
+            TypedExpression::UnnamedReturningStream(node) => {
+                let code = &node.inp_and_funs.funs[0].code;
+                // Non-numeric state should be wrapped as "MyState()".
+                assert!(code.contains("MyState()"), "code: {code}");
+            }
+            _ => panic!("Expected UnnamedReturningStream"),
+        }
+    }
+
+    // === Stream variable declarations ===
+
+    #[test]
+    fn stream_variable_from_input_function() {
+        match parse_expr("xs = range(0, 5).map(f)").unwrap() {
+            TypedExpression::StreamVariable(node) => {
+                assert_eq!(node.variable_name, "xs");
+                assert_eq!(node.funs.len(), 1);
+                assert_eq!(node.funs[0].kind, StreamFunctionKind::Map);
+            }
+            _ => panic!("Expected StreamVariable"),
+        }
+    }
+
+    #[test]
+    fn stream_variable_from_prior_variable() {
+        match parse_expr("ys = xs.filter(p)").unwrap() {
+            TypedExpression::StreamVariableFromPriorStreamVariable(node) => {
+                assert_eq!(node.variable_name, "ys");
+                assert_eq!(node.prior_stream_variable, "xs");
+                assert_eq!(node.funs.len(), 1);
+            }
+            _ => panic!("Expected StreamVariableFromPriorStreamVariable"),
+        }
+    }
+
+    #[test]
+    fn named_stream_with_return() {
+        match parse_expr("xs.filter(p).return").unwrap() {
+            TypedExpression::NamedReturningStream(node) => {
+                assert_eq!(node.stream_variable, "xs");
+                assert_eq!(node.funs.len(), 1);
+                assert!(node.out.returning);
+            }
+            _ => panic!("Expected NamedReturningStream"),
+        }
+    }
+
+    #[test]
+    fn named_stream_with_write_file_is_non_returning() {
+        match parse_expr("xs.write_file(\"out.csv\", csv)").unwrap() {
+            TypedExpression::NamedNonReturningStream(node) => {
+                assert_eq!(node.stream_variable, "xs");
+                assert!(!node.out.returning);
+            }
+            _ => panic!("Expected NamedNonReturningStream"),
+        }
+    }
+
+    // === Enum declarations ===
+
+    fn parse_enum(input: &str) -> TypedExpression {
+        let pairs = MarigoldPestParser::parse(Rule::enum_decl, input).expect("parse failed");
+        PestAstBuilder::build_enum_decl(pairs.into_iter().next().unwrap()).unwrap()
+    }
+
+    fn enum_node(expr: TypedExpression) -> EnumDeclarationNode {
+        match expr {
+            TypedExpression::EnumDeclaration(node) => node,
+            _ => panic!("Expected EnumDeclaration"),
+        }
+    }
+
+    #[test]
+    fn enum_basic_variants_without_values() {
+        let node = enum_node(parse_enum("enum Color { Red, Green, Blue }"));
+        assert_eq!(node.name, "Color");
+        assert_eq!(node.variants.len(), 3);
+        assert!(node.variants.iter().all(|(_, v)| v.is_none()));
+        assert!(node.default_variant.is_none());
+    }
+
+    #[test]
+    fn enum_variants_with_serialized_values() {
+        let node = enum_node(parse_enum(
+            "enum Sound { Meow = \"meow\", Bark = \"woof\" }",
+        ));
+        assert_eq!(
+            node.variants,
+            vec![
+                ("Meow".to_string(), Some("meow".to_string())),
+                ("Bark".to_string(), Some("woof".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn enum_default_variant_with_sized_string_type() {
+        let node = enum_node(parse_enum(
+            "enum Sound { Meow, default Unknown(string_16) }",
+        ));
+        match node.default_variant {
+            Some(DefaultEnumVariant::Sized(name, size)) => {
+                assert_eq!(name, "Unknown");
+                assert_eq!(size, 16);
+            }
+            _ => panic!("Expected Sized default variant"),
+        }
+    }
+
+    #[test]
+    fn enum_default_variant_with_explicit_value() {
+        let node = enum_node(parse_enum(
+            "enum Sound { Meow, default Unknown = \"other\" }",
+        ));
+        match node.default_variant {
+            Some(DefaultEnumVariant::WithDefaultValue(name, value)) => {
+                assert_eq!(name, "Unknown");
+                assert_eq!(value, "other");
+            }
+            _ => panic!("Expected WithDefaultValue default variant"),
+        }
+    }
+
+    #[test]
+    fn enum_default_variant_without_argument_uses_name_as_value() {
+        let node = enum_node(parse_enum("enum Sound { Meow, default Unknown }"));
+        match node.default_variant {
+            Some(DefaultEnumVariant::WithDefaultValue(name, value)) => {
+                assert_eq!(name, "Unknown");
+                assert_eq!(value, "Unknown");
+            }
+            _ => panic!("Expected WithDefaultValue default variant"),
+        }
+    }
+
+    #[test]
+    fn enum_default_variant_non_string_type_errors() {
+        let pairs =
+            MarigoldPestParser::parse(Rule::enum_decl, "enum Sound { Meow, default Unknown(u32) }")
+                .expect("parse failed");
+        let err = match PestAstBuilder::build_enum_decl(pairs.into_iter().next().unwrap()) {
+            Err(e) => e,
+            Ok(_) => panic!("expected Err"),
+        };
+        assert!(err.contains("string_N"), "got: {err}");
+    }
+
+    // === Function declarations ===
+
+    fn parse_fn(input: &str) -> FnDeclarationNode {
+        match parse_expr(input).unwrap() {
+            TypedExpression::FnDeclaration(node) => node,
+            _ => panic!("Expected FnDeclaration"),
+        }
+    }
+
+    #[test]
+    fn fn_decl_simple_by_value_param() {
+        let node = parse_fn("fn double(x: i32) -> i32 { x * 2 }");
+        assert_eq!(node.name, "double");
+        assert_eq!(node.parameters, vec![("x".to_string(), "i32".to_string())]);
+        assert_eq!(node.output_type, "i32");
+        assert_eq!(node.body.trim(), "x * 2");
+    }
+
+    #[test]
+    fn fn_decl_reference_param_gets_ampersand() {
+        let node = parse_fn("fn is_pos(x: &i32) -> bool { *x > 0 }");
+        assert_eq!(node.parameters, vec![("x".to_string(), "&i32".to_string())]);
+        assert_eq!(node.output_type, "bool");
+    }
+
+    #[test]
+    fn fn_decl_string_sized_param_translates_to_arraystring() {
+        let node = parse_fn("fn name_len(n: string_32) -> usize { n.len() }");
+        let (_, ptype) = &node.parameters[0];
+        assert!(
+            ptype.contains("ArrayString<32>"),
+            "expected ArrayString translation, got: {ptype}"
+        );
+    }
+
+    #[test]
+    fn fn_decl_sized_string_return_type_translates_to_arraystring() {
+        let node = parse_fn("fn greet(x: i32) -> string_8 { String::new() }");
+        assert!(
+            node.output_type.contains("ArrayString<8>"),
+            "got: {}",
+            node.output_type
+        );
+    }
+
+    #[test]
+    fn fn_decl_no_params() {
+        let node = parse_fn("fn constant() -> i32 { 42 }");
+        assert!(node.parameters.is_empty());
+        assert_eq!(node.output_type, "i32");
+    }
+
+    // === Bound expression error paths ===
+
+    #[test]
+    fn bound_type_reference_all_operations() {
+        fn max_op(src: &str) -> BoundOp {
+            match &get_fields(parse_struct(src).unwrap())[0].1 {
+                Type::BoundedInt {
+                    max: BoundExpr::TypeReference(_, op),
+                    ..
+                } => *op,
+                other => panic!("expected TypeReference max, got {other:?}"),
+            }
+        }
+        assert_eq!(max_op("struct F { v: int[0, E.len()] }"), BoundOp::Len);
+        assert_eq!(max_op("struct F { v: int[0, E.min()] }"), BoundOp::Min);
+        assert_eq!(max_op("struct F { v: int[0, E.max()] }"), BoundOp::Max);
+        assert_eq!(
+            max_op("struct F { v: int[0, E.cardinality()] }"),
+            BoundOp::Cardinality
+        );
+    }
+
+    #[test]
+    fn bound_literal_strips_underscores() {
+        let fields = get_fields(parse_struct("struct F { v: int[0, 1_000_000] }").unwrap());
+        match &fields[0].1 {
+            Type::BoundedInt { max, .. } => {
+                assert_eq!(*max, BoundExpr::Literal(1_000_000));
+            }
+            _ => panic!("Expected BoundedInt"),
+        }
+    }
+
+    #[test]
+    fn bound_arithmetic_mul_and_div() {
+        let fields = get_fields(parse_struct("struct F { v: int[0, 2 * 3 + 4 / 2] }").unwrap());
+        match &fields[0].1 {
+            Type::BoundedInt { max, .. } => {
+                // Structure: (2*3) + (4/2)
+                match max {
+                    BoundExpr::BinaryOp {
+                        op: ArithOp::Add,
+                        left,
+                        right,
+                    } => {
+                        assert!(matches!(
+                            **left,
+                            BoundExpr::BinaryOp {
+                                op: ArithOp::Mul,
+                                ..
+                            }
+                        ));
+                        assert!(matches!(
+                            **right,
+                            BoundExpr::BinaryOp {
+                                op: ArithOp::Div,
+                                ..
+                            }
+                        ));
+                    }
+                    _ => panic!("expected Add at root"),
+                }
+            }
+            _ => panic!("Expected BoundedInt"),
+        }
+    }
+
+    // === Code generation for StructDeclarationNode structs (kept for struct tests) ===
 }
