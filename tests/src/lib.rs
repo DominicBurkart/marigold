@@ -1,4 +1,7 @@
 #[cfg(test)]
+mod oracle;
+
+#[cfg(test)]
 mod tests {
     use marigold::m;
     use marigold::marigold_impl::StreamExt;
