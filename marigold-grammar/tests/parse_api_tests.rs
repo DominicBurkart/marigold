@@ -3,28 +3,47 @@
 #[test]
 fn parse_simple_range_return() {
     let result = marigold_grammar::marigold_parse("range(0, 10).return");
-    assert!(result.is_ok(), "Simple range.return should parse: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Simple range.return should parse: {:?}",
+        result
+    );
     let code = result.unwrap();
     // The generated code should contain marigold_impl references
-    assert!(code.contains("marigold_impl"), "Generated code should reference marigold_impl");
+    assert!(
+        code.contains("marigold_impl"),
+        "Generated code should reference marigold_impl"
+    );
 }
 
 #[test]
 fn parse_range_with_map() {
     let result = marigold_grammar::marigold_parse("range(0, 5).map(double).return");
-    assert!(result.is_ok(), "range.map.return should parse: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "range.map.return should parse: {:?}",
+        result
+    );
 }
 
 #[test]
 fn parse_range_with_filter() {
     let result = marigold_grammar::marigold_parse("range(0, 100).filter(is_even).return");
-    assert!(result.is_ok(), "range.filter.return should parse: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "range.filter.return should parse: {:?}",
+        result
+    );
 }
 
 #[test]
 fn parse_range_with_fold() {
     let result = marigold_grammar::marigold_parse("range(0, 10).fold(0, add).return");
-    assert!(result.is_ok(), "range.fold.return should parse: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "range.fold.return should parse: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -61,13 +80,19 @@ fn parse_keep_first_n() {
 fn parse_empty_input_succeeds() {
     // The parser intentionally returns Ok for empty programs (generates a trivial async wrapper).
     let result = marigold_grammar::marigold_parse("");
-    assert!(result.is_ok(), "Empty input should parse successfully per documented contract");
+    assert!(
+        result.is_ok(),
+        "Empty input should parse successfully per documented contract"
+    );
 }
 
 #[test]
 fn parse_error_no_terminal() {
     let result = marigold_grammar::marigold_parse("range(0, 10)");
-    assert!(result.is_err(), "Missing terminal (.return or .write_file) should fail");
+    assert!(
+        result.is_err(),
+        "Missing terminal (.return or .write_file) should fail"
+    );
 }
 
 #[test]
@@ -79,7 +104,11 @@ fn parse_error_invalid_syntax() {
 #[test]
 fn analyze_simple_range() {
     let result = marigold_grammar::marigold_analyze("range(0, 100).return");
-    assert!(result.is_ok(), "Analyze should succeed for simple range: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Analyze should succeed for simple range: {:?}",
+        result
+    );
     let analysis = result.unwrap();
     assert_eq!(analysis.streams.len(), 1);
 }
@@ -88,7 +117,10 @@ fn analyze_simple_range() {
 fn analyze_empty_input_succeeds() {
     // The parser intentionally returns Ok for empty programs, so analyze should also succeed.
     let result = marigold_grammar::marigold_analyze("");
-    assert!(result.is_ok(), "Analyze should succeed on empty input per documented contract");
+    assert!(
+        result.is_ok(),
+        "Analyze should succeed on empty input per documented contract"
+    );
 }
 
 #[test]
@@ -102,7 +134,11 @@ fn parse_fn_declaration_and_usage() {
     let program = r#"fn double(i: i32) -> i32 { i * 2 }
 range(0, 5).map(double).return"#;
     let result = marigold_grammar::marigold_parse(program);
-    assert!(result.is_ok(), "fn declaration + usage should parse: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "fn declaration + usage should parse: {:?}",
+        result
+    );
     // End-to-end correctness of fn declarations is validated in
     // tests/src/lib.rs::test_fn_declaration_in_macro. We only verify here
     // that parse succeeds and returns non-empty output.
@@ -114,7 +150,11 @@ range(0, 5).map(double).return"#;
 fn parse_chained_operations() {
     let result =
         marigold_grammar::marigold_parse("range(0, 10).filter(is_even).map(double).return");
-    assert!(result.is_ok(), "Chained filter.map should parse: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "Chained filter.map should parse: {:?}",
+        result
+    );
 }
 
 #[test]

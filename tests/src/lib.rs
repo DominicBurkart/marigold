@@ -295,7 +295,10 @@ mod tests {
         .await
         .collect::<Vec<_>>()
         .await;
-        assert!(result.is_empty(), "Filter that matches nothing should produce empty stream");
+        assert!(
+            result.is_empty(),
+            "Filter that matches nothing should produce empty stream"
+        );
     }
 
     #[tokio::test]
