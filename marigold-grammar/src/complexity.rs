@@ -803,9 +803,10 @@ fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
 fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Symbolic {
     match kind {
         StreamFunctionKind::Map | StreamFunctionKind::OkOrPanic => cardinality,
-        StreamFunctionKind::Filter | StreamFunctionKind::FilterMap | StreamFunctionKind::Ok => {
-            Symbolic::Filtered(Box::new(cardinality))
-        }
+        StreamFunctionKind::Filter
+        | StreamFunctionKind::FilterMap
+        | StreamFunctionKind::TakeWhile
+        | StreamFunctionKind::Ok => Symbolic::Filtered(Box::new(cardinality)),
         StreamFunctionKind::Permutations(k) => Symbolic::Permutations {
             n: Box::new(cardinality),
             k: *k,
@@ -838,6 +839,7 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
         StreamFunctionKind::Map
         | StreamFunctionKind::Filter
         | StreamFunctionKind::FilterMap
+        | StreamFunctionKind::TakeWhile
         | StreamFunctionKind::Fold
         | StreamFunctionKind::Ok
         | StreamFunctionKind::OkOrPanic => ComplexityClass::O1,
@@ -938,6 +940,7 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
             }
             StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
             StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
+            StreamFunctionKind::TakeWhile => "take_while(...)".to_string(),
             StreamFunctionKind::Fold => "fold(...)".to_string(),
             StreamFunctionKind::Ok => "ok()".to_string(),
             StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
@@ -1963,7 +1966,10 @@ mod proptests {
 
     proptest! {
         #[test]
-        fn test_complexity_class_ordering_is_total(a in arb_complexity_class(), b in arb_complexity_class()) {
+        fn test_complexity_class_ordering_is_total(
+            a in arb_complexity_class(),
+            b in arb_complexity_class(),
+        ) {
             prop_assert!(a.partial_cmp(&b).is_some());
         }
     }
@@ -1987,7 +1993,11 @@ mod proptests {
             ];
             for op in &collecting_ops {
                 let space = space_for_kind(op);
-                prop_assert!(space >= ComplexityClass::ON, "Collecting op {:?} should have space >= O(n)", op);
+                prop_assert!(
+                    space >= ComplexityClass::ON,
+                    "Collecting op {:?} should have space >= O(n)",
+                    op
+                );
             }
         }
 
@@ -2181,7 +2191,10 @@ mod proptests {
         #[test]
         fn test_symbolic_upper_bound_ge_try_evaluate(sym in arb_symbolic()) {
             if let (Some(exact), Some(upper)) = (sym.try_evaluate(), sym.upper_bound()) {
-                prop_assert!(upper >= exact, "upper_bound ({upper}) must be >= try_evaluate ({exact})");
+                prop_assert!(
+                    upper >= exact,
+                    "upper_bound ({upper}) must be >= try_evaluate ({exact})"
+                );
             }
         }
     }

@@ -147,3 +147,27 @@ async fn oracle_filter() {
     // filter produces bounded cardinality; actual count is 50
     assert_eq!(items.len(), 50);
 }
+
+#[tokio::test]
+async fn oracle_take_while() {
+    let result =
+        marigold_grammar::marigold_analyze("range(0, 10).take_while(less_than_4).return").unwrap();
+    let predicted = &result.streams[0].cardinality;
+
+    fn less_than_4(i: &i32) -> bool {
+        *i < 4
+    }
+
+    let items: Vec<i32> = m!(
+        range(0, 10)
+            .take_while(less_than_4)
+            .return
+    )
+    .await
+    .collect::<Vec<_>>()
+    .await;
+
+    assert_cardinality_matches(items.len(), predicted);
+    // take_while produces bounded cardinality; actual count is 4 (0, 1, 2, 3)
+    assert_eq!(items.len(), 4);
+}
