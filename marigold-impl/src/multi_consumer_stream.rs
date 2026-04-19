@@ -100,3 +100,40 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
         (0, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream::StreamExt;
+
+    /// A MultiConsumerStream with a single consumer should forward every item.
+    #[tokio::test]
+    async fn single_consumer_receives_all_items() {
+        let source = futures::stream::iter(vec![1u32, 2, 3]);
+        let mut mcs = MultiConsumerStream::new(source);
+        let receiver = mcs.get();
+        mcs.run().await;
+        let items: Vec<u32> = receiver.collect().await;
+        assert_eq!(items, vec![1, 2, 3]);
+    }
+
+    /// An empty source stream should close the receiver immediately.
+    #[tokio::test]
+    async fn empty_source_closes_receiver() {
+        let source = futures::stream::iter(Vec::<u32>::new());
+        let mut mcs = MultiConsumerStream::new(source);
+        let receiver = mcs.get();
+        mcs.run().await;
+        let items: Vec<u32> = receiver.collect().await;
+        assert!(items.is_empty());
+    }
+
+    /// RunFutureAsStream should produce no items and terminate after the future resolves.
+    #[tokio::test]
+    async fn run_future_as_stream_yields_no_items() {
+        let fut = Box::pin(async { () });
+        let stream: RunFutureAsStream<u32, (), _> = RunFutureAsStream::new(fut);
+        let items: Vec<u32> = stream.collect().await;
+        assert!(items.is_empty());
+    }
+}
