@@ -18,6 +18,12 @@ where
 {
     /// Takes the largest N values according to the sorted function, returned in descending order
     /// (max first). Exhausts the stream.
+    ///
+    /// Tie-breaking: when the `tokio` or `async-std` feature is enabled, ties (elements that
+    /// compare `Ordering::Equal` under `sorted_by`) are broken deterministically by preferring
+    /// the earlier stream position. The default (non-tokio/non-async-std) implementation does
+    /// not provide this guarantee: among equal elements it retains an arbitrary subset sized
+    /// to fit within `n`.
     async fn keep_first_n(
         self,
         n: usize,
@@ -266,6 +272,7 @@ mod tests {
             vec![9, 7]
         );
     }
+
     #[tokio::test]
     async fn large_stream_correctness() {
         let items: Vec<u64> = (0..10_000).map(|i| (i * 7 + 3) % 10_000).collect();
@@ -367,6 +374,7 @@ mod tests {
 
         assert_eq!(result, expected);
     }
+
     #[tokio::test]
     async fn n_zero_returns_empty() {
         assert_eq!(
