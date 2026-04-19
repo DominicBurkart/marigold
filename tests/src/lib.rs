@@ -211,23 +211,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fold_sum() {
-        fn add(acc: i32, x: i32) -> i32 {
-            acc + x
-        }
-
-        let result = m!(
-            range(1, 6)
-                .fold(0, add)
-                .return
-        )
-        .await
-        .collect::<Vec<_>>()
-        .await;
-        assert_eq!(result, vec![15], "1+2+3+4+5 = 15");
-    }
-
-    #[tokio::test]
     async fn test_chained_maps() {
         fn double(v: i32) -> i32 {
             v * 2

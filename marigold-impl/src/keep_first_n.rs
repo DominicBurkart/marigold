@@ -25,7 +25,11 @@ impl<SInput, T, F> KeepFirstN<T, F> for SInput
 where
     SInput: Stream<Item = T> + Send + Unpin + std::marker::Sync + 'static,
     T: Clone + Send + std::marker::Sync + std::fmt::Debug + 'static,
-    F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
+    F: Fn(&T, &T) -> Ordering
+        + std::marker::Send
+        + std::marker::Sync
+        + std::marker::Copy
+        + 'static,
 {
     #[instrument(skip(self, sorted_by))]
     async fn keep_first_n(
@@ -57,7 +61,11 @@ async fn impl_keep_first_n<SInput, T, F, FReversed>(
 where
     SInput: Stream<Item = T> + Send + Unpin + std::marker::Sync + 'static,
     T: Clone + Send + std::marker::Sync + std::fmt::Debug + 'static,
-    F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
+    F: Fn(&T, &T) -> Ordering
+        + std::marker::Send
+        + std::marker::Sync
+        + std::marker::Copy
+        + 'static,
     FReversed: Fn(&T, &T) -> std::cmp::Ordering + Clone + Send + 'static,
 {
     // n=0 means keep nothing; return an empty stream immediately without touching the heap
