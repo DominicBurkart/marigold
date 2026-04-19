@@ -72,6 +72,22 @@ fn bench_filter_operation(c: &mut Criterion) {
     });
 }
 
+/// Benchmark take_while operation
+fn bench_take_while_operation(c: &mut Criterion) {
+    let input = r#"
+        fn less_than_50(i: &i32) -> bool { *i < 50 }
+
+        range(0, 100)
+            .take_while(less_than_50)
+            .return
+    "#;
+
+    c.bench_function("pest_take_while_operation", |b| {
+        let parser = PestParser::new();
+        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
+    });
+}
+
 /// Benchmark struct declaration
 fn bench_struct_declaration(c: &mut Criterion) {
     let input = r#"
@@ -297,6 +313,7 @@ criterion_group!(
     bench_range_map_return,
     bench_chained_operations,
     bench_filter_operation,
+    bench_take_while_operation,
     bench_struct_declaration,
     bench_enum_declaration,
     bench_enum_default_variant,
