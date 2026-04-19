@@ -18,11 +18,17 @@
 //! Parse a Marigold program:
 //!
 //! ```ignore
-//! let code = marigold_grammar::marigold_parse("range(0, 100).return")?;
+//! let code = marigold_grammar::marigold_parse("range(0, 100).return").unwrap();
 //! println!("{}", code);
 //! ```
 //!
 //! ## Architecture
+//!
+//! ### Parser
+//!
+//! The [`parser`] module provides the Pest-based parser with a trait abstraction
+//! for extensibility. The factory function [`parser::get_parser()`] returns a
+//! parser instance.
 //!
 //! ### Grammar File
 //!
@@ -67,16 +73,15 @@ mod type_aggregation;
 
 pub mod pest_ast_builder;
 
-/// Convenience function for parsing Marigold code into Rust.
+/// Convenience function for parsing Marigold code
 ///
-/// This is the recommended entry point for most use cases.
+/// This is an alias for [`parser::parse_marigold`] that uses the appropriate parser
+/// based on feature flags. It's the recommended entry point for most use cases.
 ///
 /// # Examples
 ///
 /// ```ignore
-/// use marigold_grammar::marigold_parse;
-///
-/// let code = marigold_parse("range(0, 100).return")?;
+/// let code = marigold_grammar::marigold_parse("range(0, 100).return").unwrap();
 /// // code is now valid Rust code ready to compile
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
