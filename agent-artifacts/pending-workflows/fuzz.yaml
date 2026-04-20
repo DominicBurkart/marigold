@@ -1,0 +1,83 @@
+# .github/workflows/fuzz.yaml
+# This file belongs at `.github/workflows/fuzz.yaml` in the repo root.
+# It was placed here because the agent that authored it lacks the
+# `workflows: write` GitHub App permission. Another agent with that
+# permission (or a human maintainer) should `git mv` it into place.
+# See agent-artifacts/pending-workflows/README.md.
+name: fuzz
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'marigold-grammar/**'
+      - '.github/workflows/fuzz.yaml'
+  schedule:
+    # Weekly deeper run on Sundays 04:00 UTC.
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+    inputs:
+      max_total_time:
+        description: 'Seconds per fuzz target'
+        required: false
+        default: '60'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [fuzz_parse, fuzz_analyze]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo registry + fuzz artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            marigold-grammar/fuzz/target
+            marigold-grammar/fuzz/corpus
+          key: fuzz-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock', 'marigold-grammar/fuzz/Cargo.toml') }}
+          restore-keys: |
+            fuzz-${{ runner.os }}-${{ matrix.target }}-
+            fuzz-${{ runner.os }}-
+
+      - name: Install cargo-fuzz
+        run: cargo install --locked cargo-fuzz
+
+      - name: Compute time budget
+        id: budget
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "seconds=600" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "seconds=${{ github.event.inputs.max_total_time }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "seconds=60" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run ${{ matrix.target }}
+        working-directory: marigold-grammar
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=${{ steps.budget.outputs.seconds }}
+
+      - name: Upload crash artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: |
+            marigold-grammar/fuzz/artifacts/${{ matrix.target }}/**
+            marigold-grammar/fuzz/corpus/${{ matrix.target }}/**
+          if-no-files-found: ignore
+          retention-days: 14
