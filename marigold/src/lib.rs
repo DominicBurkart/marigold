@@ -1,7 +1,8 @@
-//! Marigold is a domain specific language for data pipelining and analysis. It compiles to
-//! asynchronous Rust and can be integrated into Rust programs using a macro.
+//! Marigold is an imperative, domain-specific language for data pipelining
+//! and analysis over async streams. It compiles to asynchronous Rust and can
+//! be embedded in Rust programs via the [`m!`] macro.
 //!
-//! ## Example Usage
+//! # Example
 //!
 //! ```rust
 //! # #[tokio::main]
@@ -24,7 +25,8 @@
 //! ```
 #![forbid(unsafe_code)]
 
-pub use crate as marigold; // used so that the tests can reference re-exported values
+// Re-exported so tests and macro output can reference this crate by name.
+pub use crate as marigold;
 pub use marigold_impl;
 
 pub use marigold_macros::marigold as m;
