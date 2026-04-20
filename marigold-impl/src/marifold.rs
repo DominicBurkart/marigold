@@ -15,6 +15,11 @@ pub trait Marifold<SInput, State, F, Fut> {
 
 /// This is an adapter trait that allows fold from StreamExt to return a Stream
 /// with a single value (the state after the parent stream has been exhausted).
+///
+/// The name `marifold` is a portmanteau of "marigold" and "fold": it wraps
+/// [`futures::StreamExt::fold`] so that the result is itself a single-item
+/// stream rather than a bare future, keeping it composable with other stream
+/// operations in a Marigold pipeline.
 #[async_trait]
 impl<State, SInput, T, F, Fut> Marifold<SInput, State, F, Fut> for SInput
 where
@@ -49,5 +54,38 @@ mod tests {
                 .await,
             vec![10]
         );
+    }
+
+    #[tokio::test]
+    async fn fold_empty_stream() {
+        // An empty stream should yield exactly one item: the initial state.
+        let result: Vec<u32> = futures::stream::iter(std::iter::empty::<u32>())
+            .marifold(42u32, |acc, x| async move { acc + x })
+            .await
+            .collect()
+            .await;
+        assert_eq!(result, vec![42]);
+    }
+
+    #[tokio::test]
+    async fn fold_non_zero_init() {
+        // Verify that the initial state is respected.
+        let result: Vec<i32> = futures::stream::iter(1..=3)
+            .marifold(100i32, |acc, x| async move { acc + x })
+            .await
+            .collect()
+            .await;
+        // 100 + 1 + 2 + 3 = 106
+        assert_eq!(result, vec![106]);
+    }
+
+    #[tokio::test]
+    async fn fold_single_item() {
+        let result: Vec<i32> = futures::stream::iter(std::iter::once(7i32))
+            .marifold(0i32, |acc, x| async move { acc + x })
+            .await
+            .collect()
+            .await;
+        assert_eq!(result, vec![7]);
     }
 }

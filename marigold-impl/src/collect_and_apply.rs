@@ -39,7 +39,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn permutations_with_replacement() {
+    async fn collect_and_apply_empty_stream() {
+        let result: Vec<i32> = futures::stream::iter(std::iter::empty::<i32>())
+            .collect_and_apply(|x| x)
+            .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn collect_and_apply_transformation() {
+        // Verify the collected vector is passed verbatim to the function.
+        let sum: i32 = futures::stream::iter(vec![1i32, 2, 3, 4])
+            .collect_and_apply(|v| v.iter().sum())
+            .await;
+        assert_eq!(sum, 10);
+    }
+
+    #[tokio::test]
+    async fn collect_and_apply_with_nested_async() {
         use futures::StreamExt;
         use genawaiter;
 

@@ -40,12 +40,20 @@ mod tests {
     use futures::stream::StreamExt;
 
     #[tokio::test]
-    async fn combinations() {
+    async fn passthrough() {
         assert_eq!(
             run_stream(futures::stream::iter(0_u32..3_u32))
                 .collect::<Vec<_>>()
                 .await,
             vec![0_u32, 1_u32, 2_u32]
         );
+    }
+
+    #[tokio::test]
+    async fn passthrough_empty() {
+        let result: Vec<u32> = run_stream(futures::stream::iter(std::iter::empty::<u32>()))
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
     }
 }

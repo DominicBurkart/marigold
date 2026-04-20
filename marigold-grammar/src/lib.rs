@@ -18,9 +18,7 @@
 //! Parse a Marigold program:
 //!
 //! ```ignore
-//! use marigold_grammar::parser::parse_marigold;
-//!
-//! let code = parse_marigold("range(0, 100).return")?;
+//! let code = marigold_grammar::marigold_parse("range(0, 100).return").unwrap();
 //! println!("{}", code);
 //! ```
 //!
@@ -83,9 +81,7 @@ pub mod pest_ast_builder;
 /// # Examples
 ///
 /// ```ignore
-/// use marigold_grammar::marigold_parse;
-///
-/// let code = marigold_parse("range(0, 100).return")?;
+/// let code = marigold_grammar::marigold_parse("range(0, 100).return").unwrap();
 /// // code is now valid Rust code ready to compile
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
@@ -96,13 +92,4 @@ pub fn marigold_analyze(
     s: &str,
 ) -> Result<complexity::ProgramComplexity, parser::MarigoldParseError> {
     parser::PestParser::analyze(s)
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
 }
