@@ -101,33 +101,16 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
     }
 }
 
-/// Sync test: does not need a runtime and runs on every build.
 #[cfg(test)]
-mod tests_sync {
-    use super::*;
-
-    /// RunFutureAsStream invariant: size_hint is always (0, None) — it never
-    /// produces items, so lower bound is 0 and upper bound is unknown.
-    #[test]
-    fn run_future_as_stream_size_hint() {
-        let fut = Box::pin(async {});
-        let stream: RunFutureAsStream<u8, (), _> = RunFutureAsStream::new(fut);
-        assert_eq!(stream.size_hint(), (0, None));
-    }
-}
-
-/// Async integration tests.  Gated on the `tokio` feature so that
-/// `#[tokio::test]` always matches the runtime used by
-/// `crate::async_runtime::spawn` (tokio takes precedence when both
-/// features are enabled).  This mirrors the pattern used in
-/// `combinations.rs`, `run_stream.rs`, and `keep_first_n.rs`.
-#[cfg(all(test, feature = "tokio"))]
 mod tests {
     use super::*;
 
     /// Helper: build a MultiConsumerStream over `items`, register `n_consumers`,
     /// then drive `run()` concurrently with draining each consumer.
-    async fn broadcast<T: Copy + Send + 'static + std::fmt::Debug + PartialEq>(
+    ///
+    /// Drain tasks are spawned on tokio (always available via dev-deps) so the
+    /// helper compiles and runs correctly under all feature combinations.
+    async fn broadcast<T: Copy + Send + 'static>(
         items: Vec<T>,
         n_consumers: usize,
     ) -> Vec<Vec<T>> {
@@ -135,25 +118,23 @@ mod tests {
         let mut multi = MultiConsumerStream::new(source);
         let receivers: Vec<_> = (0..n_consumers).map(|_| multi.get()).collect();
 
-        // Drive run() and drain all receivers concurrently.
-        // Each receiver is drained on its own task so slow consumers don't
-        // deadlock the others on the buffered mpsc channels.
+        // Spawn each consumer drain as a tokio task so that slow consumers
+        // cannot deadlock the others through the bounded mpsc channel.
         let drain_tasks: Vec<_> = receivers
             .into_iter()
-            .map(|r| crate::async_runtime::spawn(async move { r.collect::<Vec<T>>().await }))
+            .map(|r| tokio::spawn(async move { r.collect::<Vec<T>>().await }))
             .collect();
 
         multi.run().await;
 
         let mut outputs = Vec::with_capacity(drain_tasks.len());
         for t in drain_tasks {
-            let v = t.await.expect("consumer task panicked");
-            outputs.push(v);
+            outputs.push(t.await.expect("consumer task panicked"));
         }
         outputs
     }
 
-    /// Invariant: every consumer receives every item in the original order.
+    /// Every consumer receives every item in the original order.
     #[tokio::test]
     async fn every_consumer_receives_full_stream_in_order() {
         let items: Vec<u32> = (0..50).collect();
@@ -165,7 +146,7 @@ mod tests {
         }
     }
 
-    /// Invariant: a single consumer still gets the full stream.
+    /// A single consumer still gets the full stream.
     #[tokio::test]
     async fn single_consumer_gets_all_items() {
         let items: Vec<i64> = vec![-3, 0, 7, 42, 100];
@@ -173,29 +154,28 @@ mod tests {
         assert_eq!(outputs, vec![items]);
     }
 
-    /// Invariant: run() terminates cleanly when there are zero consumers.
+    /// run() terminates cleanly when there are zero consumers.
     #[tokio::test]
     async fn no_consumers_run_completes() {
         let source = futures::stream::iter(0..5_u32);
         let multi = MultiConsumerStream::new(source);
-        // With no consumers registered, run() spawns and returns immediately;
-        // this await must not hang.
-        multi.run().await;
+        // A timeout guards against a regression where run() hangs.
+        tokio::time::timeout(std::time::Duration::from_secs(5), multi.run())
+            .await
+            .expect("run() hung with zero consumers");
     }
 
-    /// Invariant: once the inner stream is exhausted, consumers observe end-of-stream.
+    /// Once the inner stream is exhausted, consumers observe end-of-stream.
     #[tokio::test]
     async fn consumers_see_end_of_stream() {
-        // Empty source -> every consumer gets an empty, closed stream.
         let outputs = broadcast::<u8>(vec![], 4).await;
         assert_eq!(outputs.len(), 4);
         for out in &outputs {
-            assert!(out.is_empty(), "expected empty stream, got {:?}", out);
+            assert!(out.is_empty(), "expected empty stream, got {out:?}");
         }
     }
 
-    /// Invariant: many consumers all still receive identical, full output.
-    /// Exercises the fan-out path under more contention than the basic test.
+    /// Many consumers all receive identical, full output.
     #[tokio::test]
     async fn many_consumers_receive_identical_streams() {
         let items: Vec<u32> = (0..200).collect();
@@ -206,13 +186,21 @@ mod tests {
         }
     }
 
-    /// RunFutureAsStream invariant: yields no items and completes Ready(None)
-    /// once the wrapped future resolves.
+    /// RunFutureAsStream yields no items and completes Ready(None) once the
+    /// wrapped future resolves.
     #[tokio::test]
     async fn run_future_as_stream_yields_none_on_completion() {
         let fut = Box::pin(async { 42_u32 });
         let stream: RunFutureAsStream<u8, u32, _> = RunFutureAsStream::new(fut);
         let collected: Vec<u8> = stream.collect().await;
         assert!(collected.is_empty());
+    }
+
+    /// RunFutureAsStream size_hint is always (0, None).
+    #[test]
+    fn run_future_as_stream_size_hint() {
+        let fut = Box::pin(async {});
+        let stream: RunFutureAsStream<u8, (), _> = RunFutureAsStream::new(fut);
+        assert_eq!(stream.size_hint(), (0, None));
     }
 }
