@@ -100,3 +100,104 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
         (0, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: build a MultiConsumerStream over `items`, register `n_consumers`,
+    /// then drive `run()` concurrently with draining each consumer.
+    ///
+    /// Drain tasks are spawned on tokio (always available via dev-deps) so the
+    /// helper compiles and runs correctly under all feature combinations.
+    async fn broadcast<T: Copy + Send + 'static>(items: Vec<T>, n_consumers: usize) -> Vec<Vec<T>> {
+        let source = futures::stream::iter(items);
+        let mut multi = MultiConsumerStream::new(source);
+        let receivers: Vec<_> = (0..n_consumers).map(|_| multi.get()).collect();
+
+        // Spawn each consumer drain as a tokio task so that slow consumers
+        // cannot deadlock the others through the bounded mpsc channel.
+        let drain_tasks: Vec<_> = receivers
+            .into_iter()
+            .map(|r| tokio::spawn(async move { r.collect::<Vec<T>>().await }))
+            .collect();
+
+        multi.run().await;
+
+        let mut outputs = Vec::with_capacity(drain_tasks.len());
+        for t in drain_tasks {
+            outputs.push(t.await.expect("consumer task panicked"));
+        }
+        outputs
+    }
+
+    /// Every consumer receives every item in the original order.
+    #[tokio::test]
+    async fn every_consumer_receives_full_stream_in_order() {
+        let items: Vec<u32> = (0..50).collect();
+        let outputs = broadcast(items.clone(), 3).await;
+
+        assert_eq!(outputs.len(), 3);
+        for out in &outputs {
+            assert_eq!(out, &items);
+        }
+    }
+
+    /// A single consumer still gets the full stream.
+    #[tokio::test]
+    async fn single_consumer_gets_all_items() {
+        let items: Vec<i64> = vec![-3, 0, 7, 42, 100];
+        let outputs = broadcast(items.clone(), 1).await;
+        assert_eq!(outputs, vec![items]);
+    }
+
+    /// run() terminates cleanly when there are zero consumers.
+    #[tokio::test]
+    async fn no_consumers_run_completes() {
+        let source = futures::stream::iter(0..5_u32);
+        let multi = MultiConsumerStream::new(source);
+        // A timeout guards against a regression where run() hangs.
+        tokio::time::timeout(std::time::Duration::from_secs(5), multi.run())
+            .await
+            .expect("run() hung with zero consumers");
+    }
+
+    /// Once the inner stream is exhausted, consumers observe end-of-stream.
+    #[tokio::test]
+    async fn consumers_see_end_of_stream() {
+        let outputs = broadcast::<u8>(vec![], 4).await;
+        assert_eq!(outputs.len(), 4);
+        for out in &outputs {
+            assert!(out.is_empty(), "expected empty stream, got {out:?}");
+        }
+    }
+
+    /// Many consumers all receive identical, full output.
+    #[tokio::test]
+    async fn many_consumers_receive_identical_streams() {
+        let items: Vec<u32> = (0..200).collect();
+        let outputs = broadcast(items.clone(), 16).await;
+        assert_eq!(outputs.len(), 16);
+        for (i, out) in outputs.iter().enumerate() {
+            assert_eq!(out, &items, "consumer {i} saw a divergent stream");
+        }
+    }
+
+    /// RunFutureAsStream yields no items and completes Ready(None) once the
+    /// wrapped future resolves.
+    #[tokio::test]
+    async fn run_future_as_stream_yields_none_on_completion() {
+        let fut = Box::pin(async { 42_u32 });
+        let stream: RunFutureAsStream<u8, u32, _> = RunFutureAsStream::new(fut);
+        let collected: Vec<u8> = stream.collect().await;
+        assert!(collected.is_empty());
+    }
+
+    /// RunFutureAsStream size_hint is always (0, None).
+    #[test]
+    fn run_future_as_stream_size_hint() {
+        let fut = Box::pin(async {});
+        let stream: RunFutureAsStream<u8, (), _> = RunFutureAsStream::new(fut);
+        assert_eq!(stream.size_hint(), (0, None));
+    }
+}
