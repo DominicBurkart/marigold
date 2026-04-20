@@ -1,9 +1,3 @@
-# .github/workflows/fuzz.yaml
-# This file belongs at `.github/workflows/fuzz.yaml` in the repo root.
-# It was placed here because the agent that authored it lacks the
-# `workflows: write` GitHub App permission. Another agent with that
-# permission (or a human maintainer) should `git mv` it into place.
-# See agent-artifacts/pending-workflows/README.md.
 name: fuzz
 
 on:
