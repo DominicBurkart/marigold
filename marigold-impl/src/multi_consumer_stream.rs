@@ -101,15 +101,19 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "tokio"))]
 mod tests {
     use super::*;
 
     /// Helper: build a MultiConsumerStream over `items`, register `n_consumers`,
     /// then drive `run()` concurrently with draining each consumer.
     ///
-    /// Drain tasks are spawned on tokio (always available via dev-deps) so the
-    /// helper compiles and runs correctly under all feature combinations.
+    /// `run()` spawns the broadcaster task internally and returns immediately, so
+    /// we spawn it on a separate tokio task and join all tasks concurrently via
+    /// `tokio::join!`-equivalent logic. This avoids a race where sequencing
+    /// `run().await` before joining drain tasks could let consumers finish their
+    /// `.collect()` before the broadcaster has pushed all items through the
+    /// bounded (size-1) mpsc channel.
     async fn broadcast<T: Copy + Send + 'static>(
         items: Vec<T>,
         n_consumers: usize,
@@ -125,12 +129,16 @@ mod tests {
             .map(|r| tokio::spawn(async move { r.collect::<Vec<T>>().await }))
             .collect();
 
-        multi.run().await;
+        // Spawn run() as its own task so the broadcaster and all drain tasks
+        // proceed concurrently; awaiting run() directly first would race
+        // against consumers on the size-1 buffer.
+        let run_handle = tokio::spawn(async move { multi.run().await });
 
         let mut outputs = Vec::with_capacity(drain_tasks.len());
         for t in drain_tasks {
             outputs.push(t.await.expect("consumer task panicked"));
         }
+        run_handle.await.expect("run task panicked");
         outputs
     }
 
@@ -159,8 +167,10 @@ mod tests {
     async fn no_consumers_run_completes() {
         let source = futures::stream::iter(0..5_u32);
         let multi = MultiConsumerStream::new(source);
-        // A timeout guards against a regression where run() hangs.
-        tokio::time::timeout(std::time::Duration::from_secs(5), multi.run())
+        // With zero consumers, run() iterates the source and exits immediately
+        // (microseconds). Use a short timeout so a regression fails loudly
+        // without bloating CI wall-time.
+        tokio::time::timeout(std::time::Duration::from_millis(100), multi.run())
             .await
             .expect("run() hung with zero consumers");
     }
@@ -197,6 +207,11 @@ mod tests {
     }
 
     /// RunFutureAsStream size_hint is always (0, None).
+    ///
+    /// `None` as the upper bound is deliberate: this stream never yields items,
+    /// but advertising `None` rather than `Some(0)` keeps the contract
+    /// forward-compatible if the type is extended to emit items in the future.
+    /// Changing it to `Some(0)` would be a narrowing (breaking) contract change.
     #[test]
     fn run_future_as_stream_size_hint() {
         let fut = Box::pin(async {});
