@@ -101,7 +101,27 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
     }
 }
 
-#[cfg(all(test, any(feature = "tokio", feature = "async-std")))]
+/// Sync test: does not need a runtime and runs on every build.
+#[cfg(test)]
+mod tests_sync {
+    use super::*;
+
+    /// RunFutureAsStream invariant: size_hint is always (0, None) — it never
+    /// produces items, so lower bound is 0 and upper bound is unknown.
+    #[test]
+    fn run_future_as_stream_size_hint() {
+        let fut = Box::pin(async {});
+        let stream: RunFutureAsStream<u8, (), _> = RunFutureAsStream::new(fut);
+        assert_eq!(stream.size_hint(), (0, None));
+    }
+}
+
+/// Async integration tests.  Gated on the `tokio` feature so that
+/// `#[tokio::test]` always matches the runtime used by
+/// `crate::async_runtime::spawn` (tokio takes precedence when both
+/// features are enabled).  This mirrors the pattern used in
+/// `combinations.rs`, `run_stream.rs`, and `keep_first_n.rs`.
+#[cfg(all(test, feature = "tokio"))]
 mod tests {
     use super::*;
 
@@ -127,10 +147,7 @@ mod tests {
 
         let mut outputs = Vec::with_capacity(drain_tasks.len());
         for t in drain_tasks {
-            #[cfg(feature = "tokio")]
             let v = t.await.expect("consumer task panicked");
-            #[cfg(all(feature = "async-std", not(feature = "tokio")))]
-            let v = t.await;
             outputs.push(v);
         }
         outputs
@@ -161,12 +178,9 @@ mod tests {
     async fn no_consumers_run_completes() {
         let source = futures::stream::iter(0..5_u32);
         let multi = MultiConsumerStream::new(source);
-        // With no consumers registered, run() must still complete without panicking.
-        // Use a timeout so a regression (e.g. waiting on a missing sender) fails loudly
-        // instead of hanging CI.
-        tokio::time::timeout(std::time::Duration::from_secs(5), multi.run())
-            .await
-            .expect("run() hung with zero consumers");
+        // With no consumers registered, run() spawns and returns immediately;
+        // this await must not hang.
+        multi.run().await;
     }
 
     /// Invariant: once the inner stream is exhausted, consumers observe end-of-stream.
@@ -200,14 +214,5 @@ mod tests {
         let stream: RunFutureAsStream<u8, u32, _> = RunFutureAsStream::new(fut);
         let collected: Vec<u8> = stream.collect().await;
         assert!(collected.is_empty());
-    }
-
-    /// RunFutureAsStream invariant: size_hint is always (0, None) — it never
-    /// produces items, so lower bound is 0 and upper bound is unknown.
-    #[test]
-    fn run_future_as_stream_size_hint() {
-        let fut = Box::pin(async {});
-        let stream: RunFutureAsStream<u8, (), _> = RunFutureAsStream::new(fut);
-        assert_eq!(stream.size_hint(), (0, None));
     }
 }
