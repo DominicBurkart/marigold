@@ -112,8 +112,9 @@ mod tests {
         let source = futures::stream::iter(vec![1u32, 2, 3]);
         let mut mcs = MultiConsumerStream::new(source);
         let receiver = mcs.get();
-        mcs.run().await;
-        let items: Vec<u32> = receiver.collect().await;
+        // The channel buffer is 1, so the feeder in `run` and the consumer
+        // must make progress concurrently; drive them together.
+        let (_, items) = futures::future::join(mcs.run(), receiver.collect::<Vec<u32>>()).await;
         assert_eq!(items, vec![1, 2, 3]);
     }
 
@@ -123,8 +124,7 @@ mod tests {
         let source = futures::stream::iter(Vec::<u32>::new());
         let mut mcs = MultiConsumerStream::new(source);
         let receiver = mcs.get();
-        mcs.run().await;
-        let items: Vec<u32> = receiver.collect().await;
+        let (_, items) = futures::future::join(mcs.run(), receiver.collect::<Vec<u32>>()).await;
         assert!(items.is_empty());
     }
 
