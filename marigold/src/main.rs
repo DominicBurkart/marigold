@@ -124,12 +124,12 @@ fn main() -> Result<()> {
                 .unwrap_or(0),
         ),
         Some(Clean { .. }) => {
-            std::fs::remove_dir_all(&program_project_dir)?;
+            std::fs::remove_dir_all(program_project_dir)?;
             std::process::exit(0);
         }
         Some(CleanAll) => {
             if marigold_cache_directory.exists() {
-                std::fs::remove_dir_all(&marigold_cache_directory)?;
+                std::fs::remove_dir_all(marigold_cache_directory)?;
             }
             std::process::exit(0);
         }
@@ -151,8 +151,7 @@ fn main() -> Result<()> {
 
     std::fs::write(
         program_src_dir.join("main.rs"),
-        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}")
-            .as_str(),
+        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}"),
     )?;
 
     const MARIGOLD_VERSION: &str = env!("CARGO_PKG_VERSION");
