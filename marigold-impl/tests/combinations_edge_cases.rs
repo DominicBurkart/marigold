@@ -3,7 +3,10 @@ use marigold_impl::Combinable;
 
 #[tokio::test]
 async fn combinations_k_zero() {
-    // C(3,0) = 1 empty combination
+    // C(3,0) = 1 empty combination.
+    // itertools::Itertools::combinations(0) is documented to yield exactly one empty
+    // combination for any n >= 0 (the empty combination). This relies on itertools'
+    // specified contract, not an implementation detail, so it is stable.
     let result = futures::stream::iter(vec![1, 2, 3])
         .combinations(0)
         .await
