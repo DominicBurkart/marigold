@@ -141,6 +141,14 @@ mod unknown {
         let result = analyze_file("tests/programs/card_read_file_map.marigold");
         assert_eq!(result.streams[0].cardinality, Cardinality::Unknown);
     }
+
+    #[test]
+    fn read_file_jsonl() {
+        // jsonl input is treated the same as csv for cardinality analysis:
+        // the row count is not known at compile time, so cardinality is Unknown.
+        let result = analyze_file("tests/programs/card_read_file_jsonl.marigold");
+        assert_eq!(result.streams[0].cardinality, Cardinality::Unknown);
+    }
 }
 
 mod left_right {
