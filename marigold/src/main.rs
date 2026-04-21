@@ -260,7 +260,7 @@ mod tests {
         )
         .expect("could not write test file");
 
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
@@ -292,7 +292,7 @@ mod tests {
         .expect("could not write test file");
 
         // Install the marigold program as a binary
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["install", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("CARGO_INSTALL_ROOT", &install_root)
@@ -318,7 +318,7 @@ mod tests {
         );
 
         // Uninstall
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["uninstall", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("CARGO_INSTALL_ROOT", &install_root)
@@ -348,7 +348,7 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create cache
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
@@ -360,7 +360,7 @@ mod tests {
         assert!(cache_dir.exists(), "cache should exist after run");
 
         // Clean
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["clean", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
@@ -390,7 +390,7 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create cache
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
@@ -402,7 +402,7 @@ mod tests {
         assert!(cache_root.exists(), "cache should exist after run");
 
         // Clean all
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["clean-all"])
             .env("HOME", &tmp)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
