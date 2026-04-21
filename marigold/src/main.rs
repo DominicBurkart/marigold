@@ -269,11 +269,11 @@ mod tests {
         assert!(status.success(), "marigold run failed");
 
         assert_eq!(
-            fs::read_to_string(&csv_file).expect("could not read CSV"),
+            fs::read_to_string(csv_file).expect("could not read CSV"),
             "0\n1\n2\n"
         );
 
-        let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(tmp);
     }
 
     #[test]
@@ -331,7 +331,7 @@ mod tests {
             "installed binary should be removed after uninstall"
         );
 
-        let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(tmp);
     }
 
     #[test]
@@ -373,7 +373,7 @@ mod tests {
             "cache dir should be removed after clean"
         );
 
-        let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(tmp);
     }
 
     #[test]
@@ -415,6 +415,6 @@ mod tests {
             "entire cache should be removed after clean-all"
         );
 
-        let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(tmp);
     }
 }
