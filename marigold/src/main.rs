@@ -195,7 +195,7 @@ tokio = {{ version = "1", features = ["full"]}}
         if !unoptimized {
             cargo_args.insert(1, "--release");
         }
-        Command::new("cargo").args(&cargo_args).spawn()?.wait()?
+        Command::new("cargo").args(cargo_args).spawn()?.wait()?
     } else {
         Command::new("cargo")
             .args([
