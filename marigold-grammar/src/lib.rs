@@ -92,6 +92,25 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
 }
 
+/// Compile-time check that the grammar accepts `jsonl` as a `read_file` and
+/// `write_file` format (issue #179).
+///
+/// # Examples
+///
+/// ```
+/// use marigold_grammar::marigold_parse;
+///
+/// let rust = marigold_parse(
+///     r#"read_file("data.jsonl", jsonl, struct=Data).ok().write_file("out.jsonl", jsonl)"#,
+/// )
+/// .expect("jsonl read/write should parse");
+/// // The generated Rust code references serde_json for both sides of the pipeline.
+/// assert!(rust.contains("serde_json::from_str"));
+/// assert!(rust.contains("serde_json::to_vec"));
+/// ```
+#[doc(hidden)]
+pub fn __jsonl_doctest_marker() {}
+
 pub fn marigold_analyze(
     s: &str,
 ) -> Result<complexity::ProgramComplexity, parser::MarigoldParseError> {
