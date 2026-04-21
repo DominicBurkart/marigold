@@ -182,13 +182,15 @@ tokio = {{ version = "1", features = ["full"]}}
 
     let utf8_err = "Marigold could not parse cache manifest path as utf-8";
     let exit_status = if command == "run" {
-        let unoptimized = matches!(
-            &args.command,
-            Some(Run {
-                unoptimized: true,
-                ..
-            })
-        );
+        let unoptimized = if let Some(Run {
+            unoptimized,
+            file: _,
+        }) = &args.command
+        {
+            *unoptimized
+        } else {
+            false
+        };
         let manifest = manifest_path.to_str().expect(utf8_err);
         let mut cargo_args = vec![command, "--manifest-path", manifest];
         if !unoptimized {
