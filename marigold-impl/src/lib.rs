@@ -35,6 +35,8 @@ pub use flate2;
 #[cfg(feature = "io")]
 pub use serde;
 #[cfg(feature = "io")]
+pub use serde_json;
+#[cfg(feature = "io")]
 pub use tokio;
 #[cfg(feature = "io")]
 pub use tokio::io::AsyncWriteExt;

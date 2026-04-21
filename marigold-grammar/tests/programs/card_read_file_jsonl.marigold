@@ -1,0 +1,1 @@
+read_file("data.jsonl", jsonl, struct=Data).ok().return

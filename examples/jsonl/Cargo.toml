@@ -1,0 +1,27 @@
+[package]
+name = "jsonl"
+version = "0.1.0"
+publish = false
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+
+[features]
+default = ["futures"]
+futures = ["dep:futures"]
+tokio = ["dep:tokio", "marigold/tokio"]
+async-std = ["dep:async-std"]
+io = ["marigold/io"]
+
+[dependencies]
+marigold = {path = "../../marigold", version = "=0.1.17"}
+anyhow = "1"
+futures = {version="0.3", features=["executor"], optional=true}
+tokio = {version = "1", features = ["rt", "rt-multi-thread", "macros"], optional=true}
+async-std = {version = "1", features= ["attributes"], optional=true}
+serde = {version="1",  features = ["derive"]}
+serde_json = "1"
+
+[dev-dependencies]
+tokio = {version="1", features=["full"]}
+tempfile = "3"
+proptest = "1"

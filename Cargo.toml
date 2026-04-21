@@ -6,6 +6,7 @@ members = [
   "marigold-impl",
   "examples/color-palette-picker",
   "examples/csv",
+  "examples/jsonl",
   "examples/multi-consumer",
   "examples/select-all",
   "examples/stateful",
