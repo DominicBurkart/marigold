@@ -104,8 +104,7 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
 // These tests use `#[tokio::test]` and depend on tokio's multi-threaded runtime to drive
 // `run()` (which spawns via `crate::async_runtime::spawn`) concurrently with the receivers.
 // Without the tokio (or async-std) feature the spawn call is absent and tests would deadlock.
-#[cfg(any(feature = "tokio", feature = "async-std"))]
-#[cfg(test)]
+#[cfg(all(test, any(feature = "tokio", feature = "async-std")))]
 mod tests {
     use super::*;
     use futures::stream::StreamExt;
