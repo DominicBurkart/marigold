@@ -241,7 +241,7 @@ mod tests {
                     _ => None,
                 }
             });
-            match (aggregate_input_count(cs.clone()), expected) {
+            match (aggregate_input_count(cs), expected) {
                 (InputCount::Known(got), Some(want)) => prop_assert_eq!(got, want),
                 (InputCount::Unknown, None) => {},
                 (InputCount::Enum(_), _) => prop_assert!(false, "aggregator emitted Enum"),
