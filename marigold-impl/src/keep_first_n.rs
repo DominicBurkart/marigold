@@ -63,7 +63,7 @@ where
     // n=0 means keep nothing; return an empty stream immediately without touching the heap
     // (the heap is empty, so peek().unwrap() would panic below).
     if n == 0 {
-        return futures::stream::iter(vec![].into_iter());
+        return futures::stream::iter(vec![]);
     }
 
     // Add indices to items for deterministic tie-breaking
@@ -97,8 +97,7 @@ where
                 .into_sorted_vec()
                 .into_iter()
                 .map(|(_idx, item)| item) // Unwrap indices
-                .collect::<Vec<_>>()
-                .into_iter(),
+                .collect::<Vec<_>>(),
         );
     }
 
@@ -159,8 +158,7 @@ where
             .into_sorted_vec()
             .into_iter()
             .map(|(_idx, item)| item) // Unwrap indices
-            .collect::<Vec<_>>()
-            .into_iter(),
+            .collect::<Vec<_>>(),
     )
 }
 
