@@ -363,6 +363,7 @@ stream_function = {
     permutations_with_replacement_fn |
     combinations_fn |
     keep_first_n_fn |
+    take_while_fn |
     filter_fn |
     filter_map_fn |
     map_fn |
@@ -375,6 +376,11 @@ stream_function = {
 // Transforms Stream<T> -> Stream<U> where U = closure(T)
 // Argument: Rust closure expression (e.g., "x -> x + 1" or "x -> x.to_uppercase()")
 map_fn = { "map(" ~ free_text_identifier ~ ")" }
+
+// take_while(closure) - Yield items while closure returns true, stop at first false
+// Transforms Stream<T> -> Stream<T>, stopping at first non-matching item
+// Argument: Rust function that takes &T and returns bool
+take_while_fn = { "take_while(" ~ free_text_identifier ~ ")" }
 
 // filter(closure) - Keep items where closure returns true
 // Transforms Stream<T> -> Stream<T>, keeping only matching items
