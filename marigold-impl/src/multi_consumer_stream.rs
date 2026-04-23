@@ -154,16 +154,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn single_consumer_no_items_dropped() {
-        // Verifies that run() delivers all items and completes without panic with a
-        // single consumer. (Note: this tests the single-consumer send path, not a
-        // zero-consumer scenario. The zero-consumer case is untested here because
-        // panics in a spawned task would be silently swallowed before surfacing.)
-        let source = futures::stream::iter(vec![1, 2, 3]);
-        let mut mcs = MultiConsumerStream::new(source);
-        let rx = mcs.get();
-        let (_, items) = futures::join!(mcs.run(), rx.collect::<Vec<i32>>());
-        assert_eq!(items, vec![1, 2, 3]);
+    async fn single_consumer_no_items_dropped_under_backpressure() {
+        // Verifies that no items are dropped when the source stream is much longer than
+        // BUFFER_SIZE (=1). After the first item is sent, run() must block waiting for
+        // the receiver to drain the channel before it can send the second item.
+        // futures::join! keeps both futures polled cooperatively so neither starves.
+        // This directly exercises the backpressure scenario fixed by the join! refactor.
+        let source = futures::stream::iter(0..100i32);
+        let result = run_and_collect_one(source).await;
+        let expected: Vec<i32> = (0..100).collect();
+        assert_eq!(result, expected);
     }
 
     #[tokio::test]
