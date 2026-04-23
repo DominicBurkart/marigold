@@ -266,8 +266,9 @@ tokio = {{ version = "1", features = ["full"]}}
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::Write;
     use std::path::PathBuf;
-    use std::process::Command;
+    use std::process::{Command, Stdio};
     use std::sync::LazyLock;
 
     /// Build the marigold binary exactly once via `cargo build` and return its path.
@@ -424,6 +425,115 @@ mod tests {
         assert!(
             !cache_dir.exists(),
             "cache dir should be removed after clean"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// `analyze <file>` must parse the program and emit a JSON document with
+    /// program-level complexity keys. This covers the file-input branch for
+    /// the analyze subcommand end-to-end.
+    #[test]
+    fn test_analyze_file() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("analyze_file");
+
+        let marigold_file = tmp.join("analyze.marigold");
+        fs::write(&marigold_file, "range(0, 5).return").expect("could not write test file");
+
+        let output = Command::new(&binary)
+            .args(["analyze", marigold_file.to_str().unwrap()])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .output()
+            .expect("could not run marigold analyze");
+        assert!(
+            output.status.success(),
+            "marigold analyze failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8(output.stdout).expect("analyze stdout not utf-8");
+        assert!(
+            stdout.contains("\"program_cardinality\": \"5\""),
+            "expected program_cardinality=5 in analyze output, got: {stdout}"
+        );
+        assert!(
+            stdout.contains("\"streams\""),
+            "expected streams key in analyze output, got: {stdout}"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Analyzer must also accept the program on stdin. This covers the
+    /// no-file-argument branch shared by `run` / `install` / `analyze`.
+    #[test]
+    fn test_analyze_stdin() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("analyze_stdin");
+
+        let mut child = Command::new(&binary)
+            .args(["analyze"])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("could not spawn marigold analyze");
+
+        {
+            let stdin = child.stdin.as_mut().expect("failed to open stdin");
+            stdin
+                .write_all(b"range(0, 10).combinations(2).return")
+                .expect("failed writing to stdin");
+        }
+
+        let output = child
+            .wait_with_output()
+            .expect("could not wait on marigold analyze");
+        assert!(
+            output.status.success(),
+            "marigold analyze stdin failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8(output.stdout).expect("analyze stdout not utf-8");
+        // C(10, 2) = 45 is the statically-computed program cardinality.
+        assert!(
+            stdout.contains("\"program_cardinality\": \"45\""),
+            "expected cardinality 45 for C(10,2), got: {stdout}"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// A malformed marigold program must make `analyze` exit non-zero and
+    /// surface a parse error on stderr.
+    #[test]
+    fn test_analyze_reports_parse_error() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("analyze_bad");
+
+        let marigold_file = tmp.join("bad.marigold");
+        fs::write(&marigold_file, "not a valid marigold program!")
+            .expect("could not write test file");
+
+        let output = Command::new(&binary)
+            .args(["analyze", marigold_file.to_str().unwrap()])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .output()
+            .expect("could not run marigold analyze");
+        assert!(
+            !output.status.success(),
+            "marigold analyze should fail on invalid input"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.to_lowercase().contains("parse"),
+            "expected parse error on stderr, got: {stderr}"
         );
 
         let _ = fs::remove_dir_all(&tmp);
