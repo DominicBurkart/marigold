@@ -199,12 +199,10 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
-        // NOTE: tests for this non-tokio path are not included in this PR because all
-        // test harness entries (`#[tokio::test]` / `Runtime::new()`) exercise the tokio
-        // impl above. The n=0 guard here is logically identical to the tokio path and is
-        // covered by code review. A dedicated non-tokio n=0 test (plain `#[test]`, no
-        // runtime) would require compiling without tokio/async-std features; that is left
-        // as a follow-up.
+        // NOTE: the test suite primarily exercises the tokio impl above via `#[tokio::test]`
+        // and `Runtime::new()` harnesses. The non-tokio n=0 guard is covered directly by
+        // `non_tokio_n_zero_returns_empty` below (compiled only without tokio/async-std features)
+        // using `futures::executor::block_on`.
         if n == 0 {
             return futures::stream::iter(vec![].into_iter());
         }
@@ -507,6 +505,22 @@ mod tests {
         result_sorted.sort();
         assert_eq!(result_sorted, vec![1, 2, 3]);
     }
+
+    /// Directly exercises the non-tokio path's `n == 0` early-return guard.
+    /// Compiled only when neither `tokio` nor `async-std` feature is active, so this
+    /// test uses `futures::executor::block_on` instead of `#[tokio::test]`.
+    #[cfg(not(any(feature = "tokio", feature = "async-std")))]
+    #[test]
+    fn non_tokio_n_zero_returns_empty() {
+        let result = futures::executor::block_on(async {
+            futures::stream::iter(vec![1i32, 2, 3])
+                .keep_first_n(0, |a, b| a.cmp(b))
+                .await
+                .collect::<Vec<_>>()
+                .await
+        });
+        assert_eq!(result, Vec::<i32>::new());
+    }
 }
 
 #[cfg(test)]
@@ -528,6 +542,10 @@ mod proptests {
     }
 
     proptest! {
+        /// Strategy ranges are intentionally scoped to small values (n in 0..60, items len 0..50)
+        /// to keep test runtime manageable at the default 256-cases-per-property setting.
+        /// Large n values (e.g. usize::MAX) would trigger OOM-abort in Vec::with_capacity rather
+        /// than a correctness failure, so they are excluded by design.
         #[test]
         fn result_length_is_min_of_n_and_input_len(
             items in proptest::collection::vec(-1000i32..1000, 0..50),
