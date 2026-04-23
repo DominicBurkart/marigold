@@ -6,15 +6,19 @@
 //!
 //! ## Usage Examples
 //!
-//! Parse Marigold code:
-//! ```ignore
-//! let result = parse_marigold("range(0, 1).return")?;
+//! Parse Marigold code with the convenience function:
+//! ```
+//! use marigold_grammar::parser::parse_marigold;
+//! let result = parse_marigold("range(0, 1).return").unwrap();
+//! assert!(result.contains("async"));
 //! ```
 //!
 //! Explicitly create a parser instance:
-//! ```ignore
+//! ```
+//! use marigold_grammar::parser::{MarigoldParser, PestParser};
 //! let parser = PestParser::new();
-//! let result = parser.parse("range(0, 1).return")?;
+//! let result = parser.parse("range(0, 1).return").unwrap();
+//! assert!(result.contains("async"));
 //! ```
 
 use pest::Parser;
@@ -395,78 +399,32 @@ pub fn parse_marigold(input: &str) -> Result<String, MarigoldParseError> {
 mod tests {
     use super::*;
 
+    /// Covers the plumbing for every public way to drive the parser: the
+    /// `PestParser` struct, the `get_parser()` factory, and the `parse_marigold`
+    /// convenience function. Empty input is the minimum-sized legal program and
+    /// must lower to an async block re-exporting the impl prelude.
     #[test]
-    fn test_pest_parser_creation() {
+    fn parser_plumbing_and_empty_program() {
+        let expected_async_prelude = |output: &str| {
+            assert!(
+                output.contains("async"),
+                "output missing async block: {output}"
+            );
+            assert!(
+                output.contains("use ::marigold::marigold_impl::*"),
+                "output missing impl prelude: {output}"
+            );
+        };
+
         let parser = PestParser::new();
         assert_eq!(parser.name(), "Pest");
-    }
+        expected_async_prelude(&parser.parse("").expect("PestParser::parse(\"\")"));
 
-    #[test]
-    fn test_default_parser_selection() {
-        let parser = get_parser();
-        assert_eq!(parser.name(), "Pest");
-    }
+        let factory = get_parser();
+        assert_eq!(factory.name(), "Pest");
+        expected_async_prelude(&factory.parse("").expect("get_parser().parse(\"\")"));
 
-    #[test]
-    fn test_parse_marigold_function() {
-        let result = parse_marigold("");
-
-        assert!(result.is_ok());
-
-        let output = result.unwrap();
-        assert!(output.contains("async"));
-    }
-
-    #[test]
-    fn test_pest_parser_basic_functionality() {
-        let parser = PestParser::new();
-
-        let result = parser.parse("");
-        assert!(result.is_ok());
-
-        let output = result.unwrap();
-        assert!(output.contains("async"));
-    }
-
-    #[test]
-    fn test_pest_parser_empty_input() {
-        let parser = PestParser::new();
-        let result = parser.parse("");
-
-        assert!(result.is_ok());
-        let output = result.unwrap();
-        assert!(output.contains("async"));
-        assert!(output.contains("use ::marigold::marigold_impl::*"));
-    }
-
-    #[test]
-    fn test_pest_grammar_basic_parsing() {
-        let _parser = MarigoldPestParser;
-    }
-
-    #[test]
-    fn test_parser_empty_input() {
-        let pest_parser = PestParser::new();
-        let pest_result = pest_parser.parse("");
-
-        assert!(pest_result.is_ok());
-        let pest_output = pest_result.unwrap();
-        assert!(pest_output.contains("async"));
-        assert!(pest_output.contains("use ::marigold::marigold_impl::*"));
-    }
-
-    #[test]
-    fn test_factory_function_consistency() {
-        let parser = get_parser();
-        assert_eq!(parser.name(), "Pest");
-    }
-
-    #[test]
-    fn test_parse_marigold_function_works() {
-        let result = parse_marigold("");
-        assert!(result.is_ok());
-        let output = result.unwrap();
-        assert!(output.contains("async"));
+        expected_async_prelude(&parse_marigold("").expect("parse_marigold(\"\")"));
     }
 
     #[test]

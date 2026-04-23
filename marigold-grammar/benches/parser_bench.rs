@@ -15,103 +15,84 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use marigold_grammar::parser::{MarigoldParser, PestParser};
 
-/// Benchmark simple range with return
-fn bench_simple_range_return(c: &mut Criterion) {
-    let input = "range(0, 100).return";
-
-    c.bench_function("pest_simple_range_return", |b| {
+/// Register a single parser benchmark. Each case parses `input` repeatedly so
+/// we measure end-to-end parser throughput for that program shape.
+fn bench_parse(c: &mut Criterion, name: &'static str, input: &'static str) {
+    c.bench_function(name, |b| {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
 }
 
-/// Benchmark range with map and return
+fn bench_empty_input(c: &mut Criterion) {
+    bench_parse(c, "pest_empty_input", "");
+}
+
+fn bench_simple_range_return(c: &mut Criterion) {
+    bench_parse(c, "pest_simple_range_return", "range(0, 100).return");
+}
+
 fn bench_range_map_return(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_range_map_return",
+        r#"
         fn double(v: i32) -> i32 { v * 2 }
 
         range(0, 100)
             .map(double)
             .return
-    "#;
-
-    c.bench_function("pest_range_map_return", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_range_map_return", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark chained stream operations
 fn bench_chained_operations(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_chained_operations",
+        r#"
         range(0, 10)
             .permutations(2)
             .combinations(2)
             .return
-    "#;
-
-    c.bench_function("pest_chained_operations", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_chained_operations", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark filter operation
 fn bench_filter_operation(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_filter_operation",
+        r#"
         fn is_odd_number(i: &i32) -> bool { i % 2 == 1 }
 
         range(0, 100)
             .filter(is_odd_number)
             .return
-    "#;
-
-    c.bench_function("pest_filter_operation", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_filter_operation", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark struct declaration
 fn bench_struct_declaration(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_struct_declaration",
+        r#"
         struct Point {
             x: i32,
             y: i32,
         }
 
         range(0, 10).return
-    "#;
-
-    c.bench_function("pest_struct_declaration", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_struct_declaration", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark enum declaration with string values
 fn bench_enum_declaration(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_enum_declaration",
+        r#"
         enum Hull {
             Spherical = "spherical",
             Split = "split",
@@ -123,22 +104,15 @@ fn bench_enum_declaration(c: &mut Criterion) {
         }
 
         range(0, 5).return
-    "#;
-
-    c.bench_function("pest_enum_declaration", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_enum_declaration", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark enum with default variant
 fn bench_enum_default_variant(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_enum_default_variant",
+        r#"
         enum Color {
             Red = "red",
             Green = "green",
@@ -147,80 +121,62 @@ fn bench_enum_default_variant(c: &mut Criterion) {
         }
 
         range(0, 5).return
-    "#;
-
-    c.bench_function("pest_enum_default_variant", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_enum_default_variant", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark stream variable declaration
 fn bench_stream_variable(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_stream_variable",
+        r#"
         x = range(0, 100)
-    "#;
-
-    c.bench_function("pest_stream_variable", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_stream_variable", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark permutations with replacement
 fn bench_permutations_with_replacement(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_permutations_with_replacement",
+        r#"
         range(0, 10)
             .permutations_with_replacement(3)
             .return
-    "#;
-
-    c.bench_function("pest_permutations_with_replacement", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_permutations_with_replacement", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark keep_first_n with external function
 fn bench_keep_first_n(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_keep_first_n",
+        r#"
         fn sorter(a: &Vec<i32>, b: &Vec<i32>) -> Ordering { a[0].cmp(&b[0]) }
 
         range(0, 20)
             .permutations(2)
             .keep_first_n(10, sorter)
             .return
-    "#;
-
-    c.bench_function("pest_keep_first_n", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_keep_first_n", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark complex example from CSV integration test
+fn bench_write_file(c: &mut Criterion) {
+    bench_parse(
+        c,
+        "pest_write_file",
+        r#"
+        range(0, 100).write_file("output.csv", csv)
+    "#,
+    );
+}
+
 fn bench_complex_csv_example(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_complex_csv_example",
+        r#"
         enum Hull {
             Spherical = "spherical",
             Split = "split",
@@ -236,22 +192,15 @@ fn bench_complex_csv_example(c: &mut Criterion) {
         range(0, 100)
             .filter(is_spherical)
             .return
-    "#;
-
-    c.bench_function("pest_complex_csv_example", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_complex_csv_example", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark complex example with multiple streams
 fn bench_multiple_streams(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_multiple_streams",
+        r#"
         enum Hull {
             Spherical = "spherical",
             Split = "split",
@@ -267,54 +216,15 @@ fn bench_multiple_streams(c: &mut Criterion) {
 
         range(50, 100)
             .return
-    "#;
-
-    c.bench_function("pest_multiple_streams", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_multiple_streams", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark write_file operation
-fn bench_write_file(c: &mut Criterion) {
-    let input = r#"
-        range(0, 100).write_file("output.csv", csv)
-    "#;
-
-    c.bench_function("pest_write_file", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_write_file", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-}
-
-/// Benchmark empty input (baseline)
-fn bench_empty_input(c: &mut Criterion) {
-    let input = "";
-
-    c.bench_function("pest_empty_input", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_empty_input", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-}
-
-/// Benchmark deeply nested function calls
 fn bench_deeply_nested(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_deeply_nested",
+        r#"
         fn process_a(v: i32) -> i32 { v + 1 }
         fn process_b(v: i32) -> i32 { v * 2 }
         fn process_c(v: i32) -> i32 { v - 3 }
@@ -328,22 +238,15 @@ fn bench_deeply_nested(c: &mut Criterion) {
             .permutations(2)
             .combinations(2)
             .return
-    "#;
-
-    c.bench_function("pest_deeply_nested", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_deeply_nested", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
-/// Benchmark color palette picker example (real-world use case)
 fn bench_color_palette_picker(c: &mut Criterion) {
-    let input = r#"
+    bench_parse(
+        c,
+        "pest_color_palette_picker",
+        r#"
         fn compare_contrast(a: &Vec<Vec<u8>>, b: &Vec<Vec<u8>>) -> Ordering { Ordering::Equal }
 
         range(0, 255)
@@ -351,17 +254,8 @@ fn bench_color_palette_picker(c: &mut Criterion) {
             .combinations(5)
             .keep_first_n(20, compare_contrast)
             .return
-    "#;
-
-    c.bench_function("pest_color_palette_picker", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
-
-    c.bench_function("pest_color_palette_picker", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
+    "#,
+    );
 }
 
 // Group all benchmarks
