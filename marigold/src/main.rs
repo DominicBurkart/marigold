@@ -717,9 +717,12 @@ mod cache_tests {
             toml.contains("path = \"/some/path\""),
             "expected path dep in Cargo.toml, got: {toml}"
         );
+        // Ensure no crates.io version pin is emitted for the marigold dep.
+        // The package itself still has `version = "0.0.1"`, so look for the
+        // specific marigold-version-pin marker `version = "=`.
         assert!(
-            !toml.contains("version ="),
-            "should not emit version dep when workspace_path is set, got: {toml}"
+            !toml.contains("version = \"="),
+            "should not emit marigold version pin when workspace_path is set, got: {toml}"
         );
     }
 
