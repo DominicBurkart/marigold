@@ -118,9 +118,9 @@ mod tests {
         let r2 = mcs.get();
         let r3 = mcs.get();
 
-        let h1 = tokio::spawn(async move { r1.collect::<Vec<_>>().await });
-        let h2 = tokio::spawn(async move { r2.collect::<Vec<_>>().await });
-        let h3 = tokio::spawn(async move { r3.collect::<Vec<_>>().await });
+        let h1 = tokio::spawn(r1.collect::<Vec<_>>());
+        let h2 = tokio::spawn(r2.collect::<Vec<_>>());
+        let h3 = tokio::spawn(r3.collect::<Vec<_>>());
 
         mcs.run().await;
 
@@ -137,11 +137,12 @@ mod tests {
         let inner = stream::iter(0u32..5);
         let mcs = MultiConsumerStream::new(inner);
 
-        // run spawns the drain, so this returns promptly. We rely on
-        // tokio's shutdown to surface any panic from the spawned task.
+        // run spawns the drain when the tokio/async-std feature is on, so this
+        // returns promptly; under the no-runtime fallback it drains in-line.
+        // Either way, completion within 5s guarantees no hang.
         tokio::time::timeout(std::time::Duration::from_secs(5), mcs.run())
             .await
-            .expect("run() should complete immediately when there are no consumers");
+            .expect("run() should complete without a registered consumer");
     }
 
     /// Invariant: a single-consumer MultiConsumerStream behaves like a pass-
@@ -152,7 +153,7 @@ mod tests {
         let inner = stream::iter(Vec::<u32>::new());
         let mut mcs = MultiConsumerStream::new(inner);
         let r = mcs.get();
-        let h = tokio::spawn(async move { r.collect::<Vec<_>>().await });
+        let h = tokio::spawn(r.collect::<Vec<_>>());
         mcs.run().await;
         assert_eq!(h.await.unwrap(), Vec::<u32>::new());
 
@@ -160,15 +161,14 @@ mod tests {
         let inner = stream::iter(vec![42u32, 7, 99, 0, 1]);
         let mut mcs = MultiConsumerStream::new(inner);
         let r = mcs.get();
-        let h = tokio::spawn(async move { r.collect::<Vec<_>>().await });
+        let h = tokio::spawn(r.collect::<Vec<_>>());
         mcs.run().await;
         assert_eq!(h.await.unwrap(), vec![42u32, 7, 99, 0, 1]);
     }
 
     /// Invariant: a slow consumer must not cause a fast consumer to lose
     /// values. The broadcast semantics (feed on every sender before advancing
-    /// the inner stream) means both consumers see the full sequence, even
-    /// though their observed interleaving with each other can differ.
+    /// the inner stream) mean both consumers see the full sequence.
     #[tokio::test]
     async fn slow_consumer_does_not_drop_values_for_fast_consumer() {
         let inner = stream::iter(0u32..20);
@@ -177,7 +177,7 @@ mod tests {
         let fast = mcs.get();
         let slow = mcs.get();
 
-        let fast_handle = tokio::spawn(async move { fast.collect::<Vec<_>>().await });
+        let fast_handle = tokio::spawn(fast.collect::<Vec<_>>());
         let slow_handle = tokio::spawn(async move {
             let mut out = Vec::new();
             let mut s = slow;
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn run_future_as_stream_size_hint_is_unbounded() {
         use futures::Stream;
-        let fut = Box::pin(async { () });
+        let fut = Box::pin(async {});
         let s: RunFutureAsStream<u32, (), _> = RunFutureAsStream::new(fut);
         assert_eq!(s.size_hint(), (0, None));
     }
