@@ -96,7 +96,9 @@ fn prepare_cache(
         // More precise: reject only if `})` appears as a substring.
         if program_contents.contains("})") {
             anyhow::bail!(
-                "program contents contain '})' which would escape the macro invocation"
+                "program contents contain '{}{}' which would escape the macro invocation",
+                '}',
+                ')'
             );
         }
     }
@@ -341,7 +343,7 @@ fn main() -> Result<()> {
     std::process::exit(exit_status.code().unwrap_or(0));
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "cli"))]
 mod tests {
     use std::fs;
     use std::path::PathBuf;
@@ -733,7 +735,9 @@ mod cache_tests {
         );
         assert!(
             result.is_err(),
-            "prepare_cache should reject program_contents containing '})'"
+            "prepare_cache should reject program_contents containing '{}{}'",
+            '}',
+            ')'
         );
     }
 }
