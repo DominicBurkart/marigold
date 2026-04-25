@@ -41,8 +41,7 @@ impl<
     pub async fn run(mut self) {
         self.senders.shrink_to_fit();
 
-        #[cfg(any(feature = "async-std", feature = "tokio"))]
-        crate::async_runtime::spawn(async move {
+        let drive = async move {
             while let Some(v) = self.inner_stream.next().await {
                 let mut futures = self
                     .senders
@@ -52,20 +51,15 @@ impl<
                 while let Some(_result) = futures.next().await {}
             }
             self.senders.iter_mut().for_each(|s| s.disconnect());
-        });
+        };
+
+        #[cfg(any(feature = "async-std", feature = "tokio"))]
+        {
+            crate::async_runtime::spawn(drive);
+        }
 
         #[cfg(not(any(feature = "async-std", feature = "tokio")))]
-        {
-            while let Some(v) = self.inner_stream.next().await {
-                let mut futures = self
-                    .senders
-                    .iter_mut()
-                    .map(|sender| sender.feed(v))
-                    .collect::<FuturesUnordered<_>>();
-                while let Some(_result) = futures.next().await {}
-            }
-            self.senders.iter_mut().for_each(|s| s.disconnect());
-        }
+        drive.await;
     }
 }
 
