@@ -48,4 +48,21 @@ mod tests {
             vec![0_u32, 1_u32, 2_u32]
         );
     }
+
+    #[tokio::test]
+    async fn run_stream_preserves_order_for_long_stream() {
+        let n = 1024_u32;
+        let collected = run_stream(futures::stream::iter(0_u32..n))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(collected, (0..n).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn run_stream_empty_stream_yields_nothing() {
+        let collected = run_stream(futures::stream::iter(std::iter::empty::<u32>()))
+            .collect::<Vec<_>>()
+            .await;
+        assert!(collected.is_empty());
+    }
 }

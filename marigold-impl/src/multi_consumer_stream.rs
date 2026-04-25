@@ -100,3 +100,73 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
         (0, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream::StreamExt;
+
+    /// One consumer should observe every item produced by the inner stream.
+    #[tokio::test]
+    async fn multi_consumer_single_consumer_passthrough() {
+        let mut mcs = MultiConsumerStream::new(futures::stream::iter(0_u32..5_u32));
+        let consumer = mcs.get();
+        tokio::spawn(mcs.run());
+        assert_eq!(consumer.collect::<Vec<_>>().await, vec![0, 1, 2, 3, 4]);
+    }
+
+    /// Every registered consumer should observe every item, in order.
+    #[tokio::test]
+    async fn multi_consumer_broadcast_to_three() {
+        let mut mcs = MultiConsumerStream::new(futures::stream::iter(10_u32..14_u32));
+        let a = mcs.get();
+        let b = mcs.get();
+        let c = mcs.get();
+        tokio::spawn(mcs.run());
+
+        let (va, vb, vc) = tokio::join!(
+            a.collect::<Vec<_>>(),
+            b.collect::<Vec<_>>(),
+            c.collect::<Vec<_>>(),
+        );
+        assert_eq!(va, vec![10, 11, 12, 13]);
+        assert_eq!(vb, vec![10, 11, 12, 13]);
+        assert_eq!(vc, vec![10, 11, 12, 13]);
+    }
+
+    /// With no consumers, run() should still complete cleanly.
+    #[tokio::test]
+    async fn multi_consumer_no_consumers_completes() {
+        let mcs = MultiConsumerStream::new(futures::stream::iter(0_u32..3_u32));
+        let handle = tokio::spawn(mcs.run());
+        handle.await.expect("run() should complete cleanly");
+    }
+
+    /// An empty inner stream should yield zero items to a registered consumer
+    /// and still cause the consumer's stream to terminate.
+    #[tokio::test]
+    async fn multi_consumer_empty_inner_terminates() {
+        let mut mcs = MultiConsumerStream::new(futures::stream::iter(std::iter::empty::<u32>()));
+        let consumer = mcs.get();
+        tokio::spawn(mcs.run());
+        assert_eq!(consumer.collect::<Vec<_>>().await, Vec::<u32>::new());
+    }
+
+    /// `RunFutureAsStream` adapts a Future into a Stream that yields no items but
+    /// terminates after the future resolves.
+    #[tokio::test]
+    async fn run_future_as_stream_yields_nothing_then_terminates() {
+        let fut = Box::pin(async { 42_u32 });
+        let stream: RunFutureAsStream<(), u32, _> = RunFutureAsStream::new(fut);
+        let collected: Vec<()> = stream.collect().await;
+        assert!(collected.is_empty());
+    }
+
+    /// `size_hint` should report (0, None) — the adapter never produces items.
+    #[test]
+    fn run_future_as_stream_size_hint_is_zero_unbounded() {
+        let fut = Box::pin(async {});
+        let stream: RunFutureAsStream<(), (), _> = RunFutureAsStream::new(fut);
+        assert_eq!(stream.size_hint(), (0, None));
+    }
+}
