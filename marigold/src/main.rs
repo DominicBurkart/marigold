@@ -91,10 +91,9 @@ fn prepare_cache(
     // Reject program contents containing `})` — that sequence closes the
     // `marigold::m!({program_contents}).await` invocation and would allow
     // arbitrary Rust code injection.
-    if program_contents.contains("}") {
+    if program_contents.contains('}') {
         anyhow::bail!(
-            "program contents contain '{}' which would escape the macro invocation",
-            '}'
+            "program contents contain '}}' which would escape the macro invocation"
         );
     }
 
@@ -105,8 +104,7 @@ fn prepare_cache(
 
     std::fs::write(
         program_src_dir.join("main.rs"),
-        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}")
-            .as_str(),
+        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}"),
     )?;
 
     let manifest_path = program_project_dir.join("Cargo.toml");
@@ -175,17 +173,12 @@ fn invoke_cargo(
 
     let status = match invocation {
         CargoInvocation::Run { release } => {
+            let mut args = vec!["run"];
             if release {
-                Command::new("cargo")
-                    .args(["run", "--release", "--manifest-path", path_str])
-                    .spawn()?
-                    .wait()?
-            } else {
-                Command::new("cargo")
-                    .args(["run", "--manifest-path", path_str])
-                    .spawn()?
-                    .wait()?
+                args.push("--release");
             }
+            args.extend(["--manifest-path", path_str]);
+            Command::new("cargo").args(&args).spawn()?.wait()?
         }
         CargoInvocation::Install => Command::new("cargo")
             .args(["install", "--path", path_str])
@@ -228,11 +221,11 @@ fn main() -> Result<()> {
 
         file_name = file_name.to_case(Case::Snake);
         file_name = file_name
-            .strip_prefix("_")
+            .strip_prefix('_')
             .map(|s| s.to_string())
             .unwrap_or(file_name);
         file_name = file_name
-            .strip_suffix("_")
+            .strip_suffix('_')
             .map(|s| s.to_string())
             .unwrap_or(file_name);
         file_name
@@ -387,7 +380,7 @@ mod tests {
         )
         .expect("could not write test file");
 
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("XDG_CACHE_HOME", tmp.join(".cache"))
@@ -420,7 +413,7 @@ mod tests {
         .expect("could not write test file");
 
         // Install the marigold program as a binary
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["install", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("XDG_CACHE_HOME", tmp.join(".cache"))
@@ -447,7 +440,7 @@ mod tests {
         );
 
         // Uninstall
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["uninstall", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("XDG_CACHE_HOME", tmp.join(".cache"))
@@ -478,7 +471,7 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create cache
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("XDG_CACHE_HOME", tmp.join(".cache"))
@@ -493,7 +486,7 @@ mod tests {
         assert!(cache_dir.exists(), "cache should exist after run");
 
         // Clean
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["clean", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("XDG_CACHE_HOME", tmp.join(".cache"))
@@ -524,7 +517,7 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create cache
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("XDG_CACHE_HOME", tmp.join(".cache"))
@@ -539,7 +532,7 @@ mod tests {
         assert!(cache_root.exists(), "cache should exist after run");
 
         // Clean all
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["clean-all"])
             .env("HOME", &tmp)
             .env("XDG_CACHE_HOME", tmp.join(".cache"))
@@ -732,9 +725,7 @@ mod cache_tests {
         );
         assert!(
             result.is_err(),
-            "prepare_cache should reject program_contents containing '{}{}'",
-            '}',
-            ')'
+            "prepare_cache should reject program_contents containing '})'"  
         );
     }
 }
