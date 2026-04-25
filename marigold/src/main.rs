@@ -88,19 +88,14 @@ fn prepare_cache(
 ) -> Result<std::path::PathBuf> {
     const RUST_EDITION: &str = "2021";
 
-    // Reject program contents that would escape the marigold::m!(...) invocation.
-    // The generated main.rs wraps contents as: marigold::m!({program_contents}).await
-    // A `})` sequence closes the macro call and ends the async block, allowing
-    // arbitrary Rust injection. Reject such input early.
-    if program_contents.contains("}") && program_contents.contains(")") {
-        // More precise: reject only if `})` appears as a substring.
-        if program_contents.contains("})") {
-            anyhow::bail!(
-                "program contents contain '{}{}' which would escape the macro invocation",
-                '}',
-                ')'
-            );
-        }
+    // Reject program contents containing `})` — that sequence closes the
+    // `marigold::m!({program_contents}).await` invocation and would allow
+    // arbitrary Rust code injection.
+    if program_contents.contains("}") {
+        anyhow::bail!(
+            "program contents contain '{}' which would escape the macro invocation",
+            '}'
+        );
     }
 
     let program_project_dir = cache_root.join(program_name);
@@ -208,7 +203,6 @@ fn main() -> Result<()> {
     use convert_case::{Case, Casing};
     use std::io;
     use std::io::Read;
-    use std::process::Command;
 
     let args = Args::parse();
 
@@ -264,7 +258,7 @@ fn main() -> Result<()> {
             } => "run",
             Install { file: _ } => "install",
             Uninstall { file: _ } => std::process::exit(
-                Command::new("cargo")
+                std::process::Command::new("cargo")
                     .args(["uninstall", &program_name])
                     .spawn()?
                     .wait()?
@@ -396,6 +390,7 @@ mod tests {
         let status = Command::new(&binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold command");
@@ -428,6 +423,7 @@ mod tests {
         let status = Command::new(&binary)
             .args(["install", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("CARGO_INSTALL_ROOT", &install_root)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
@@ -454,6 +450,7 @@ mod tests {
         let status = Command::new(&binary)
             .args(["uninstall", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("CARGO_INSTALL_ROOT", &install_root)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
@@ -490,13 +487,9 @@ mod tests {
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        // Derive the expected cache path from dirs::cache_dir() so the assertion
-        // is correct on both Linux ($XDG_CACHE_HOME) and macOS ($HOME/Library/Caches).
-        // The test process inherits the same env vars as the subprocess, so
-        // dirs::cache_dir() resolves to the same root here.
-        let cache_dir = dirs::cache_dir()
-            .expect("dirs::cache_dir() must be available in test env")
-            .join("marigold/test_clean");
+        // Derive expected cache path from the injected XDG_CACHE_HOME so the
+        // assertion is hermetic and independent of the ambient CI environment.
+        let cache_dir = tmp.join(".cache/marigold/test_clean");
         assert!(cache_dir.exists(), "cache should exist after run");
 
         // Clean
@@ -540,11 +533,9 @@ mod tests {
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        // Derive the expected cache root from dirs::cache_dir() so the assertion
-        // is correct on both Linux ($XDG_CACHE_HOME) and macOS ($HOME/Library/Caches).
-        let cache_root = dirs::cache_dir()
-            .expect("dirs::cache_dir() must be available in test env")
-            .join("marigold");
+        // Derive expected cache root from the injected XDG_CACHE_HOME so the
+        // assertion is hermetic and independent of the ambient CI environment.
+        let cache_root = tmp.join(".cache/marigold");
         assert!(cache_root.exists(), "cache should exist after run");
 
         // Clean all
@@ -620,10 +611,13 @@ mod cache_tests {
     #[test]
     fn test_clean_all_with_programs() {
         let tmp = tempfile::tempdir().unwrap();
-        prepare_cache(tmp.path(), "prog_a", "range(0, 1).return", "0.1.0", None).unwrap();
-        prepare_cache(tmp.path(), "prog_b", "range(0, 2).return", "0.1.0", None).unwrap();
-        clean_all_cache(tmp.path()).unwrap();
-        assert!(!tmp.path().exists());
+        // Take ownership of the path so TempDir::drop does not attempt to
+        // remove_dir_all a path that clean_all_cache already removed.
+        let path = tmp.into_path();
+        prepare_cache(&path, "prog_a", "range(0, 1).return", "0.1.0", None).unwrap();
+        prepare_cache(&path, "prog_b", "range(0, 2).return", "0.1.0", None).unwrap();
+        clean_all_cache(&path).unwrap();
+        assert!(!path.exists());
     }
 
     #[test]
