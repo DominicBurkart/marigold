@@ -1,0 +1,12 @@
+{
+  "default_threshold_pct": 8,
+  "tier-async": {
+    "threshold_pct": 25,
+    "id_prefixes": [
+      "keep_first_n/",
+      "pipeline_stages/",
+      "bench_color_picker",
+      "pwr3_comb3_kfn20_compare_by_sum"
+    ]
+  }
+}

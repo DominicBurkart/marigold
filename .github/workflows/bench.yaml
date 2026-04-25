@@ -73,22 +73,20 @@ jobs:
         key: bench-criterion-${{ github.event.pull_request.base.sha }}
         restore-keys: bench-criterion-
 
-    - name: Criterion benches — compare to baseline
+    - name: Criterion benches — compare to baseline (2 runs for noise resistance)
       if: steps.restore-baseline.outputs.cache-hit != ''
-      run: cargo bench --bench keep_first_n --features tokio -- --baseline main 2>&1 | tee /tmp/bench_keep_first_n.txt
-      working-directory: marigold-impl
-    - if: steps.restore-baseline.outputs.cache-hit != ''
-      run: cargo bench --bench per_item_costs --features tokio -- --baseline main 2>&1 | tee /tmp/bench_per_item_costs.txt
-      working-directory: marigold-impl
-    - if: steps.restore-baseline.outputs.cache-hit != ''
-      run: cargo bench --bench pipeline_stages --features tokio -- --baseline main 2>&1 | tee /tmp/bench_pipeline_stages.txt
-      working-directory: marigold-impl
-    - if: steps.restore-baseline.outputs.cache-hit != ''
-      run: cargo bench --bench parser_bench -- --baseline main 2>&1 | tee /tmp/bench_parser_bench.txt
-      working-directory: marigold-grammar
-    - if: steps.restore-baseline.outputs.cache-hit != ''
-      run: cargo bench --bench color_picker_bench --features tokio -- --baseline main 2>&1 | tee /tmp/bench_color_picker_bench.txt
-      working-directory: examples/color-palette-picker
+      run: |
+        set -euo pipefail
+        for run in 1 2; do
+          cd "$GITHUB_WORKSPACE/marigold-impl"
+          cargo bench --bench keep_first_n --features tokio -- --baseline main 2>&1 | tee /tmp/bench_keep_first_n_run${run}.txt
+          cargo bench --bench per_item_costs --features tokio -- --baseline main 2>&1 | tee /tmp/bench_per_item_costs_run${run}.txt
+          cargo bench --bench pipeline_stages --features tokio -- --baseline main 2>&1 | tee /tmp/bench_pipeline_stages_run${run}.txt
+          cd "$GITHUB_WORKSPACE/marigold-grammar"
+          cargo bench --bench parser_bench -- --baseline main 2>&1 | tee /tmp/bench_parser_bench_run${run}.txt
+          cd "$GITHUB_WORKSPACE/examples/color-palette-picker"
+          cargo bench --bench color_picker_bench --features tokio -- --baseline main 2>&1 | tee /tmp/bench_color_picker_run${run}.txt
+        done
 
     - name: Criterion benches — no baseline available
       if: steps.restore-baseline.outputs.cache-hit == ''
@@ -114,4 +112,6 @@ jobs:
       working-directory: marigold-impl
 
     - name: Check for regressions
-      run: bash marigold-impl/benches/check_regression.sh 15 $(ls /tmp/bench_*.txt 2>/dev/null || true)
+      run: |
+        bash marigold-impl/benches/check_regression.sh 15 --require-runs 2 \
+          $(ls /tmp/bench_*_run1.txt /tmp/bench_*_run2.txt 2>/dev/null || true)
