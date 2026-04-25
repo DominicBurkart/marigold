@@ -28,9 +28,8 @@
 //!
 //! ### Parser
 //!
-//! The [`parser`] module provides the Pest-based parser with a trait abstraction
-//! for extensibility. The factory function [`parser::get_parser()`] returns a
-//! parser instance.
+//! The [`parser`] module exposes [`parser::PestParser`] and the convenience
+//! function [`parser::parse_marigold`].
 //!
 //! ### Grammar File
 //!
@@ -74,23 +73,6 @@ pub mod symbol_table;
 mod type_aggregation;
 
 pub mod pest_ast_builder;
-
-/// Convenience function for parsing Marigold code
-///
-/// This is an alias for [`parser::parse_marigold`] that uses the appropriate parser
-/// based on feature flags. It's the recommended entry point for most use cases.
-///
-/// # Examples
-///
-/// ```ignore
-/// use marigold_grammar::marigold_parse;
-///
-/// let code = marigold_parse("range(0, 100).return")?;
-/// // code is now valid Rust code ready to compile
-/// ```
-pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
-    parser::parse_marigold(s)
-}
 
 pub fn marigold_analyze(
     s: &str,
