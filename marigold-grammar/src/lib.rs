@@ -2,65 +2,26 @@
 
 //! # Marigold Grammar Library
 //!
-//! This crate provides the grammar and parser infrastructure for the Marigold DSL.
-//!
-//! ## Overview
-//!
-//! Marigold is a domain-specific language for expressing stream processing programs in Rust.
-//! This library provides:
-//!
-//! - **Pest-based parser**: Fast, maintainable PEG parser
-//! - **AST definitions**: Complete abstract syntax tree for Marigold programs
-//! - **Code generation**: Transforms Marigold programs into valid Rust code
+//! Grammar and parser infrastructure for the Marigold DSL: a Pest-based PEG
+//! parser, the AST defined in [`nodes`], and code generation that transforms
+//! parsed programs into Rust source.
 //!
 //! ## Quick Start
-//!
-//! Parse a Marigold program:
 //!
 //! ```ignore
 //! use marigold_grammar::parser::parse_marigold;
 //!
 //! let code = parse_marigold("range(0, 100).return")?;
-//! println!("{}", code);
+//! println!("{code}");
 //! ```
 //!
-//! ## Architecture
+//! ## Layout
 //!
-//! ### Parser
-//!
-//! The [`parser`] module provides the Pest-based parser with a trait abstraction
-//! for extensibility. The factory function [`parser::get_parser()`] returns a
-//! parser instance.
-//!
-//! ### Grammar File
-//!
-//! - **Pest**: `src/marigold.pest` - Defines the complete Marigold language grammar
-//!
-//! ### AST and Code Generation
-//!
-//! - [`nodes`]: AST node definitions for all Marigold constructs
-//! - Code generation: Internal function that transforms AST to Rust code
-//! - [`pest_ast_builder`]: Transforms Pest parse trees into the AST
-//!
-//! ## Testing & Validation
-//!
-//! The parser implementation is validated through:
-//!
-//! - **Unit tests** in each module covering specific functionality
-//! - **Negative tests** ensuring invalid syntax is properly rejected
-//! - **Integration tests** using real-world example programs
-//!
-//! ## Feature Flags
-//!
-//! - `io`: I/O features (available in other crates)
-//! - `tokio`: Tokio runtime integration (available in other crates)
-//! - `async-std`: async-std runtime integration (available in other crates)
-//!
-//! ## Performance Characteristics
-//!
-//! - **Parsing**: Completes in < 1ms for typical programs
-//! - **Code generation**: Dominates runtime, scales with program complexity
-//! - **Binary size**: Pest parser adds ~40KB to binary size
+//! - `src/marigold.pest` — PEG grammar.
+//! - [`parser`] — entry points [`parser::parse_marigold`] and [`parser::PestParser`].
+//! - [`pest_ast_builder`] — builds [`nodes`] AST from the Pest parse tree.
+//! - [`bound_resolution`] / [`symbol_table`] — bounded-type resolution.
+//! - [`complexity`] — static complexity analysis used by `marigold analyze`.
 
 extern crate proc_macro;
 
@@ -75,34 +36,10 @@ mod type_aggregation;
 
 pub mod pest_ast_builder;
 
-/// Convenience function for parsing Marigold code
-///
-/// This is an alias for [`parser::parse_marigold`] that uses the appropriate parser
-/// based on feature flags. It's the recommended entry point for most use cases.
-///
-/// # Examples
-///
-/// ```ignore
-/// use marigold_grammar::marigold_parse;
-///
-/// let code = marigold_parse("range(0, 100).return")?;
-/// // code is now valid Rust code ready to compile
-/// ```
-pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
-    parser::parse_marigold(s)
-}
-
+/// Convenience wrapper around [`parser::parse_marigold`] that also runs
+/// [`complexity::analyze_program`] on the resolved AST.
 pub fn marigold_analyze(
     s: &str,
 ) -> Result<complexity::ProgramComplexity, parser::MarigoldParseError> {
     parser::PestParser::analyze(s)
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
 }
