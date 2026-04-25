@@ -38,14 +38,68 @@ mod tests {
     use futures::stream::StreamExt;
 
     #[tokio::test]
-    async fn combinations() {
+    async fn combinations_basic() {
         assert_eq!(
             futures::stream::iter(vec![1, 2, 3])
                 .combinations(2)
                 .await
                 .collect::<Vec<_>>()
                 .await,
-            vec![vec![1, 2], vec![1, 3], vec![2, 3],]
+            vec![vec![1, 2], vec![1, 3], vec![2, 3]]
         );
+    }
+
+    #[tokio::test]
+    async fn combinations_k_zero() {
+        // k=0 yields exactly one combination: the empty set
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3])
+            .combinations(0)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![Vec::<i32>::new()]);
+    }
+
+    #[tokio::test]
+    async fn combinations_k_equals_length() {
+        // k = len yields exactly one combination containing all elements
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3])
+            .combinations(3)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![vec![1, 2, 3]]);
+    }
+
+    #[tokio::test]
+    async fn combinations_k_exceeds_length() {
+        // k > len yields nothing
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2])
+            .combinations(5)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn combinations_empty_stream() {
+        let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
+            .combinations(2)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn combinations_count() {
+        // C(5,2) = 10
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3, 4, 5])
+            .combinations(2)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result.len(), 10);
     }
 }

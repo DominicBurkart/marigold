@@ -1,4 +1,7 @@
 #[cfg(test)]
+mod oracle;
+
+#[cfg(test)]
 mod tests {
     use marigold::m;
     use marigold::marigold_impl::StreamExt;
@@ -160,6 +163,39 @@ mod tests {
     //         }
     //     );
     // }
+
+    #[tokio::test]
+    async fn test_enum_range() {
+        let r = m!(
+            enum Words { Hello, World, }
+            range(Words).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(r.len(), 2);
+        assert_eq!(format!("{:?}", r[0]), "Hello");
+        assert_eq!(format!("{:?}", r[1]), "World");
+    }
+
+    #[tokio::test]
+    async fn test_enum_range_with_filter() {
+        let r = m!(
+            fn is_hello(w: Words) -> bool {
+                matches!(w, Words::Hello)
+            }
+
+            enum Words { Hello, World, }
+            range(Words)
+                .filter(is_hello)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(r.len(), 1);
+        assert_eq!(format!("{:?}", r[0]), "Hello");
+    }
 
     #[tokio::test]
     async fn test_select_all_multiple_streams() {
