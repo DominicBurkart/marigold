@@ -109,8 +109,8 @@ fn bench_struct_declaration(c: &mut Criterion) {
 fn bench_enum_declaration(c: &mut Criterion) {
     let input = r#"
         enum Hull {
-            Spherical = "spherical",
-            Split = "split",
+            Spherical = \"spherical\",
+            Split = \"split\",
         }
 
         struct Ship {
@@ -131,9 +131,9 @@ fn bench_enum_declaration(c: &mut Criterion) {
 fn bench_enum_default_variant(c: &mut Criterion) {
     let input = r#"
         enum Color {
-            Red = "red",
-            Green = "green",
-            Blue = "blue",
+            Red = \"red\",
+            Green = \"green\",
+            Blue = \"blue\",
             default Other,
         }
 
@@ -193,8 +193,8 @@ fn bench_keep_first_n(c: &mut Criterion) {
 fn bench_complex_csv_example(c: &mut Criterion) {
     let input = r#"
         enum Hull {
-            Spherical = "spherical",
-            Split = "split",
+            Spherical = \"spherical\",
+            Split = \"split\",
         }
 
         struct Vaisseau {
@@ -219,8 +219,8 @@ fn bench_complex_csv_example(c: &mut Criterion) {
 fn bench_multiple_streams(c: &mut Criterion) {
     let input = r#"
         enum Hull {
-            Spherical = "spherical",
-            Split = "split",
+            Spherical = \"spherical\",
+            Split = \"split\",
         }
 
         struct Vaisseau {
@@ -244,7 +244,7 @@ fn bench_multiple_streams(c: &mut Criterion) {
 /// Benchmark write_file operation
 fn bench_write_file(c: &mut Criterion) {
     let input = r#"
-        range(0, 100).write_file("output.csv", csv)
+        range(0, 100).write_file(\"output.csv\", csv)
     "#;
 
     c.bench_function("pest_write_file", |b| {
