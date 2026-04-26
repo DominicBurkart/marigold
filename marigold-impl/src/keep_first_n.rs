@@ -97,7 +97,8 @@ where
                 .into_sorted_vec()
                 .into_iter()
                 .map(|(_idx, item)| item) // Unwrap indices
-                .collect::<Vec<_>>(),
+                .collect::<Vec<_>>()
+                .into_iter(),
         );
     }
 
@@ -172,7 +173,8 @@ where
             .into_sorted_vec()
             .into_iter()
             .map(|(_idx, item)| item) // Unwrap indices
-            .collect::<Vec<_>>(),
+            .collect::<Vec<_>>()
+            .into_iter(),
     )
 }
 
