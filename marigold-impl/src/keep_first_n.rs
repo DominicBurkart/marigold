@@ -39,20 +39,20 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
-        // use the reverse ordering so that the smallest value is always the first to pop.
+        // A min-heap (reverse of sorted_by) keeps the smallest kept item at the top,
+        // so eviction is O(log n) instead of scanning the whole set.
         let first_n = BinaryHeap::with_capacity_by(n, move |a, b| sorted_by(a, b).reverse());
         impl_keep_first_n(self, first_n, n, sorted_by).await
     }
 }
 
-/// Internal logic for keep_first_n. This is in a separate function so that we can get the full
-/// type of the binary heap, which includes a lambda for reversing the ordering fromt the passed
-/// sort_by function. By declaring a new function, we can use generics to describe its type, and
-/// then can use that type while unsafely casting pointers.
+/// Internal logic for keep_first_n. Separated into its own function so generics can fully
+/// express the BinaryHeap type (including the reversed-comparator lambda), which is required
+/// for safe pointer operations in the parallel section.
 ///
-/// This implementation wraps items with their stream index to provide deterministic tie-breaking
-/// when the user's comparison function returns Equal. Lower indices (earlier in stream) are
-/// preferred to ensure consistent results even with parallel processing.
+/// Items are wrapped with their stream index for deterministic tie-breaking: when the
+/// user comparator returns Equal, the earlier item (lower index) wins, ensuring consistent
+/// results across parallel executions.
 #[cfg(any(feature = "tokio", feature = "async-std"))]
 async fn impl_keep_first_n<SInput, T, F, FReversed>(
     sinput: SInput,
@@ -66,22 +66,21 @@ where
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
     FReversed: Fn(&T, &T) -> std::cmp::Ordering + Clone + Send + 'static,
 {
-    // Add indices to items for deterministic tie-breaking
     let mut indexed_stream = sinput.enumerate();
 
-    // Create a heap that stores (index, item) tuples with tie-breaking comparator
+    // Store (index, item) so tie-breaking is deterministic even with parallel processing.
     let indexed_comparator = move |a: &(usize, T), b: &(usize, T)| {
         match sorted_by(&a.1, &b.1) {
             Ordering::Less => Ordering::Less,
             Ordering::Greater => Ordering::Greater,
-            // When equal, prefer lower index (earlier in stream)
+            // Earlier stream position wins on a tie.
             Ordering::Equal => a.0.cmp(&b.0),
         }
     };
     let mut first_n =
         BinaryHeap::with_capacity_by(n, move |a, b| indexed_comparator(a, b).reverse());
 
-    // Iterate through values in a single thread until we have seen n values.
+    // Fill the heap sequentially until we have n items or exhaust the stream.
     while first_n.len() < n {
         if let Some(indexed_item) = indexed_stream.next().await {
             first_n.push(indexed_item);
@@ -90,27 +89,24 @@ where
         }
     }
 
-    // If we have exhausted the stream before reaching n values, we can exit early.
     if first_n.len() < n {
         return futures::stream::iter(
             first_n
                 .into_sorted_vec()
                 .into_iter()
-                .map(|(_idx, item)| item) // Unwrap indices
+                .map(|(_idx, item)| item)
                 .collect::<Vec<_>>()
                 .into_iter(),
         );
     }
 
-    // Otherwise, we can check each remaining value in the stream against the smallest
-    // kept value, updating the kept values only when a keepable value is found. This
-    // is done by spawning tasks, which can be parallelized by multithreaded runtimes.
+    // For the remainder of the stream, spawn parallel tasks to check each item against
+    // the current smallest kept value.
     //
-    // A double-check pattern is used: the RwLock provides a fast-path filter
-    // (most items are rejected without touching the mutex), and after acquiring
-    // the mutex the condition is re-checked against the current heap state to
-    // eliminate the TOCTOU race where two tasks could both pass the fast-path
-    // check but only one should actually replace the smallest kept value.
+    // A double-check pattern guards the heap: the RwLock gives a fast-path read
+    // (most items are rejected without touching the mutex), and after acquiring the
+    // mutex the condition is re-checked to eliminate the TOCTOU race where two tasks
+    // both pass the fast path but only one should actually replace the smallest value.
     let first_n_mutex = std::sync::Arc::new(parking_lot::Mutex::new(first_n));
     let smallest_kept = std::sync::Arc::new(parking_lot::RwLock::new(
         first_n_mutex.lock().peek().unwrap().to_owned(),
@@ -172,7 +168,7 @@ where
             .into_inner()
             .into_sorted_vec()
             .into_iter()
-            .map(|(_idx, item)| item) // Unwrap indices
+            .map(|(_idx, item)| item)
             .collect::<Vec<_>>()
             .into_iter(),
     )
@@ -192,7 +188,8 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
-        // use the reverse ordering so that the smallest value is always the first to pop.
+        // A min-heap (reverse of sorted_by) keeps the smallest kept item at the top,
+        // so eviction is O(log n) instead of scanning the whole set.
         let mut first_n = BinaryHeap::with_capacity_by(n, |a, b| match sorted_by(a, b) {
             Ordering::Less => Ordering::Greater,
             Ordering::Equal => Ordering::Equal,
@@ -207,13 +204,11 @@ where
             }
         }
 
-        // If we have exhausted the stream before reaching n values, we can exit early.
         if first_n.len() < n {
             return futures::stream::iter(first_n.into_sorted_vec().into_iter());
         }
 
-        // Otherwise, we can check each remaining value in the stream against the smallest
-        // kept value, updating the kept values only when a keepable value is found.
+        // Without a spawning runtime, drive concurrency via for_each_concurrent.
         let first_n_mutex = parking_lot::Mutex::new(first_n);
         let smallest_kept =
             parking_lot::RwLock::new(first_n_mutex.lock().peek().unwrap().to_owned());

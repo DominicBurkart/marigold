@@ -1,41 +1,7 @@
-//! Symbol Table for Type Information
+//! Symbol table tracking type information for bound-expression resolution.
 //!
-//! This module provides a symbol table that tracks type information needed
-//! for resolving bounded type expressions.
-//!
-//! ## Tracked Information
-//!
-//! - **Enums**: Variant counts for `.len()` and `.cardinality()` operations
-//! - **Bounded Fields**: Min/max expressions for struct fields with bounded types
-//!
-//! ## Usage
-//!
-//! The symbol table is built from parsed expressions and used by the
-//! [`BoundResolver`](crate::bound_resolution::BoundResolver) to evaluate
-//! type references.
-//!
-//! ```
-//! use marigold_grammar::symbol_table::SymbolTable;
-//! use marigold_grammar::nodes::{TypedExpression, EnumDeclarationNode};
-//!
-//! // Create an enum with 3 variants
-//! let expressions = vec![
-//!     TypedExpression::EnumDeclaration(EnumDeclarationNode {
-//!         name: "Color".to_string(),
-//!         variants: vec![
-//!             ("Red".to_string(), Some("r".to_string())),
-//!             ("Green".to_string(), Some("g".to_string())),
-//!             ("Blue".to_string(), Some("b".to_string())),
-//!         ],
-//!         default_variant: None,
-//!     }),
-//! ];
-//!
-//! let table = SymbolTable::from_expressions(&expressions);
-//!
-//! // Check if an enum exists and get its variant count
-//! assert_eq!(table.get_enum_len("Color"), Some(3));
-//! ```
+//! Collects enum variant counts and bounded struct fields from parsed
+//! expressions; consumed by [`crate::bound_resolution::BoundResolver`].
 
 use crate::nodes::{BoundExpr, EnumDeclarationNode, StructDeclarationNode, Type, TypedExpression};
 use std::collections::HashMap;
