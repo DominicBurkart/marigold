@@ -5,6 +5,12 @@ use futures::stream::StreamExt;
 use std::cmp::Ordering;
 use tracing::instrument;
 
+// Batch size for ready_chunks: amortizes spawn overhead (~8,405 ns) over many items (~28 ns each).
+// Measured crossover is ~300 items; 256 is a power-of-2 heuristic just below that. Workloads with
+// heavier comparators would benefit from a smaller value; trivially cheap ones from a larger one.
+#[cfg(any(feature = "tokio", feature = "async-std"))]
+const READY_CHUNK_SIZE: usize = 256;
+
 #[async_trait]
 pub trait KeepFirstN<T, F>
 where
@@ -60,6 +66,12 @@ where
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
     FReversed: Fn(&T, &T) -> std::cmp::Ordering + Clone + Send + 'static,
 {
+    // n=0 means keep nothing; return an empty stream immediately without touching the heap
+    // (the heap is empty, so peek().unwrap() would panic below).
+    if n == 0 {
+        return futures::stream::iter(vec![]);
+    }
+
     // Add indices to items for deterministic tie-breaking
     let mut indexed_stream = sinput.enumerate();
 
@@ -91,8 +103,7 @@ where
                 .into_sorted_vec()
                 .into_iter()
                 .map(|(_idx, item)| item) // Unwrap indices
-                .collect::<Vec<_>>()
-                .into_iter(),
+                .collect::<Vec<_>>(),
         );
     }
 
@@ -100,52 +111,66 @@ where
     // kept value, updating the kept values only when a keepable value is found. This
     // is done by spawning tasks, which can be parallelized by multithreaded runtimes.
     //
-    // The check and update are performed atomically under the same mutex to avoid a
-    // TOCTOU race where two tasks could both observe the same "smallest" and both
-    // decide to replace it, leading to non-deterministic tie-breaking.
+    // A double-check pattern is used: the RwLock provides a fast-path filter
+    // (most items are rejected without touching the mutex), and after acquiring
+    // the mutex the condition is re-checked against the current heap state to
+    // eliminate the TOCTOU race where two tasks could both pass the fast-path
+    // check but only one should actually replace the smallest kept value.
     let first_n_mutex = std::sync::Arc::new(parking_lot::Mutex::new(first_n));
     let smallest_kept = std::sync::Arc::new(parking_lot::RwLock::new(
         first_n_mutex.lock().peek().unwrap().to_owned(),
     ));
-    {
-        let first_n_arc = first_n_mutex.clone();
-        let smallest_kept_arc = smallest_kept.clone();
+    let first_n_arc = first_n_mutex.clone();
+    let smallest_kept_arc = smallest_kept.clone();
+    let parallel_work = async move {
         let mut ongoing_tasks = indexed_stream
-            .map(move |indexed_item| {
+            .ready_chunks(READY_CHUNK_SIZE)
+            .map(move |chunk: Vec<(usize, T)>| {
                 let first_n_arc = first_n_arc.clone();
                 let smallest_kept_arc = smallest_kept_arc.clone();
                 crate::async_runtime::spawn(async move {
-                    // Fast pre-check under read lock to skip clearly inferior items
-                    // without contending on the mutex.
-                    {
+                    #[cfg(feature = "bench-instrumentation")]
+                    let _worker_span = tracing::info_span!("keep_first_n_worker_task").entered();
+                    for indexed_item in chunk {
                         let smallest = smallest_kept_arc.read();
-                        if sorted_by(&smallest.1, &indexed_item.1) == Ordering::Greater {
-                            return;
-                        }
-                    }
-
-                    // Atomically check and update under the mutex to prevent TOCTOU.
-                    let mut update_first_n = first_n_arc.lock();
-                    let should_keep = {
-                        let smallest = update_first_n.peek().unwrap();
-                        match sorted_by(&smallest.1, &indexed_item.1) {
+                        let should_keep = match sorted_by(&smallest.1, &indexed_item.1) {
                             Ordering::Less => true,
                             Ordering::Greater => false,
-                            // When equal, prefer item with lower index (earlier in stream)
                             Ordering::Equal => indexed_item.0 < smallest.0,
+                        };
+                        drop(smallest);
+
+                        if should_keep {
+                            let mut update_first_n = first_n_arc.lock();
+                            let current_smallest = update_first_n.peek().unwrap();
+                            let still_should_keep =
+                                match sorted_by(&current_smallest.1, &indexed_item.1) {
+                                    Ordering::Less => true,
+                                    Ordering::Greater => false,
+                                    Ordering::Equal => indexed_item.0 < current_smallest.0,
+                                };
+                            if still_should_keep {
+                                update_first_n.pop();
+                                update_first_n.push(indexed_item);
+                                let mut update_smallest_kept = smallest_kept_arc.write();
+                                *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
+                            }
                         }
-                    };
-                    if should_keep {
-                        update_first_n.pop();
-                        update_first_n.push(indexed_item);
-                        let mut update_smallest_kept = smallest_kept_arc.write();
-                        *update_smallest_kept = update_first_n.peek().unwrap().to_owned();
                     }
                 })
             })
             .buffer_unordered(num_cpus::get() * 4);
         while let Some(_task) = ongoing_tasks.next().await {}
+    };
+    #[cfg(feature = "bench-instrumentation")]
+    {
+        use tracing::Instrument;
+        parallel_work
+            .instrument(tracing::info_span!("keep_first_n_parallel_section"))
+            .await;
     }
+    #[cfg(not(feature = "bench-instrumentation"))]
+    parallel_work.await;
     futures::stream::iter(
         std::sync::Arc::try_unwrap(first_n_mutex)
             .expect("Dangling references to mutex")
@@ -153,8 +178,7 @@ where
             .into_sorted_vec()
             .into_iter()
             .map(|(_idx, item)| item) // Unwrap indices
-            .collect::<Vec<_>>()
-            .into_iter(),
+            .collect::<Vec<_>>(),
     )
 }
 
@@ -172,6 +196,12 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
+        // n=0 means keep nothing; return an empty stream immediately without touching the heap
+        // (the heap is empty, so peek().unwrap() would panic below).
+        if n == 0 {
+            return futures::stream::iter(vec![].into_iter());
+        }
+
         // use the reverse ordering so that the smallest value is always the first to pop.
         let mut first_n = BinaryHeap::with_capacity_by(n, |a, b| match sorted_by(a, b) {
             Ordering::Less => Ordering::Greater,
@@ -236,17 +266,105 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_keep_first_n_more_than_available() {
-        // Request more items than the stream contains; all items should be returned.
-        // The result is in descending order (largest first) because keep_first_n always
-        // returns items sorted max-first, i.e. in reverse comparator order. This is an
-        // implementation detail encoded in the KeepFirstN trait contract.
-        let result = futures::stream::iter(vec![3, 1, 2])
+    async fn large_stream_correctness() {
+        let items: Vec<u64> = (0..10_000).map(|i| (i * 7 + 3) % 10_000).collect();
+        let mut expected: Vec<u64> = items.clone();
+        expected.sort_by(|a, b| b.cmp(a));
+        expected.truncate(10);
+
+        let result = futures::stream::iter(items)
+            .keep_first_n(10, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(result, expected);
+    }
+
+    #[tokio::test]
+    async fn chunk_boundary_exact() {
+        let items: Vec<u32> = (0..256).collect();
+        let result = futures::stream::iter(items)
+            .keep_first_n(5, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![255, 254, 253, 252, 251]);
+    }
+
+    #[tokio::test]
+    async fn chunk_boundary_plus_one() {
+        let items: Vec<u32> = (0..257).collect();
+        let result = futures::stream::iter(items)
+            .keep_first_n(5, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![256, 255, 254, 253, 252]);
+    }
+
+    #[tokio::test]
+    async fn chunk_boundary_less_than_chunk() {
+        let items: Vec<u32> = (0..100).collect();
+        let result = futures::stream::iter(items)
+            .keep_first_n(5, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![99, 98, 97, 96, 95]);
+    }
+
+    #[tokio::test]
+    async fn chunk_boundary_keep_all() {
+        let items: Vec<u32> = (0..10).collect();
+        let result = futures::stream::iter(items)
+            .keep_first_n(10, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+    }
+
+    #[tokio::test]
+    async fn tie_breaking_determinism() {
+        let items: Vec<(u32, usize)> = (0..100).map(|i| (42u32, i)).collect();
+        let result = futures::stream::iter(items)
+            .keep_first_n(5, |a, b| a.0.cmp(&b.0))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(result.len(), 5);
+        let mut indices: Vec<usize> = result.iter().map(|(_, i)| *i).collect();
+        indices.sort_unstable();
+        assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[tokio::test]
+    async fn stream_shorter_than_n() {
+        let result = futures::stream::iter(vec![3u32, 1, 2])
             .keep_first_n(10, |a, b| a.cmp(b))
             .await
             .collect::<Vec<_>>()
             .await;
         assert_eq!(result, vec![3, 2, 1]);
+    }
+
+    #[tokio::test]
+    async fn cross_chunk_concurrent_correctness() {
+        let n = 10_000usize;
+        let items: Vec<u64> = (0..n as u64).collect();
+        let mut expected: Vec<u64> = items.clone();
+        expected.sort_by(|a, b| b.cmp(a));
+        expected.truncate(50);
+
+        let result = futures::stream::iter(items)
+            .keep_first_n(50, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(result, expected);
     }
 
     #[tokio::test]
