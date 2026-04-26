@@ -57,17 +57,13 @@ fn main() {
 fn get_file_name_argument(args: &Args) -> Option<String> {
     use MarigoldCommand::*;
 
-    match &args.command {
-        Some(Run {
-            unoptimized: _,
-            file,
-        }) => file.clone(),
-        Some(Install { file }) => file.clone(),
-        Some(Uninstall { file }) => file.clone(),
-        Some(Clean { file }) => file.clone(),
-        Some(Analyze { file }) => file.clone(),
-        Some(CleanAll) => None,
-        None => None,
+    match args.command.as_ref()? {
+        Run { file, .. }
+        | Install { file }
+        | Uninstall { file }
+        | Clean { file }
+        | Analyze { file } => file.clone(),
+        CleanAll => None,
     }
 }
 
@@ -91,96 +87,71 @@ fn main() -> Result<()> {
     let file_name_argument = get_file_name_argument(&args);
 
     let program_name = {
-        let mut file_name = match &file_name_argument {
-            Some(path) => {
-                let stem = std::path::Path::new(path)
+        let stem = file_name_argument
+            .as_deref()
+            .and_then(|path| {
+                std::path::Path::new(path)
                     .file_stem()
                     .and_then(|s| s.to_str())
-                    .unwrap_or("marigold_program");
-                if stem.len() > 1 {
-                    stem.to_string()
-                } else {
-                    "marigold_program".to_string()
-                }
-            }
-            None => "marigold_program".to_string(),
-        };
-
-        file_name = file_name.to_case(Case::Snake);
-        file_name = file_name
-            .strip_prefix("_")
-            .map(|s| s.to_string())
-            .unwrap_or(file_name);
-        file_name = file_name
-            .strip_suffix("_")
-            .map(|s| s.to_string())
-            .unwrap_or(file_name);
-        file_name
+                    .filter(|s| s.len() > 1)
+            })
+            .unwrap_or("marigold_program");
+        stem.to_case(Case::Snake).trim_matches('_').to_string()
     };
 
     let program_project_dir = marigold_cache_directory.join(&program_name);
 
-    let command = match args.command {
-        Some(ref command) => match command {
-            Run {
-                unoptimized: _,
-                file: _,
-            } => "run",
-            Install { file: _ } => "install",
-            Uninstall { file: _ } => std::process::exit(
-                Command::new("cargo")
-                    .args(["uninstall", &program_name])
-                    .spawn()?
-                    .wait()?
-                    .code()
-                    .unwrap_or(0),
-            ),
-            Clean { file: _ } => {
-                std::fs::remove_dir_all(&program_project_dir)?;
-                std::process::exit(0);
+    let read_program = || -> Result<String> {
+        Ok(match &file_name_argument {
+            Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
+            None => {
+                let mut stdin = String::new();
+                io::stdin().lock().read_to_string(&mut stdin)?;
+                stdin.trim().to_string()
             }
-            CleanAll => {
-                if marigold_cache_directory.exists() {
-                    std::fs::remove_dir_all(&marigold_cache_directory)?;
-                }
-                std::process::exit(0);
+        })
+    };
+
+    let command = match &args.command {
+        Some(Run { .. }) | None => "run", // default is run.
+        Some(Install { .. }) => "install",
+        Some(Uninstall { .. }) => std::process::exit(
+            Command::new("cargo")
+                .args(["uninstall", &program_name])
+                .spawn()?
+                .wait()?
+                .code()
+                .unwrap_or(0),
+        ),
+        Some(Clean { .. }) => {
+            std::fs::remove_dir_all(program_project_dir)?;
+            std::process::exit(0);
+        }
+        Some(CleanAll) => {
+            if marigold_cache_directory.exists() {
+                std::fs::remove_dir_all(marigold_cache_directory)?;
             }
-            Analyze { file: _ } => {
-                let program_contents = match &file_name_argument {
-                    Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
-                    None => {
-                        let mut stdin = String::new();
-                        io::stdin().lock().read_to_string(&mut stdin)?;
-                        stdin.trim().to_string()
-                    }
-                };
-                let result = marigold_grammar::marigold_analyze(&program_contents)
-                    .map_err(|e| anyhow::anyhow!("{}", e))?;
-                let json = serde_json::to_string_pretty(&result)?;
-                println!("{json}");
-                std::process::exit(0);
-            }
-        },
-        None => "run", // default is run.
+            std::process::exit(0);
+        }
+        Some(Analyze { .. }) => {
+            let program_contents = read_program()?;
+            let result = marigold_grammar::marigold_analyze(&program_contents)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let json = serde_json::to_string_pretty(&result)?;
+            println!("{json}");
+            std::process::exit(0);
+        }
     };
 
     let program_src_dir = program_project_dir.join("src");
 
     std::fs::create_dir_all(&program_src_dir)?;
 
-    let program_contents = match file_name_argument {
-        Some(path) => std::fs::read_to_string(&path)?.trim().to_string(),
-        None => {
-            let mut stdin = String::new();
-            io::stdin().lock().read_to_string(&mut stdin)?;
-            stdin.trim().to_string()
-        }
-    };
+    let program_contents = read_program()?;
 
     std::fs::write(
         program_src_dir.join("main.rs"),
-        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}")
-            .as_str(),
+        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}"),
     )?;
 
     const MARIGOLD_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -209,55 +180,32 @@ tokio = {{ version = "1", features = ["full"]}}
         ),
     )?;
 
-    let exit_status = {
-        if command == "run" {
-            let unoptimized = {
-                if let Some(Run {
-                    unoptimized,
-                    file: _,
-                }) = &args.command
-                {
-                    *unoptimized
-                } else {
-                    false
-                }
-            };
-            if unoptimized {
-                Command::new("cargo")
-                    .args([
-                        command,
-                        "--manifest-path",
-                        manifest_path
-                            .to_str()
-                            .expect("Marigold could not parse cache manifest path as utf-8"),
-                    ])
-                    .spawn()?
-                    .wait()?
-            } else {
-                Command::new("cargo")
-                    .args([
-                        command,
-                        "--release",
-                        "--manifest-path",
-                        manifest_path
-                            .to_str()
-                            .expect("Marigold could not parse cache manifest path as utf-8"),
-                    ])
-                    .spawn()?
-                    .wait()?
-            }
+    let utf8_err = "Marigold could not parse cache manifest path as utf-8";
+    let exit_status = if command == "run" {
+        let unoptimized = if let Some(Run {
+            unoptimized,
+            file: _,
+        }) = &args.command
+        {
+            *unoptimized
         } else {
-            Command::new("cargo")
-                .args([
-                    command,
-                    "--path",
-                    program_project_dir
-                        .to_str()
-                        .expect("Marigold could not parse cache manifest path as utf-8"),
-                ])
-                .spawn()?
-                .wait()?
+            false
+        };
+        let manifest = manifest_path.to_str().expect(utf8_err);
+        let mut cargo_args = vec![command, "--manifest-path", manifest];
+        if !unoptimized {
+            cargo_args.insert(1, "--release");
         }
+        Command::new("cargo").args(cargo_args).spawn()?.wait()?
+    } else {
+        Command::new("cargo")
+            .args([
+                command,
+                "--path",
+                program_project_dir.to_str().expect(utf8_err),
+            ])
+            .spawn()?
+            .wait()?
     };
 
     std::process::exit(exit_status.code().unwrap_or(0));
@@ -313,7 +261,7 @@ mod tests {
         )
         .expect("could not write test file");
 
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
@@ -322,11 +270,11 @@ mod tests {
         assert!(status.success(), "marigold run failed");
 
         assert_eq!(
-            fs::read_to_string(&csv_file).expect("could not read CSV"),
+            fs::read_to_string(csv_file).expect("could not read CSV"),
             "0\n1\n2\n"
         );
 
-        let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(tmp);
     }
 
     #[test]
@@ -345,7 +293,7 @@ mod tests {
         .expect("could not write test file");
 
         // Install the marigold program as a binary
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["install", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("CARGO_INSTALL_ROOT", &install_root)
@@ -371,7 +319,7 @@ mod tests {
         );
 
         // Uninstall
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["uninstall", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("CARGO_INSTALL_ROOT", &install_root)
@@ -384,7 +332,7 @@ mod tests {
             "installed binary should be removed after uninstall"
         );
 
-        let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(tmp);
     }
 
     #[test]
@@ -401,7 +349,7 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create cache
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
@@ -413,7 +361,7 @@ mod tests {
         assert!(cache_dir.exists(), "cache should exist after run");
 
         // Clean
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["clean", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
@@ -426,7 +374,7 @@ mod tests {
             "cache dir should be removed after clean"
         );
 
-        let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(tmp);
     }
 
     #[test]
@@ -443,7 +391,7 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create cache
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
@@ -455,7 +403,7 @@ mod tests {
         assert!(cache_root.exists(), "cache should exist after run");
 
         // Clean all
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["clean-all"])
             .env("HOME", &tmp)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
@@ -468,6 +416,6 @@ mod tests {
             "entire cache should be removed after clean-all"
         );
 
-        let _ = fs::remove_dir_all(&tmp);
+        let _ = fs::remove_dir_all(tmp);
     }
 }
