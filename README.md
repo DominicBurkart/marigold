@@ -6,11 +6,11 @@
 [![lines of code](https://raw.githubusercontent.com/DominicBurkart/marigold/main/development_metadata/badges/lines_of_code.svg)](https://github.com/DominicBurkart/marigold)
 [![contributors](https://raw.githubusercontent.com/DominicBurkart/marigold/main/development_metadata/badges/contributors.svg)](https://github.com/DominicBurkart/marigold/graphs/contributors)
 [![bench](https://github.com/DominicBurkart/marigold/workflows/bench/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/bench.yaml)
+[![codecov](https://codecov.io/gh/DominicBurkart/nanna-coder/graph/badge.svg?token=47S7xzd3Ny)](https://codecov.io/gh/DominicBurkart/nanna-coder)
 [![tests](https://github.com/DominicBurkart/marigold/workflows/tests/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/tests.yaml)
 [![style](https://github.com/DominicBurkart/marigold/workflows/style/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/style.yaml)
 [![wasm](https://github.com/DominicBurkart/marigold/workflows/wasm/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml)
 [![last commit](https://img.shields.io/github/last-commit/dominicburkart/marigold)](https://github.com/DominicBurkart/marigold)
-[![onboarding](https://github.com/DominicBurkart/marigold/workflows/onboarding/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/onboarding.yaml)
 
 Marigold is an imperative, domain-specific language for data pipelining and
 analysis using async streams. It can be used as a standalone language or within
@@ -92,15 +92,15 @@ marigold analyze hello_world.marigold
     {
       "description": "input.write_file(...)",
       "cardinality": "5",
-      "time_class": "O(n)",
-      "exact_time": "O(n)",
+      "time_class": "O(1)",
+      "exact_time": "O(1)",
       "space_class": "O(1)",
       "exact_space": "O(1)",
       "collects_input": false
     }
   ],
-  "program_time": "O(n)",
-  "program_exact_time": "O(n)",
+  "program_time": "O(1)",
+  "program_exact_time": "O(1)",
   "program_space": "O(1)",
   "program_exact_space": "O(1)",
   "program_cardinality": "5"
