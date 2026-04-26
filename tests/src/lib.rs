@@ -221,4 +221,186 @@ mod tests {
         .await;
         assert_eq!(result, vec![0, 1, 2, 3]);
     }
+
+    // ── fold ─────────────────────────────────────────────────────────────────
+
+    /// fold produces exactly one item (the final accumulator) and the value is
+    /// the correct sum. This validates the end-to-end marifold → m!() path.
+    #[tokio::test]
+    async fn fold_sum_produces_single_item_with_correct_value() {
+        fn add(acc: i32, v: i32) -> i32 {
+            acc + v
+        }
+
+        let result = m!(
+            range(0, 10)
+                .fold(0, add)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+
+        // 0+1+…+9 = 45; fold must yield exactly one element
+        assert_eq!(result, vec![45i32]);
+    }
+
+    /// fold with an empty range yields the initial accumulator unchanged.
+    #[tokio::test]
+    async fn fold_empty_range_yields_init() {
+        fn add(acc: i32, v: i32) -> i32 {
+            acc + v
+        }
+
+        let result = m!(
+            range(5, 5)
+                .fold(99, add)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+
+        assert_eq!(result, vec![99i32]);
+    }
+
+    // ── filter + map chain ───────────────────────────────────────────────────
+
+    /// filter then map: only even numbers survive the filter, then each is
+    /// doubled. Validates that cardinality and values are correct after both
+    /// a narrowing and a transforming step.
+    #[tokio::test]
+    async fn filter_then_map_even_doubled() {
+        fn is_even(i: i32) -> bool {
+            i % 2 == 0
+        }
+        fn double(i: i32) -> i32 {
+            i * 2
+        }
+
+        let result = m!(
+            range(0, 6)
+                .filter(is_even)
+                .map(double)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+
+        // evens in [0,6): 0, 2, 4 → doubled: 0, 4, 8
+        assert_eq!(result, vec![0i32, 4, 8]);
+    }
+
+    /// filter that rejects everything produces an empty stream (not a panic).
+    #[tokio::test]
+    async fn filter_rejects_all_yields_empty_stream() {
+        fn always_false(_: i32) -> bool {
+            false
+        }
+
+        let result = m!(
+            range(0, 10)
+                .filter(always_false)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+
+        assert!(result.is_empty());
+    }
+
+    // ── keep_first_n via m!() ────────────────────────────────────────────────
+
+    /// keep_first_n selects the N largest values and returns them in
+    /// descending order. End-to-end via the m!() macro.
+    #[tokio::test]
+    async fn keep_first_n_largest_values() {
+        let cmp = |a: &i32, b: &i32| a.cmp(b);
+
+        let result = m!(
+            range(0, 10)
+                .keep_first_n(3, cmp)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+
+        assert_eq!(result, vec![9i32, 8, 7]);
+    }
+
+    /// keep_first_n with n larger than the stream returns all items in
+    /// descending order — no panic, no missing elements.
+    #[tokio::test]
+    async fn keep_first_n_larger_than_stream_returns_all() {
+        let cmp = |a: &i32, b: &i32| a.cmp(b);
+
+        let result = m!(
+            range(0, 4)
+                .keep_first_n(100, cmp)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+
+        assert_eq!(result, vec![3i32, 2, 1, 0]);
+    }
+
+    // ── multi-consumer (stream variable reuse) ───────────────────────────────
+
+    /// A named stream variable can be consumed by two independent output
+    /// pipelines. Both pipelines see all items from the original source.
+    /// This exercises the MultiConsumerStream broadcast path end-to-end.
+    #[tokio::test]
+    async fn multi_consumer_both_branches_see_all_items() {
+        fn is_even(i: i32) -> bool {
+            i % 2 == 0
+        }
+        fn is_odd(i: i32) -> bool {
+            i % 2 != 0
+        }
+
+        let evens = m!(
+            digits = range(0, 10)
+            digits.filter(is_even).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+
+        let odds = m!(
+            digits = range(0, 10)
+            digits.filter(is_odd).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+
+        assert_eq!(evens, vec![0i32, 2, 4, 6, 8]);
+        assert_eq!(odds, vec![1i32, 3, 5, 7, 9]);
+    }
+
+    /// A stream variable used with fold produces the correct aggregate.
+    /// Validates that the variable definition → fold → single-item output
+    /// path works correctly end-to-end.
+    #[tokio::test]
+    async fn stream_variable_fold_produces_correct_sum() {
+        fn add(acc: i32, v: i32) -> i32 {
+            acc + v
+        }
+
+        let result = m!(
+            nums = range(1, 6)
+            nums.fold(0, add).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+
+        // 1+2+3+4+5 = 15
+        assert_eq!(result, vec![15i32]);
+    }
 }
