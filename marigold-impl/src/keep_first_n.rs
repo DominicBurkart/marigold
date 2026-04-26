@@ -45,14 +45,13 @@ where
     }
 }
 
-/// Internal logic for keep_first_n. This is in a separate function so that we can get the full
-/// type of the binary heap, which includes a lambda for reversing the ordering fromt the passed
-/// sort_by function. By declaring a new function, we can use generics to describe its type, and
-/// then can use that type while unsafely casting pointers.
+/// Internal logic for `keep_first_n`, split out so the binary heap's full type —
+/// including the closure that reverses the user's `sort_by` — can be named via
+/// generics and reused for pointer casts.
 ///
-/// This implementation wraps items with their stream index to provide deterministic tie-breaking
-/// when the user's comparison function returns Equal. Lower indices (earlier in stream) are
-/// preferred to ensure consistent results even with parallel processing.
+/// Items are wrapped with their stream index so that ties (when the user's
+/// comparator returns `Equal`) break deterministically: lower indices (earlier
+/// in the stream) win, yielding consistent results even under parallelism.
 #[cfg(any(feature = "tokio", feature = "async-std"))]
 async fn impl_keep_first_n<SInput, T, F, FReversed>(
     sinput: SInput,
