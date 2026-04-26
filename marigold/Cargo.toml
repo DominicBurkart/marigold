@@ -6,6 +6,7 @@ authors = ["Dominic <code@dominic.computer>"]
 description = "The Marigold Programming Language."
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
+readme = "../README.md"
 
 [features]
 tokio = ["marigold-impl/tokio", "marigold-grammar/tokio"]
