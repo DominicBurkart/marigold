@@ -38,39 +38,25 @@ mod tests {
         );
     }
 
+    /// Verify that the closure receives the full collected Vec and can
+    /// transform it arbitrarily (here: reverse the order).
     #[tokio::test]
-    async fn collect_and_apply_with_nested_generator() {
-        use futures::StreamExt;
-        use genawaiter;
-
-        let collected = futures::stream::iter(1..=3)
-            .collect_and_apply(|values| async {
-                genawaiter::sync::Gen::new(|co| async move {
-                    for val0 in values.iter() {
-                        for val1 in values.iter() {
-                            co.yield_(vec![*val0, *val1]).await;
-                        }
-                    }
-                })
+    async fn collect_and_apply_transform() {
+        let result = futures::stream::iter(1..=4)
+            .collect_and_apply(|mut v| {
+                v.reverse();
+                v
             })
-            .await
-            .await
-            .collect::<Vec<_>>()
             .await;
+        assert_eq!(result, vec![4, 3, 2, 1]);
+    }
 
-        assert_eq!(
-            collected,
-            vec![
-                vec![1, 1],
-                vec![1, 2],
-                vec![1, 3],
-                vec![2, 1],
-                vec![2, 2],
-                vec![2, 3],
-                vec![3, 1],
-                vec![3, 2],
-                vec![3, 3]
-            ]
-        );
+    /// Verify that the closure can reduce the Vec to a scalar value.
+    #[tokio::test]
+    async fn collect_and_apply_sum() {
+        let result: i32 = futures::stream::iter(1..=5)
+            .collect_and_apply(|v| v.into_iter().sum())
+            .await;
+        assert_eq!(result, 15);
     }
 }
