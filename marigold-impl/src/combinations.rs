@@ -109,4 +109,20 @@ mod tests {
             "expected no combinations when k > input length"
         );
     }
+
+    /// k=0 on a non-empty input yields exactly one empty combination (itertools
+    /// semantics, symmetric with `permutations(0)` on a non-empty input).
+    #[tokio::test]
+    async fn combinations_k0_yields_one_empty_combination() {
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3])
+            .combinations(0)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(
+            result,
+            vec![vec![] as Vec<i32>],
+            "itertools yields one empty combination for k=0 on a non-empty input"
+        );
+    }
 }

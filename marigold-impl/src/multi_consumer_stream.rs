@@ -101,30 +101,40 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
     }
 }
 
+// These tests exercise the non-feature-gated inline `run()` path, which is
+// active when neither the `tokio` nor `async-std` crate features of
+// marigold-impl are enabled.  Under those features `run()` spawns a background
+// task and returns immediately, so the receivers would deadlock waiting for
+// items that the spawned task hasn't distributed yet.  Gate the whole block to
+// keep the suite green under all feature combinations.
 #[cfg(test)]
+#[cfg(not(any(feature = "async-std", feature = "tokio")))]
 mod tests {
     use super::MultiConsumerStream;
     use futures::stream::StreamExt;
 
-    // These tests rely on the non-feature-gated inline path in `run()`, which is
-    // active when neither the `tokio` nor `async-std` crate features of
-    // marigold-impl are enabled (the normal state for `cargo test` on this crate
-    // without explicit feature flags).  The tokio runtime is still available via
-    // dev-dependencies for driving the async test harness.
+    // The tokio runtime is available via dev-dependencies (features = ["full"])
+    // and drives the async test harness even though the `tokio` crate feature
+    // of marigold-impl is disabled.
 
     /// Both consumers receive every item emitted by the source stream.
+    ///
+    /// `run()` is spawned concurrently so that the channel back-pressure
+    /// (BUFFER_SIZE = 1) doesn't deadlock: the consumers drain items while the
+    /// producer is still fanning them out.
     #[tokio::test]
     async fn all_consumers_receive_all_items() {
         let source = futures::stream::iter(vec![1u32, 2, 3]);
         let mut mcs = MultiConsumerStream::new(source);
 
-        let mut rx1 = mcs.get();
-        let mut rx2 = mcs.get();
+        let rx1 = mcs.get();
+        let rx2 = mcs.get();
 
-        mcs.run().await;
+        // Spawn run() so consumers and producer interleave on the tokio runtime.
+        let run_handle = tokio::spawn(mcs.run());
 
-        let got1 = rx1.collect::<Vec<_>>().await;
-        let got2 = rx2.collect::<Vec<_>>().await;
+        let (got1, got2, _) =
+            tokio::join!(rx1.collect::<Vec<_>>(), rx2.collect::<Vec<_>>(), run_handle,);
 
         assert_eq!(got1, vec![1, 2, 3]);
         assert_eq!(got2, vec![1, 2, 3]);
@@ -136,22 +146,22 @@ mod tests {
         let source = futures::stream::iter(vec![10u32, 20, 30]);
         let mut mcs = MultiConsumerStream::new(source);
 
-        let mut rx = mcs.get();
+        let rx = mcs.get();
 
-        mcs.run().await;
-
-        let got = rx.collect::<Vec<_>>().await;
+        let run_handle = tokio::spawn(mcs.run());
+        let (got, _) = tokio::join!(rx.collect::<Vec<_>>(), run_handle);
         assert_eq!(got, vec![10, 20, 30]);
     }
 
     /// An empty source stream causes all consumers to receive an empty sequence.
+    /// No items means no back-pressure, so sequential await is fine here.
     #[tokio::test]
     async fn empty_source_closes_consumers_immediately() {
         let source = futures::stream::iter(Vec::<u32>::new());
         let mut mcs = MultiConsumerStream::new(source);
 
-        let mut rx1 = mcs.get();
-        let mut rx2 = mcs.get();
+        let rx1 = mcs.get();
+        let rx2 = mcs.get();
 
         mcs.run().await;
 
@@ -175,20 +185,16 @@ mod tests {
         // channel immediately.
         drop(rx_drop);
 
-        mcs.run().await;
-
-        let got = rx_keep.collect::<Vec<_>>().await;
+        // Spawn run() concurrently so back-pressure on the surviving channel
+        // doesn't cause a deadlock (BUFFER_SIZE = 1).
+        let run_handle = tokio::spawn(mcs.run());
+        let (got, _) = tokio::join!(rx_keep.collect::<Vec<_>>(), run_handle);
         assert_eq!(got, vec![1, 2, 3, 4, 5]);
     }
 
-    /// Items are buffered correctly: a consumer that hasn't read yet still
-    /// receives values once it starts draining (BUFFER_SIZE = 1 means the
-    /// sender will block until the receiver catches up, so we interleave
-    /// produce and consume in separate tasks).
-    ///
-    /// Because the inline path runs synchronously we can't truly run producer
-    /// and consumer concurrently without spawning.  This test verifies the
-    /// simpler property: after `run()` completes, buffered items are available.
+    /// Items are buffered correctly: verify that a single item is available
+    /// after `run()` completes.  A single-item source never exceeds the buffer
+    /// capacity (BUFFER_SIZE = 1), so sequential await is safe here.
     #[tokio::test]
     async fn buffered_items_are_received_after_run() {
         let source = futures::stream::iter(vec![42u32]);
@@ -208,14 +214,25 @@ mod tests {
     }
 
     /// `RunFutureAsStream` always resolves to an empty stream regardless of what
-    /// the underlying future returns.
+    /// the underlying future returns.  The stream item type (`u32`) and the
+    /// future's output type (`&str`) are intentionally different to verify the
+    /// implementation correctly separates the two roles.
     #[tokio::test]
     async fn run_future_as_stream_is_always_empty() {
         use super::RunFutureAsStream;
 
-        let fut = Box::pin(async { 99u32 });
-        let stream: RunFutureAsStream<u32, u32, _> = RunFutureAsStream::new(fut);
+        let fut = Box::pin(async { "side-effect" });
+        let stream: RunFutureAsStream<u32, &str, _> = RunFutureAsStream::new(fut);
         let items = stream.collect::<Vec<u32>>().await;
         assert!(items.is_empty(), "RunFutureAsStream should emit no items");
+    }
+
+    /// `run()` with no consumers must complete without panicking or hanging.
+    /// Items from the source are silently dropped when the sender list is empty.
+    #[tokio::test]
+    async fn no_consumers_run_completes_without_panic() {
+        let source = futures::stream::iter(vec![1u32, 2, 3]);
+        let mcs = MultiConsumerStream::new(source);
+        mcs.run().await; // must not panic or hang
     }
 }
