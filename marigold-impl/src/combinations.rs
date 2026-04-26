@@ -58,7 +58,10 @@ mod tests {
             .await
             .collect::<Vec<_>>()
             .await;
-        assert!(result.is_empty(), "expected no combinations from empty input");
+        assert!(
+            result.is_empty(),
+            "expected no combinations from empty input"
+        );
     }
 
     /// A single-element stream with k=1 yields exactly that one element as a
