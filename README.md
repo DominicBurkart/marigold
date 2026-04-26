@@ -1,76 +1,122 @@
-IyBNYXJpZ29sZAoKWyFbY3JhdGVzLmlvXShodHRwczovL2ltZy5zaGllbGRz
-LmlvL2NyYXRlcy92L21hcmlnb2xkLnN2ZyldKGh0dHBzOi8vY3JhdGVzLmlv
-L2NyYXRlcy9tYXJpZ29sZCkKWyFbZG9jcy5yc10oaHR0cHM6Ly9pbWcuc2hp
-ZWxkcy5pby9kb2Nycy9tYXJpZ29sZC5zdmcpXShodHRwczovL2RvY3MucnMv
-bWFyaWdvbGQpClshW3dlYnNpdGVdKGh0dHBzOi8vaW1nLnNoaWVsZHMuaW8v
-YmFkZ2UvLXdlYnNpdGUtYmx1ZSldKGh0dHBzOi8vZG9taW5pYy5jb21wdXRl
-ci9tYXJpZ29sZCkKWyFbbGluZXMgb2YgY29kZV0oaHR0cHM6Ly9yYXcuZ2l0
-aHVidXNlcmNvbnRlbnQuY29tL0RvbWluaWNCdXJrYXJ0L21hcmlnb2xkL21h
-aW4vZGV2ZWxvcG1lbnRfbWV0YWRhdGEvYmFkZ2VzL2xpbmVzX29mX2NvZGUu
-c3ZnKV0oaHR0cHM6Ly9naXRodWIuY29tL0RvbWluaWNCdXJrYXJ0L21hcmln
-b2xkKQpbIVtjb250cmlidXRvcnNdKGh0dHBzOi8vcmF3LmdpdGh1YnVzZXJj
-b250ZW50LmNvbS9Eb21pbmljQnVya2FydC9tYXJpZ29sZC9tYWluL2RldmVs
-b3BtZW50X21ldGFkYXRhL2JhZGdlcy9jb250cmlidXRvcnMuc3ZnKV0oaHR0
-cHM6Ly9naXRodWIuY29tL0RvbWluaWNCdXJrYXJ0L21hcmlnb2xkL2dyYXBo
-cy9jb250cmlidXRvcnMpClshW2JlbmNoXShodHRwczovL2dpdGh1Yi5jb20v
-RG9taW5pY0J1cmthcnQvbWFyaWdvbGQvd29ya2Zsb3dzL2JlbmNoL2JhZGdl
-LnN2ZyldKGh0dHBzOi8vZ2l0aHViLmNvbS9Eb21pbmljQnVya2FydC9tYXJp
-Z29sZC9hY3Rpb25zL3dvcmtmbG93cy9iZW5jaC55YW1sKQpbIVtjb2RlY292
-XShodHRwczovL2NvZGVjb3YuaW8vZ2gvRG9taW5pY0J1cmthcnQvbWFyaWdv
-bGQvZ3JhcGgvYmFkZ2Uuc3ZnKV0oaHR0cHM6Ly9jb2RlY292LmlvL2doL0Rv
-bWluaWNCdXJrYXJ0L21hcmlnb2xkKQpbIVt0ZXN0c10oaHR0cHM6Ly9naXRo
-dWIuY29tL0RvbWluaWNCdXJrYXJ0L21hcmlnb2xkL3dvcmtmbG93cy90ZXN0
-cy9iYWRnZS5zdmcpXShodHRwczovL2dpdGh1Yi5jb20vRG9taW5pY0J1cmth
-cnQvbWFyaWdvbGQvYWN0aW9ucy93b3JrZmxvd3MvdGVzdHMueWFtbCkKWyFb
-c3R5bGVdKGh0dHBzOi8vZ2l0aHViLmNvbS9Eb21pbmljQnVya2FydC9tYXJp
-Z29sZC93b3JrZmxvd3Mvc3R5bGUvYmFkZ2Uuc3ZnKV0oaHR0cHM6Ly9naXRo
-dWIuY29tL0RvbWluaWNCdXJrYXJ0L21hcmlnb2xkL2FjdGlvbnMvd29ya2Zs
-b3dzL3N0eWxlLnlhbWwpClshW3dhc21dKGh0dHBzOi8vZ2l0aHViLmNvbS9E
-b21pbmljQnVya2FydC9tYXJpZ29sZC93b3JrZmxvd3Mvd2FzbS9iYWRnZS5z
-dmcpXShodHRwczovL2dpdGh1Yi5jb20vRG9taW5pY0J1cmthcnQvbWFyaWdv
-bGQvYWN0aW9ucy93b3JrZmxvd3Mvd2FzbS55YW1sKQpbIVtsYXN0IGNvbW1p
-dF0oaHR0cHM6Ly9pbWcuc2hpZWxkcy5pby9naXRodWIvbGFzdC1jb21taXQv
-ZG9taW5pY2J1cmthcnQvbWFyaWdvbGQpXShodHRwczovL2dpdGh1Yi5jb20v
-RG9taW5pY0J1cmthcnQvbWFyaWdvbGQpCgpNYXJpZ29sZCBpcyBhbiBpbXBl
-cmF0aXZlLCBkb21haW4tc3BlY2lmaWMgbGFuZ3VhZ2UgZm9yIGRhdGEgcGlw
-ZWxpbmluZyBhbmQKYW5hbHlzaXMgdXNpbmcgYXN5bmMgc3RyZWFtcy4gSXQg
-Y2FuIGJlIHVzZWQgYXMgYSBzdGFuZGFsb25lIGxhbmd1YWdlIG9yIHdpdGhp
-bgpSdXN0IHByb2dyYW1zLgoKYGBgcnVzdAp1c2UgbWFyaWdvbGQ6Om07CgpsZXQg
-b2RkX2RpZ2l0cyA9IG0hKAogIGZuIGlzX29kZChpOiAmaTMyKSAtPiBib29s
-IHsKICAgIGkud3JhcHBpbmdfcmVtKDIpID09IDEKICB9CgogIHJhbmdlKDAs
-IDEwKQogICAgLmZpbHRlcihpc19vZGQpCiAgICAucmV0dXJuCikuYXdhaXQu
-Y29sbGVjdDo6PFZlY188Xz4+KCk7CgpwcmludGxuISgiezp9PyIsIG9kZF9k
-aWdpdHMpOyAvLyBbMSwgMywgNSwgNywgOV0KYGBgCgojIyBRdWlja3N0YXJ0
-CgojIyMgSW5zdGFsbAoKYGBgc2gKY3VybCAtLXByb3RvICc9aHR0cHMnIC0t
-dGxzdjEuMiAtc1NmIGh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNv
-bS9Eb21pbmljQnVya2FydC9tYXJpZ29sZC9tYWluL2luc3RhbGwuc2ggfCBz
-aApgYGAKCk9yIHZpYSBjYXJnbzoKCmBgYHNoCmNhcmdvIGluc3RhbGwgbWFy
-aWdvbGQgLUYgY2xpCmBgYAoKT3IgZnJvbSBzb3VyY2U6CgpgYGBzaApnaXQg
-Y2xvbmUgaHR0cHM6Ly9naXRodWIuY29tL0RvbWluaWNCdXJrYXJ0L21hcmlnb2xk
-LmdpdApjZCBtYXJpZ29sZApjYXJnbyBpbnN0YWxsIC0tcGF0aCBtYXJpZ29s
-ZCAtRiBjbGkKYGBgCgojIyMgSGVsbG8gV29ybGQKCkNyZWF0ZSBgaGVsbG9f
-d29ybGQubWFyaWdvbGRgOgoKYGBgbWFyaWdvbGQKcmFuZ2UoMCwgNSkud3Jp
-dGVfZmlsZSgiL2Rldi9zdGRvdXQiLCBjc3YpCmBgYAoKUnVuIGl0OgoKYGBg
-c2gKbWFyaWdvbGQgcnVuIGhlbGxvX3dvcmxkLm1hcmlnb2xkCmBgYAoKT3V0
-cHV0OgoKYGBgdGV4dAowCjEKMgozCjQKYGBgCgojIyMgU3RhdGljIEFuYWx5
-c2lzCgpNYXJpZ29sZCBjYW4gc3RhdGljYWxseSBhbmFseXplIHlvdXIgcHJv
-Z3JhbSdzIGNvbXBsZXhpdHk6CgpgYGBzaAptYXJpZ29sZCBhbmFseXplIGhl
-bGxvX3dvcmxkLm1hcmlnb2xkCmBgYAoKYGBganNvbgp7CiAgInN0cmVhbXMi
-OiBbCiAgICB7CiAgICAgICJkZXNjcmlwdGlvbiI6ICJpbnB1dC53cml0ZV9m
-aWxlKC4uLikiLAogICAgICAiY2FyZGluYWxpdHkiOiAiNSIsCiAgICAgICJ0
-aW1lX2NsYXNzIjogIk8oMSkiLAogICAgICAiZXhhY3RfdGltZSI6ICJPKDEP
-IiwKICAgICAgInNwYWNlX2NsYXNzIjogIk8oMSkiLAogICAgICAiZXhhY3Rf
-c3BhY2UiOiAiTygxKSIsCiAgICAgICJjb2xsZWN0c19pbnB1dCI6IGZhbHNl
-CiAgICB9CiAgXSwKICAicHJvZ3JhbV90aW1lIjogIk8oMSkiLAogICJwcm9n
-cmFtX2V4YWN0X3RpbWUiOiAiTygxKSIsCiAgInByb2dyYW1fc3BhY2UiOiAi
-TygxKSIsCiAgInByb2dyYW1fZXhhY3Rfc3BhY2UiOiAiTygxKSIsCiAgInBy
-b2dyYW1fY2FyZGluYWxpdHkiOiAiNSIKfQpgYGAKCiMjIFJ1bnRpbWVzCgpC
-eSBkZWZhdWx0LCBNYXJpZ29sZCB3b3JrcyBpbiBhIHNpbmdsZSBmdXR1cmUg
-YW5kIGNhbiB3b3JrIHdpdGggYW55IHJ1bnRpbWUuCgpUaGUgYHRva2lvYCBh
-bmQgYGFzeW5jLXN0ZGAgZmVhdHVyZXMgYWxsb3cgTWFyaWdvbGQgdG8gc3Bh
-d24gYWRkaXRpb25hbCB0YXNrcywKZW5hYmxpbmcgcGFyYWxsZWxpc20gZm9y
-IG11bHRpdGhyZWFkZWQgcnVudGltZXMuCgpNYXJpZ29sZCBzdXBwb3J0cyBh
-c3luYyB0cmFjaW5nLCBlLmcuIHdpdGggdG9raW8tY29uc29sZS4KCiMjIFBs
-YXRmb3JtcwoKTWFyaWdvbGQncyBDSSBidWlsZHMgYWdhaW5zdCBhYXJjaDY0
-LCBhcm0sIFdBU00sIGFuZCB4ODYgdGFyZ2V0cywgYW5kIGJ1aWxkcwp0aGUg
-eDg2IHRhcmdldCBpbiBtYWMgYW5kIHdpbmRvd3MgZW52aXJvbm1lbnRzLgo=
+# Marigold
+
+[![crates.io](https://img.shields.io/crates/v/marigold.svg)](https://crates.io/crates/marigold)
+[![docs.rs](https://img.shields.io/docsrs/marigold.svg)](https://docs.rs/marigold)
+[![website](https://img.shields.io/badge/-website-blue)](https://dominic.computer/marigold)
+[![lines of code](https://raw.githubusercontent.com/DominicBurkart/marigold/main/development_metadata/badges/lines_of_code.svg)](https://github.com/DominicBurkart/marigold)
+[![contributors](https://raw.githubusercontent.com/DominicBurkart/marigold/main/development_metadata/badges/contributors.svg)](https://github.com/DominicBurkart/marigold/graphs/contributors)
+[![bench](https://github.com/DominicBurkart/marigold/workflows/bench/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/bench.yaml)
+[![codecov](https://codecov.io/gh/DominicBurkart/marigold/graph/badge.svg)](https://codecov.io/gh/DominicBurkart/marigold)
+[![tests](https://github.com/DominicBurkart/marigold/workflows/tests/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/tests.yaml)
+[![style](https://github.com/DominicBurkart/marigold/workflows/style/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/style.yaml)
+[![wasm](https://github.com/DominicBurkart/marigold/workflows/wasm/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml)
+[![last commit](https://img.shields.io/github/last-commit/dominicburkart/marigold)](https://github.com/DominicBurkart/marigold)
+
+Marigold is an imperative, domain-specific language for data pipelining and
+analysis using async streams. It can be used as a standalone language or within
+Rust programs.
+
+```rust
+use marigold::m;
+
+let odd_digits = m!(
+  fn is_odd(i: &i32) -> bool {
+    i.wrapping_rem(2) == 1
+  }
+
+  range(0, 10)
+    .filter(is_odd)
+    .return
+).await.collect::<Vec<_>>();
+
+println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
+```
+
+## Quickstart
+
+### Install
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/DominicBurkart/marigold/main/install.sh | sh
+```
+
+Or via cargo:
+
+```sh
+cargo install marigold -F cli
+```
+
+Or from source:
+
+```sh
+git clone https://github.com/DominicBurkart/marigold.git
+cd marigold
+cargo install --path marigold -F cli
+```
+
+### Hello World
+
+Create `hello_world.marigold`:
+
+```marigold
+range(0, 5).write_file("/dev/stdout", csv)
+```
+
+Run it:
+
+```sh
+marigold run hello_world.marigold
+```
+
+Output:
+
+```text
+0
+1
+2
+3
+4
+```
+
+### Static Analysis
+
+Marigold can statically analyze your program's complexity:
+
+```sh
+marigold analyze hello_world.marigold
+```
+
+```json
+{
+  "streams": [
+    {
+      "description": "input.write_file(...)",
+      "cardinality": "5",
+      "time_class": "O(1)",
+      "exact_time": "O(1)",
+      "space_class": "O(1)",
+      "exact_space": "O(1)",
+      "collects_input": false
+    }
+  ],
+  "program_time": "O(1)",
+  "program_exact_time": "O(1)",
+  "program_space": "O(1)",
+  "program_exact_space": "O(1)",
+  "program_cardinality": "5"
+}
+```
+
+## Runtimes
+
+By default, Marigold works in a single future and can work with any runtime.
+
+The `tokio` and `async-std` features allow Marigold to spawn additional tasks,
+enabling parallelism for multithreaded runtimes.
+
+Marigold supports async tracing, e.g. with tokio-console.
+
+## Platforms
+
+Marigold's CI builds against aarch64, arm, WASM, and x86 targets, and builds
+the x86 target in mac and windows environments.
