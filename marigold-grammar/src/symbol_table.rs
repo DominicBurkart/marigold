@@ -60,6 +60,8 @@ pub struct BoundedFieldInfo {
 pub struct SymbolTable {
     enums: HashMap<String, EnumInfo>,
     bounded_fields: Vec<BoundedFieldInfo>,
+    /// Index of `bounded_fields` keyed by `"StructName.fieldName"` for O(1) lookup.
+    bounded_fields_by_key: HashMap<String, usize>,
 }
 
 impl SymbolTable {
@@ -104,6 +106,8 @@ impl SymbolTable {
         for (field_name, field_type) in &struct_node.fields {
             match field_type {
                 Type::BoundedInt { min, max } => {
+                    let key = format!("{}.{}", struct_node.name, field_name);
+                    let idx = self.bounded_fields.len();
                     self.bounded_fields.push(BoundedFieldInfo {
                         struct_name: struct_node.name.clone(),
                         field_name: field_name.clone(),
@@ -111,8 +115,11 @@ impl SymbolTable {
                         max: max.clone(),
                         is_signed: true,
                     });
+                    self.bounded_fields_by_key.insert(key, idx);
                 }
                 Type::BoundedUint { min, max } => {
+                    let key = format!("{}.{}", struct_node.name, field_name);
+                    let idx = self.bounded_fields.len();
                     self.bounded_fields.push(BoundedFieldInfo {
                         struct_name: struct_node.name.clone(),
                         field_name: field_name.clone(),
@@ -120,6 +127,7 @@ impl SymbolTable {
                         max: max.clone(),
                         is_signed: false,
                     });
+                    self.bounded_fields_by_key.insert(key, idx);
                 }
                 _ => {}
             }
@@ -136,6 +144,13 @@ impl SymbolTable {
 
     pub fn get_bounded_fields(&self) -> &[BoundedFieldInfo] {
         &self.bounded_fields
+    }
+
+    /// Look up a bounded field by its `"StructName.fieldName"` key in O(1).
+    pub fn get_bounded_field_by_key(&self, key: &str) -> Option<&BoundedFieldInfo> {
+        self.bounded_fields_by_key
+            .get(key)
+            .map(|&idx| &self.bounded_fields[idx])
     }
 
     pub fn has_bounded_types(&self) -> bool {
@@ -297,5 +312,28 @@ mod tests {
         assert_eq!(names.len(), 2);
         assert!(names.iter().any(|&n| n == "Alpha"));
         assert!(names.iter().any(|&n| n == "Beta"));
+    }
+
+    #[test]
+    fn test_get_bounded_field_by_key() {
+        let struct_node = create_struct_with_bounded_field(
+            "Pixel",
+            "value",
+            BoundExpr::Literal(0),
+            BoundExpr::Literal(255),
+            false,
+        );
+        let exprs = vec![TypedExpression::StructDeclaration(struct_node)];
+        let table = SymbolTable::from_expressions(&exprs);
+
+        let field = table.get_bounded_field_by_key("Pixel.value");
+        assert!(field.is_some());
+        let field = field.unwrap();
+        assert_eq!(field.struct_name, "Pixel");
+        assert_eq!(field.field_name, "value");
+        assert!(!field.is_signed);
+
+        assert!(table.get_bounded_field_by_key("Pixel.nonexistent").is_none());
+        assert!(table.get_bounded_field_by_key("NonExistent.value").is_none());
     }
 }
