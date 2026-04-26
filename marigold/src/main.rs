@@ -72,21 +72,134 @@ fn get_file_name_argument(args: &Args) -> Option<String> {
 }
 
 #[cfg(feature = "cli")]
+fn cache_root() -> Result<std::path::PathBuf> {
+    dirs::cache_dir()
+        .ok_or_else(|| anyhow::anyhow!("could not determine OS cache directory"))
+        .map(|d| d.join("marigold"))
+}
+
+#[cfg(feature = "cli")]
+fn prepare_cache(
+    cache_root: &std::path::Path,
+    program_name: &str,
+    program_contents: &str,
+    marigold_version: &str,
+    workspace_path: Option<&str>,
+) -> Result<std::path::PathBuf> {
+    const RUST_EDITION: &str = "2021";
+
+    // Reject program contents containing `})` — that sequence closes the
+    // `marigold::m!({program_contents}).await` invocation and would allow
+    // arbitrary Rust code injection.
+    if program_contents.contains('}') {
+        anyhow::bail!(
+            "program contents contain '}}' which would escape the macro invocation"
+        );
+    }
+
+    let program_project_dir = cache_root.join(program_name);
+    let program_src_dir = program_project_dir.join("src");
+
+    std::fs::create_dir_all(&program_src_dir)?;
+
+    std::fs::write(
+        program_src_dir.join("main.rs"),
+        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}"),
+    )?;
+
+    let manifest_path = program_project_dir.join("Cargo.toml");
+
+    let marigold_dep = if let Some(path) = workspace_path {
+        format!("marigold = {{ path = \"{path}\", features = [\"tokio\", \"io\"]}}\n")
+    } else {
+        format!(
+            "marigold = {{ version = \"={marigold_version}\", features = [\"tokio\", \"io\"]}}\n"
+        )
+    };
+
+    std::fs::write(
+        &manifest_path,
+        format!(
+            r#"[package]
+name = "{program_name}"
+edition = "{RUST_EDITION}"
+version = "0.0.1"
+
+[dependencies]
+serde = "1"
+tokio = {{ version = "1", features = ["full"]}}
+{marigold_dep}
+"#
+        ),
+    )?;
+
+    Ok(manifest_path)
+}
+
+#[cfg(feature = "cli")]
+fn clean_program_cache(cache_root: &std::path::Path, program_name: &str) -> Result<()> {
+    let program_project_dir = cache_root.join(program_name);
+    if program_project_dir.exists() {
+        std::fs::remove_dir_all(&program_project_dir)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+fn clean_all_cache(cache_root: &std::path::Path) -> Result<()> {
+    if cache_root.exists() {
+        std::fs::remove_dir_all(cache_root)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cli")]
+enum CargoInvocation {
+    Run { release: bool },
+    Install,
+}
+
+/// Invoke `cargo run` (with `--manifest-path`) or `cargo install` (with `--path`).
+#[cfg(feature = "cli")]
+fn invoke_cargo(
+    invocation: CargoInvocation,
+    path: &std::path::Path,
+) -> Result<std::process::ExitStatus> {
+    use std::process::Command;
+
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Marigold could not parse cache path as utf-8"))?;
+
+    let status = match invocation {
+        CargoInvocation::Run { release } => {
+            let mut args = vec!["run"];
+            if release {
+                args.push("--release");
+            }
+            args.extend(["--manifest-path", path_str]);
+            Command::new("cargo").args(&args).spawn()?.wait()?
+        }
+        CargoInvocation::Install => Command::new("cargo")
+            .args(["install", "--path", path_str])
+            .spawn()?
+            .wait()?,
+    };
+
+    Ok(status)
+}
+
+#[cfg(feature = "cli")]
 fn main() -> Result<()> {
     use MarigoldCommand::*;
 
     use convert_case::{Case, Casing};
     use std::io;
     use std::io::Read;
-    use std::process::Command;
-
-    const RUST_EDITION: &str = "2021";
 
     let args = Args::parse();
 
-    let marigold_cache_directory = home::home_dir()
-        .expect("could not locate user's home directory for marigold cache")
-        .join(".marigold");
+    let marigold_cache_directory = cache_root()?;
 
     let file_name_argument = get_file_name_argument(&args);
 
@@ -108,17 +221,27 @@ fn main() -> Result<()> {
 
         file_name = file_name.to_case(Case::Snake);
         file_name = file_name
-            .strip_prefix("_")
+            .strip_prefix('_')
             .map(|s| s.to_string())
             .unwrap_or(file_name);
         file_name = file_name
-            .strip_suffix("_")
+            .strip_suffix('_')
             .map(|s| s.to_string())
             .unwrap_or(file_name);
         file_name
     };
 
-    let program_project_dir = marigold_cache_directory.join(&program_name);
+    // Validate program_name against Cargo package name rules: ^[a-z][a-z0-9_]*$
+    if !program_name.starts_with(|c: char| c.is_ascii_lowercase())
+        || !program_name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
+        anyhow::bail!(
+            "invalid program name '{}': must start with a lowercase letter and contain only [a-z0-9_]",
+            program_name
+        );
+    }
 
     let command = match args.command {
         Some(ref command) => match command {
@@ -128,7 +251,7 @@ fn main() -> Result<()> {
             } => "run",
             Install { file: _ } => "install",
             Uninstall { file: _ } => std::process::exit(
-                Command::new("cargo")
+                std::process::Command::new("cargo")
                     .args(["uninstall", &program_name])
                     .spawn()?
                     .wait()?
@@ -136,13 +259,11 @@ fn main() -> Result<()> {
                     .unwrap_or(0),
             ),
             Clean { file: _ } => {
-                std::fs::remove_dir_all(&program_project_dir)?;
+                clean_program_cache(&marigold_cache_directory, &program_name)?;
                 std::process::exit(0);
             }
             CleanAll => {
-                if marigold_cache_directory.exists() {
-                    std::fs::remove_dir_all(&marigold_cache_directory)?;
-                }
+                clean_all_cache(&marigold_cache_directory)?;
                 std::process::exit(0);
             }
             Analyze { file: _ } => {
@@ -161,12 +282,8 @@ fn main() -> Result<()> {
                 std::process::exit(0);
             }
         },
-        None => "run", // default is run.
+        None => "run",
     };
-
-    let program_src_dir = program_project_dir.join("src");
-
-    std::fs::create_dir_all(&program_src_dir)?;
 
     let program_contents = match file_name_argument {
         Some(path) => std::fs::read_to_string(&path)?.trim().to_string(),
@@ -177,93 +294,43 @@ fn main() -> Result<()> {
         }
     };
 
-    std::fs::write(
-        program_src_dir.join("main.rs"),
-        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}")
-            .as_str(),
-    )?;
-
     const MARIGOLD_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-    let manifest_path = program_project_dir.join("Cargo.toml");
-
-    let marigold_dep = if let Ok(workspace_path) = std::env::var("MARIGOLD_WORKSPACE_PATH") {
-        format!(r#"marigold = {{ path = "{workspace_path}", features = ["tokio", "io"]}}"#)
-    } else {
-        format!(r#"marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}"#)
-    };
-
-    std::fs::write(
-        &manifest_path,
-        format!(
-            r#"[package]
-name = "{program_name}"
-edition = "{RUST_EDITION}"
-version = "0.0.1"
-
-[dependencies]
-serde = "1"
-tokio = {{ version = "1", features = ["full"]}}
-{marigold_dep}
-        "#
-        ),
+    let workspace_path = std::env::var("MARIGOLD_WORKSPACE_PATH").ok();
+    let manifest_path = prepare_cache(
+        &marigold_cache_directory,
+        &program_name,
+        &program_contents,
+        MARIGOLD_VERSION,
+        workspace_path.as_deref(),
     )?;
 
-    let exit_status = {
-        if command == "run" {
-            let unoptimized = {
-                if let Some(Run {
-                    unoptimized,
-                    file: _,
-                }) = &args.command
-                {
-                    *unoptimized
-                } else {
-                    false
-                }
-            };
-            if unoptimized {
-                Command::new("cargo")
-                    .args([
-                        command,
-                        "--manifest-path",
-                        manifest_path
-                            .to_str()
-                            .expect("Marigold could not parse cache manifest path as utf-8"),
-                    ])
-                    .spawn()?
-                    .wait()?
-            } else {
-                Command::new("cargo")
-                    .args([
-                        command,
-                        "--release",
-                        "--manifest-path",
-                        manifest_path
-                            .to_str()
-                            .expect("Marigold could not parse cache manifest path as utf-8"),
-                    ])
-                    .spawn()?
-                    .wait()?
-            }
-        } else {
-            Command::new("cargo")
-                .args([
-                    command,
-                    "--path",
-                    program_project_dir
-                        .to_str()
-                        .expect("Marigold could not parse cache manifest path as utf-8"),
-                ])
-                .spawn()?
-                .wait()?
-        }
+    let unoptimized = matches!(
+        &args.command,
+        Some(Run {
+            unoptimized: true,
+            file: _,
+        })
+    );
+
+    let exit_status = if command == "run" {
+        invoke_cargo(
+            CargoInvocation::Run {
+                release: !unoptimized,
+            },
+            &manifest_path,
+        )?
+    } else {
+        invoke_cargo(
+            CargoInvocation::Install,
+            &marigold_cache_directory.join(&program_name),
+        )?
     };
 
     std::process::exit(exit_status.code().unwrap_or(0));
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "cli"))]
 mod tests {
     use std::fs;
     use std::path::PathBuf;
@@ -313,9 +380,10 @@ mod tests {
         )
         .expect("could not write test file");
 
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold command");
@@ -345,9 +413,10 @@ mod tests {
         .expect("could not write test file");
 
         // Install the marigold program as a binary
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["install", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("CARGO_INSTALL_ROOT", &install_root)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
@@ -371,9 +440,10 @@ mod tests {
         );
 
         // Uninstall
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["uninstall", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("CARGO_INSTALL_ROOT", &install_root)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
@@ -401,21 +471,25 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create cache
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        let cache_dir = tmp.join(".marigold/test_clean");
+        // Derive expected cache path from the injected XDG_CACHE_HOME so the
+        // assertion is hermetic and independent of the ambient CI environment.
+        let cache_dir = tmp.join(".cache/marigold/test_clean");
         assert!(cache_dir.exists(), "cache should exist after run");
 
         // Clean
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["clean", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold clean");
@@ -443,21 +517,25 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create cache
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        let cache_root = tmp.join(".marigold");
+        // Derive expected cache root from the injected XDG_CACHE_HOME so the
+        // assertion is hermetic and independent of the ambient CI environment.
+        let cache_root = tmp.join(".cache/marigold");
         assert!(cache_root.exists(), "cache should exist after run");
 
         // Clean all
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["clean-all"])
             .env("HOME", &tmp)
+            .env("XDG_CACHE_HOME", tmp.join(".cache"))
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold clean-all");
@@ -469,5 +547,185 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(all(test, feature = "cli"))]
+mod cache_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_prepare_cache_creates_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = prepare_cache(tmp.path(), "my_prog", "range(0, 1).return", "0.1.0", None)
+            .expect("prepare_cache failed");
+        assert!(tmp.path().join("my_prog/src/main.rs").exists());
+        assert!(manifest.exists());
+        let cargo_toml = fs::read_to_string(&manifest).unwrap();
+        assert!(cargo_toml.contains("my_prog"));
+        assert!(cargo_toml.contains("marigold"));
+    }
+
+    #[test]
+    fn test_prepare_cache_overwrites_existing() {
+        let tmp = tempfile::tempdir().unwrap();
+        prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None).unwrap();
+        prepare_cache(tmp.path(), "prog", "range(0, 2).return", "0.1.0", None).unwrap();
+        let main_rs = fs::read_to_string(tmp.path().join("prog/src/main.rs")).unwrap();
+        assert!(main_rs.contains("range(0, 2).return"));
+    }
+
+    #[test]
+    fn test_clean_nonexistent_program() {
+        let tmp = tempfile::tempdir().unwrap();
+        clean_program_cache(tmp.path(), "never_existed").expect("should succeed even if missing");
+    }
+
+    #[test]
+    fn test_clean_existing_program() {
+        let tmp = tempfile::tempdir().unwrap();
+        prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None).unwrap();
+        assert!(tmp.path().join("prog").exists());
+        clean_program_cache(tmp.path(), "prog").unwrap();
+        assert!(!tmp.path().join("prog").exists());
+    }
+
+    #[test]
+    fn test_clean_all_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Take ownership of the path so TempDir::drop does not attempt to
+        // remove_dir_all a path that clean_all_cache already removed.
+        let path = tmp.into_path();
+        clean_all_cache(&path).expect("should succeed on empty dir");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_clean_all_with_programs() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Take ownership of the path so TempDir::drop does not attempt to
+        // remove_dir_all a path that clean_all_cache already removed.
+        let path = tmp.into_path();
+        prepare_cache(&path, "prog_a", "range(0, 1).return", "0.1.0", None).unwrap();
+        prepare_cache(&path, "prog_b", "range(0, 2).return", "0.1.0", None).unwrap();
+        clean_all_cache(&path).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_cache_root_returns_os_path() {
+        let root = cache_root().expect("cache_root failed");
+        assert_eq!(root.file_name().unwrap(), "marigold");
+        assert_eq!(root.parent().unwrap(), dirs::cache_dir().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_prepare_cache_readonly_parent() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root can write to read-only directories, so skip this test when running as root.
+        let is_root = std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim() == "0")
+            .unwrap_or(false);
+        if is_root {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o444)).unwrap();
+        let result = prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None);
+        fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err(), "expected error writing into read-only dir");
+    }
+
+    #[test]
+    fn test_partial_loss_main_rs_deleted() {
+        let tmp = tempfile::tempdir().unwrap();
+        prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None).unwrap();
+        fs::remove_file(tmp.path().join("prog/src/main.rs")).unwrap();
+        prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None)
+            .expect("should recreate missing main.rs");
+        assert!(tmp.path().join("prog/src/main.rs").exists());
+    }
+
+    #[test]
+    fn test_partial_loss_cargo_toml_deleted() {
+        let tmp = tempfile::tempdir().unwrap();
+        prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None).unwrap();
+        fs::remove_file(tmp.path().join("prog/Cargo.toml")).unwrap();
+        prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None)
+            .expect("should recreate missing Cargo.toml");
+        assert!(tmp.path().join("prog/Cargo.toml").exists());
+    }
+
+    #[test]
+    fn test_partial_loss_src_dir_deleted() {
+        let tmp = tempfile::tempdir().unwrap();
+        prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None).unwrap();
+        fs::remove_dir_all(tmp.path().join("prog/src")).unwrap();
+        prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None)
+            .expect("should recreate missing src dir");
+        assert!(tmp.path().join("prog/src/main.rs").exists());
+    }
+
+    #[test]
+    fn test_cache_disappears_after_prepare() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest =
+            prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None).unwrap();
+        fs::remove_dir_all(tmp.path().join("prog")).unwrap();
+        // cargo spawns successfully but exits non-zero because the manifest is missing;
+        // invoke_cargo returns Ok(failing_status), not Err.
+        let status = invoke_cargo(CargoInvocation::Run { release: false }, &manifest)
+            .expect("cargo should spawn successfully");
+        assert!(
+            !status.success(),
+            "cargo should fail when manifest is missing"
+        );
+    }
+
+    #[test]
+    fn test_prepare_cache_workspace_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = prepare_cache(
+            tmp.path(),
+            "prog",
+            "range(0, 1).return",
+            "0.1.0",
+            Some("/some/path"),
+        )
+        .unwrap();
+        let toml = fs::read_to_string(&manifest).unwrap();
+        assert!(
+            toml.contains("path = \"/some/path\""),
+            "expected path dep in Cargo.toml, got: {toml}"
+        );
+        // Ensure no crates.io version pin is emitted for the marigold dep.
+        // The package itself still has `version = "0.0.1"`, so look for the
+        // specific marigold-version-pin marker `version = "=`.
+        assert!(
+            !toml.contains("version = \"="),
+            "should not emit marigold version pin when workspace_path is set, got: {toml}"
+        );
+    }
+
+    #[test]
+    fn test_prepare_cache_rejects_injection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = prepare_cache(
+            tmp.path(),
+            "prog",
+            "range(0, 1).return }).await } fn evil() { ",
+            "0.1.0",
+            None,
+        );
+        assert!(
+            result.is_err(),
+            "prepare_cache should reject program_contents containing '})'"  
+        );
     }
 }
