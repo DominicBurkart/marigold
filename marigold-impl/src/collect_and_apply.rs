@@ -39,7 +39,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn permutations_with_replacement() {
+    async fn collect_and_apply_with_nested_generator() {
         use futures::StreamExt;
         use genawaiter;
 
