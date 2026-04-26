@@ -1,4 +1,5 @@
-error: proc macro panicked
+error: marigold parse error: Parse error: Bounded type validation failed:
+         - Bounds violation for field 'Temp.reading': uint[] cannot have negative min value (-10)
   --> compile_fail/negative_bounds_uint.rs:6:13
    |
  6 |       let _ = m!(
@@ -9,7 +10,7 @@ error: proc macro panicked
 11 | |     )
    | |_____^
    |
-   = help: message: marigold parsing error: MarigoldParseError("Bounded type validation failed:\n  - Bounds violation for field 'Temp.reading': uint[] cannot have negative min value (-10)")
+   = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0282]: type annotations needed
   --> compile_fail/negative_bounds_uint.rs:6:13
