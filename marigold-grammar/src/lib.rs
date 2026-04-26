@@ -62,8 +62,6 @@
 //! - **Code generation**: Dominates runtime, scales with program complexity
 //! - **Binary size**: Pest parser adds ~40KB to binary size
 
-extern crate proc_macro;
-
 pub use itertools;
 
 pub mod bound_resolution;
