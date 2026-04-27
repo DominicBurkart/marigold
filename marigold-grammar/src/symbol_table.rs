@@ -37,7 +37,10 @@
 //! assert_eq!(table.get_enum_len("Color"), Some(3));
 //! ```
 
-use crate::nodes::{BoundExpr, DefaultEnumVariant, EnumDeclarationNode, StructDeclarationNode, Type, TypedExpression};
+use crate::nodes::{
+    BoundExpr, DefaultEnumVariant, EnumDeclarationNode, StructDeclarationNode, Type,
+    TypedExpression,
+};
 use std::collections::HashMap;
 
 /// Information about an enum type.
