@@ -589,5 +589,24 @@ mod proptests {
                     "Expected descending order, got {:?} before {:?}", window[0], window[1]);
             }
         }
+    async fn test_keep_first_n_single_element() {
+        // Keep only 1 element (the largest).
+        let result = futures::stream::iter(vec![5, 3, 8, 1])
+            .keep_first_n(1, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![8]);
+    }
+
+    #[tokio::test]
+    async fn test_keep_first_n_empty_stream() {
+        // Empty stream should return empty results regardless of n.
+        let result = futures::stream::iter(Vec::<i32>::new())
+            .keep_first_n(5, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
     }
 }
