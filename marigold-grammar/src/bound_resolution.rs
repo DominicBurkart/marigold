@@ -272,6 +272,7 @@ impl<'a> BoundResolver<'a> {
         visited: &mut HashSet<String>,
         context: &str,
     ) -> Result<i128, ResolutionError> {
+        // O(1) enum lookup via HashMap.
         if let Some(len) = self.symbol_table.get_enum_len(type_name) {
             return match op {
                 BoundOp::Len => Ok(len as i128),
@@ -281,19 +282,23 @@ impl<'a> BoundResolver<'a> {
             };
         }
 
-        for field_info in self.symbol_table.get_bounded_fields() {
-            let field_key = format!("{}.{}", field_info.struct_name, field_info.field_name);
-            if field_key == type_name || field_info.field_name == type_name {
-                return match op {
-                    BoundOp::Min => self.resolve_expr(&field_info.min, visited, context),
-                    BoundOp::Max => self.resolve_expr(&field_info.max, visited, context),
-                    BoundOp::Len | BoundOp::Cardinality => {
-                        let min = self.resolve_expr(&field_info.min, visited, context)?;
-                        let max = self.resolve_expr(&field_info.max, visited, context)?;
-                        Ok(max - min + 1)
-                    }
-                };
-            }
+        // O(1) bounded-field lookup via HashMap keyed by "StructName.fieldName".
+        // `type_name` may already be in that form, or it may be a bare field name
+        // (legacy fallback: not reachable through the current parser, but preserved
+        // for safety via the linear scan below).
+        if let Some(field_info) = self.symbol_table.get_bounded_field_by_key(type_name) {
+            // Clone the expressions we need before the mutable borrow of `self`.
+            let min_expr = field_info.min.clone();
+            let max_expr = field_info.max.clone();
+            return match op {
+                BoundOp::Min => self.resolve_expr(&min_expr, visited, context),
+                BoundOp::Max => self.resolve_expr(&max_expr, visited, context),
+                BoundOp::Len | BoundOp::Cardinality => {
+                    let min = self.resolve_expr(&min_expr, visited, context)?;
+                    let max = self.resolve_expr(&max_expr, visited, context)?;
+                    Ok(max - min + 1)
+                }
+            };
         }
 
         Err(ResolutionError::UndefinedType(type_name.to_string()))
