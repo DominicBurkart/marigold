@@ -75,6 +75,12 @@ where
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
     FReversed: Fn(&T, &T) -> std::cmp::Ordering + Clone + Send + 'static,
 {
+    // n=0 means keep nothing; return an empty stream immediately without touching the heap
+    // (the heap is empty, so peek().unwrap() would panic below).
+    if n == 0 {
+        return futures::stream::iter(vec![]);
+    }
+
     // Add indices to items for deterministic tie-breaking
     let mut indexed_stream = sinput.enumerate();
 
@@ -199,13 +205,12 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
-        // NOTE: the test suite primarily exercises the tokio impl above via `#[tokio::test]`
-        // and `Runtime::new()` harnesses. The non-tokio n=0 guard is covered directly by
-        // `non_tokio_n_zero_returns_empty` below (compiled only without tokio/async-std features)
-        // using `futures::executor::block_on`.
+        // n=0 means keep nothing; return an empty stream immediately without touching the heap
+        // (the heap is empty, so peek().unwrap() would panic below).
         if n == 0 {
             return futures::stream::iter(vec![].into_iter());
         }
+
         // use the reverse ordering so that the smallest value is always the first to pop.
         let mut first_n = BinaryHeap::with_capacity_by(n, |a, b| match sorted_by(a, b) {
             Ordering::Less => Ordering::Greater,
