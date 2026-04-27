@@ -333,7 +333,11 @@ mod tests {
         assert_eq!(field.field_name, "value");
         assert!(!field.is_signed);
 
-        assert!(table.get_bounded_field_by_key("Pixel.nonexistent").is_none());
-        assert!(table.get_bounded_field_by_key("NonExistent.value").is_none());
+        assert!(table
+            .get_bounded_field_by_key("Pixel.nonexistent")
+            .is_none());
+        assert!(table
+            .get_bounded_field_by_key("NonExistent.value")
+            .is_none());
     }
 }
