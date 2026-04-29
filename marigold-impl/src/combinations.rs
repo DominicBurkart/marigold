@@ -39,29 +39,70 @@ mod tests {
 
     /// C(3,2) produces exactly the three expected pairs.
     #[tokio::test]
-    async fn combinations_c3_2() {
+    async fn combinations_basic() {
         assert_eq!(
             futures::stream::iter(vec![1, 2, 3])
                 .combinations(2)
                 .await
                 .collect::<Vec<_>>()
                 .await,
-            vec![vec![1, 2], vec![1, 3], vec![2, 3],]
+            vec![vec![1, 2], vec![1, 3], vec![2, 3]]
         );
+    }
+
+    #[tokio::test]
+    async fn combinations_k_zero() {
+        // k=0 yields exactly one combination: the empty set
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3])
+            .combinations(0)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![Vec::<i32>::new()]);
+    }
+
+    #[tokio::test]
+    async fn combinations_k_equals_length() {
+        // k = len yields exactly one combination containing all elements
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3])
+            .combinations(3)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![vec![1, 2, 3]]);
+    }
+
+    #[tokio::test]
+    async fn combinations_k_exceeds_length() {
+        // k > len yields nothing
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2])
+            .combinations(5)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
     }
 
     /// Empty input stream yields no combinations for any k.
     #[tokio::test]
-    async fn combinations_empty_input() {
+    async fn combinations_empty_stream() {
         let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
             .combinations(2)
             .await
             .collect::<Vec<_>>()
             .await;
-        assert!(
-            result.is_empty(),
-            "expected no combinations from empty input"
-        );
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn combinations_count() {
+        // C(5,2) = 10
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3, 4, 5])
+            .combinations(2)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result.len(), 10);
     }
 
     /// A single-element stream with k=1 yields exactly that one element as a
@@ -94,35 +135,5 @@ mod tests {
             let inserted = seen.insert(combo.clone());
             assert!(inserted, "duplicate combination found: {:?}", combo);
         }
-    }
-
-    /// Choosing k larger than the stream length produces no combinations.
-    #[tokio::test]
-    async fn combinations_k_larger_than_input() {
-        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2])
-            .combinations(5)
-            .await
-            .collect::<Vec<_>>()
-            .await;
-        assert!(
-            result.is_empty(),
-            "expected no combinations when k > input length"
-        );
-    }
-
-    /// k=0 on a non-empty input yields exactly one empty combination (itertools
-    /// semantics, symmetric with `permutations(0)` on a non-empty input).
-    #[tokio::test]
-    async fn combinations_k0_yields_one_empty_combination() {
-        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3])
-            .combinations(0)
-            .await
-            .collect::<Vec<_>>()
-            .await;
-        assert_eq!(
-            result,
-            vec![vec![] as Vec<i32>],
-            "itertools yields one empty combination for k=0 on a non-empty input"
-        );
     }
 }
