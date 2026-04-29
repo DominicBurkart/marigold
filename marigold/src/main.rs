@@ -484,8 +484,7 @@ mod tests {
         let marigold_file = tmp.join("test_analyze.marigold");
         // Use a simple program with a known cardinality so we can validate
         // the static analyzer's output shape and (where deterministic) values.
-        fs::write(&marigold_file, "range(0, 5).return")
-            .expect("could not write marigold file");
+        fs::write(&marigold_file, "range(0, 5).return").expect("could not write marigold file");
 
         let output = Command::new(&binary)
             .args(["analyze", marigold_file.to_str().unwrap()])
