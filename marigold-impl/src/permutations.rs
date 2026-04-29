@@ -58,7 +58,7 @@ mod tests {
 
     /// P(3, 2): 6 ordered pairs drawn from [1,2,3].
     #[tokio::test]
-    async fn permutations_p3_2() {
+    async fn permutations_basic() {
         assert_eq!(
             futures::stream::iter(vec![1, 2, 3])
                 .permutations(2)
@@ -76,6 +76,82 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn permutations_with_replacement_basic() {
+        assert_eq!(
+            futures::stream::iter(vec![0, 1, 2])
+                .permutations_with_replacement(2)
+                .await
+                .collect::<Vec<_>>()
+                .await,
+            vec![
+                vec![0, 0],
+                vec![0, 1],
+                vec![0, 2],
+                vec![1, 0],
+                vec![1, 1],
+                vec![1, 2],
+                vec![2, 0],
+                vec![2, 1],
+                vec![2, 2],
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn permutations_k_zero() {
+        // k=0 yields exactly one permutation: the empty sequence
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3])
+            .permutations(0)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![Vec::<i32>::new()]);
+    }
+
+    #[tokio::test]
+    async fn permutations_k_exceeds_length() {
+        // k > len yields nothing
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2])
+            .permutations(5)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn permutations_empty_stream() {
+        let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
+            .permutations(2)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn permutations_count() {
+        // P(4,2) = 4!/(4-2)! = 12
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3, 4])
+            .permutations(2)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result.len(), 12);
+    }
+
+    #[tokio::test]
+    async fn permutations_with_replacement_empty_stream() {
+        // empty stream yields nothing regardless of k
+        let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
+            .permutations_with_replacement(2)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
+
     /// P(3, 3) = 6 full-length permutations of [1,2,3].
     #[tokio::test]
     async fn permutations_p3_full() {
@@ -85,11 +161,7 @@ mod tests {
             .collect::<Vec<_>>()
             .await;
 
-        assert_eq!(
-            result.len(),
-            6,
-            "P(3) should produce exactly 6 permutations"
-        );
+        assert_eq!(result.len(), 6, "P(3) should produce exactly 6 permutations");
 
         // Every output is a valid permutation of the input (same multiset of values).
         let mut input_sorted = vec![1, 2, 3];
@@ -98,7 +170,8 @@ mod tests {
             let mut p = perm.clone();
             p.sort_unstable();
             assert_eq!(
-                p, input_sorted,
+                p,
+                input_sorted,
                 "permutation {:?} contains unexpected values",
                 perm
             );
@@ -112,27 +185,10 @@ mod tests {
         }
     }
 
-    /// Empty input stream: itertools yields no permutations (not even an empty one).
-    /// Invariant: permutations of an empty set with k=0 yields one empty permutation;
-    /// with k>0 yields nothing.
-    #[tokio::test]
-    async fn permutations_empty_input_nonzero_k() {
-        let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
-            .permutations(2)
-            .await
-            .collect::<Vec<_>>()
-            .await;
-        assert!(
-            result.is_empty(),
-            "expected no permutations from empty input with k=2"
-        );
-    }
-
     /// k=0 on an empty input: itertools yields exactly one empty permutation.
-    /// This may seem surprising but matches itertools' documented semantics:
-    /// `permutations(0)` yields `[[]]` for any input (empty or not), because
-    /// there is exactly one way to choose 0 elements.  Verified against
-    /// itertools 0.10.x in the test suite itself — the assertion passes.
+    /// This matches itertools' documented semantics: `permutations(0)` yields
+    /// `[[]]` for any input (empty or not), because there is exactly one way
+    /// to choose 0 elements.
     #[tokio::test]
     async fn permutations_empty_input_k0() {
         let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
@@ -157,43 +213,5 @@ mod tests {
             .collect::<Vec<_>>()
             .await;
         assert_eq!(result, vec![vec![7]]);
-    }
-
-    /// permutations_with_replacement on [0,1,2] with k=2 produces all 9 ordered
-    /// pairs (including self-pairs).
-    #[tokio::test]
-    async fn permutations_with_replacement() {
-        assert_eq!(
-            futures::stream::iter(vec![0, 1, 2])
-                .permutations_with_replacement(2)
-                .await
-                .collect::<Vec<_>>()
-                .await,
-            vec![
-                vec![0, 0],
-                vec![0, 1],
-                vec![0, 2],
-                vec![1, 0],
-                vec![1, 1],
-                vec![1, 2],
-                vec![2, 0],
-                vec![2, 1],
-                vec![2, 2],
-            ]
-        );
-    }
-
-    /// permutations_with_replacement on an empty stream yields no results.
-    #[tokio::test]
-    async fn permutations_with_replacement_empty_input() {
-        let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
-            .permutations_with_replacement(2)
-            .await
-            .collect::<Vec<_>>()
-            .await;
-        assert!(
-            result.is_empty(),
-            "expected no results from permutations_with_replacement on empty input"
-        );
     }
 }
