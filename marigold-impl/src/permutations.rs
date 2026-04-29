@@ -161,7 +161,11 @@ mod tests {
             .collect::<Vec<_>>()
             .await;
 
-        assert_eq!(result.len(), 6, "P(3) should produce exactly 6 permutations");
+        assert_eq!(
+            result.len(),
+            6,
+            "P(3) should produce exactly 6 permutations"
+        );
 
         // Every output is a valid permutation of the input (same multiset of values).
         let mut input_sorted = vec![1, 2, 3];
@@ -170,8 +174,7 @@ mod tests {
             let mut p = perm.clone();
             p.sort_unstable();
             assert_eq!(
-                p,
-                input_sorted,
+                p, input_sorted,
                 "permutation {:?} contains unexpected values",
                 perm
             );
