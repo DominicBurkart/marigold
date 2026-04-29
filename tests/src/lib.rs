@@ -266,6 +266,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_take_while_empty_stream() {
+        fn always_true(_i: &i32) -> bool {
+            true
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 0)
+                .take_while(always_true)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            Vec::<i32>::new()
+        );
+    }
+
+    #[tokio::test]
     async fn test_enum_range() {
         let r = m!(
             enum Words { Hello, World, }
