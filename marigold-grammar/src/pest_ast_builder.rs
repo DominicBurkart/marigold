@@ -856,6 +856,13 @@ impl PestAstBuilder {
             }
             Rule::keep_first_n_fn => {
                 let n = Self::peek_numeric_arg(&inner)?;
+                if n == 0 {
+                    return Err(
+                        "keep_first_n(0) is a no-op — the input stream is never polled. \
+                         Remove the call or pass a non-zero literal."
+                            .to_string(),
+                    );
+                }
                 (
                     StreamFunctionKind::KeepFirstN(n),
                     Self::build_keep_first_n_fn(inner)?,
