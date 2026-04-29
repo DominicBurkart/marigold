@@ -14,6 +14,7 @@ version = "=0.1.17"
 [dev-dependencies]
 futures = "0.3"
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
+trybuild = "1"
 
 [dev-dependencies.cargo-husky]
 version = "1"

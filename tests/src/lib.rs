@@ -185,4 +185,14 @@ mod tests {
         .await;
         assert_eq!(result, vec![0, 1, 2, 3]);
     }
+
+    /// Verify that invalid Marigold DSL syntax produces a `compile_error!` diagnostic
+    /// rather than a panic. The fixture file contains an invocation that is valid Rust
+    /// tokenisation but invalid Marigold grammar, so `marigold_parse` returns `Err(_)`
+    /// and the macro emits `compile_error!(...)`.
+    #[test]
+    fn bad_syntax_yields_compile_error() {
+        let t = trybuild::TestCases::new();
+        t.compile_fail("ui/bad_syntax.rs");
+    }
 }
