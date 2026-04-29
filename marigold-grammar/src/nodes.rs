@@ -258,6 +258,10 @@ pub enum StreamFunctionKind {
     PermutationsWithReplacement(u64),
     Combinations(u64),
     KeepFirstN(u64),
+    /// `take(n)`: yield at most the first `n` items. Mirrors
+    /// `futures::StreamExt::take` / `Iterator::take`. O(1) space, exact
+    /// cardinality `min(input, n)`.
+    Take(u64),
     Fold,
     Ok,
     OkOrPanic,

@@ -91,6 +91,28 @@ mod exact {
             Cardinality::Exact(BigUint::from(5u64))
         );
     }
+
+    /// Issue #85: `take(n)` on a known-cardinality input gives an exact
+    /// cardinality of `min(input, n)`.
+    #[test]
+    fn take_under_input() {
+        let result = analyze_file("tests/programs/card_take.marigold");
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(5u64))
+        );
+    }
+
+    /// Issue #85: when `n` exceeds input cardinality, take yields the full
+    /// input (still exact).
+    #[test]
+    fn take_exceeds_input() {
+        let result = analyze_file("tests/programs/card_take_exceeds.marigold");
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(5u64))
+        );
+    }
 }
 
 mod bounded {
@@ -122,6 +144,19 @@ mod bounded {
         assert!(
             matches!(result.streams[0].cardinality, Cardinality::Bounded(_)),
             "filter+keep_first_n should produce bounded cardinality, got {:?}",
+            result.streams[0].cardinality
+        );
+    }
+
+    /// Issue #85: a `take(n)` after a `filter` should set an upper bound
+    /// rather than an exact count — once cardinality is bounded by the
+    /// filter, take cannot make it exact again.
+    #[test]
+    fn filter_then_take() {
+        let result = analyze_file("tests/programs/card_filter_take.marigold");
+        assert!(
+            matches!(result.streams[0].cardinality, Cardinality::Bounded(_)),
+            "filter+take should produce bounded cardinality, got {:?}",
             result.streams[0].cardinality
         );
     }
