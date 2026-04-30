@@ -188,13 +188,15 @@ mod tests {
         }
     }
 
-    /// k=0 on an empty input: itertools yields exactly one empty permutation.
+    /// k=0 on a non-empty input: itertools yields exactly one empty permutation.
     /// This matches itertools' documented semantics: `permutations(0)` yields
     /// `[[]]` for any input (empty or not), because there is exactly one way
-    /// to choose 0 elements.
+    /// to choose 0 elements.  The test uses a non-empty input to make the k=0
+    /// invariant explicit — symmetrical with `combinations_k_zero` in
+    /// combinations.rs.
     #[tokio::test]
-    async fn permutations_empty_input_k0() {
-        let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
+    async fn permutations_k0_yields_one_empty_permutation() {
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3])
             .permutations(0)
             .await
             .collect::<Vec<_>>()

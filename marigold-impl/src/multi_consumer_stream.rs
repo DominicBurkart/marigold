@@ -215,16 +215,34 @@ mod tests {
 
     /// `RunFutureAsStream` always resolves to an empty stream regardless of what
     /// the underlying future returns.  The stream item type (`u32`) and the
-    /// future's output type (`&str`) are intentionally different to verify the
+    /// future's output type (`()`) are intentionally different to verify the
     /// implementation correctly separates the two roles.
+    ///
+    /// The test also asserts that the future is actually *driven to completion*:
+    /// an `AtomicBool` is set inside the future, and we assert it is `true` after
+    /// collecting the stream.  This pins down the key behavioral contract of
+    /// `RunFutureAsStream`: `poll_next` keeps returning `Poll::Pending` until the
+    /// inner future resolves, then returns `Poll::Ready(None)`.
     #[tokio::test]
     async fn run_future_as_stream_is_always_empty() {
         use super::RunFutureAsStream;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
-        let fut = Box::pin(async { "side-effect" });
-        let stream: RunFutureAsStream<u32, &str, _> = RunFutureAsStream::new(fut);
+        let ran = Arc::new(AtomicBool::new(false));
+        let ran2 = Arc::clone(&ran);
+
+        let fut = Box::pin(async move {
+            ran2.store(true, Ordering::SeqCst);
+        });
+        let stream: RunFutureAsStream<u32, (), _> = RunFutureAsStream::new(fut);
         let items = stream.collect::<Vec<u32>>().await;
+
         assert!(items.is_empty(), "RunFutureAsStream should emit no items");
+        assert!(
+            ran.load(Ordering::SeqCst),
+            "the underlying future must be driven to completion"
+        );
     }
 
     /// `run()` with no consumers must complete without panicking or hanging.
