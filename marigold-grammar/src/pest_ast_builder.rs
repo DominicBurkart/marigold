@@ -855,6 +855,13 @@ impl PestAstBuilder {
                 )
             }
             Rule::keep_first_n_fn => {
+                // Literal-only guard: today's grammar admits `free_text_literal = ASCII_DIGIT+`
+                // at this position, so `peek_numeric_arg` parses a `u64` from the source text.
+                // That means `n == 0` covers `0`, `00`, `0_000`, etc. — any lexical form whose
+                // numeric value is zero. Function-valued / const-generic `n` is explicitly
+                // deferred per issue #211 and is not yet expressible in the grammar; if/when
+                // the grammar grows to admit non-literal arguments here, this guard must be
+                // revisited (it would silently become a partial check).
                 let n = Self::peek_numeric_arg(&inner)?;
                 if n == 0 {
                     return Err(

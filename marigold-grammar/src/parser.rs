@@ -1275,6 +1275,25 @@ mod negative_tests {
     }
 
     #[test]
+    fn test_reject_keep_first_n_leading_zero_literal() {
+        // Issue #211 follow-up: the n==0 guard is on numeric value (post-`u64` parse),
+        // not lexical form. Lock that in by exercising a leading-zero literal `00` —
+        // this should be rejected just like `0`, so a future grammar/parser refactor
+        // (e.g. switching to a different numeric token shape) cannot silently regress
+        // this check.
+        let result = parse_marigold("range(0, 10).keep_first_n(00, compare).return");
+        assert!(
+            result.is_err(),
+            "keep_first_n(00) should be rejected at parse time (no-op)"
+        );
+        let err = result.unwrap_err().0;
+        assert!(
+            err.contains("keep_first_n(0)") && err.contains("no-op"),
+            "Error should mention keep_first_n(0) and no-op, got: {err}"
+        );
+    }
+
+    #[test]
     fn test_accept_keep_first_n_one_literal() {
         // Positive smoke test: keep_first_n with non-zero literal continues to
         // parse and lower correctly after the n==0 guard was added.
