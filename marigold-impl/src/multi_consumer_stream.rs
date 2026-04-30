@@ -226,8 +226,8 @@ mod tests {
     #[tokio::test]
     async fn run_future_as_stream_is_always_empty() {
         use super::RunFutureAsStream;
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
 
         let ran = Arc::new(AtomicBool::new(false));
         let ran2 = Arc::clone(&ran);
