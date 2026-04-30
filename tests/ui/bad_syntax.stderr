@@ -1,12 +1,12 @@
 error: marigold parse error: Parse error:  --> 1:1
+         |
+       1 | bad syntax
+         | ^---
+         |
+         = expected program
+ --> ui/bad_syntax.rs:6:13
   |
-1 | bad syntax
-  | ^---
+6 |     let _ = marigold::m!(bad syntax);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^
   |
-  = expected EOI, fn_decl, enum_decl, struct_decl, stream_variable_declaration, or stream
-  --> ui/bad_syntax.rs:6:13
-   |
- 6 |     let _ = marigold::m!(bad syntax);
-   |             ^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the macro `marigold::m` (in Nightly builds, run with -Z macro-backtrace for more info)
