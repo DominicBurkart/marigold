@@ -1,17 +1,117 @@
-name:                bench
+name: bench
 
-on:                  [push]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 env:
-  CARGO_TERM_COLOR:  always
+  CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name:            Benches
-    runs-on:         ubuntu-latest
+  cache-baseline:
+    name: Save Criterion baseline
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-    - uses:          actions/checkout@v2
-    - uses:          actions-rs/toolchain@v1
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+
+    - name: Criterion benches — save baseline
+      run: cargo bench --bench keep_first_n --features tokio -- --save-baseline main
+      working-directory: marigold-impl
+    - run: cargo bench --bench per_item_costs --features tokio -- --save-baseline main
+      working-directory: marigold-impl
+    - run: cargo bench --bench pipeline_stages --features tokio -- --save-baseline main
+      working-directory: marigold-impl
+    - run: cargo bench --bench parser_bench -- --save-baseline main
+      working-directory: marigold-grammar
+    - run: cargo bench --bench color_picker_bench --features tokio -- --save-baseline main
+      working-directory: examples/color-palette-picker
+
+    - name: Custom benches — compile and run
+      run: cargo bench --bench cpu_utilization --features tokio
+      working-directory: marigold-impl
+    - run: cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation"
+      working-directory: marigold-impl
+    - run: cargo bench --bench map_filter_utilization --features tokio
+      working-directory: marigold-impl
+
+    - name: Save Criterion baseline to cache
+      uses: actions/cache/save@v4
       with:
-          toolchain: stable
-    - run:           cargo bench
+        path: target/criterion
+        key: bench-criterion-${{ github.sha }}
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: criterion-reports
+        path: target/criterion/
+        if-no-files-found: ignore
+
+  bench-pr:
+    name: Benches
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+
+    - name: Restore Criterion baseline from cache
+      id: restore-baseline
+      uses: actions/cache/restore@v4
+      with:
+        path: target/criterion
+        key: bench-criterion-${{ github.event.pull_request.base.sha }}
+        restore-keys: bench-criterion-
+
+    - name: Criterion benches — compare to baseline
+      if: steps.restore-baseline.outputs.cache-hit != ''
+      run: cargo bench --bench keep_first_n --features tokio -- --baseline main 2>&1 | tee /tmp/bench_keep_first_n.txt
+      working-directory: marigold-impl
+    - if: steps.restore-baseline.outputs.cache-hit != ''
+      run: cargo bench --bench per_item_costs --features tokio -- --baseline main 2>&1 | tee /tmp/bench_per_item_costs.txt
+      working-directory: marigold-impl
+    - if: steps.restore-baseline.outputs.cache-hit != ''
+      run: cargo bench --bench pipeline_stages --features tokio -- --baseline main 2>&1 | tee /tmp/bench_pipeline_stages.txt
+      working-directory: marigold-impl
+    - if: steps.restore-baseline.outputs.cache-hit != ''
+      run: cargo bench --bench parser_bench -- --baseline main 2>&1 | tee /tmp/bench_parser_bench.txt
+      working-directory: marigold-grammar
+    - if: steps.restore-baseline.outputs.cache-hit != ''
+      run: cargo bench --bench color_picker_bench --features tokio -- --baseline main 2>&1 | tee /tmp/bench_color_picker_bench.txt
+      working-directory: examples/color-palette-picker
+
+    - name: Criterion benches — no baseline available
+      if: steps.restore-baseline.outputs.cache-hit == ''
+      run: |
+        echo "No cached baseline found — running benches without comparison"
+        cargo bench --bench keep_first_n --features tokio
+        cargo bench --bench per_item_costs --features tokio
+        cargo bench --bench pipeline_stages --features tokio
+      working-directory: marigold-impl
+    - if: steps.restore-baseline.outputs.cache-hit == ''
+      run: cargo bench --bench parser_bench
+      working-directory: marigold-grammar
+    - if: steps.restore-baseline.outputs.cache-hit == ''
+      run: cargo bench --bench color_picker_bench --features tokio
+      working-directory: examples/color-palette-picker
+
+    - name: Custom benches — compile and run
+      run: cargo bench --bench cpu_utilization --features tokio
+      working-directory: marigold-impl
+    - run: cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation"
+      working-directory: marigold-impl
+    - run: cargo bench --bench map_filter_utilization --features tokio
+      working-directory: marigold-impl
+
+    - name: Check for regressions
+      run: bash marigold-impl/benches/check_regression.sh 15 $(ls /tmp/bench_*.txt 2>/dev/null || true)
