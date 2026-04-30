@@ -10,6 +10,7 @@
 //!
 //! - **Simple**: Basic constructs (range, return)
 //! - **Complex**: Structs, enums, functions with chaining
+//! - **Filtering**: filter, take_while
 //! - **Real-world**: Examples from integration tests
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
