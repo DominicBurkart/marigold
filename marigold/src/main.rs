@@ -92,9 +92,7 @@ fn prepare_cache(
     // `marigold::m!({program_contents}).await` invocation and would allow
     // arbitrary Rust code injection.
     if program_contents.contains("}") {
-        anyhow::bail!(
-            "program contents contain '}}' which would escape the macro invocation"
-        );
+        anyhow::bail!("program contents contain '}}' which would escape the macro invocation");
     }
 
     let program_project_dir = cache_root.join(program_name);
@@ -729,7 +727,7 @@ mod cache_tests {
         );
         assert!(
             result.is_err(),
-            "prepare_cache should reject program_contents containing '})'"
+            "prepare_cache should reject program_contents containing '}}'"
         );
     }
 }
