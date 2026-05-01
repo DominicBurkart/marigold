@@ -161,12 +161,7 @@ impl NamedStreamNode {
         let intermediate = match self.funs.len() {
             0 => "".to_string(),
             _ => format!(
-                ".{}",
-                self.funs
-                    .iter()
-                    .map(|f| f.code.as_str())
-                    .collect::<Vec<_>>()
-                    .join(".")
+                ".",
             ),
         };
         let stream_prefix = &self.out.stream_prefix;
@@ -189,12 +184,7 @@ impl StreamVariableNode {
             0 => "".to_string(),
             _ => {
                 format!(
-                    ".{}",
-                    self.funs
-                        .iter()
-                        .map(|f| f.code.as_str())
-                        .collect::<Vec<_>>()
-                        .join(".")
+                    ".",
                 )
             }
         };
@@ -226,12 +216,7 @@ impl StreamVariableFromPriorStreamVariableNode {
             0 => "".to_string(),
             _ => {
                 format!(
-                    ".{}",
-                    self.funs
-                        .iter()
-                        .map(|f| f.code.as_str())
-                        .collect::<Vec<_>>()
-                        .join(".")
+                    ".",
                 )
             }
         };
@@ -810,31 +795,34 @@ mod tests {
         assert_eq!(select_smallest_unsigned_type(65536), "u32");
     }
 
-    /// Compile-time totality check for `TypedExpression` variants.
+    /// Variant totality check for `TypedExpression`.
     ///
     /// This test ensures that every variant of `TypedExpression` is explicitly
-    /// constructed, so adding a new variant without updating downstream match
-    /// arms is caught at test time. When you add a new variant:
+    /// constructed, so that:
+    ///   - **Renamed or removed variants** are caught at *compile time*: the old
+    ///     name no longer compiles.
+    ///   - **New variants** are caught at *runtime* by the count assertion: if a
+    ///     variant is added without adding a construction here and bumping the
+    ///     constant, the `assert_eq!` will fail.
+    ///
+    /// When you add a new variant:
     ///   1. Add a dummy construction of it to the `variants` vec below.
     ///   2. Bump `EXPECTED_TYPED_EXPRESSION_VARIANTS` by one.
-    ///
-    /// To verify this test catches missing variants, temporarily add a dummy
-    /// variant to the enum and confirm the test fails.
     #[test]
     fn test_typed_expression_variant_count() {
         const EXPECTED_TYPED_EXPRESSION_VARIANTS: usize = 9;
 
-        let dummy_inp = InputFunctionNode {
+        let dummy_inp = || InputFunctionNode {
             variability: InputVariability::Constant,
             input_count: InputCount::Unknown,
             code: String::new(),
         };
-        let dummy_out_returning = OutputFunctionNode {
+        let dummy_out_returning = || OutputFunctionNode {
             stream_prefix: String::new(),
             stream_postfix: String::new(),
             returning: true,
         };
-        let dummy_out_non_returning = OutputFunctionNode {
+        let dummy_out_non_returning = || OutputFunctionNode {
             stream_prefix: String::new(),
             stream_postfix: String::new(),
             returning: false,
@@ -851,15 +839,15 @@ mod tests {
         let variants: Vec<TypedExpression> = vec![
             TypedExpression::UnnamedReturningStream(UnnamedStreamNode {
                 inp_and_funs: dummy_inp_and_funs(),
-                out: dummy_out_returning,
+                out: dummy_out_returning(),
             }),
             TypedExpression::UnnamedNonReturningStream(UnnamedStreamNode {
                 inp_and_funs: dummy_inp_and_funs(),
-                out: dummy_out_non_returning,
+                out: dummy_out_non_returning(),
             }),
             TypedExpression::StreamVariable(StreamVariableNode {
                 variable_name: String::new(),
-                inp: dummy_inp,
+                inp: dummy_inp(),
                 funs: vec![],
             }),
             TypedExpression::StreamVariableFromPriorStreamVariable(
@@ -907,16 +895,19 @@ mod tests {
         assert_eq!(variants.len(), EXPECTED_TYPED_EXPRESSION_VARIANTS);
     }
 
-    /// Compile-time totality check for `StreamFunctionKind` variants.
+    /// Variant totality check for `StreamFunctionKind`.
     ///
     /// This test ensures that every variant of `StreamFunctionKind` is
-    /// explicitly listed, so adding a new variant without updating downstream
-    /// match arms is caught at test time. When you add a new variant:
+    /// explicitly listed, so that:
+    ///   - **Renamed or removed variants** are caught at *compile time*: the old
+    ///     name no longer compiles.
+    ///   - **New variants** are caught at *runtime* by the count assertion: if a
+    ///     variant is added without adding it here and bumping the constant, the
+    ///     `assert_eq!` will fail.
+    ///
+    /// When you add a new variant:
     ///   1. Add it to the `variants` vec below.
     ///   2. Bump `EXPECTED_STREAM_FUNCTION_KIND_VARIANTS` by one.
-    ///
-    /// To verify this test catches missing variants, temporarily add a dummy
-    /// variant to the enum and confirm the test fails.
     #[test]
     fn test_stream_function_kind_variant_count() {
         const EXPECTED_STREAM_FUNCTION_KIND_VARIANTS: usize = 10;
