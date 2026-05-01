@@ -383,10 +383,28 @@ fn parse_base_complexity(s: &str) -> Result<ComplexityClass, String> {
 pub enum Symbolic {
     Constant(BigUint),
     Unknown,
+    /// Arbitrary-subset filtering (e.g. `filter` / `filter_map`): the output may
+    /// be any subset of the input, not necessarily contiguous.
     Filtered(Box<Symbolic>),
-    Permutations { n: Box<Symbolic>, k: u64 },
-    PermutationsWithReplacement { n: Box<Symbolic>, k: u64 },
-    Combinations { n: Box<Symbolic>, k: u64 },
+    /// Prefix-truncation (e.g. `take_while`): the output is a contiguous prefix
+    /// of the input. Behaves identically to `Filtered` for cardinality / time /
+    /// space classification today, but is preserved as a distinct variant so
+    /// future analyses can exploit the prefix-preservation guarantee
+    /// (ordering preservation, early upstream termination, tighter bounds when
+    /// the input cardinality is known).
+    TakeWhile(Box<Symbolic>),
+    Permutations {
+        n: Box<Symbolic>,
+        k: u64,
+    },
+    PermutationsWithReplacement {
+        n: Box<Symbolic>,
+        k: u64,
+    },
+    Combinations {
+        n: Box<Symbolic>,
+        k: u64,
+    },
     Min(Box<Symbolic>, Box<Symbolic>),
     Sum(Vec<Symbolic>),
 }
@@ -397,6 +415,7 @@ impl Symbolic {
             Symbolic::Constant(v) => Some(v.clone()),
             Symbolic::Unknown => None,
             Symbolic::Filtered(_) => None,
+            Symbolic::TakeWhile(_) => None,
             Symbolic::Permutations { n, k } => {
                 let n_val = n.try_evaluate()?;
                 let k_val = *k;
@@ -432,6 +451,7 @@ impl Symbolic {
             Symbolic::Constant(_) => ComplexityClass::O1,
             Symbolic::Unknown => ComplexityClass::Unknown,
             Symbolic::Filtered(inner) => inner.classify_as_time(),
+            Symbolic::TakeWhile(inner) => inner.classify_as_time(),
             Symbolic::Permutations { k, .. } => ComplexityClass::OPermutational(*k),
             Symbolic::PermutationsWithReplacement { k, .. } => ComplexityClass::OPolynomial(*k),
             Symbolic::Combinations { k, .. } => ComplexityClass::OCombinatorial(*k),
@@ -454,6 +474,7 @@ impl Symbolic {
             Symbolic::Unknown => true,
             Symbolic::Constant(_) => false,
             Symbolic::Filtered(inner) => inner.contains_unknown(),
+            Symbolic::TakeWhile(inner) => inner.contains_unknown(),
             Symbolic::Permutations { n, .. }
             | Symbolic::PermutationsWithReplacement { n, .. }
             | Symbolic::Combinations { n, .. } => n.contains_unknown(),
@@ -467,6 +488,7 @@ impl Symbolic {
             Symbolic::Constant(v) => Some(v.clone()),
             Symbolic::Unknown => None,
             Symbolic::Filtered(inner) => inner.upper_bound(),
+            Symbolic::TakeWhile(inner) => inner.upper_bound(),
             Symbolic::Permutations { n, k } => {
                 let n_val = n.upper_bound()?;
                 Some(falling_factorial(&n_val, *k))
@@ -511,6 +533,7 @@ impl fmt::Display for Symbolic {
             Symbolic::Constant(v) => write!(f, "{v}"),
             Symbolic::Unknown => write!(f, "?"),
             Symbolic::Filtered(inner) => write!(f, "\u{2264}{inner}"),
+            Symbolic::TakeWhile(inner) => write!(f, "\u{2291}{inner}"),
             Symbolic::Permutations { n, k } => write!(f, "P({n}, {k})"),
             Symbolic::PermutationsWithReplacement { n, k } => write!(f, "{n}^{k}"),
             Symbolic::Combinations { n, k } => write!(f, "C({n}, {k})"),
@@ -573,6 +596,13 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
                 .next()
                 .ok_or_else(|| "Missing filtered inner".to_string())?;
             Ok(Symbolic::Filtered(Box::new(parse_symbolic_pair(inner)?)))
+        }
+        Rule::symbolic_take_while => {
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "Missing take_while inner".to_string())?;
+            Ok(Symbolic::TakeWhile(Box::new(parse_symbolic_pair(inner)?)))
         }
         Rule::symbolic_min => {
             let mut inner = pair.into_inner();
@@ -803,6 +833,7 @@ fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Sy
         StreamFunctionKind::Filter | StreamFunctionKind::FilterMap | StreamFunctionKind::Ok => {
             Symbolic::Filtered(Box::new(cardinality))
         }
+        StreamFunctionKind::TakeWhile => Symbolic::TakeWhile(Box::new(cardinality)),
         StreamFunctionKind::Permutations(k) => Symbolic::Permutations {
             n: Box::new(cardinality),
             k: *k,
@@ -835,6 +866,7 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
         StreamFunctionKind::Map
         | StreamFunctionKind::Filter
         | StreamFunctionKind::FilterMap
+        | StreamFunctionKind::TakeWhile
         | StreamFunctionKind::Fold
         | StreamFunctionKind::Ok
         | StreamFunctionKind::OkOrPanic => ComplexityClass::O1,
@@ -929,6 +961,7 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
             StreamFunctionKind::Map => "map(...)".to_string(),
             StreamFunctionKind::Filter => "filter(...)".to_string(),
             StreamFunctionKind::FilterMap => "filter_map(...)".to_string(),
+            StreamFunctionKind::TakeWhile => "take_while(...)".to_string(),
             StreamFunctionKind::Permutations(k) => format!("permutations({k})"),
             StreamFunctionKind::PermutationsWithReplacement(k) => {
                 format!("permutations_with_replacement({k})")
@@ -1240,6 +1273,58 @@ mod tests {
     }
 
     #[test]
+    fn test_evaluate_take_while() {
+        let s = Symbolic::TakeWhile(Box::new(Symbolic::Constant(BigUint::from(100u64))));
+        assert_eq!(s.try_evaluate(), None);
+    }
+
+    #[test]
+    fn test_take_while_classifications_match_filtered() {
+        // TakeWhile and Filtered should classify identically today (no behavior
+        // change from issue #222 — the variant is preserved so future analyses
+        // can exploit prefix semantics).
+        let inner = Symbolic::Constant(BigUint::from(100u64));
+        let f = Symbolic::Filtered(Box::new(inner.clone()));
+        let tw = Symbolic::TakeWhile(Box::new(inner.clone()));
+
+        assert_eq!(f.classify_as_time(), tw.classify_as_time());
+        assert_eq!(f.upper_bound(), tw.upper_bound());
+        assert_eq!(f.contains_unknown(), tw.contains_unknown());
+        assert_eq!(f.try_evaluate(), tw.try_evaluate());
+        assert_eq!(f.classify_as_cardinality(), {
+            // Cardinality::Bounded uses the symbolic inside; since the variant
+            // is distinct, the bounded values themselves are not equal — but
+            // both should be Bounded.
+            match tw.classify_as_cardinality() {
+                Cardinality::Bounded(_) => Cardinality::Bounded(f.clone()),
+                other => other,
+            }
+        });
+    }
+
+    #[test]
+    fn test_take_while_distinct_from_filtered() {
+        // The whole point of #222: TakeWhile and Filtered are distinct values
+        // even when they wrap identical inner cardinality.
+        let inner = Symbolic::Constant(BigUint::from(100u64));
+        let f = Symbolic::Filtered(Box::new(inner.clone()));
+        let tw = Symbolic::TakeWhile(Box::new(inner));
+        assert_ne!(f, tw);
+    }
+
+    #[test]
+    fn test_take_while_contains_unknown_propagates() {
+        let s = Symbolic::TakeWhile(Box::new(Symbolic::Unknown));
+        assert!(s.contains_unknown());
+    }
+
+    #[test]
+    fn test_take_while_upper_bound_propagates() {
+        let s = Symbolic::TakeWhile(Box::new(Symbolic::Constant(BigUint::from(42u64))));
+        assert_eq!(s.upper_bound(), Some(BigUint::from(42u64)));
+    }
+
+    #[test]
     fn test_evaluate_min() {
         let s = Symbolic::Min(
             Box::new(Symbolic::Constant(BigUint::from(100u64))),
@@ -1280,6 +1365,34 @@ mod tests {
         let card = Symbolic::Constant(BigUint::from(100u64));
         let result = propagate_cardinality(card.clone(), &StreamFunctionKind::Filter);
         assert_eq!(result, Symbolic::Filtered(Box::new(card)));
+    }
+
+    #[test]
+    fn test_take_while_wraps_cardinality() {
+        // #222: TakeWhile must produce Symbolic::TakeWhile, NOT Symbolic::Filtered.
+        let card = Symbolic::Constant(BigUint::from(100u64));
+        let result = propagate_cardinality(card.clone(), &StreamFunctionKind::TakeWhile);
+        assert_eq!(result, Symbolic::TakeWhile(Box::new(card)));
+    }
+
+    #[test]
+    fn test_take_while_distinct_from_filter_in_propagate_cardinality() {
+        // #222: For the same input, take_while and filter must produce
+        // distinct symbolic values so downstream analyses can tell them apart.
+        let card = Symbolic::Constant(BigUint::from(100u64));
+        let from_filter = propagate_cardinality(card.clone(), &StreamFunctionKind::Filter);
+        let from_take_while = propagate_cardinality(card, &StreamFunctionKind::TakeWhile);
+
+        assert!(matches!(from_filter, Symbolic::Filtered(_)));
+        assert!(matches!(from_take_while, Symbolic::TakeWhile(_)));
+        assert_ne!(from_filter, from_take_while);
+
+        // ...but classifications today are identical (no behavior change).
+        assert_eq!(
+            from_filter.classify_as_time(),
+            from_take_while.classify_as_time()
+        );
+        assert_eq!(from_filter.upper_bound(), from_take_while.upper_bound());
     }
 
     #[test]
@@ -1384,6 +1497,20 @@ mod tests {
         assert_eq!(
             Symbolic::Filtered(Box::new(Symbolic::Constant(BigUint::from(100u64)))).to_string(),
             "\u{2264}100"
+        );
+        assert_eq!(
+            Symbolic::TakeWhile(Box::new(Symbolic::Constant(BigUint::from(100u64)))).to_string(),
+            "\u{2291}100"
+        );
+    }
+
+    #[test]
+    fn test_symbolic_take_while_fromstr_roundtrip() {
+        let s = Symbolic::TakeWhile(Box::new(Symbolic::Constant(BigUint::from(42u64)))).to_string();
+        let parsed = Symbolic::from_str(&s).unwrap();
+        assert_eq!(
+            parsed,
+            Symbolic::TakeWhile(Box::new(Symbolic::Constant(BigUint::from(42u64))))
         );
     }
 
@@ -2117,6 +2244,7 @@ mod proptests {
             arb_symbolic_constant(),
             Just(Symbolic::Unknown),
             arb_symbolic_constant().prop_map(|s| Symbolic::Filtered(Box::new(s))),
+            arb_symbolic_constant().prop_map(|s| Symbolic::TakeWhile(Box::new(s))),
             (arb_symbolic_constant(), 1u64..5)
                 .prop_map(|(s, k)| Symbolic::Permutations { n: Box::new(s), k }),
             (arb_symbolic_constant(), 1u64..5)
