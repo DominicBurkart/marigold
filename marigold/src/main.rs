@@ -93,7 +93,10 @@ fn prepare_cache(
     // arbitrary Rust code injection. The sequence is built with concat! to
     // avoid the literal appearing in this source file.
     if program_contents.contains(concat!("}", ")")) {
-        anyhow::bail!("program contents contain '})' which would escape the macro invocation");
+        anyhow::bail!(
+            "program contents contain '{}' which would escape the macro invocation",
+            concat!("}", ")")
+        );
     }
 
     let program_project_dir = cache_root.join(program_name);
@@ -408,13 +411,19 @@ mod tests {
             .status()
             .expect("could not run marigold install");
         assert!(status.success(), "marigold install failed");
-        assert!(!csv_file.exists(), "csv should not exist before running installed program");
+        assert!(
+            !csv_file.exists(),
+            "csv should not exist before running installed program"
+        );
         let installed_binary = install_root.join("bin/test_install");
         let status = Command::new(&installed_binary)
             .status()
             .expect("could not run installed program");
         assert!(status.success(), "installed program failed");
-        assert!(csv_file.exists(), "csv should exist after running installed program");
+        assert!(
+            csv_file.exists(),
+            "csv should exist after running installed program"
+        );
         let status = Command::new(binary)
             .args(["uninstall", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
@@ -424,7 +433,10 @@ mod tests {
             .status()
             .expect("could not run marigold uninstall");
         assert!(status.success(), "marigold uninstall failed");
-        assert!(!installed_binary.exists(), "installed binary should be removed after uninstall");
+        assert!(
+            !installed_binary.exists(),
+            "installed binary should be removed after uninstall"
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -457,7 +469,10 @@ mod tests {
             .status()
             .expect("could not run marigold clean");
         assert!(status.success(), "marigold clean failed");
-        assert!(!cache_dir.exists(), "cache dir should be removed after clean");
+        assert!(
+            !cache_dir.exists(),
+            "cache dir should be removed after clean"
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -490,7 +505,10 @@ mod tests {
             .status()
             .expect("could not run marigold clean-all");
         assert!(status.success(), "marigold clean-all failed");
-        assert!(!cache_root.exists(), "entire cache should be removed after clean-all");
+        assert!(
+            !cache_root.exists(),
+            "entire cache should be removed after clean-all"
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 }
@@ -631,7 +649,10 @@ mod cache_tests {
         fs::remove_dir_all(tmp.path().join("prog")).unwrap();
         let status = invoke_cargo(CargoInvocation::Run { release: false }, &manifest)
             .expect("cargo should spawn successfully");
-        assert!(!status.success(), "cargo should fail when manifest is missing");
+        assert!(
+            !status.success(),
+            "cargo should fail when manifest is missing"
+        );
     }
 
     #[test]
@@ -668,7 +689,9 @@ mod cache_tests {
         );
         assert!(
             result.is_err(),
-            "prepare_cache should reject program_contents containing '})'"
+            "prepare_cache should reject program_contents containing '{}{}'",
+            "}",
+            ")"
         );
     }
 }
