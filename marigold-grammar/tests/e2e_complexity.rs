@@ -75,6 +75,27 @@ fn assumes_o1_user_fns_serde_roundtrip() {
     assert_eq!(result.assumes_o1_user_fns, deserialized.assumes_o1_user_fns);
 }
 
+#[test]
+fn assumes_o1_user_fns_serde_missing_field() {
+    // Simulates JSON produced before this PR, which lacks the `assumes_o1_user_fns` field.
+    // With `#[serde(default)]` the missing field should deserialize to `false` rather than
+    // returning a "missing field" error.
+    let result = analyze_file("tests/programs/no_fn_decl.marigold");
+    let json = serde_json::to_string(&result).expect("serialize");
+    // Strip the field from the JSON to simulate legacy data.
+    let legacy_json = json
+        .replace(",\"assumes_o1_user_fns\":false", "")
+        .replace("\"assumes_o1_user_fns\":false,", "")
+        .replace("\"assumes_o1_user_fns\":false", "");
+    let deserialized: marigold_grammar::complexity::ProgramComplexity =
+        serde_json::from_str(&legacy_json)
+            .expect("deserialize legacy JSON without assumes_o1_user_fns");
+    assert!(
+        !deserialized.assumes_o1_user_fns,
+        "missing field should default to false"
+    );
+}
+
 fn analyze_file(path: &str) -> marigold_grammar::complexity::ProgramComplexity {
     let source =
         std::fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
