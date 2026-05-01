@@ -591,7 +591,10 @@ mod tests {
         assert!(status.success(), "marigold run failed for writer test");
 
         // Verify the CSV was created.
-        assert!(csv_file.exists(), "CSV output file was not created by write_file");
+        assert!(
+            csv_file.exists(),
+            "CSV output file was not created by write_file"
+        );
 
         // Verify content: each integer on its own line, no trailing garbage.
         let content = fs::read_to_string(&csv_file).expect("could not read CSV output");
