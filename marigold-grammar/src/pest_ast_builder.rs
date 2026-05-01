@@ -45,7 +45,7 @@ impl PestAstBuilder {
         Ok(expressions)
     }
 
-    /// Build a typed expression from an expr rule
+    /// Dispatch expression building to specific handlers
     fn build_expression(pair: Pair<Rule>) -> Result<TypedExpression, String> {
         let inner = pair
             .into_inner()
@@ -404,7 +404,7 @@ impl PestAstBuilder {
                 let n = Self::peek_numeric_arg(&inner)?;
                 (
                     StreamFunctionKind::Combinations(n),
-                    Self::build_permutations_fn(inner)?,
+                    Self::build_combinations_fn(inner)?,
                 )
             }
             Rule::keep_first_n_fn => {
