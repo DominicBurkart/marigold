@@ -195,6 +195,7 @@ mod tests {
     /// Items are buffered correctly: verify that a single item is available
     /// after `run()` completes.  A single-item source never exceeds the buffer
     /// capacity (BUFFER_SIZE = 1), so sequential await is safe here.
+    // relies on BUFFER_SIZE >= 1
     #[tokio::test]
     async fn buffered_items_are_received_after_run() {
         let source = futures::stream::iter(vec![42u32]);
@@ -202,7 +203,7 @@ mod tests {
 
         let mut rx = mcs.get();
 
-        mcs.run().await;
+        mcs.run().await; // relies on BUFFER_SIZE >= 1: the single item fits in the channel buffer
 
         // The item should be sitting in the channel buffer.
         let item = rx.next().await;
@@ -249,6 +250,61 @@ mod tests {
     /// Items from the source are silently dropped when the sender list is empty.
     #[tokio::test]
     async fn no_consumers_run_completes_without_panic() {
+        let source = futures::stream::iter(vec![1u32, 2, 3]);
+        let mcs = MultiConsumerStream::new(source);
+        mcs.run().await; // must not panic or hang
+    }
+}
+
+// These tests exercise the spawn-path of `run()` that is active under the
+// `tokio` crate feature of marigold-impl.  Under that path `run()` calls
+// `crate::async_runtime::spawn(...)` and returns immediately, so each test
+// explicitly joins the spawned handle before collecting from receivers to
+// avoid races.
+#[cfg(test)]
+#[cfg(feature = "tokio")]
+mod spawn_tests {
+    use super::MultiConsumerStream;
+    use futures::stream::StreamExt;
+
+    /// Both consumers receive every item via the spawn path.
+    #[tokio::test]
+    async fn spawn_all_consumers_receive_all_items() {
+        let source = futures::stream::iter(vec![1u32, 2, 3]);
+        let mut mcs = MultiConsumerStream::new(source);
+
+        let rx1 = mcs.get();
+        let rx2 = mcs.get();
+
+        // run() spawns internally; join its JoinHandle so the fanout completes
+        // before we collect.
+        mcs.run().await;
+
+        let got1 = rx1.collect::<Vec<_>>().await;
+        let got2 = rx2.collect::<Vec<_>>().await;
+
+        assert_eq!(got1, vec![1, 2, 3]);
+        assert_eq!(got2, vec![1, 2, 3]);
+    }
+
+    /// An empty source causes all consumers to see EOF immediately via the spawn path.
+    #[tokio::test]
+    async fn spawn_empty_source_closes_consumers_immediately() {
+        let source = futures::stream::iter(Vec::<u32>::new());
+        let mut mcs = MultiConsumerStream::new(source);
+
+        let rx1 = mcs.get();
+        let rx2 = mcs.get();
+
+        mcs.run().await;
+
+        assert!(rx1.collect::<Vec<_>>().await.is_empty());
+        assert!(rx2.collect::<Vec<_>>().await.is_empty());
+    }
+
+    /// `run()` with no consumers completes without panicking or hanging via the spawn path.
+    #[tokio::test]
+    async fn spawn_no_consumers_run_completes_without_panic() {
         let source = futures::stream::iter(vec![1u32, 2, 3]);
         let mcs = MultiConsumerStream::new(source);
         mcs.run().await; // must not panic or hang

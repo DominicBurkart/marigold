@@ -219,4 +219,24 @@ mod tests {
             .await;
         assert_eq!(result, vec![vec![7]]);
     }
+
+    /// Empty input with k=0: itertools yields exactly one empty permutation,
+    /// `[[]]`, because there is exactly one way to choose 0 elements from any
+    /// collection (including an empty one).  This completes the axis coverage:
+    /// `permutations_empty_stream` covers empty-input + k>0,
+    /// `permutations_k0_yields_one_empty_permutation` covers non-empty-input + k=0,
+    /// and this test covers the empty-input + k=0 corner.
+    #[tokio::test]
+    async fn permutations_empty_input_k0_yields_one_empty_permutation() {
+        let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
+            .permutations(0)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(
+            result,
+            vec![vec![] as Vec<i32>],
+            "itertools yields [[]] for permutations(0) even on an empty input"
+        );
+    }
 }
