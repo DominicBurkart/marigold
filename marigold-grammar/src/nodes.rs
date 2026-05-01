@@ -162,6 +162,11 @@ impl NamedStreamNode {
             0 => "".to_string(),
             _ => format!(
                 ".",
+                self.funs
+                    .iter()
+                    .map(|f| f.code.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".")
             ),
         };
         let stream_prefix = &self.out.stream_prefix;
@@ -185,6 +190,11 @@ impl StreamVariableNode {
             _ => {
                 format!(
                     ".",
+                    self.funs
+                        .iter()
+                        .map(|f| f.code.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".")
                 )
             }
         };
@@ -217,6 +227,11 @@ impl StreamVariableFromPriorStreamVariableNode {
             _ => {
                 format!(
                     ".",
+                    self.funs
+                        .iter()
+                        .map(|f| f.code.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".")
                 )
             }
         };
@@ -777,7 +792,7 @@ mod tests {
             t.primitive_to_type_string_with_resolved_bounds(Some(0), Some(200)),
             "u8"
         );
-    }
+        }
 
     #[test]
     fn test_select_smallest_signed_type() {
