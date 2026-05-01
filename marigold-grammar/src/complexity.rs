@@ -84,7 +84,7 @@ impl fmt::Display for ComplexityClass {
             ComplexityClass::OCombinatorial(k) => write!(f, "O(C(n,{k}))"),
             ComplexityClass::OPermutational(k) => write!(f, "O(n!/(n-{k})!)"),
             ComplexityClass::OFactorial => write!(f, "O(n!)"),
-            ComplexityClass::Unknown => write!(f, "O(?))"),
+            ComplexityClass::Unknown => write!(f, "O(?)"),
         }
     }
 }
@@ -1158,7 +1158,7 @@ mod tests {
     #[test]
     fn test_parse_unknown() {
         assert_eq!(
-            ComplexityClass::from_str("O(?))").unwrap(),
+            ComplexityClass::from_str("O(?)").unwrap(),
             ComplexityClass::Unknown
         );
     }
