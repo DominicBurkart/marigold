@@ -26,41 +26,21 @@
 //!
 //! ## Architecture
 //!
-//! ### Parser
+//! - [`parser`]: Pest-based PEG parser entry points. The grammar lives in
+//!   `src/marigold.pest`.
+//! - [`pest_ast_builder`]: Lowers Pest parse trees into the AST.
+//! - [`nodes`]: AST node definitions for all Marigold constructs and the
+//!   code-generation logic that emits Rust source.
+//! - [`complexity`], [`bound_resolution`], [`symbol_table`]: Static analysis
+//!   passes (cardinality/space/time, bounded-type evaluation, type lookups).
 //!
-//! The [`parser`] module provides the Pest-based parser with a trait abstraction
-//! for extensibility. The factory function [`parser::get_parser()`] returns a
-//! parser instance.
-//!
-//! ### Grammar File
-//!
-//! - **Pest**: `src/marigold.pest` - Defines the complete Marigold language grammar
-//!
-//! ### AST and Code Generation
-//!
-//! - [`nodes`]: AST node definitions for all Marigold constructs
-//! - Code generation: Internal function that transforms AST to Rust code
-//! - [`pest_ast_builder`]: Transforms Pest parse trees into the AST
-//!
-//! ## Testing & Validation
-//!
-//! The parser implementation is validated through:
-//!
-//! - **Unit tests** in each module covering specific functionality
-//! - **Negative tests** ensuring invalid syntax is properly rejected
-//! - **Integration tests** using real-world example programs
+//! Validation: per-module unit tests, negative parser tests, and
+//! integration tests over the example programs.
 //!
 //! ## Feature Flags
 //!
-//! - `io`: I/O features (available in other crates)
-//! - `tokio`: Tokio runtime integration (available in other crates)
-//! - `async-std`: async-std runtime integration (available in other crates)
-//!
-//! ## Performance Characteristics
-//!
-//! - **Parsing**: Completes in < 1ms for typical programs
-//! - **Code generation**: Dominates runtime, scales with program complexity
-//! - **Binary size**: Pest parser adds ~40KB to binary size
+//! `io`, `tokio`, `async-std`: forwarded by downstream crates that consume
+//! the generated code; this crate itself only emits feature-gated source.
 
 pub use itertools;
 
@@ -73,10 +53,10 @@ mod type_aggregation;
 
 pub mod pest_ast_builder;
 
-/// Convenience function for parsing Marigold code
+/// Parse a Marigold program and return the generated Rust source.
 ///
-/// This is an alias for [`parser::parse_marigold`] that uses the appropriate parser
-/// based on feature flags. It's the recommended entry point for most use cases.
+/// Thin alias for [`parser::parse_marigold`]; the recommended entry point
+/// for most callers.
 ///
 /// # Examples
 ///
@@ -84,7 +64,7 @@ pub mod pest_ast_builder;
 /// use marigold_grammar::marigold_parse;
 ///
 /// let code = marigold_parse("range(0, 100).return")?;
-/// // code is now valid Rust code ready to compile
+/// // code is now valid Rust source ready to compile
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
