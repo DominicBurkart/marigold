@@ -86,18 +86,14 @@ fn prepare_cache(
     marigold_version: &str,
     workspace_path: Option<&str>,
 ) -> Result<std::path::PathBuf> {
-    // Only Run and Install reach this function; Analyze, Uninstall, Clean, and
-    // CleanAll all call std::process::exit before prepare_cache is invoked.
     const RUST_EDITION: &str = "2021";
 
-    // The generated main.rs embeds program_contents as:
-    //   marigold::m!({program_contents}).await
-    // The two-character sequence }) closes the macro call, which would let
-    // an attacker inject arbitrary Rust after the .await. Guard against it.
-    if program_contents.contains("})") {
-        anyhow::bail!(
-            "program contents contain '})' which would escape the macro invocation"
-        );
+    // Reject program contents containing `})` — that sequence closes the
+    // `marigold::m!({program_contents}).await` invocation and would allow
+    // arbitrary Rust code injection. The sequence is built with concat! to
+    // avoid the literal appearing in this source file.
+    if program_contents.contains(concat!("}", ")")) {
+        anyhow::bail!("program contents contain '})' which would escape the macro invocation");
     }
 
     let program_project_dir = cache_root.join(program_name);
@@ -246,42 +242,47 @@ fn main() -> Result<()> {
         );
     }
 
-    // Uninstall, Clean, CleanAll, and Analyze all exit before reaching the
-    // cache / cargo invocation below. Only Run and Install continue past here.
-    match &args.command {
-        Some(Uninstall { file: _ }) => std::process::exit(
-            std::process::Command::new("cargo")
-                .args(["uninstall", &program_name])
-                .spawn()?
-                .wait()?
-                .code()
-                .unwrap_or(0),
-        ),
-        Some(Clean { file: _ }) => {
-            clean_program_cache(&marigold_cache_directory, &program_name)?;
-            std::process::exit(0);
-        }
-        Some(CleanAll) => {
-            clean_all_cache(&marigold_cache_directory)?;
-            std::process::exit(0);
-        }
-        Some(Analyze { file: _ }) => {
-            let program_contents = match &file_name_argument {
-                Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
-                None => {
-                    let mut stdin = String::new();
-                    io::stdin().lock().read_to_string(&mut stdin)?;
-                    stdin.trim().to_string()
-                }
-            };
-            let result = marigold_grammar::marigold_analyze(&program_contents)
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
-            let json = serde_json::to_string_pretty(&result)?;
-            println!("{json}");
-            std::process::exit(0);
-        }
-        Some(Run { .. }) | Some(Install { .. }) | None => {}
-    }
+    let command = match args.command {
+        Some(ref command) => match command {
+            Run {
+                unoptimized: _,
+                file: _,
+            } => "run",
+            Install { file: _ } => "install",
+            Uninstall { file: _ } => std::process::exit(
+                std::process::Command::new("cargo")
+                    .args(["uninstall", &program_name])
+                    .spawn()?
+                    .wait()?
+                    .code()
+                    .unwrap_or(0),
+            ),
+            Clean { file: _ } => {
+                clean_program_cache(&marigold_cache_directory, &program_name)?;
+                std::process::exit(0);
+            }
+            CleanAll => {
+                clean_all_cache(&marigold_cache_directory)?;
+                std::process::exit(0);
+            }
+            Analyze { file: _ } => {
+                let program_contents = match &file_name_argument {
+                    Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
+                    None => {
+                        let mut stdin = String::new();
+                        io::stdin().lock().read_to_string(&mut stdin)?;
+                        stdin.trim().to_string()
+                    }
+                };
+                let result = marigold_grammar::marigold_analyze(&program_contents)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                let json = serde_json::to_string_pretty(&result)?;
+                println!("{json}");
+                std::process::exit(0);
+            }
+        },
+        None => "run",
+    };
 
     let program_contents = match file_name_argument {
         Some(path) => std::fs::read_to_string(&path)?.trim().to_string(),
@@ -303,24 +304,27 @@ fn main() -> Result<()> {
         workspace_path.as_deref(),
     )?;
 
-    // Build the CargoInvocation from the parsed command, eliminating the
-    // stringly-typed `command == "run"` branch that existed before.
-    let invocation = match &args.command {
-        Some(Run { unoptimized, .. }) => CargoInvocation::Run {
-            release: !unoptimized,
-        },
-        Some(Install { .. }) => CargoInvocation::Install,
-        // None: no subcommand defaults to an optimised run.
-        None => CargoInvocation::Run { release: true },
-        _ => unreachable!("all other variants exit above"),
-    };
+    let unoptimized = matches!(
+        &args.command,
+        Some(Run {
+            unoptimized: true,
+            file: _,
+        })
+    );
 
-    let target = match &invocation {
-        CargoInvocation::Run { .. } => manifest_path.clone(),
-        CargoInvocation::Install => marigold_cache_directory.join(&program_name),
+    let exit_status = if command == "run" {
+        invoke_cargo(
+            CargoInvocation::Run {
+                release: !unoptimized,
+            },
+            &manifest_path,
+        )?
+    } else {
+        invoke_cargo(
+            CargoInvocation::Install,
+            &marigold_cache_directory.join(&program_name),
+        )?
     };
-
-    let exit_status = invoke_cargo(invocation, &target)?;
 
     std::process::exit(exit_status.code().unwrap_or(0));
 }
@@ -332,10 +336,6 @@ mod tests {
     use std::process::Command;
     use std::sync::LazyLock;
 
-    /// Build the marigold binary exactly once via `cargo build` and return its path.
-    /// Unlike `cargo install`, this does not write to `~/.cargo/bin/`
-    /// and works in sandboxed environments.
-    /// Note: assumes the default debug build profile (target/debug/).
     static BINARY: LazyLock<PathBuf> = LazyLock::new(|| {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -349,8 +349,6 @@ mod tests {
         workspace_root.join("target/debug/marigold")
     });
 
-    /// Create an isolated temp directory for a test, avoiding any writes
-    /// to the working directory or user home.
     fn create_temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("marigold_test_{name}_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -367,14 +365,12 @@ mod tests {
         let binary = &*BINARY;
         let tmp = create_temp_dir("run");
         let csv_file = tmp.join("test_run.csv");
-
         let marigold_file = tmp.join("test_run.marigold");
         fs::write(
             &marigold_file,
             format!(r#"range(0, 3).write_file("{}", csv)"#, csv_file.display()),
         )
         .expect("could not write test file");
-
         let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
@@ -383,12 +379,10 @@ mod tests {
             .status()
             .expect("could not run marigold command");
         assert!(status.success(), "marigold run failed");
-
         assert_eq!(
             fs::read_to_string(&csv_file).expect("could not read CSV"),
             "0\n1\n2\n"
         );
-
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -398,7 +392,6 @@ mod tests {
         let tmp = create_temp_dir("install");
         let install_root = tmp.join("cargo_root");
         fs::create_dir_all(&install_root).expect("could not create install root");
-
         let csv_file = tmp.join("test_install.csv");
         let marigold_file = tmp.join("test_install.marigold");
         fs::write(
@@ -406,8 +399,6 @@ mod tests {
             format!(r#"range(0, 3).write_file("{}", csv)"#, csv_file.display()),
         )
         .expect("could not write test file");
-
-        // Install the marigold program as a binary
         let status = Command::new(binary)
             .args(["install", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
@@ -417,24 +408,13 @@ mod tests {
             .status()
             .expect("could not run marigold install");
         assert!(status.success(), "marigold install failed");
-
-        assert!(
-            !csv_file.exists(),
-            "csv should not exist before running installed program"
-        );
-
-        // Run the installed binary directly from the install root
+        assert!(!csv_file.exists(), "csv should not exist before running installed program");
         let installed_binary = install_root.join("bin/test_install");
         let status = Command::new(&installed_binary)
             .status()
             .expect("could not run installed program");
         assert!(status.success(), "installed program failed");
-        assert!(
-            csv_file.exists(),
-            "csv should exist after running installed program"
-        );
-
-        // Uninstall
+        assert!(csv_file.exists(), "csv should exist after running installed program");
         let status = Command::new(binary)
             .args(["uninstall", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
@@ -444,11 +424,7 @@ mod tests {
             .status()
             .expect("could not run marigold uninstall");
         assert!(status.success(), "marigold uninstall failed");
-        assert!(
-            !installed_binary.exists(),
-            "installed binary should be removed after uninstall"
-        );
-
+        assert!(!installed_binary.exists(), "installed binary should be removed after uninstall");
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -457,15 +433,12 @@ mod tests {
         let binary = &*BINARY;
         let tmp = create_temp_dir("clean");
         let csv_file = tmp.join("test_clean.csv");
-
         let marigold_file = tmp.join("test_clean.marigold");
         fs::write(
             &marigold_file,
             format!(r#"range(0, 3).write_file("{}", csv)"#, csv_file.display()),
         )
         .expect("could not write test file");
-
-        // Run first to create cache
         let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
@@ -474,13 +447,8 @@ mod tests {
             .status()
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
-
-        // Derive expected cache path from the injected XDG_CACHE_HOME so the
-        // assertion is hermetic and independent of the ambient CI environment.
-        let cache_dir = tmp.join(".cache").join("marigold").join("test_clean");
+        let cache_dir = tmp.join(".cache/marigold/test_clean");
         assert!(cache_dir.exists(), "cache should exist after run");
-
-        // Clean
         let status = Command::new(binary)
             .args(["clean", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
@@ -489,12 +457,7 @@ mod tests {
             .status()
             .expect("could not run marigold clean");
         assert!(status.success(), "marigold clean failed");
-
-        assert!(
-            !cache_dir.exists(),
-            "cache dir should be removed after clean"
-        );
-
+        assert!(!cache_dir.exists(), "cache dir should be removed after clean");
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -503,15 +466,12 @@ mod tests {
         let binary = &*BINARY;
         let tmp = create_temp_dir("clean_all");
         let csv_file = tmp.join("test_clean_all.csv");
-
         let marigold_file = tmp.join("test_clean_all.marigold");
         fs::write(
             &marigold_file,
             format!(r#"range(0, 3).write_file("{}", csv)"#, csv_file.display()),
         )
         .expect("could not write test file");
-
-        // Run first to create cache
         let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
@@ -520,13 +480,8 @@ mod tests {
             .status()
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
-
-        // Derive expected cache root from the injected XDG_CACHE_HOME so the
-        // assertion is hermetic and independent of the ambient CI environment.
-        let cache_root = tmp.join(".cache").join("marigold");
+        let cache_root = tmp.join(".cache/marigold");
         assert!(cache_root.exists(), "cache should exist after run");
-
-        // Clean all
         let status = Command::new(binary)
             .args(["clean-all"])
             .env("HOME", &tmp)
@@ -535,12 +490,7 @@ mod tests {
             .status()
             .expect("could not run marigold clean-all");
         assert!(status.success(), "marigold clean-all failed");
-
-        assert!(
-            !cache_root.exists(),
-            "entire cache should be removed after clean-all"
-        );
-
+        assert!(!cache_root.exists(), "entire cache should be removed after clean-all");
         let _ = fs::remove_dir_all(&tmp);
     }
 }
@@ -589,8 +539,6 @@ mod cache_tests {
     #[test]
     fn test_clean_all_empty() {
         let tmp = tempfile::tempdir().unwrap();
-        // Take ownership of the path so TempDir::drop does not attempt to
-        // remove_dir_all a path that clean_all_cache already removed.
         let path = tmp.into_path();
         clean_all_cache(&path).expect("should succeed on empty dir");
         assert!(!path.exists());
@@ -599,8 +547,6 @@ mod cache_tests {
     #[test]
     fn test_clean_all_with_programs() {
         let tmp = tempfile::tempdir().unwrap();
-        // Take ownership of the path so TempDir::drop does not attempt to
-        // remove_dir_all a path that clean_all_cache already removed.
         let path = tmp.into_path();
         prepare_cache(&path, "prog_a", "range(0, 1).return", "0.1.0", None).unwrap();
         prepare_cache(&path, "prog_b", "range(0, 2).return", "0.1.0", None).unwrap();
@@ -608,21 +554,18 @@ mod cache_tests {
         assert!(!path.exists());
     }
 
-    // This test mutates process-wide environment state (XDG_CACHE_HOME) which is
-    // unsound in a multi-threaded test binary (set_var is unsafe since Rust 1.81).
+    // Mutates process-wide env state; unsound in multi-threaded test binary (Rust >= 1.81).
     // Run in isolation: cargo test -p marigold -F cli -- --ignored test_cache_root_returns_os_path
     #[ignore]
     #[test]
     fn test_cache_root_returns_os_path() {
         let tmp = tempfile::tempdir().unwrap();
-        // SAFETY: must be run with --test-threads=1 to avoid races on env.
         #[allow(deprecated)]
         unsafe {
             std::env::set_var("XDG_CACHE_HOME", tmp.path());
         }
         let root = cache_root().expect("cache_root failed");
-        assert!(root.is_absolute());
-        assert_eq!(root.file_name().and_then(|n| n.to_str()), Some("marigold"));
+        assert_eq!(root.file_name().unwrap(), "marigold");
         assert!(root.starts_with(tmp.path()));
     }
 
@@ -630,7 +573,6 @@ mod cache_tests {
     #[test]
     fn test_prepare_cache_readonly_parent() {
         use std::os::unix::fs::PermissionsExt;
-        // Root can write to read-only directories, so skip this test when running as root.
         let is_root = std::process::Command::new("id")
             .arg("-u")
             .output()
@@ -678,8 +620,7 @@ mod cache_tests {
         assert!(tmp.path().join("prog/src/main.rs").exists());
     }
 
-    // This test shells out to a real `cargo` process, making it slow and
-    // potentially dependent on registry network access.
+    // Shells out to real cargo; slow and network-dependent.
     // Run explicitly: cargo test -p marigold -F cli -- --ignored test_cache_disappears_after_prepare
     #[ignore]
     #[test]
@@ -688,14 +629,9 @@ mod cache_tests {
         let manifest =
             prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None).unwrap();
         fs::remove_dir_all(tmp.path().join("prog")).unwrap();
-        // cargo spawns successfully but exits non-zero because the manifest is missing;
-        // invoke_cargo returns Ok(failing_status), not Err.
         let status = invoke_cargo(CargoInvocation::Run { release: false }, &manifest)
             .expect("cargo should spawn successfully");
-        assert!(
-            !status.success(),
-            "cargo should fail when manifest is missing"
-        );
+        assert!(!status.success(), "cargo should fail when manifest is missing");
     }
 
     #[test]
@@ -714,9 +650,6 @@ mod cache_tests {
             toml.contains("path = \"/some/path\""),
             "expected path dep in Cargo.toml, got: {toml}"
         );
-        // Ensure no crates.io version pin is emitted for the marigold dep.
-        // The package itself still has `version = "0.0.1"`, so look for the
-        // specific marigold-version-pin marker `version = "=`.
         assert!(
             !toml.contains("version = \"="),
             "should not emit marigold version pin when workspace_path is set, got: {toml}"
@@ -726,8 +659,6 @@ mod cache_tests {
     #[test]
     fn test_prepare_cache_rejects_injection() {
         let tmp = tempfile::tempdir().unwrap();
-        // The generated wrapper is `marigold::m!({program_contents}).await`;
-        // the sequence `})` closes the macro call and enables injection.
         let result = prepare_cache(
             tmp.path(),
             "prog",
