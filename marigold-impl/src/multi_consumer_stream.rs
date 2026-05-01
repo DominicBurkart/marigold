@@ -101,7 +101,7 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "tokio"))]
 mod tests {
     use super::*;
 
