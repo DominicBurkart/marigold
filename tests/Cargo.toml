@@ -11,8 +11,12 @@ license = "Apache-2.0 OR MIT"
 path = "../marigold"
 version = "=0.1.17"
 
+[dependencies.marigold-grammar]
+path = "../marigold-grammar"
+
 [dev-dependencies]
 futures = "0.3"
+num-bigint = "0.4"
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
 
 [dev-dependencies.cargo-husky]
