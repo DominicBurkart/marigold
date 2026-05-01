@@ -161,7 +161,7 @@ impl NamedStreamNode {
         let intermediate = match self.funs.len() {
             0 => "".to_string(),
             _ => format!(
-                ".",
+                ".{}",
                 self.funs
                     .iter()
                     .map(|f| f.code.as_str())
@@ -189,7 +189,7 @@ impl StreamVariableNode {
             0 => "".to_string(),
             _ => {
                 format!(
-                    ".",
+                    ".{}",
                     self.funs
                         .iter()
                         .map(|f| f.code.as_str())
@@ -226,7 +226,7 @@ impl StreamVariableFromPriorStreamVariableNode {
             0 => "".to_string(),
             _ => {
                 format!(
-                    ".",
+                    ".{}",
                     self.funs
                         .iter()
                         .map(|f| f.code.as_str())
@@ -792,7 +792,7 @@ mod tests {
             t.primitive_to_type_string_with_resolved_bounds(Some(0), Some(200)),
             "u8"
         );
-        }
+    }
 
     #[test]
     fn test_select_smallest_signed_type() {
