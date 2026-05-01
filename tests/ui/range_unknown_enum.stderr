@@ -2,6 +2,6 @@ error: marigold parse error: Parse error: range(NonExistent): 'NonExistent' is n
  --> ui/range_unknown_enum.rs:9:13
   |
 9 |     let _ = marigold::m!(range(NonExistent).return);
-  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   |
   = note: this error originates in the macro `marigold::m` (in Nightly builds, run with -Z macro-backtrace for more info)
