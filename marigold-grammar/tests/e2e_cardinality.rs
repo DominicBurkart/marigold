@@ -126,12 +126,10 @@ mod bounded {
     fn take_while_then_map() {
         use marigold_grammar::complexity::Symbolic;
 
-        // Note: `card_take_while_map.marigold` and `take_while_pipeline.marigold` contain
-        // identical program source by coincidence (same operations, different range).
-        // They are read by different test harnesses (cardinality vs. complexity) and are
-        // intentionally kept as separate files — a content change to one does not imply
-        // a change to the other.
-        let result = analyze_file("tests/programs/card_take_while_map.marigold");
+        // Shares the `take_while_with_map.marigold` fixture with the complexity harness
+        // (`take_while_pipeline` in e2e_complexity.rs). A single fixture eliminates the
+        // drift risk that two byte-identical files would create.
+        let result = analyze_file("tests/programs/take_while_with_map.marigold");
         // map preserves cardinality, so take_while+map should remain Bounded(Filtered(Constant(10)))
         assert_eq!(
             result.streams[0].cardinality,

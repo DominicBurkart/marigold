@@ -172,12 +172,10 @@ fn take_while_reports_o1_space() {
 
 #[test]
 fn take_while_pipeline() {
-    // Note: `take_while_pipeline.marigold` and `card_take_while_map.marigold` contain
-    // identical program source by coincidence (same operations, different range).
-    // They are read by different test harnesses (complexity vs. cardinality) and are
-    // intentionally kept as separate files — a content change to one does not imply
-    // a change to the other.
-    // take_while_pipeline.marigold: range(0, 10).take_while(less_than_4).map(double).return
+    // Shares the `take_while_with_map.marigold` fixture with the cardinality harness
+    // (`take_while_then_map` in e2e_cardinality.rs). A single fixture eliminates the
+    // drift risk that two byte-identical files would create.
+    // take_while_with_map.marigold: range(0, 10).take_while(less_than_4).map(double).return
     // - range(0, 10): constant cardinality → O(1)
     // - take_while(..): constant input cardinality → classified O(1) via the early
     //   return, but output is Symbolic::Filtered (take_while's stopping point is not
@@ -185,7 +183,7 @@ fn take_while_pipeline() {
     // - map(..): input is Filtered (try_evaluate == None), so classified O(n)
     // Total exact_time terms: {O(1): 1, O(n): 1} which renders as "O(n)" (the O(1)
     // term is hidden when a higher-class term is present).
-    let result = analyze_file("tests/programs/take_while_pipeline.marigold");
+    let result = analyze_file("tests/programs/take_while_with_map.marigold");
     assert_eq!(result.streams.len(), 1);
     assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
     assert_eq!(result.streams[0].exact_time.to_string(), "O(n)");
