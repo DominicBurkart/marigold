@@ -9,7 +9,9 @@ mod io_tests {
     #[tokio::test]
     async fn vector_writer_write_flush_shutdown() {
         let mut w = Writer::vector();
-        w.write_all(b"hello, world").await.expect("write_all failed");
+        w.write_all(b"hello, world")
+            .await
+            .expect("write_all failed");
         w.flush().await.expect("flush failed");
         w.shutdown().await.expect("shutdown failed");
     }
@@ -26,8 +28,8 @@ mod io_tests {
     /// `Writer::file()`: write bytes, shutdown, then read back to verify contents.
     #[tokio::test]
     async fn file_writer_write_and_read_back() {
-        let path = std::env::temp_dir()
-            .join(format!("marigold_writer_test_{}.txt", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("marigold_writer_test_{}.txt", std::process::id()));
 
         // Write via Writer.
         {
@@ -35,12 +37,16 @@ mod io_tests {
                 .await
                 .expect("failed to create temp file");
             let mut w = Writer::file(file);
-            w.write_all(b"marigold test data").await.expect("write_all failed");
+            w.write_all(b"marigold test data")
+                .await
+                .expect("write_all failed");
             w.shutdown().await.expect("shutdown failed");
         }
 
         // Read back and verify.
-        let contents = tokio::fs::read(&path).await.expect("failed to read temp file");
+        let contents = tokio::fs::read(&path)
+            .await
+            .expect("failed to read temp file");
         assert_eq!(contents, b"marigold test data");
 
         // Clean up.
@@ -50,10 +56,8 @@ mod io_tests {
     /// `Writer::file()`: multiple writes produce the correct concatenated content.
     #[tokio::test]
     async fn file_writer_multiple_writes_concat() {
-        let path = std::env::temp_dir().join(format!(
-            "marigold_writer_multi_{}.txt",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("marigold_writer_multi_{}.txt", std::process::id()));
 
         {
             let file = tokio::fs::File::create(&path)
@@ -66,7 +70,9 @@ mod io_tests {
             w.shutdown().await.expect("shutdown failed");
         }
 
-        let contents = tokio::fs::read(&path).await.expect("failed to read temp file");
+        let contents = tokio::fs::read(&path)
+            .await
+            .expect("failed to read temp file");
         assert_eq!(contents, b"hello, world");
 
         let _ = tokio::fs::remove_file(&path).await;

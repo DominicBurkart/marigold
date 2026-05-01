@@ -85,5 +85,8 @@ async fn run_future_as_stream_yields_no_items_but_runs_future() {
     let items: Vec<u32> = stream.collect().await;
 
     assert!(items.is_empty(), "RunFutureAsStream should yield no items");
-    assert!(flag.load(Ordering::SeqCst), "Future should have been driven to completion");
+    assert!(
+        flag.load(Ordering::SeqCst),
+        "Future should have been driven to completion"
+    );
 }
