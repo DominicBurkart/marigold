@@ -56,8 +56,13 @@ mod tests {
     use super::Permutable;
     use futures::stream::StreamExt;
 
+    // Edge-case coverage (k=0, k>n, empty/single-element streams, with-replacement
+    // edges) lives in tests/permutations_edge_cases.rs. The inline tests below
+    // pin down the exact emission ordering for both permutation flavours, which
+    // the integration tests do not assert.
+
     #[tokio::test]
-    async fn permutations_basic() {
+    async fn permutations_basic_ordering() {
         assert_eq!(
             futures::stream::iter(vec![1, 2, 3])
                 .permutations(2)
@@ -76,7 +81,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn permutations_with_replacement_basic() {
+    async fn permutations_with_replacement_basic_ordering() {
         assert_eq!(
             futures::stream::iter(vec![0, 1, 2])
                 .permutations_with_replacement(2)
@@ -95,49 +100,6 @@ mod tests {
                 vec![2, 2],
             ]
         );
-    }
-
-    #[tokio::test]
-    async fn permutations_k_zero() {
-        // k=0 yields exactly one permutation: the empty sequence
-        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3])
-            .permutations(0)
-            .await
-            .collect::<Vec<_>>()
-            .await;
-        assert_eq!(result, vec![Vec::<i32>::new()]);
-    }
-
-    #[tokio::test]
-    async fn permutations_k_exceeds_length() {
-        // k > len yields nothing
-        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2])
-            .permutations(5)
-            .await
-            .collect::<Vec<_>>()
-            .await;
-        assert!(result.is_empty());
-    }
-
-    #[tokio::test]
-    async fn permutations_empty_stream() {
-        let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
-            .permutations(2)
-            .await
-            .collect::<Vec<_>>()
-            .await;
-        assert!(result.is_empty());
-    }
-
-    #[tokio::test]
-    async fn permutations_count() {
-        // P(4,2) = 4!/(4-2)! = 12
-        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 2, 3, 4])
-            .permutations(2)
-            .await
-            .collect::<Vec<_>>()
-            .await;
-        assert_eq!(result.len(), 12);
     }
 
     #[tokio::test]
