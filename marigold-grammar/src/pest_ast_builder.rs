@@ -404,7 +404,7 @@ impl PestAstBuilder {
                 let n = Self::peek_numeric_arg(&inner)?;
                 (
                     StreamFunctionKind::Combinations(n),
-                    Self::build_combinations_fn(inner)?,
+                    Self::build_permutations_fn(inner)?,
                 )
             }
             Rule::keep_first_n_fn => {
