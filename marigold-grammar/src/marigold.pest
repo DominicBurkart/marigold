@@ -54,7 +54,7 @@ identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
 
 // Quoted strings for file paths and default enum values
 // Must be double-quoted and cannot contain unescaped quotes
-quoted_string = @{ "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
+quoted_string = @{ "\"" ~ (!("\"" ) ~ ANY)* ~ "\"" }
 
 // Type annotations for struct fields and function parameters
 // Matches Rust type syntax including generics, array brackets, and commas
@@ -207,7 +207,7 @@ fn_body_content = @{
         fn_line_comment |
         fn_block_comment |
         fn_body_braced |
-        (!("{" | "}") ~ ANY)
+        !("{" | "}") ~ ANY
     )*
 }
 
@@ -289,8 +289,14 @@ input_function = {
 // Returns: Stream<Item = i32>
 // Example: range(0, 100)   -> 0..100
 // Example: range(0, =255)  -> 0..=255
+//
+// range(EnumName) - Iterate over all unit variants of a marigold enum
+// Arguments: EnumName (identifier)
+// Returns: Stream<Item = EnumName>
+// Example: range(MyEnum)
 range_input = {
-    "range(" ~ free_text_literal ~ "," ~ inclusive_marker? ~ free_text_literal ~ ")"
+    "range(" ~ free_text_literal ~ "," ~ inclusive_marker? ~ free_text_literal ~ ")" |
+    "range(" ~ free_text_identifier ~ ")"
 }
 
 inclusive_marker = { "=" }

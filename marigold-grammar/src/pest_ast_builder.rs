@@ -1,9 +1,13 @@
-#![forbid(unsafe_code)]
 
 use crate::nodes::*;
 use pest::iterators::{Pair, Pairs};
 
 use crate::parser::Rule;
+
+/// Advance a `Pairs` iterator by one, returning an error with `msg` if exhausted.
+fn next_pair<'a>(pairs: &mut Pairs<'a, Rule>, msg: &str) -> Result<Pair<'a, Rule>, String> {
+    pairs.next().ok_or_else(|| msg.to_string())
+}
 
 /// AST builder for converting Pest parse trees to Marigold AST nodes
 pub struct PestAstBuilder;
@@ -62,7 +66,7 @@ impl PestAstBuilder {
         let mut inner = pair.into_inner();
 
         // First element determines if this is unnamed (input_function) or named (identifier)
-        let first = inner.next().ok_or_else(|| "Empty stream".to_string())?;
+        let first = next_pair(&mut inner, "Empty stream")?;
 
         match first.as_rule() {
             Rule::input_function => {
@@ -82,11 +86,8 @@ impl PestAstBuilder {
                 }
 
                 // Get output function (should be last)
-                let out = Self::build_output_function(
-                    inner
-                        .next()
-                        .ok_or_else(|| "Missing output function".to_string())?,
-                )?;
+                let out =
+                    Self::build_output_function(next_pair(&mut inner, "Missing output function")?)?;
 
                 Ok(TypedExpression::from(UnnamedStreamNode {
                     inp_and_funs: InputAndMaybeStreamFunctions { inp, funs },
@@ -110,11 +111,8 @@ impl PestAstBuilder {
                 }
 
                 // Get output function (should be last)
-                let out = Self::build_output_function(
-                    inner
-                        .next()
-                        .ok_or_else(|| "Missing output function".to_string())?,
-                )?;
+                let out =
+                    Self::build_output_function(next_pair(&mut inner, "Missing output function")?)?;
 
                 Ok(TypedExpression::from(NamedStreamNode {
                     stream_variable,
@@ -131,16 +129,12 @@ impl PestAstBuilder {
         let mut inner = pair.into_inner();
 
         // First identifier is the variable name
-        let variable_name = inner
-            .next()
-            .ok_or_else(|| "Missing variable name".to_string())?
+        let variable_name = next_pair(&mut inner, "Missing variable name")?
             .as_str()
             .to_string();
 
         // Next should be either input_function or identifier (for prior stream variable)
-        let second = inner
-            .next()
-            .ok_or_else(|| "Missing right-hand side of assignment".to_string())?;
+        let second = next_pair(&mut inner, "Missing right-hand side of assignment")?;
 
         match second.as_rule() {
             Rule::input_function => {
@@ -192,15 +186,11 @@ impl PestAstBuilder {
     fn build_struct_decl(pair: Pair<Rule>) -> Result<TypedExpression, String> {
         let mut inner = pair.into_inner();
 
-        let struct_name = inner
-            .next()
-            .ok_or_else(|| "Missing struct name".to_string())?
+        let struct_name = next_pair(&mut inner, "Missing struct name")?
             .as_str()
             .to_string();
 
-        let body = inner
-            .next()
-            .ok_or_else(|| "Missing struct body".to_string())?;
+        let body = next_pair(&mut inner, "Missing struct body")?;
 
         let mut fields = Vec::new();
         for body_inner in body.into_inner() {
@@ -221,14 +211,10 @@ impl PestAstBuilder {
 
     fn build_struct_field(pair: Pair<Rule>) -> Result<(String, Type), String> {
         let mut inner = pair.into_inner();
-        let name = inner
-            .next()
-            .ok_or_else(|| "Missing field name".to_string())?
+        let name = next_pair(&mut inner, "Missing field name")?
             .as_str()
             .to_string();
-        let field_type_pair = inner
-            .next()
-            .ok_or_else(|| "Missing field type".to_string())?;
+        let field_type_pair = next_pair(&mut inner, "Missing field type")?;
         let ty = Self::build_field_type(field_type_pair)?;
         Ok((name, ty))
     }
@@ -250,30 +236,18 @@ impl PestAstBuilder {
             }
             Rule::bounded_int_type => {
                 let mut exprs = inner.into_inner();
-                let min = Self::build_bound_expr(
-                    exprs
-                        .next()
-                        .ok_or_else(|| "Missing min in boundedInt".to_string())?,
-                )?;
-                let max = Self::build_bound_expr(
-                    exprs
-                        .next()
-                        .ok_or_else(|| "Missing max in boundedInt".to_string())?,
-                )?;
+                let min =
+                    Self::build_bound_expr(next_pair(&mut exprs, "Missing min in boundedInt")?)?;
+                let max =
+                    Self::build_bound_expr(next_pair(&mut exprs, "Missing max in boundedInt")?)?;
                 Ok(Type::BoundedInt { min, max })
             }
             Rule::bounded_uint_type => {
                 let mut exprs = inner.into_inner();
-                let min = Self::build_bound_expr(
-                    exprs
-                        .next()
-                        .ok_or_else(|| "Missing min in boundedUint".to_string())?,
-                )?;
-                let max = Self::build_bound_expr(
-                    exprs
-                        .next()
-                        .ok_or_else(|| "Missing max in boundedUint".to_string())?,
-                )?;
+                let min =
+                    Self::build_bound_expr(next_pair(&mut exprs, "Missing min in boundedUint")?)?;
+                let max =
+                    Self::build_bound_expr(next_pair(&mut exprs, "Missing max in boundedUint")?)?;
                 Ok(Type::BoundedUint { min, max })
             }
             Rule::string_type => {
@@ -329,9 +303,7 @@ impl PestAstBuilder {
 
     fn build_bound_additive_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
         let mut inner = pair.into_inner();
-        let first = inner
-            .next()
-            .ok_or_else(|| "Empty additive expr".to_string())?;
+        let first = next_pair(&mut inner, "Empty additive expr")?;
         let mut left = Self::build_bound_multiplicative_expr(first)?;
 
         while let Some(op_pair) = inner.next() {
@@ -340,9 +312,7 @@ impl PestAstBuilder {
                 "-" => ArithOp::Sub,
                 s => return Err(format!("Unknown additive op: {}", s)),
             };
-            let right_pair = inner
-                .next()
-                .ok_or_else(|| "Missing right operand in additive expr".to_string())?;
+            let right_pair = next_pair(&mut inner, "Missing right operand in additive expr")?;
             let right = Self::build_bound_multiplicative_expr(right_pair)?;
             left = BoundExpr::BinaryOp {
                 left: Box::new(left),
@@ -356,9 +326,7 @@ impl PestAstBuilder {
 
     fn build_bound_multiplicative_expr(pair: Pair<Rule>) -> Result<BoundExpr, String> {
         let mut inner = pair.into_inner();
-        let first = inner
-            .next()
-            .ok_or_else(|| "Empty multiplicative expr".to_string())?;
+        let first = next_pair(&mut inner, "Empty multiplicative expr")?;
         let mut left = Self::build_bound_unary_expr(first)?;
 
         while let Some(op_pair) = inner.next() {
@@ -367,9 +335,7 @@ impl PestAstBuilder {
                 "/" => ArithOp::Div,
                 s => return Err(format!("Unknown multiplicative op: {}", s)),
             };
-            let right_pair = inner
-                .next()
-                .ok_or_else(|| "Missing right operand in multiplicative expr".to_string())?;
+            let right_pair = next_pair(&mut inner, "Missing right operand in multiplicative expr")?;
             let right = Self::build_bound_unary_expr(right_pair)?;
             left = BoundExpr::BinaryOp {
                 left: Box::new(left),
@@ -418,14 +384,8 @@ impl PestAstBuilder {
             Rule::bound_expr => Self::build_bound_expr(inner),
             Rule::bound_type_ref => {
                 let mut parts = inner.into_inner();
-                let type_name = parts
-                    .next()
-                    .ok_or_else(|| "Missing type name".to_string())?
-                    .as_str();
-                let method = parts
-                    .next()
-                    .ok_or_else(|| "Missing method name".to_string())?
-                    .as_str();
+                let type_name = next_pair(&mut parts, "Missing type name")?.as_str();
+                let method = next_pair(&mut parts, "Missing method name")?.as_str();
                 let op = match method {
                     "len" => BoundOp::Len,
                     "min" => BoundOp::Min,
@@ -477,15 +437,11 @@ impl PestAstBuilder {
     fn build_enum_decl(pair: Pair<Rule>) -> Result<TypedExpression, String> {
         let mut inner = pair.into_inner();
 
-        let enum_name = inner
-            .next()
-            .ok_or_else(|| "Missing enum name".to_string())?
+        let enum_name = next_pair(&mut inner, "Missing enum name")?
             .as_str()
             .to_string();
 
-        let body = inner
-            .next()
-            .ok_or_else(|| "Missing enum body".to_string())?;
+        let body = next_pair(&mut inner, "Missing enum body")?;
 
         let mut variants = Vec::new();
         let mut default_variant = None;
@@ -516,9 +472,7 @@ impl PestAstBuilder {
     fn parse_enum_variant(pair: Pair<Rule>) -> Result<(String, Option<String>), String> {
         let mut inner = pair.into_inner();
 
-        let variant_name = inner
-            .next()
-            .ok_or_else(|| "Missing variant name".to_string())?
+        let variant_name = next_pair(&mut inner, "Missing variant name")?
             .as_str()
             .to_string();
 
@@ -539,9 +493,7 @@ impl PestAstBuilder {
     fn parse_default_variant(pair: Pair<Rule>) -> Result<DefaultEnumVariant, String> {
         let mut inner = pair.into_inner();
 
-        let default_name = inner
-            .next()
-            .ok_or_else(|| "Missing default variant name".to_string())?
+        let default_name = next_pair(&mut inner, "Missing default variant name")?
             .as_str()
             .to_string();
 
@@ -594,9 +546,7 @@ impl PestAstBuilder {
     fn build_fn_decl(pair: Pair<Rule>) -> Result<TypedExpression, String> {
         let mut inner = pair.into_inner();
 
-        let name = inner
-            .next()
-            .ok_or_else(|| "Missing function name".to_string())?
+        let name = next_pair(&mut inner, "Missing function name")?
             .as_str()
             .to_string();
 
@@ -648,9 +598,7 @@ impl PestAstBuilder {
 
     fn parse_fn_param(pair: Pair<Rule>) -> Result<(String, String), String> {
         let mut parts = pair.into_inner();
-        let param_name = parts
-            .next()
-            .ok_or_else(|| "Missing parameter name".to_string())?
+        let param_name = next_pair(&mut parts, "Missing parameter name")?
             .as_str()
             .to_string();
 
@@ -686,70 +634,66 @@ impl PestAstBuilder {
     /// Build range input function
     fn build_range_input(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
         let mut inner = pair.into_inner();
-        let n1 = inner
-            .next()
-            .ok_or_else(|| "Missing range start".to_string())?
-            .as_str();
+        let first = next_pair(&mut inner, "Missing range argument")?;
 
-        let next = inner
-            .next()
-            .ok_or_else(|| "Missing range end".to_string())?;
+        if let Some(next) = inner.next() {
+            let n1 = first.as_str();
 
-        let (inclusive, n2) = if next.as_rule() == Rule::inclusive_marker {
-            let n2 = inner
-                .next()
-                .ok_or_else(|| "Missing range end after =".to_string())?
-                .as_str();
-            (true, n2)
+            let (inclusive, n2) = if next.as_rule() == Rule::inclusive_marker {
+                let n2 = next_pair(&mut inner, "Missing range end after =")?.as_str();
+                (true, n2.to_owned())
+            } else {
+                (false, next.as_str().to_owned())
+            };
+
+            let end_val = n2
+                .parse::<num_bigint::BigInt>()
+                .map_err(|e| format!("Could not parse range end: {}", e))?;
+            let start_val = n1
+                .parse::<num_bigint::BigInt>()
+                .map_err(|e| format!("Could not parse range start: {}", e))?;
+
+            let count = if inclusive {
+                (end_val - &start_val + num_bigint::BigInt::from(1u32))
+                    .to_biguint()
+                    .ok_or_else(|| "Range count is negative".to_string())?
+            } else {
+                (end_val - &start_val)
+                    .to_biguint()
+                    .ok_or_else(|| "Range count is negative".to_string())?
+            };
+
+            let range_expr = if inclusive {
+                format!("::marigold::marigold_impl::futures::stream::iter({n1}..={n2})")
+            } else {
+                format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})")
+            };
+
+            Ok(InputFunctionNode {
+                variability: InputVariability::Constant,
+                input_count: InputCount::Known(count),
+                code: range_expr,
+            })
         } else {
-            (false, next.as_str())
-        };
-
-        let end_val = n2
-            .parse::<num_bigint::BigInt>()
-            .map_err(|e| format!("Could not parse range end: {}", e))?;
-        let start_val = n1
-            .parse::<num_bigint::BigInt>()
-            .map_err(|e| format!("Could not parse range start: {}", e))?;
-
-        let count = if inclusive {
-            (end_val - &start_val + num_bigint::BigInt::from(1u32))
-                .to_biguint()
-                .ok_or_else(|| "Range count is negative".to_string())?
-        } else {
-            (end_val - &start_val)
-                .to_biguint()
-                .ok_or_else(|| "Range count is negative".to_string())?
-        };
-
-        let range_expr = if inclusive {
-            format!("::marigold::marigold_impl::futures::stream::iter({n1}..={n2})")
-        } else {
-            format!("::marigold::marigold_impl::futures::stream::iter({n1}..{n2})")
-        };
-
-        Ok(InputFunctionNode {
-            variability: InputVariability::Constant,
-            input_count: InputCount::Known(count),
-            code: range_expr,
-        })
+            let enum_name = first.as_str();
+            Ok(InputFunctionNode {
+                variability: InputVariability::Constant,
+                input_count: InputCount::Enum(enum_name.to_string()),
+                code: format!("::marigold::marigold_impl::futures::stream::iter({enum_name}::__marigold_variants())"),
+            })
+        }
     }
 
     fn build_read_file_csv_input(pair: Pair<Rule>) -> Result<InputFunctionNode, String> {
         let mut inner = pair.into_inner();
 
         // Extract path (quoted_string) - keep quotes for LALRPOP compatibility
-        let path = inner
-            .next()
-            .ok_or_else(|| "Missing path in read_file".to_string())?
-            .as_str();
+        let path = next_pair(&mut inner, "Missing path in read_file")?.as_str();
 
         // Extract struct type (free_text_identifier)
         // Note: Pest only captures non-literal tokens, so we skip "csv", "struct", "=" literals
-        let deserialization_struct = inner
-            .next()
-            .ok_or_else(|| "Missing struct type in read_file".to_string())?
-            .as_str();
+        let deserialization_struct =
+            next_pair(&mut inner, "Missing struct type in read_file")?.as_str();
 
         // Check for optional infer_compression parameter (boolean_value)
         let infer_compression = inner.next().map(|p| p.as_str() == "true");
@@ -1014,27 +958,15 @@ impl PestAstBuilder {
 
     fn build_keep_first_n_fn(pair: Pair<Rule>) -> Result<String, String> {
         let mut inner = pair.into_inner();
-        let n = inner
-            .next()
-            .ok_or_else(|| "Missing keep_first_n size".to_string())?
-            .as_str();
-        let value_fn = inner
-            .next()
-            .ok_or_else(|| "Missing keep_first_n value function".to_string())?
-            .as_str();
+        let n = next_pair(&mut inner, "Missing keep_first_n size")?.as_str();
+        let value_fn = next_pair(&mut inner, "Missing keep_first_n value function")?.as_str();
         Ok(format!("keep_first_n({n}, {value_fn}).await"))
     }
 
     fn build_fold_fn(pair: Pair<Rule>) -> Result<String, String> {
         let mut inner = pair.into_inner();
-        let state = inner
-            .next()
-            .ok_or_else(|| "Missing fold state".to_string())?
-            .as_str();
-        let fun = inner
-            .next()
-            .ok_or_else(|| "Missing fold function".to_string())?
-            .as_str();
+        let state = next_pair(&mut inner, "Missing fold state")?.as_str();
+        let fun = next_pair(&mut inner, "Missing fold function")?.as_str();
 
         let number_or_constructor = match state.trim().parse::<f64>() {
             Ok(_) => state.to_string(),
@@ -1062,15 +994,11 @@ impl PestAstBuilder {
                 let mut inner_pairs = inner.into_inner();
 
                 // Extract path (quoted_string) - keep quotes for LALRPOP compatibility
-                let path_pair = inner_pairs
-                    .next()
-                    .ok_or_else(|| "Missing path in write_file".to_string())?;
+                let path_pair = next_pair(&mut inner_pairs, "Missing path in write_file")?;
                 let path = path_pair.as_str();
 
                 // Extract format (write_file_format)
-                let format_pair = inner_pairs
-                    .next()
-                    .ok_or_else(|| "Missing format in write_file".to_string())?;
+                let format_pair = next_pair(&mut inner_pairs, "Missing format in write_file")?;
                 let format = format_pair.as_str();
 
                 // Only "csv" format is currently supported
@@ -1195,7 +1123,7 @@ impl PestAstBuilder {
                   None
                 })
             )
-        }"
+        }}"
             .to_string(),
             returning: false,
         })
@@ -1279,7 +1207,7 @@ impl PestAstBuilder {
                       None
                   })
               )
-          }"
+          }}"
             .to_string(),
             returning: false,
         })
