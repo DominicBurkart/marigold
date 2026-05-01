@@ -25,7 +25,8 @@ enum MarigoldCommand {
         /// Path of the Marigold file to read
         file: Option<String>,
     },
-    /// Clean the cache for the passed file.\n    Clean {
+    /// Clean the cache for the passed file.
+    Clean {
         /// Path of the Marigold file to read
         file: Option<String>,
     },
@@ -85,14 +86,11 @@ fn prepare_cache(
     marigold_version: &str,
     workspace_path: Option<&str>,
 ) -> Result<std::path::PathBuf> {
-    // Only Run and Install reach this function; Analyze, Uninstall, Clean, and
-    // CleanAll all call std::process::exit before prepare_cache is invoked.
     const RUST_EDITION: &str = "2021";
 
-    // The generated main.rs wraps program_contents as:
-    //   marigold::m!({program_contents}).await
-    // The sequence `})` closes the macro call and lets an attacker inject
-    // arbitrary Rust after the `.await`. Guard against it explicitly.
+    // Reject program contents containing `})` — that sequence closes the
+    // `marigold::m!({program_contents}).await` invocation and would allow
+    // arbitrary Rust code injection.
     if program_contents.contains("}") {
         anyhow::bail!("program contents contain '})' which would escape the macro invocation");
     }
@@ -243,42 +241,47 @@ fn main() -> Result<()> {
         );
     }
 
-    // Uninstall, Clean, CleanAll, and Analyze all exit before reaching the
-    // cache / cargo invocation below, so only Run and Install continue past here.
-    match &args.command {
-        Some(Uninstall { file: _ }) => std::process::exit(
-            std::process::Command::new("cargo")
-                .args(["uninstall", &program_name])
-                .spawn()?
-                .wait()?
-                .code()
-                .unwrap_or(0),
-        ),
-        Some(Clean { file: _ }) => {
-            clean_program_cache(&marigold_cache_directory, &program_name)?;
-            std::process::exit(0);
-        }
-        Some(CleanAll) => {
-            clean_all_cache(&marigold_cache_directory)?;
-            std::process::exit(0);
-        }
-        Some(Analyze { file: _ }) => {
-            let program_contents = match &file_name_argument {
-                Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
-                None => {
-                    let mut stdin = String::new();
-                    io::stdin().lock().read_to_string(&mut stdin)?;
-                    stdin.trim().to_string()
-                }
-            };
-            let result = marigold_grammar::marigold_analyze(&program_contents)
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
-            let json = serde_json::to_string_pretty(&result)?;
-            println!("{json}");
-            std::process::exit(0);
-        }
-        Some(Run { .. }) | Some(Install { .. }) | None => {}
-    }
+    let command = match args.command {
+        Some(ref command) => match command {
+            Run {
+                unoptimized: _,
+                file: _,
+            } => "run",
+            Install { file: _ } => "install",
+            Uninstall { file: _ } => std::process::exit(
+                std::process::Command::new("cargo")
+                    .args(["uninstall", &program_name])
+                    .spawn()?
+                    .wait()?
+                    .code()
+                    .unwrap_or(0),
+            ),
+            Clean { file: _ } => {
+                clean_program_cache(&marigold_cache_directory, &program_name)?;
+                std::process::exit(0);
+            }
+            CleanAll => {
+                clean_all_cache(&marigold_cache_directory)?;
+                std::process::exit(0);
+            }
+            Analyze { file: _ } => {
+                let program_contents = match &file_name_argument {
+                    Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
+                    None => {
+                        let mut stdin = String::new();
+                        io::stdin().lock().read_to_string(&mut stdin)?;
+                        stdin.trim().to_string()
+                    }
+                };
+                let result = marigold_grammar::marigold_analyze(&program_contents)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                let json = serde_json::to_string_pretty(&result)?;
+                println!("{json}");
+                std::process::exit(0);
+            }
+        },
+        None => "run",
+    };
 
     let program_contents = match file_name_argument {
         Some(path) => std::fs::read_to_string(&path)?.trim().to_string(),
@@ -300,22 +303,27 @@ fn main() -> Result<()> {
         workspace_path.as_deref(),
     )?;
 
-    let invocation = match &args.command {
-        Some(Run { unoptimized, .. }) => CargoInvocation::Run {
-            release: !unoptimized,
-        },
-        Some(Install { .. }) => CargoInvocation::Install,
-        // None defaults to run with optimizations (no subcommand given)
-        None => CargoInvocation::Run { release: true },
-        _ => unreachable!("handled above"),
-    };
+    let unoptimized = matches!(
+        &args.command,
+        Some(Run {
+            unoptimized: true,
+            file: _,
+        })
+    );
 
-    let target = match &invocation {
-        CargoInvocation::Run { .. } => manifest_path.clone(),
-        CargoInvocation::Install => marigold_cache_directory.join(&program_name),
+    let exit_status = if command == "run" {
+        invoke_cargo(
+            CargoInvocation::Run {
+                release: !unoptimized,
+            },
+            &manifest_path,
+        )?
+    } else {
+        invoke_cargo(
+            CargoInvocation::Install,
+            &marigold_cache_directory.join(&program_name),
+        )?
     };
-
-    let exit_status = invoke_cargo(invocation, &target)?;
 
     std::process::exit(exit_status.code().unwrap_or(0));
 }
@@ -472,7 +480,7 @@ mod tests {
 
         // Derive expected cache path from the injected XDG_CACHE_HOME so the
         // assertion is hermetic and independent of the ambient CI environment.
-        let cache_dir = tmp.join(".cache").join("marigold").join("test_clean");
+        let cache_dir = tmp.join(".cache/marigold/test_clean");
         assert!(cache_dir.exists(), "cache should exist after run");
 
         // Clean
@@ -518,7 +526,7 @@ mod tests {
 
         // Derive expected cache root from the injected XDG_CACHE_HOME so the
         // assertion is hermetic and independent of the ambient CI environment.
-        let cache_root = tmp.join(".cache").join("marigold");
+        let cache_root = tmp.join(".cache/marigold");
         assert!(cache_root.exists(), "cache should exist after run");
 
         // Clean all
@@ -604,22 +612,21 @@ mod cache_tests {
     }
 
     // This test mutates process-wide environment state (XDG_CACHE_HOME) which is
-    // unsound in a multi-threaded test binary (`set_var` is unsafe since Rust 1.81).
-    // Run explicitly, isolated, with:
+    // unsound in a multi-threaded test binary (set_var is deprecated/unsafe since
+    // Rust 1.81). Run explicitly in isolation with:
     //   cargo test -p marigold -F cli -- --ignored test_cache_root_returns_os_path
     #[ignore]
     #[test]
     fn test_cache_root_returns_os_path() {
         let tmp = tempfile::tempdir().unwrap();
-        // SAFETY: this test is #[ignore] and must be run with --test-threads=1
-        // to avoid data races on the process environment.
+        // Set XDG_CACHE_HOME so cache_root() does not depend on $HOME being
+        // present in the CI environment.
         #[allow(deprecated)]
         unsafe {
             std::env::set_var("XDG_CACHE_HOME", tmp.path());
         }
         let root = cache_root().expect("cache_root failed");
-        assert!(root.is_absolute());
-        assert_eq!(root.file_name().and_then(|n| n.to_str()), Some("marigold"));
+        assert_eq!(root.file_name().unwrap(), "marigold");
         assert!(root.starts_with(tmp.path()));
     }
 
@@ -723,8 +730,6 @@ mod cache_tests {
     #[test]
     fn test_prepare_cache_rejects_injection() {
         let tmp = tempfile::tempdir().unwrap();
-        // The generated wrapper is `marigold::m!({program_contents}).await`;
-        // the sequence `})` closes the macro call and enables injection.
         let result = prepare_cache(
             tmp.path(),
             "prog",
@@ -734,7 +739,7 @@ mod cache_tests {
         );
         assert!(
             result.is_err(),
-            "prepare_cache should reject program_contents containing '})'"           
+            "prepare_cache should reject program_contents containing '})'"
         );
     }
 }
