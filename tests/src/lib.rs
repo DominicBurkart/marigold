@@ -232,6 +232,15 @@ mod tests {
         t.compile_fail("ui/bad_syntax.rs");
     }
 
+    /// Verify that `range(EnumName)` where `EnumName` is not a declared enum in the
+    /// program produces a `compile_error!` diagnostic (from `resolve_enum_range_counts`)
+    /// rather than a panic or silent codegen failure.
+    #[test]
+    fn range_unknown_enum_yields_compile_error() {
+        let t = trybuild::TestCases::new();
+        t.compile_fail("ui/range_unknown_enum.rs");
+    }
+
     // --- New tests below ---
 
     #[tokio::test]
