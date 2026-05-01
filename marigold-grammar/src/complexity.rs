@@ -85,7 +85,7 @@ impl fmt::Display for ComplexityClass {
             ComplexityClass::OCombinatorial(k) => write!(f, "O(C(n,{k}))"),
             ComplexityClass::OPermutational(k) => write!(f, "O(n!/(n-{k})!)"),
             ComplexityClass::OFactorial => write!(f, "O(n!)"),
-            ComplexityClass::Unknown => write!(f, "O(?)" ),
+            ComplexityClass::Unknown => write!(f, "O(?)"),
         }
     }
 }
@@ -800,9 +800,9 @@ fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
 fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Symbolic {
     match kind {
         StreamFunctionKind::Map | StreamFunctionKind::OkOrPanic => cardinality,
-        StreamFunctionKind::Filter
-        | StreamFunctionKind::FilterMap
-        | StreamFunctionKind::Ok => Symbolic::Filtered(Box::new(cardinality)),
+        StreamFunctionKind::Filter | StreamFunctionKind::FilterMap | StreamFunctionKind::Ok => {
+            Symbolic::Filtered(Box::new(cardinality))
+        }
         // TODO(#222): dedicated Symbolic::TakeWhile variant — take_while yields only a
         // prefix of the stream (not an arbitrary subset like filter), so a dedicated variant
         // would let the analyzer exploit the prefix guarantee for early-termination and
@@ -1166,7 +1166,7 @@ mod tests {
     #[test]
     fn test_parse_unknown() {
         assert_eq!(
-            ComplexityClass::from_str("O(?)" ).unwrap(),
+            ComplexityClass::from_str("O(?)").unwrap(),
             ComplexityClass::Unknown
         );
     }
