@@ -537,7 +537,12 @@ mod tests {
     }
 
     /// Verify that `marigold analyze` exits with a non-zero status code when
-    /// given a syntactically invalid program, and does not panic.
+    /// given a syntactically invalid program, and emits a parse-error message
+    /// on stderr.
+    ///
+    /// Using `.output()` (rather than `.status()`) lets us inspect stderr and
+    /// confirm that the failure is actually a parse error, not some unrelated
+    /// reason (missing workspace path, I/O error, etc.).
     #[test]
     fn test_analyze_command_rejects_invalid_program() {
         let binary = &*BINARY;
@@ -547,16 +552,22 @@ mod tests {
         // Missing closing paren - parser should reject this.
         fs::write(&marigold_file, "range(0, 10").expect("could not write test file");
 
-        let status = Command::new(&binary)
+        let output = Command::new(&binary)
             .args(["analyze", marigold_file.to_str().unwrap()])
             .env("HOME", &tmp)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
-            .status()
+            .output()
             .expect("could not run marigold analyze");
 
         assert!(
-            !status.success(),
+            !output.status.success(),
             "marigold analyze should fail on invalid input but exited with success"
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Parse error"),
+            "expected stderr to contain 'Parse error', got: {stderr:?}"
         );
 
         let _ = fs::remove_dir_all(&tmp);
