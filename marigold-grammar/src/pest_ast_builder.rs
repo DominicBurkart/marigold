@@ -645,7 +645,7 @@ impl PestAstBuilder {
 }
 
 /// Extract the return type from a raw fn declaration string.
-/// e.g. `fn foo(x: i32) -> i32 { x }` → `i32`
+/// e.g. `fn foo(x: i32) -> i32 { x }` -> `i32`
 fn extract_return_type_from_fn(fn_text: &str) -> String {
     if let Some(arrow_pos) = fn_text.find("->") {
         let after_arrow = fn_text[arrow_pos + 2..].trim();
