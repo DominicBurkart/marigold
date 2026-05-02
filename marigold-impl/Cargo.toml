@@ -12,6 +12,7 @@ default = []
 tokio = ["tokio/full", "tokio/tracing", "dep:num_cpus"]
 async-std = ["dep:async-std", "dep:num_cpus"]
 io = ["tokio/fs", "dep:csv-async", "dep:async-compression", "dep:tokio-util", "dep:flate2", "dep:serde", "arrayvec/serde"]
+bench-instrumentation = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -24,7 +25,7 @@ gen-nested-iter-yield = "=0.1.3"
 genawaiter = {version = "0.99.1", features = ["futures03"]}
 parking_lot = "0.12.0"
 tokio = { version = "1", default-features=false, optional=true}
-async-std = { version = "1", default-features=false, optional=true}
+async-std = { version = "1", features=["async-global-executor"], optional=true}
 num_cpus = {version="1.13.1", optional=true}
 tracing = "0.1"
 csv-async = {version="1.2", optional=true}
@@ -38,3 +39,36 @@ pin-utils = "0.1.0"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"]}
+criterion = { version = "0.5", features = ["html_reports"] }
+cpu-time = "1.0"
+tracing-subscriber = { version = "0.3", features = ["registry"] }
+
+[[bench]]
+name = "keep_first_n"
+harness = false
+required-features = ["tokio"]
+
+[[bench]]
+name = "cpu_utilization"
+harness = false
+required-features = ["tokio"]
+
+[[bench]]
+name = "per_item_costs"
+harness = false
+required-features = ["tokio"]
+
+[[bench]]
+name = "map_filter_utilization"
+harness = false
+required-features = ["tokio"]
+
+[[bench]]
+name = "pipeline_stages"
+harness = false
+required-features = ["tokio"]
+
+[[bench]]
+name = "driver_worker_split"
+harness = false
+required-features = ["tokio", "bench-instrumentation"]

@@ -1,13 +1,9 @@
 [advisories]
 ignore = [
-    # serde_cbor unmaintained — used only by criterion (dev dep)
-    "RUSTSEC-2021-0127",
-    # atty unmaintained — used only by criterion (dev dep)
-    "RUSTSEC-2021-0145",
     # proc-macro-error unmaintained — used only by internal macros
     "RUSTSEC-2024-0370",
-    # atty unsound potential unaligned read — dev dep only
-    "RUSTSEC-2024-0375",
+    # rand unsound with custom logger using thread_rng — not applicable (no custom logger)
+    "RUSTSEC-2026-0097",
 ]
 
 [licenses]
