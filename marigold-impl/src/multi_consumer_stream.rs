@@ -276,12 +276,14 @@ mod spawn_tests {
         let rx1 = mcs.get();
         let rx2 = mcs.get();
 
-        // run() spawns internally; join its JoinHandle so the fanout completes
-        // before we collect.
-        mcs.run().await;
+        // run() spawns internally and returns immediately.  We must drive the
+        // fanout task and the receivers concurrently; otherwise the single-item
+        // channel buffer (BUFFER_SIZE = 1) causes a deadlock when the producer
+        // tries to send item 2 before item 1 has been drained.
+        let run_handle = tokio::spawn(mcs.run());
 
-        let got1 = rx1.collect::<Vec<_>>().await;
-        let got2 = rx2.collect::<Vec<_>>().await;
+        let (got1, got2, _) =
+            tokio::join!(rx1.collect::<Vec<_>>(), rx2.collect::<Vec<_>>(), run_handle,);
 
         assert_eq!(got1, vec![1, 2, 3]);
         assert_eq!(got2, vec![1, 2, 3]);
