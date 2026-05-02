@@ -1,12 +1,14 @@
-PR #115 CI re-trigger marker — 2026-05-01
+PR #115 CI re-trigger marker — 2026-05-02
 
 The push workflows ([push]-triggered: Tests, style hooks, builds, Benches)
-did not produce check runs on commit 7942aace4709af34e61f355c14cec21b2dd20537 —
+did not produce check runs on commit b9fb027807e9521c19f9d1133cce5fb614c05fd6 —
 only CodeQL/Analyze ran. This commit re-triggers the missing workflows.
 
-Same symptom observed on PR #140 (head a3e2b40c) pushed in the same window,
-suggesting transient GitHub Actions scheduling/queue behavior on rapid
-concurrent pushes. The implementation itself is verified by prior local runs
-(see PR comments: cargo test -p marigold-grammar/tests, fmt, clippy all clean).
+Same symptom observed previously on this PR (commit 7942aace) and on
+PR #140 (head a3e2b40c) pushed in the same window, suggesting transient
+GitHub Actions scheduling/queue behavior on rapid concurrent pushes.
 
-Session: claude/sdk
+The implementation itself is verified by prior local runs (see PR comments:
+cargo test -p marigold-grammar/tests, fmt, clippy all clean).
+
+Sessions: claude/sdk, https://claude.ai/code/session_01G7ndAwj9iNcWH8D6PyBBHB
