@@ -546,10 +546,15 @@ pub struct ProgramComplexity {
     pub program_space: ComplexityClass,
     pub program_exact_space: ExactComplexity,
     pub program_cardinality: Cardinality,
-    /// When true, the analysis assumes user-defined functions are O(1); set when any
-    /// `FnDeclaration` node exists in the program. Callers should treat complexity results
-    /// conservatively if this flag is true, because the actual cost of those functions is
-    /// not analysed.
+    /// When `true`, the analysis assumes every user-**declared** function (i.e. a
+    /// `FnDeclaration` node present in the source) is O(1); set when any such node exists
+    /// in the program. Callers should treat complexity results conservatively if this flag
+    /// is true, because the actual cost of those functions is not analysed.
+    ///
+    /// Note: the analyzer also treats imported / extern user functions (e.g. Rust closures
+    /// or symbols like `double` referenced without a corresponding `FnDeclaration`) as O(1),
+    /// but those do **not** flip this flag. The flag is specifically scoped to functions
+    /// that appear as `FnDeclaration` nodes in the parsed source.
     #[serde(default)]
     pub assumes_o1_user_fns: bool,
 }
@@ -752,9 +757,8 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
                     ),
                 );
             }
-            TypedExpression::FnDeclaration(_) => {
-                has_fn_declaration = true;
-            }
+            // FnDeclaration nodes are fully handled in the first pass above;
+            // there is nothing more to do for them in this pass.
             _ => {}
         }
     }

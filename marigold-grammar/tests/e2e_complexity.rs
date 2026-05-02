@@ -66,6 +66,21 @@ fn with_fn_decl_assumes_true() {
     assert!(result.assumes_o1_user_fns);
 }
 
+/// Calling an undeclared (extern / imported) user function does NOT flip `assumes_o1_user_fns`.
+///
+/// The analyzer silently treats such calls as O(1) via the `fn_map.get()` miss path, but
+/// the flag is specifically scoped to `FnDeclaration` nodes present in the source. This test
+/// pins that semantics so a future refactor cannot silently change it without a test failure.
+#[test]
+fn extern_fn_does_not_flip_flag() {
+    // no_fn_decl.marigold calls `double`, which is an extern symbol with no FnDeclaration.
+    let result = analyze_file("tests/programs/no_fn_decl.marigold");
+    assert!(
+        !result.assumes_o1_user_fns,
+        "an extern/imported user function (no FnDeclaration) must not set assumes_o1_user_fns"
+    );
+}
+
 #[test]
 fn assumes_o1_user_fns_serde_roundtrip() {
     let result = analyze_file("tests/programs/with_fn_decl.marigold");
