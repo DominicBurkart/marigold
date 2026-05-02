@@ -52,9 +52,7 @@ impl PestAstBuilder {
             Rule::fn_declaration => Self::build_fn_declaration(first).map(Into::into),
             Rule::struct_declaration => Self::build_struct_declaration(first).map(Into::into),
             Rule::enum_declaration => Self::build_enum_declaration(first).map(Into::into),
-            Rule::stream_variable_assignment => {
-                Self::build_stream_variable(first).map(Into::into)
-            }
+            Rule::stream_variable_assignment => Self::build_stream_variable(first).map(Into::into),
             Rule::stream_variable_from_prior_stream_variable_assignment => {
                 Self::build_stream_variable_from_prior(first).map(Into::into)
             }
@@ -152,19 +150,17 @@ impl PestAstBuilder {
             match variant_pair.as_rule() {
                 Rule::enum_variant => {
                     let mut variant_inner = variant_pair.into_inner();
-                    let variant_name =
-                        next_pair(&mut variant_inner, "enum_variant missing name")?
-                            .as_str()
-                            .to_string();
+                    let variant_name = next_pair(&mut variant_inner, "enum_variant missing name")?
+                        .as_str()
+                        .to_string();
                     let definition = variant_inner.next().map(|p| p.as_str().to_string());
                     variants.push((variant_name, definition));
                 }
                 Rule::default_enum_variant => {
                     let mut dev_inner = variant_pair.into_inner();
-                    let dev_name =
-                        next_pair(&mut dev_inner, "default_enum_variant missing name")?
-                            .as_str()
-                            .to_string();
+                    let dev_name = next_pair(&mut dev_inner, "default_enum_variant missing name")?
+                        .as_str()
+                        .to_string();
                     // Check if the next token is a size or a value
                     if let Some(next_tok) = dev_inner.next() {
                         match next_tok.as_rule() {
@@ -202,8 +198,10 @@ impl PestAstBuilder {
         let name_pair = next_pair(&mut inner, "stream_variable missing variable_name")?;
         let variable_name = name_pair.as_str().to_string();
 
-        let stream_pair =
-            next_pair(&mut inner, "stream_variable missing unnamed_stream_without_output")?;
+        let stream_pair = next_pair(
+            &mut inner,
+            "stream_variable missing unnamed_stream_without_output",
+        )?;
         let (inp, funs) = Self::build_input_and_funs(stream_pair)?;
 
         Ok(StreamVariableNode {
@@ -301,8 +299,10 @@ impl PestAstBuilder {
         let mut inner = pair.into_inner();
 
         // First child is always the input + functions without output
-        let stream_pair =
-            next_pair(&mut inner, "unnamed_stream missing unnamed_stream_without_output")?;
+        let stream_pair = next_pair(
+            &mut inner,
+            "unnamed_stream missing unnamed_stream_without_output",
+        )?;
         let (inp, funs) = Self::build_input_and_funs(stream_pair)?;
 
         // Last child is the output function
@@ -321,7 +321,10 @@ impl PestAstBuilder {
     ) -> Result<(InputFunctionNode, Vec<StreamFunctionNode>), String> {
         let mut inner = pair.into_inner();
 
-        let inp_pair = next_pair(&mut inner, "unnamed_stream_without_output missing input_fun")?;
+        let inp_pair = next_pair(
+            &mut inner,
+            "unnamed_stream_without_output missing input_fun",
+        )?;
         let inp = Self::build_input_function(inp_pair)?;
 
         let mut funs = Vec::new();
@@ -411,9 +414,7 @@ impl PestAstBuilder {
 
                         return Ok(InputFunctionNode {
                             variability: InputVariability::Constant,
-                            input_count: InputCount::Known(
-                                num_bigint::BigUint::from(count),
-                            ),
+                            input_count: InputCount::Known(num_bigint::BigUint::from(count)),
                             code,
                         });
                     }
@@ -630,9 +631,7 @@ impl PestAstBuilder {
                     .as_str()
                     .to_string();
                 let stream_prefix = String::new();
-                let stream_postfix = format!(
-                    ".write_file(\"{path}\", {format})",
-                );
+                let stream_postfix = format!(".write_file(\"{path}\", {format})",);
                 Ok(OutputFunctionNode {
                     stream_prefix,
                     stream_postfix,
@@ -792,7 +791,10 @@ mod tests {
 
     #[test]
     fn test_extract_body() {
-        assert_eq!(extract_body_from_fn("fn foo(x: i32) -> i32 { x * 2 }"), " x * 2 ");
+        assert_eq!(
+            extract_body_from_fn("fn foo(x: i32) -> i32 { x * 2 }"),
+            " x * 2 "
+        );
     }
 
     #[test]
@@ -857,8 +859,7 @@ mod tests {
         use crate::parser::{MarigoldPestParser, Rule};
         use pest::Parser;
 
-        let src =
-            "fn take_matrix(m: &[[i32; 3]; 3]) -> i32 { 0 }\nrange(0, 1).return";
+        let src = "fn take_matrix(m: &[[i32; 3]; 3]) -> i32 { 0 }\nrange(0, 1).return";
         let pairs = MarigoldPestParser::parse(Rule::program, src).expect("parse failed");
         let exprs = PestAstBuilder::build_program(pairs).expect("build failed");
 
