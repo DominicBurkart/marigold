@@ -13,7 +13,10 @@ pub fn marigold(item: TokenStream) -> TokenStream {
     let s = item.to_string();
     match marigold_parse(&s) {
         Ok(generated) => {
-            let src = format!("{{\n{}\n}}\n", generated);
+            let src = format!("{{
+{}
+}}
+", generated);
             match src.parse() {
                 Ok(ts) => ts,
                 Err(e) => {
