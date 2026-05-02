@@ -3,7 +3,7 @@
 //! These tests call `parse_marigold` from outside the crate to exercise the
 //! public error paths. They focus on cases not already covered by the
 //! `negative_tests` module inside `marigold-grammar/src/parser.rs`:
-//! unclosed punctuation, unknown function names, non-numeric range arguments,
+//! unclosed punctuation, unknown function names, non-integer range arguments,
 //! and a bare identifier that is not a complete program.
 //!
 //! Each test asserts both that the result is an `Err` *and* that the error
@@ -72,9 +72,12 @@ fn unknown_chained_function() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn range_with_non_numeric_arguments() {
-    // `range` expects integer literals; identifiers are not accepted.
-    assert_parse_err!("range(a, b).return", "Parse error");
+fn range_with_float_arguments() {
+    // `free_text_literal` matches ASCII_DIGIT+ or a letter-starting identifier.
+    // A float like `1.5` is not a valid free_text_literal: the digit sequence
+    // `1` is consumed, but the remaining `.5` prevents the required comma from
+    // matching, so the entire parse fails.
+    assert_parse_err!("range(1.5, 2.5).return", "Parse error");
 }
 
 // ---------------------------------------------------------------------------
