@@ -95,7 +95,6 @@ mod tests {
     #[tokio::test]
     async fn collect_and_apply_returns_async_generator() {
         use futures::StreamExt;
-        use genawaiter;
 
         let collected = futures::stream::iter(1..=3)
             .collect_and_apply(|values| async {

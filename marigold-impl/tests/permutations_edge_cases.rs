@@ -44,20 +44,19 @@ async fn permutations_single_element_k1() {
 
 #[tokio::test]
 async fn permutations_with_replacement_k_zero() {
-    // itertools::multi_cartesian_product called on zero iterators yields an
-    // empty iterator (observed behavior on itertools >=0.13). This diverges
-    // from the mathematical Cartesian-product identity, but we assert the
-    // observed library contract so the test is stable.
+    // itertools::multi_cartesian_product of 0 iterators yields exactly one
+    // result: the empty product [[]].  This is the standard mathematical
+    // convention (there is exactly one way to choose 0 elements from any set)
+    // and is the behaviour of itertools 0.10.x multi_cartesian_product.
     //
-    // Note: this differs from `permutations(0)` which yields vec![vec![]]
-    // via itertools::permutations(0); the two code paths use different
-    // itertools primitives and have different k=0 semantics.
+    // Note: this differs from permutations_with_replacement(k) on an *empty*
+    // source (which yields nothing because there are no elements to choose from).
     let result = futures::stream::iter(vec![1, 2])
         .permutations_with_replacement(0)
         .await
         .collect::<Vec<_>>()
         .await;
-    assert!(result.is_empty());
+    assert_eq!(result, vec![vec![] as Vec<i32>]);
 }
 
 #[tokio::test]
