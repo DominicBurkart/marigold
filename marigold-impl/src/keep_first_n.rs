@@ -76,13 +76,11 @@ where
     let mut indexed_stream = sinput.enumerate();
 
     // Create a heap that stores (index, item) tuples with tie-breaking comparator
-    let indexed_comparator = move |a: &(usize, T), b: &(usize, T)| {
-        match sorted_by(&a.1, &b.1) {
-            Ordering::Less => Ordering::Less,
-            Ordering::Greater => Ordering::Greater,
-            // When equal, prefer lower index (earlier in stream)
-            Ordering::Equal => a.0.cmp(&b.0),
-        }
+    // When equal, prefer lower index (earlier in stream)
+    let indexed_comparator = move |a: &(usize, T), b: &(usize, T)| match sorted_by(&a.1, &b.1) {
+        Ordering::Less => Ordering::Less,
+        Ordering::Greater => Ordering::Greater,
+        Ordering::Equal => a.0.cmp(&b.0),
     };
     let mut first_n =
         BinaryHeap::with_capacity_by(n, move |a, b| indexed_comparator(a, b).reverse());
