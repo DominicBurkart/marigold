@@ -1,4 +1,4 @@
-error: marigold parse error: Parse error: range(NonExistent): 'NonExistent' is not a declared enum in this program
+error: marigold parse error: range(NonExistent): 'NonExistent' is not a declared enum in this program
  --> ui/range_unknown_enum.rs:9:13
   |
 9 |     let _ = marigold::m!(range(NonExistent).return);

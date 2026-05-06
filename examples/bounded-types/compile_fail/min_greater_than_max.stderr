@@ -1,4 +1,4 @@
-error: marigold parse error: Parse error: Bounded type validation failed:
+error: marigold parse error: Bounded type validation failed:
          - Bounds violation for field 'Sensor.reading': min (100) is greater than max (0)
   --> compile_fail/min_greater_than_max.rs:6:13
    |

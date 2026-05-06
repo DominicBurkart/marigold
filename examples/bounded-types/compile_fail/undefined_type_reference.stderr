@@ -1,4 +1,4 @@
-error: marigold parse error: Parse error: Bounded type validation failed:
+error: marigold parse error: Bounded type validation failed:
          - Undefined type: 'NonExistent'
   --> compile_fail/undefined_type_reference.rs:6:13
    |

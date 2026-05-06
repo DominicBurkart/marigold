@@ -1,4 +1,4 @@
-error: marigold parse error: Parse error:  --> 1:5
+error: marigold parse error:  --> 1:5
          |
        1 | bad syntax
          |     ^---

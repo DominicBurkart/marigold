@@ -1,4 +1,4 @@
-error: marigold parse error: Parse error: Bounded type validation failed:
+error: marigold parse error: Bounded type validation failed:
          - Bounds violation for field 'Temp.reading': uint[] cannot have negative min value (-10)
   --> compile_fail/negative_bounds_uint.rs:6:13
    |

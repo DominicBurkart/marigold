@@ -26,7 +26,7 @@ pub struct MarigoldParseError(pub String);
 
 impl fmt::Display for MarigoldParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Parse error: {}", self.0)
+        write!(f, "{}", self.0)
     }
 }
 
