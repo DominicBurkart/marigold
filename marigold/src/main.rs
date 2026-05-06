@@ -483,10 +483,16 @@ mod tests {
 
         // A simple valid Marigold program: range written to CSV (non-returning terminal).
         // `analyze` only needs to parse and inspect the pipeline - it does not run it.
+        // We embed the path to a (not-yet-created) tmp file so the program text is valid;
+        // analyze never executes the pipeline, so the file does not need to exist.
+        let output_csv = tmp.join("analyze_output.csv");
         let marigold_file = tmp.join("test_analyze.marigold");
         fs::write(
             &marigold_file,
-            r#"range(0, 100).write_file("/dev/null", csv)"#,
+            format!(
+                r#"range(0, 100).write_file("{}", csv)"#,
+                output_csv.display()
+            ),
         )
         .expect("could not write test file");
 
