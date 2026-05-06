@@ -47,6 +47,17 @@ pub enum ComplexityClass {
 }
 
 impl ComplexityClass {
+    /// Stable per-class rank used as the primary key for `Ord`.
+    ///
+    /// Returns a small `u64` (0..=7) identifying the class only, with no
+    /// dependence on the parameter `k`. Parameterized variants
+    /// (`ONLogK`, `OPolynomial`, `OCombinatorial`, `OPermutational`) all
+    /// return a single rank for the class; their `k` values are compared
+    /// lexicographically as a secondary key in the custom `Ord` impl below.
+    ///
+    /// This avoids the additive-`k` collision bug (issue #232) where, for
+    /// example, `OPolynomial(999_995)` and `OCombinatorial(0)` both mapped
+    /// to the same ordinal slot, breaking the `Ord`/`Eq` contract.
     fn ordinal(&self) -> u64 {
         match self {
             ComplexityClass::O1 => 0,
@@ -54,11 +65,24 @@ impl ComplexityClass {
             ComplexityClass::ON => 2,
             ComplexityClass::ONLogK(_) => 3,
             ComplexityClass::ONLogN => 4,
-            ComplexityClass::OPolynomial(k) => 5 + *k,
-            ComplexityClass::OCombinatorial(k) => 1_000_000 + *k,
-            ComplexityClass::OPermutational(k) => 2_000_000 + *k,
-            ComplexityClass::OFactorial => 3_000_000,
+            ComplexityClass::OPolynomial(_) => 5,
+            ComplexityClass::OCombinatorial(_) => 6,
+            ComplexityClass::OPermutational(_) => 7,
+            ComplexityClass::OFactorial => 8,
             ComplexityClass::Unknown => u64::MAX,
+        }
+    }
+
+    /// Secondary key for `Ord`: the parameter `k` for parameterized variants,
+    /// `0` for non-parameterized variants. Combined with `ordinal()` this
+    /// yields a `(class_rank, k)` lexicographic ordering.
+    fn parameter_key(&self) -> u64 {
+        match self {
+            ComplexityClass::ONLogK(k)
+            | ComplexityClass::OPolynomial(k)
+            | ComplexityClass::OCombinatorial(k)
+            | ComplexityClass::OPermutational(k) => *k,
+            _ => 0,
         }
     }
 
@@ -71,7 +95,19 @@ impl ComplexityClass {
     }
 }
 
-impl_ord_via_ordinal!(ComplexityClass);
+impl PartialOrd for ComplexityClass {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ComplexityClass {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.ordinal()
+            .cmp(&other.ordinal())
+            .then_with(|| self.parameter_key().cmp(&other.parameter_key()))
+    }
+}
 
 impl fmt::Display for ComplexityClass {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1936,6 +1972,100 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn onlogk_ord_consistent_with_eq() {
+        use std::cmp::Ordering;
+        assert!(ComplexityClass::ONLogK(2) < ComplexityClass::ONLogK(5));
+        assert_eq!(
+            ComplexityClass::ONLogK(2).cmp(&ComplexityClass::ONLogK(2)),
+            Ordering::Equal
+        );
+        assert_ne!(ComplexityClass::ONLogK(1), ComplexityClass::ONLogK(2));
+        assert_ne!(
+            ComplexityClass::ONLogK(1).cmp(&ComplexityClass::ONLogK(2)),
+            Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn complexity_class_boundary_preserved() {
+        // ON < ONLogK(1)
+        assert!(ComplexityClass::ON < ComplexityClass::ONLogK(1));
+        // ONLogK(u64::MAX) < ONLogN — would have failed under old impl since
+        // ONLogK collapsed to ordinal 3 (no k carried) and ONLogN was 4.
+        // (Under old impl this happened to hold; the failure mode for
+        // ONLogK was Ord/Eq inconsistency between ONLogK(_) values.)
+        assert!(ComplexityClass::ONLogK(u64::MAX) < ComplexityClass::ONLogN);
+        // ONLogN < OPolynomial(1)
+        assert!(ComplexityClass::ONLogN < ComplexityClass::OPolynomial(1));
+        // OPolynomial(u64::MAX) < OCombinatorial(0) — caught the broadened
+        // bug: under old impl, OPolynomial(k)=5+k and OCombinatorial(k)=
+        // 1_000_000+k could collide / cross when k >= 999_995.
+        assert!(ComplexityClass::OPolynomial(u64::MAX) < ComplexityClass::OCombinatorial(0));
+        // OCombinatorial(u64::MAX) < OPermutational(0)
+        assert!(ComplexityClass::OCombinatorial(u64::MAX) < ComplexityClass::OPermutational(0));
+        // OPermutational(u64::MAX) < OFactorial
+        assert!(ComplexityClass::OPermutational(u64::MAX) < ComplexityClass::OFactorial);
+    }
+
+    #[test]
+    fn parameterized_variants_compare_by_k() {
+        use std::cmp::Ordering;
+        assert!(ComplexityClass::OPolynomial(2) < ComplexityClass::OPolynomial(5));
+        assert_eq!(
+            ComplexityClass::OPolynomial(2).cmp(&ComplexityClass::OPolynomial(2)),
+            Ordering::Equal
+        );
+        assert!(ComplexityClass::OCombinatorial(2) < ComplexityClass::OCombinatorial(5));
+        assert_eq!(
+            ComplexityClass::OCombinatorial(2).cmp(&ComplexityClass::OCombinatorial(2)),
+            Ordering::Equal
+        );
+        assert!(ComplexityClass::OPermutational(2) < ComplexityClass::OPermutational(5));
+        assert_eq!(
+            ComplexityClass::OPermutational(2).cmp(&ComplexityClass::OPermutational(2)),
+            Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn complexity_class_sort_round_trip() {
+        let mut v = vec![
+            ComplexityClass::ONLogK(5),
+            ComplexityClass::ON,
+            ComplexityClass::ONLogK(2),
+            ComplexityClass::ONLogN,
+            ComplexityClass::OPolynomial(3),
+            ComplexityClass::ON,
+            ComplexityClass::OCombinatorial(1),
+        ];
+        v.sort();
+        assert_eq!(
+            v,
+            vec![
+                ComplexityClass::ON,
+                ComplexityClass::ON,
+                ComplexityClass::ONLogK(2),
+                ComplexityClass::ONLogK(5),
+                ComplexityClass::ONLogN,
+                ComplexityClass::OPolynomial(3),
+                ComplexityClass::OCombinatorial(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn btreemap_distinguishes_parameterized() {
+        let mut map: BTreeMap<ComplexityClass, u64> = BTreeMap::new();
+        map.insert(ComplexityClass::ONLogK(1), 1);
+        map.insert(ComplexityClass::ONLogK(2), 2);
+        map.insert(ComplexityClass::OPolynomial(1), 3);
+        assert_eq!(map.len(), 3);
+        assert_eq!(map.get(&ComplexityClass::ONLogK(1)), Some(&1));
+        assert_eq!(map.get(&ComplexityClass::ONLogK(2)), Some(&2));
+        assert_eq!(map.get(&ComplexityClass::OPolynomial(1)), Some(&3));
+    }
 }
 
 #[cfg(test)]
@@ -2055,6 +2185,7 @@ mod proptests {
                 Just(ComplexityClass::O1),
                 Just(ComplexityClass::OLogN),
                 Just(ComplexityClass::ON),
+                (1..10u64).prop_map(ComplexityClass::ONLogK),
                 Just(ComplexityClass::ONLogN),
                 (2..10u64).prop_map(ComplexityClass::OPolynomial),
                 (1..10u64).prop_map(ComplexityClass::OPermutational),
@@ -2189,6 +2320,29 @@ mod proptests {
             let s = sym.to_string();
             let parsed = Symbolic::from_str(&s).unwrap();
             prop_assert_eq!(sym, parsed);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_eq_iff_cmp_equal(
+            a in arb_complexity_class(),
+            b in arb_complexity_class(),
+        ) {
+            use std::cmp::Ordering;
+            prop_assert_eq!(a == b, a.cmp(&b) == Ordering::Equal);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn proptest_antisymmetry(
+            a in arb_complexity_class(),
+            b in arb_complexity_class(),
+        ) {
+            if a <= b && b <= a {
+                prop_assert_eq!(a, b);
+            }
         }
     }
 }
