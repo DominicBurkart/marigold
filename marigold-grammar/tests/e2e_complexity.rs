@@ -55,12 +55,6 @@ mod left_right {
 }
 
 #[test]
-fn no_fn_decl_assumes_false() {
-    let result = analyze_file("tests/programs/no_fn_decl.marigold");
-    assert!(!result.assumes_o1_user_fns);
-}
-
-#[test]
 fn with_fn_decl_assumes_true() {
     let result = analyze_file("tests/programs/with_fn_decl.marigold");
     assert!(result.assumes_o1_user_fns);
@@ -82,8 +76,19 @@ fn extern_fn_does_not_flip_flag() {
 }
 
 #[test]
-fn assumes_o1_user_fns_serde_roundtrip() {
+fn assumes_o1_user_fns_serde_roundtrip_true() {
     let result = analyze_file("tests/programs/with_fn_decl.marigold");
+    let json = serde_json::to_string(&result).expect("serialize");
+    let deserialized: marigold_grammar::complexity::ProgramComplexity =
+        serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(result.assumes_o1_user_fns, deserialized.assumes_o1_user_fns);
+}
+
+#[test]
+fn assumes_o1_user_fns_serde_roundtrip_false() {
+    // Confirms that the normal round-trip (field present, value false) also works correctly.
+    let result = analyze_file("tests/programs/no_fn_decl.marigold");
+    assert!(!result.assumes_o1_user_fns, "precondition: flag must be false");
     let json = serde_json::to_string(&result).expect("serialize");
     let deserialized: marigold_grammar::complexity::ProgramComplexity =
         serde_json::from_str(&json).expect("deserialize");
