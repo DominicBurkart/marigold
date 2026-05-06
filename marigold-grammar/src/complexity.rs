@@ -1142,7 +1142,8 @@ mod tests {
                 unknown_count += 1;
             }
         }
-        // With 10% weight we expect ~1000 unknowns; assert at least 5% as a safe floor.
+        // arb_symbolic_leaf uses a 9:1 weight (Constant vs Unknown), so ~10% of samples
+        // should be Unknown. Assert at least 5% as a conservative floor.
         assert!(
             unknown_count * 100 >= total * 5,
             "Unknown appeared {unknown_count}/{total} times, expected >= 5%"
@@ -1218,8 +1219,10 @@ mod tests {
             })
         }
 
-        // Test 32 structural combinations (bits 0–4 gate which declaration types appear)
-        // × varying field/variant counts (bits 5–8), for 512 total iterations.
+        // Iterate over 512 combinations of declaration presence and field/variant counts.
+        // Bits 0-4 (5 bits = 32 structural patterns) gate which declaration types appear;
+        // bits 5-8 vary field/variant counts within each structural pattern, yielding
+        // 512 total iterations that exercise declarations before, after, and around streams.
         for i in 0..512u32 {
             let mut expressions: Vec<TypedExpression> = Vec::new();
 
