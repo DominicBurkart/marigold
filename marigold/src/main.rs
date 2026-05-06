@@ -233,48 +233,44 @@ fn main() -> Result<()> {
         file_name
     };
 
-    // Handle commands that exit early; Run and Install fall through to prepare_cache.
-    match args.command {
-        Some(ref command) => match command {
-            Run {
-                unoptimized: _,
-                file: _,
-            } => {}
-            Install { file: _ } => {}
-            Uninstall { file: _ } => std::process::exit(
+    // Handle early-exit subcommands first, borrowing args.command.
+    // Only Run, Install, and the default (None) fall through to prepare_cache.
+    match &args.command {
+        Some(Uninstall { .. }) => {
+            return Ok(std::process::exit(
                 std::process::Command::new("cargo")
                     .args(["uninstall", &program_name])
                     .spawn()?
                     .wait()?
                     .code()
                     .unwrap_or(0),
-            ),
-            Clean { file: _ } => {
-                clean_program_cache(&marigold_cache_directory, &program_name)?;
-                std::process::exit(0);
-            }
-            CleanAll => {
-                clean_all_cache(&marigold_cache_directory)?;
-                std::process::exit(0);
-            }
-            Analyze { file: _ } => {
-                let program_contents = match &file_name_argument {
-                    Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
-                    None => {
-                        let mut stdin = String::new();
-                        io::stdin().lock().read_to_string(&mut stdin)?;
-                        stdin.trim().to_string()
-                    }
-                };
-                let result = marigold_grammar::marigold_analyze(&program_contents)
-                    .map_err(|e| anyhow::anyhow!("{}", e))?;
-                let json = serde_json::to_string_pretty(&result)?;
-                println!("{json}");
-                std::process::exit(0);
-            }
-        },
-        None => {}
-    };
+            ));
+        }
+        Some(Clean { .. }) => {
+            clean_program_cache(&marigold_cache_directory, &program_name)?;
+            std::process::exit(0);
+        }
+        Some(CleanAll) => {
+            clean_all_cache(&marigold_cache_directory)?;
+            std::process::exit(0);
+        }
+        Some(Analyze { .. }) => {
+            let program_contents = match &file_name_argument {
+                Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
+                None => {
+                    let mut stdin = String::new();
+                    io::stdin().lock().read_to_string(&mut stdin)?;
+                    stdin.trim().to_string()
+                }
+            };
+            let result = marigold_grammar::marigold_analyze(&program_contents)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let json = serde_json::to_string_pretty(&result)?;
+            println!("{json}");
+            std::process::exit(0);
+        }
+        Some(Run { .. }) | Some(Install { .. }) | None => {}
+    }
 
     // Validate program_name against Cargo package name rules: ^[a-z][a-z0-9_]*$
     // Only Run and Install reach this point; Analyze/Uninstall/Clean/CleanAll all
@@ -311,8 +307,7 @@ fn main() -> Result<()> {
         workspace_path.as_deref(),
     )?;
 
-    // Build the CargoInvocation directly from the parsed command, eliminating
-    // the stringly-typed `command` variable and the `if command == "run"` branch.
+    // Build the CargoInvocation directly from the parsed command.
     let invocation = match &args.command {
         Some(Run { unoptimized, .. }) => CargoInvocation::Run {
             release: !unoptimized,
