@@ -237,14 +237,13 @@ fn main() -> Result<()> {
     // Only Run, Install, and the default (None) fall through to prepare_cache.
     match &args.command {
         Some(Uninstall { .. }) => {
-            return Ok(std::process::exit(
-                std::process::Command::new("cargo")
-                    .args(["uninstall", &program_name])
-                    .spawn()?
-                    .wait()?
-                    .code()
-                    .unwrap_or(0),
-            ));
+            let code = std::process::Command::new("cargo")
+                .args(["uninstall", &program_name])
+                .spawn()?
+                .wait()?
+                .code()
+                .unwrap_or(0);
+            std::process::exit(code);
         }
         Some(Clean { .. }) => {
             clean_program_cache(&marigold_cache_directory, &program_name)?;
