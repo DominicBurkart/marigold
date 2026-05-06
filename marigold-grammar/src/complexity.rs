@@ -1217,7 +1217,7 @@ mod tests {
     #[test]
     fn test_parse_unknown() {
         assert_eq!(
-            ComplexityClass::from_str("O(?))").unwrap(),
+            ComplexityClass::from_str("O(?)").unwrap(),
             ComplexityClass::Unknown
         );
     }
