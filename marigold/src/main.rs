@@ -233,13 +233,14 @@ fn main() -> Result<()> {
         file_name
     };
 
-    let command = match args.command {
+    // Handle commands that exit early; Run and Install fall through to prepare_cache.
+    match args.command {
         Some(ref command) => match command {
             Run {
                 unoptimized: _,
                 file: _,
-            } => "run",
-            Install { file: _ } => "install",
+            } => {}
+            Install { file: _ } => {}
             Uninstall { file: _ } => std::process::exit(
                 std::process::Command::new("cargo")
                     .args(["uninstall", &program_name])
@@ -272,7 +273,7 @@ fn main() -> Result<()> {
                 std::process::exit(0);
             }
         },
-        None => "run",
+        None => {}
     };
 
     // Validate program_name against Cargo package name rules: ^[a-z][a-z0-9_]*$
@@ -640,10 +641,7 @@ mod cache_tests {
         struct RestorePerms<'a>(&'a std::path::Path);
         impl Drop for RestorePerms<'_> {
             fn drop(&mut self) {
-                let _ = fs::set_permissions(
-                    self.0,
-                    fs::Permissions::from_mode(0o755),
-                );
+                let _ = fs::set_permissions(self.0, fs::Permissions::from_mode(0o755));
             }
         }
         let _guard = RestorePerms(tmp.path());
