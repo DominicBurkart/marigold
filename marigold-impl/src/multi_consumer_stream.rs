@@ -259,8 +259,9 @@ mod tests {
 // These tests exercise the spawn-path of `run()` that is active under the
 // `tokio` crate feature of marigold-impl.  Under that path `run()` calls
 // `crate::async_runtime::spawn(...)` and returns immediately, so each test
-// explicitly joins the spawned handle before collecting from receivers to
-// avoid races.
+// explicitly drives the spawned fanout task and the receivers concurrently via
+// `tokio::join!` to avoid races and deadlocks caused by the BUFFER_SIZE=1
+// channel back-pressure.
 #[cfg(test)]
 #[cfg(feature = "tokio")]
 mod spawn_tests {
@@ -276,10 +277,9 @@ mod spawn_tests {
         let rx1 = mcs.get();
         let rx2 = mcs.get();
 
-        // run() spawns internally and returns immediately.  We must drive the
-        // fanout task and the receivers concurrently; otherwise the single-item
-        // channel buffer (BUFFER_SIZE = 1) causes a deadlock when the producer
-        // tries to send item 2 before item 1 has been drained.
+        // run() spawns internally and returns immediately.  Wrap in
+        // tokio::spawn so the outer join! drives the fanout task and both
+        // receivers concurrently; otherwise BUFFER_SIZE=1 deadlocks.
         let run_handle = tokio::spawn(mcs.run());
 
         let (got1, got2, _) =
@@ -298,10 +298,15 @@ mod spawn_tests {
         let rx1 = mcs.get();
         let rx2 = mcs.get();
 
-        mcs.run().await;
+        // Even with an empty source the internal spawn must complete before
+        // senders are disconnected.  Drive concurrently to be safe.
+        let run_handle = tokio::spawn(mcs.run());
 
-        assert!(rx1.collect::<Vec<_>>().await.is_empty());
-        assert!(rx2.collect::<Vec<_>>().await.is_empty());
+        let (got1, got2, _) =
+            tokio::join!(rx1.collect::<Vec<_>>(), rx2.collect::<Vec<_>>(), run_handle,);
+
+        assert!(got1.is_empty());
+        assert!(got2.is_empty());
     }
 
     /// `run()` with no consumers completes without panicking or hanging via the spawn path.
@@ -309,6 +314,8 @@ mod spawn_tests {
     async fn spawn_no_consumers_run_completes_without_panic() {
         let source = futures::stream::iter(vec![1u32, 2, 3]);
         let mcs = MultiConsumerStream::new(source);
-        mcs.run().await; // must not panic or hang
+        // No receivers means no back-pressure; just ensure run() doesn't panic.
+        let run_handle = tokio::spawn(mcs.run());
+        run_handle.await.unwrap();
     }
 }
