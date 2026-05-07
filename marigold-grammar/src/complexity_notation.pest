@@ -1,27 +1,57 @@
+// Whitespace is significant in some positions (e.g. "n log n"), so we keep
+// WHITESPACE silent only between tokens where it is truly optional.
 WHITESPACE = _{ " " }
 
-simple_complexity = { SOI ~ "O(" ~ base_complexity ~ ")" ~ EOI }
-
-exact_complexity = { SOI ~ "O(" ~ exact_expr ~ ")" ~ EOI }
-exact_expr = { exact_term ~ ("+" ~ exact_term)* }
-exact_term = { coefficient ~ base_complexity_non_constant | constant_term | base_complexity }
-coefficient = @{ ASCII_DIGIT+ }
-constant_term = @{ ASCII_DIGIT+ }
-
-base_complexity = { "1" | base_complexity_non_constant }
-base_complexity_non_constant = {
-    "log(n)"
-  | "n" ~ "!/" ~ "(n-" ~ number ~ ")!"
-  | "n" ~ "!"
-  | "n" ~ "^" ~ number
-  | "n" ~ "*log(n)"
-  | "n" ~ "*log(" ~ number ~ ")"
-  | "n"
-  | "C(n," ~ number ~ ")"
-  | "?"
-}
+// ---------------------------------------------------------------------------
+// ComplexityClass atoms
+// ---------------------------------------------------------------------------
 
 number = @{ ASCII_DIGIT+ }
+
+o1             = { "O(1)" }
+o_log_n        = { "O(log n)" }
+o_n_log_n      = { "O(n log n)" }
+o_n_log_k      = { "O(n log " ~ number ~ ")" }
+o_n            = { "O(n)" }
+o_polynomial   = { "O(n^" ~ number ~ ")" }
+o_combinatorial = { "O(C(n," ~ number ~ "))" }
+o_permutational = { "O(P(n," ~ number ~ "))" }
+o_factorial    = { "O(n!)" }
+o_unknown      = { "O(?)" }
+
+// A single complexity class — order matters: longer / more-specific
+// alternatives must appear before shorter ones to avoid partial matches.
+complexity_class = {
+    o_n_log_n
+  | o_n_log_k
+  | o_polynomial
+  | o_combinatorial
+  | o_permutational
+  | o_factorial
+  | o_log_n
+  | o1
+  | o_n
+  | o_unknown
+}
+
+// ---------------------------------------------------------------------------
+// ExactComplexity
+// ---------------------------------------------------------------------------
+
+// Optional count prefix "N \u{00D7} " (e.g. "2 \u{00D7} O(n)")
+count = @{ ASCII_DIGIT+ }
+
+complexity_term = {
+    count ~ "\u{00D7}" ~ complexity_class
+  | complexity_class
+}
+
+// A full ExactComplexity string: one or more terms joined by " + "
+exact_complexity = { SOI ~ complexity_term ~ (" + " ~ complexity_term)* ~ EOI }
+
+// ---------------------------------------------------------------------------
+// Symbolic (retained for backwards compatibility, not parsed by Rust code)
+// ---------------------------------------------------------------------------
 
 symbolic = { SOI ~ symbolic_expr ~ EOI }
 symbolic_expr = { symbolic_sum | symbolic_atom }
