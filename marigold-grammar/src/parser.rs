@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! # Marigold Parser Module
 //!
 //! This module provides the Marigold parser using the Pest parsing library.
