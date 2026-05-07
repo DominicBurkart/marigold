@@ -1,5 +1,4 @@
-// Whitespace is significant in some positions (e.g. "n log n"), so we keep
-// WHITESPACE silent only between tokens where it is truly optional.
+// Spaces are allowed between tokens in non-atomic rules via WHITESPACE.
 WHITESPACE = _{ " " }
 
 // ---------------------------------------------------------------------------
@@ -8,19 +7,19 @@ WHITESPACE = _{ " " }
 
 number = @{ ASCII_DIGIT+ }
 
-o1             = { "O(1)" }
-o_log_n        = { "O(log n)" }
-o_n_log_n      = { "O(n log n)" }
-o_n_log_k      = { "O(n log " ~ number ~ ")" }
-o_n            = { "O(n)" }
-o_polynomial   = { "O(n^" ~ number ~ ")" }
+o1              = { "O(1)" }
+o_log_n         = { "O(log n)" }
+o_n_log_n       = { "O(n log n)" }
+o_n_log_k       = { "O(n log " ~ number ~ ")" }
+o_n             = { "O(n)" }
+o_polynomial    = { "O(n^" ~ number ~ ")" }
 o_combinatorial = { "O(C(n," ~ number ~ "))" }
 o_permutational = { "O(P(n," ~ number ~ "))" }
-o_factorial    = { "O(n!)" }
-o_unknown      = { "O(?)" }
+o_factorial     = { "O(n!)" }
+o_unknown       = { "O(?)" }
 
-// A single complexity class — order matters: longer / more-specific
-// alternatives must appear before shorter ones to avoid partial matches.
+// A single complexity class.  Order matters: longer / more-specific
+// alternatives must precede shorter ones (PEG takes first match).
 complexity_class = {
     o_n_log_n
   | o_n_log_k
@@ -38,19 +37,22 @@ complexity_class = {
 // ExactComplexity
 // ---------------------------------------------------------------------------
 
-// Optional count prefix "N \u{00D7} " (e.g. "2 \u{00D7} O(n)")
+// Digit-only count prefix, e.g. the "2" in "2 \u{00D7} O(n)".
 count = @{ ASCII_DIGIT+ }
 
+// A term is either "N \u{00D7} <class>" or just "<class>".
+// WHITESPACE around \u{00D7} is consumed implicitly.
 complexity_term = {
     count ~ "\u{00D7}" ~ complexity_class
   | complexity_class
 }
 
-// A full ExactComplexity string: one or more terms joined by " + "
-exact_complexity = { SOI ~ complexity_term ~ (" + " ~ complexity_term)* ~ EOI }
+// A full ExactComplexity string: one or more terms separated by "+".
+// WHITESPACE is consumed around each "+" automatically.
+exact_complexity = { SOI ~ complexity_term ~ ("+" ~ complexity_term)* ~ EOI }
 
 // ---------------------------------------------------------------------------
-// Symbolic (retained for backwards compatibility, not parsed by Rust code)
+// Symbolic (retained; not currently parsed by the Rust complexity code)
 // ---------------------------------------------------------------------------
 
 symbolic = { SOI ~ symbolic_expr ~ EOI }
