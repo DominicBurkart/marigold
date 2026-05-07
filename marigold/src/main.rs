@@ -539,8 +539,8 @@ mod tests {
 
 #[cfg(all(test, feature = "cli"))]
 mod cache_tests {
-    use super::*;
     use std::fs;
+    use super::*;
 
     #[test]
     fn test_prepare_cache_creates_files() {
