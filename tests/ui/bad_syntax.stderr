@@ -1,9 +1,9 @@
 error: marigold parse error:  --> 1:5
-         |
-       1 | bad syntax
-         |     ^---
-         |
-         = expected ".", "="
+  |
+1 | bad syntax
+  |     ^---
+  |
+  = expected ".", "="
  --> ui/bad_syntax.rs:6:13
   |
 6 |     let _ = marigold::m!(bad syntax);
