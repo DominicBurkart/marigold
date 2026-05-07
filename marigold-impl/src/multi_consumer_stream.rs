@@ -100,3 +100,97 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
         (0, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream::StreamExt;
+
+    #[tokio::test]
+    async fn run_future_as_stream_completes_without_items() {
+        let stream = RunFutureAsStream::<u32, _, _>::new(Box::pin(async {}));
+        let items: Vec<u32> = stream.collect().await;
+        assert!(items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_future_as_stream_size_hint_is_zero_upper_none() {
+        let stream = RunFutureAsStream::<u32, _, _>::new(Box::pin(async {}));
+        assert_eq!(stream.size_hint(), (0, None));
+    }
+
+    #[tokio::test]
+    async fn run_future_as_stream_executes_future_side_effect() {
+        use std::sync::{Arc, Mutex};
+        let flag = Arc::new(Mutex::new(false));
+        let flag_clone = flag.clone();
+        let stream = RunFutureAsStream::<u32, _, _>::new(Box::pin(async move {
+            *flag_clone.lock().unwrap() = true;
+        }));
+        let _: Vec<u32> = stream.collect().await;
+        assert!(*flag.lock().unwrap());
+    }
+
+    #[cfg(feature = "tokio")]
+    #[tokio::test]
+    async fn multi_consumer_single_subscriber_receives_all_items() {
+        use futures::stream;
+        let source = stream::iter(vec![1u32, 2, 3]);
+        let mut mcs = MultiConsumerStream::new(source);
+        let mut rx = mcs.get();
+        mcs.run().await;
+        let mut results = Vec::new();
+        while let Some(v) = rx.next().await {
+            results.push(v);
+        }
+        assert_eq!(results, vec![1, 2, 3]);
+    }
+
+    #[cfg(feature = "tokio")]
+    #[tokio::test]
+    async fn multi_consumer_empty_stream_closes_receiver() {
+        use futures::stream;
+        let source = stream::iter(Vec::<u32>::new());
+        let mut mcs = MultiConsumerStream::new(source);
+        let mut rx = mcs.get();
+        mcs.run().await;
+        assert!(rx.next().await.is_none());
+    }
+
+    #[cfg(feature = "tokio")]
+    #[tokio::test]
+    async fn multi_consumer_no_subscribers_completes_without_panic() {
+        use futures::stream;
+        let source = stream::iter(vec![1u32, 2, 3]);
+        let mcs = MultiConsumerStream::new(source);
+        mcs.run().await;
+    }
+
+    #[cfg(feature = "tokio")]
+    #[tokio::test]
+    async fn multi_consumer_two_subscribers_each_receive_all_items() {
+        use futures::stream;
+        let source = stream::iter(vec![1u32, 2, 3]);
+        let mut mcs = MultiConsumerStream::new(source);
+        let mut rx1 = mcs.get();
+        let mut rx2 = mcs.get();
+        mcs.run().await;
+        let t1 = tokio::spawn(async move {
+            let mut v = Vec::new();
+            while let Some(x) = rx1.next().await {
+                v.push(x);
+            }
+            v
+        });
+        let t2 = tokio::spawn(async move {
+            let mut v = Vec::new();
+            while let Some(x) = rx2.next().await {
+                v.push(x);
+            }
+            v
+        });
+        let (r1, r2) = tokio::join!(t1, t2);
+        assert_eq!(r1.unwrap(), vec![1, 2, 3]);
+        assert_eq!(r2.unwrap(), vec![1, 2, 3]);
+    }
+}
