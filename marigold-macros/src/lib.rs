@@ -8,10 +8,7 @@ use proc_macro::TokenStream;
 pub fn marigold(item: TokenStream) -> TokenStream {
     let s = item.to_string();
     match marigold_parse(&s) {
-        Ok(generated) => format!("{{{{
-{generated}
-}}}}
-").parse().expect(
+        Ok(generated) => format!("{{\n{generated}\n}}\n").parse().expect(
             "generated Rust code failed to lex as a TokenStream; this is a bug in marigold",
         ),
         Err(e) => {
