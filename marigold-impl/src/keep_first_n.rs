@@ -66,6 +66,12 @@ where
     F: Fn(&T, &T) -> Ordering + std::marker::Send + std::marker::Sync + std::marker::Copy + 'static,
     FReversed: Fn(&T, &T) -> std::cmp::Ordering + Clone + Send + 'static,
 {
+    // n=0 means keep nothing; return an empty stream immediately without touching the heap
+    // (the heap is empty, so peek().unwrap() would panic below).
+    if n == 0 {
+        return futures::stream::iter(vec![]);
+    }
+
     // Add indices to items for deterministic tie-breaking
     let mut indexed_stream = sinput.enumerate();
 
@@ -97,8 +103,7 @@ where
                 .into_sorted_vec()
                 .into_iter()
                 .map(|(_idx, item)| item) // Unwrap indices
-                .collect::<Vec<_>>()
-                .into_iter(),
+                .collect::<Vec<_>>(),
         );
     }
 
@@ -173,8 +178,7 @@ where
             .into_sorted_vec()
             .into_iter()
             .map(|(_idx, item)| item) // Unwrap indices
-            .collect::<Vec<_>>()
-            .into_iter(),
+            .collect::<Vec<_>>(),
     )
 }
 
@@ -205,6 +209,12 @@ where
         n: usize,
         sorted_by: F,
     ) -> futures::stream::Iter<std::vec::IntoIter<T>> {
+        // n=0 means keep nothing; return an empty stream immediately without touching the heap
+        // (the heap is empty, so peek().unwrap() would panic below).
+        if n == 0 {
+            return futures::stream::iter(vec![].into_iter());
+        }
+
         // use the reverse ordering so that the smallest value is always the first to pop.
         let mut first_n = BinaryHeap::with_capacity_by(n, |a, b| match sorted_by(a, b) {
             Ordering::Less => Ordering::Greater,
@@ -368,5 +378,27 @@ mod tests {
             .await;
 
         assert_eq!(result, expected);
+    }
+
+    #[tokio::test]
+    async fn test_keep_first_n_single_element() {
+        // Keep only 1 element (the largest).
+        let result = futures::stream::iter(vec![5, 3, 8, 1])
+            .keep_first_n(1, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![8]);
+    }
+
+    #[tokio::test]
+    async fn test_keep_first_n_empty_stream() {
+        // Empty stream should return empty results regardless of n.
+        let result = futures::stream::iter(Vec::<i32>::new())
+            .keep_first_n(5, |a, b| a.cmp(b))
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
     }
 }
