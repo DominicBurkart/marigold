@@ -472,10 +472,19 @@ mod tests {
     }
 
     /// Verify that `marigold analyze` exits successfully and emits valid JSON
-    /// with the expected top-level fields produced by `marigold_grammar::marigold_analyze`.
+    /// with the complete shape of `ProgramComplexity` and its nested
+    /// `StreamComplexity` entry.
     ///
-    /// The program `range(0, 3).write_file("...", csv)` is a single-stream pipeline;
-    /// the JSON output must therefore contain a `streams` array with one element.
+    /// `ProgramComplexity` has six top-level fields:
+    ///   streams, program_time, program_exact_time,
+    ///   program_space, program_exact_space, program_cardinality
+    ///
+    /// Each `StreamComplexity` entry has seven fields:
+    ///   description, cardinality, time_class, exact_time,
+    ///   space_class, exact_space, collects_input
+    ///
+    /// The program `range(0, 100).write_file("...", csv)` is a single-stream
+    /// pipeline, so `streams` must contain exactly one element.
     #[test]
     fn test_analyze_command() {
         let binary = &*BINARY;
@@ -515,7 +524,9 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_str(&stdout).expect("analyze output was not valid JSON");
 
-        // ProgramComplexity always contains a `streams` array.
+        // --- Top-level ProgramComplexity fields ---
+
+        // streams: Vec<StreamComplexity>
         assert!(
             json.get("streams").is_some(),
             "JSON output missing 'streams' field; got: {json}"
@@ -525,18 +536,87 @@ mod tests {
             "'streams' field should be a JSON array; got: {}",
             json["streams"]
         );
-
-        // Our single-stream program must produce exactly one stream entry.
+        // Our single-pipeline program must produce exactly one stream entry.
         assert_eq!(
             json["streams"].as_array().unwrap().len(),
             1,
             "expected exactly 1 stream in analyze output; got: {json}"
         );
 
-        // The top-level program_time complexity field must be present.
+        // program_time: ComplexityClass
         assert!(
             json.get("program_time").is_some(),
             "JSON output missing 'program_time' field; got: {json}"
+        );
+
+        // program_exact_time: ExactComplexity
+        assert!(
+            json.get("program_exact_time").is_some(),
+            "JSON output missing 'program_exact_time' field; got: {json}"
+        );
+
+        // program_space: ComplexityClass
+        assert!(
+            json.get("program_space").is_some(),
+            "JSON output missing 'program_space' field; got: {json}"
+        );
+
+        // program_exact_space: ExactComplexity
+        assert!(
+            json.get("program_exact_space").is_some(),
+            "JSON output missing 'program_exact_space' field; got: {json}"
+        );
+
+        // program_cardinality: Cardinality
+        assert!(
+            json.get("program_cardinality").is_some(),
+            "JSON output missing 'program_cardinality' field; got: {json}"
+        );
+
+        // --- StreamComplexity fields for the single stream entry ---
+
+        let stream = &json["streams"][0];
+
+        // description: String
+        assert!(
+            stream.get("description").map(|v| v.is_string()).unwrap_or(false),
+            "stream entry missing string 'description' field; got: {stream}"
+        );
+
+        // cardinality: Cardinality
+        assert!(
+            stream.get("cardinality").is_some(),
+            "stream entry missing 'cardinality' field; got: {stream}"
+        );
+
+        // time_class: ComplexityClass
+        assert!(
+            stream.get("time_class").is_some(),
+            "stream entry missing 'time_class' field; got: {stream}"
+        );
+
+        // exact_time: ExactComplexity
+        assert!(
+            stream.get("exact_time").is_some(),
+            "stream entry missing 'exact_time' field; got: {stream}"
+        );
+
+        // space_class: ComplexityClass
+        assert!(
+            stream.get("space_class").is_some(),
+            "stream entry missing 'space_class' field; got: {stream}"
+        );
+
+        // exact_space: ExactComplexity
+        assert!(
+            stream.get("exact_space").is_some(),
+            "stream entry missing 'exact_space' field; got: {stream}"
+        );
+
+        // collects_input: bool
+        assert!(
+            stream.get("collects_input").map(|v| v.is_boolean()).unwrap_or(false),
+            "stream entry missing boolean 'collects_input' field; got: {stream}"
         );
 
         let _ = fs::remove_dir_all(&tmp);
