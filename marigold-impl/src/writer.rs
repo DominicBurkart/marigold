@@ -59,3 +59,39 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Writer;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn writer_vector_write_all_succeeds() {
+        let mut w = Writer::vector();
+        let result = w.write_all(b"hello world").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn writer_vector_flush_after_write() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.unwrap();
+        let result = w.flush().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn writer_vector_shutdown_after_write() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.unwrap();
+        let result = w.shutdown().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn writer_vector_write_empty_bytes() {
+        let mut w = Writer::vector();
+        let result = w.write_all(b"").await;
+        assert!(result.is_ok());
+    }
+}
