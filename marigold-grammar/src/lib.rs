@@ -28,9 +28,8 @@
 //!
 //! ### Parser
 //!
-//! The [`parser`] module provides the Pest-based parser with a trait abstraction
-//! for extensibility. The factory function [`parser::get_parser()`] returns a
-//! parser instance.
+//! The [`parser`] module provides the Pest-based parser. The factory function
+//! [`parser::get_parser()`] returns a `PestParser` instance directly.
 //!
 //! ### Grammar File
 //!
