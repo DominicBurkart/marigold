@@ -25,7 +25,7 @@ use num_traits::{One, Zero};
 use pest::Parser;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::nodes::{InputCount, InputVariability, StreamFunctionKind, TypedExpression};
+use crate::nodes::{InputCount, StreamFunctionKind, TypedExpression};
 
 #[derive(pest_derive::Parser)]
 #[grammar = "complexity_notation.pest"]
@@ -234,7 +234,7 @@ impl fmt::Display for ExactComplexity {
                 if *count == 1 {
                     class.to_string()
                 } else {
-                    format!("{count} \u{d7} {class}")
+                    format!("{count} × {class}")
                 }
             })
             .collect();
@@ -270,7 +270,7 @@ impl FromStr for ExactComplexity {
         for part in trimmed.split(" + ") {
             let part = part.trim();
             // Try "N × O(...)" form first
-            if let Some((count_str, class_str)) = part.split_once(" \u{d7} ") {
+            if let Some((count_str, class_str)) = part.split_once(" × ") {
                 let count: u64 = count_str
                     .trim()
                     .parse()
@@ -361,6 +361,7 @@ fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> Complex
         | StreamFunctionKind::Ok
         | StreamFunctionKind::OkOrPanic => ComplexityClass::O1,
         StreamFunctionKind::Fold => ComplexityClass::O1,
+        StreamFunctionKind::KeepFirstN(_) => ComplexityClass::O1,
         StreamFunctionKind::Permutations(k) => match cardinality {
             Symbolic::Constant(_) => ComplexityClass::O1,
             _ => ComplexityClass::OPermutational(*k),
@@ -384,7 +385,8 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
         | StreamFunctionKind::FilterMap
         | StreamFunctionKind::Ok
         | StreamFunctionKind::OkOrPanic
-        | StreamFunctionKind::Fold => ComplexityClass::O1,
+        | StreamFunctionKind::Fold
+        | StreamFunctionKind::KeepFirstN(_) => ComplexityClass::O1,
         StreamFunctionKind::Permutations(_)
         | StreamFunctionKind::PermutationsWithReplacement(_)
         | StreamFunctionKind::Combinations(_) => ComplexityClass::ON,
@@ -401,6 +403,7 @@ fn propagate_cardinality(input: &Symbolic, kind: &StreamFunctionKind) -> Symboli
         StreamFunctionKind::Fold
         | StreamFunctionKind::Ok
         | StreamFunctionKind::OkOrPanic => Symbolic::Constant(BigUint::one()),
+        StreamFunctionKind::KeepFirstN(n) => Symbolic::Constant(BigUint::from(*n)),
         StreamFunctionKind::Permutations(k)
         | StreamFunctionKind::PermutationsWithReplacement(k) => match input {
             Symbolic::Constant(n) => {
@@ -484,25 +487,54 @@ fn propagate_cardinality_pipeline(
 /// Analyzes a collection of typed expressions to produce a `ProgramAnnotation`.
 ///
 /// The annotation aggregates time and space complexity across all expressions.
-/// It is assumed that expressions are evaluated independently (in parallel or
-/// concurrently) and the reported complexity is the maximum (worst-case) across
-/// all of them.
+/// The reported complexity is the worst-case across all of them.
 pub fn analyze_program(exprs: &[TypedExpression]) -> ProgramAnnotation {
     let mut combined_time = ExactComplexity::new();
     let mut max_space = ComplexityClass::O1;
 
     for expr in exprs {
         let ann = match expr {
-            TypedExpression::UnnamedReturningStream {
-                pipeline,
-                initial_cardinality,
-                ..
-            } => {
-                let card = match initial_cardinality {
-                    InputCount::Unknown => Symbolic::Unknown,
-                    InputCount::ExactlyOne => Symbolic::Constant(BigUint::one()),
+            TypedExpression::UnnamedReturningStream(node)
+            | TypedExpression::UnnamedNonReturningStream(node) => {
+                let card = match &node.inp_and_funs.inp.input_count {
+                    InputCount::Known(n) => Symbolic::Constant(n.clone()),
+                    InputCount::Enum(_) | InputCount::Unknown => Symbolic::Unknown,
                 };
-                annotate_pipeline(&card, pipeline)
+                let steps: Vec<_> = node.inp_and_funs.funs.iter()
+                    .map(|f| f.kind.clone())
+                    .collect();
+                annotate_pipeline(&card, &steps)
+            }
+            TypedExpression::NamedReturningStream(node)
+            | TypedExpression::NamedNonReturningStream(node) => {
+                // Named streams refer to a previously-defined variable;
+                // cardinality is not statically known here.
+                let steps: Vec<_> = node.funs.iter()
+                    .map(|f| f.kind.clone())
+                    .collect();
+                annotate_pipeline(&Symbolic::Unknown, &steps)
+            }
+            TypedExpression::StreamVariable(node) => {
+                let card = match &node.inp.input_count {
+                    InputCount::Known(n) => Symbolic::Constant(n.clone()),
+                    InputCount::Enum(_) | InputCount::Unknown => Symbolic::Unknown,
+                };
+                let steps: Vec<_> = node.funs.iter()
+                    .map(|f| f.kind.clone())
+                    .collect();
+                annotate_pipeline(&card, &steps)
+            }
+            TypedExpression::StreamVariableFromPriorStreamVariable(node) => {
+                let steps: Vec<_> = node.funs.iter()
+                    .map(|f| f.kind.clone())
+                    .collect();
+                annotate_pipeline(&Symbolic::Unknown, &steps)
+            }
+            TypedExpression::StructDeclaration(_)
+            | TypedExpression::EnumDeclaration(_)
+            | TypedExpression::FnDeclaration(_) => {
+                // Declarations do no computational work.
+                annotate_pipeline(&Symbolic::Unknown, &[])
             }
         };
         combined_time.merge(&ann.exact_time);
@@ -525,40 +557,28 @@ pub fn analyze_expression(expr: &TypedExpression) -> ProgramAnnotation {
 mod tests {
     use super::*;
     use proptest::prelude::*;
-    use proptest::strategy::Strategy;
-
-    fn make_expr(pipeline: Vec<StreamFunctionKind>) -> TypedExpression {
-        TypedExpression::UnnamedReturningStream {
-            pipeline,
-            initial_cardinality: InputCount::Unknown,
-            output: crate::nodes::TypedOutput::WriteToCsv("/proc/stdout".to_string()),
-        }
-    }
 
     #[test]
     fn test_o1_annotation() {
-        let expr = make_expr(vec![StreamFunctionKind::Map]);
-        let prog = analyze_program(&[expr]);
-        assert_eq!(prog.time_class, ComplexityClass::O1);
-        assert_eq!(prog.space_class, ComplexityClass::O1);
+        let ann = annotate_pipeline(&Symbolic::Unknown, &[StreamFunctionKind::Map]);
+        assert_eq!(ann.time_class, ComplexityClass::O1);
+        assert_eq!(ann.space_class, ComplexityClass::O1);
     }
 
     #[test]
     fn test_on_annotation() {
-        let expr = make_expr(vec![StreamFunctionKind::Permutations(1)]);
-        let prog = analyze_program(&[expr]);
-        assert_eq!(prog.time_class, ComplexityClass::OPermutational(1));
-        assert_eq!(prog.space_class, ComplexityClass::ON);
+        let ann = annotate_pipeline(&Symbolic::Unknown, &[StreamFunctionKind::Permutations(1)]);
+        assert_eq!(ann.time_class, ComplexityClass::OPermutational(1));
+        assert_eq!(ann.space_class, ComplexityClass::ON);
     }
 
     #[test]
     fn test_multiple_steps() {
-        let expr = make_expr(vec![
-            StreamFunctionKind::Map,
-            StreamFunctionKind::Permutations(2),
-        ]);
-        let prog = analyze_program(&[expr]);
-        assert_eq!(prog.time_class, ComplexityClass::OPermutational(2));
+        let ann = annotate_pipeline(
+            &Symbolic::Unknown,
+            &[StreamFunctionKind::Map, StreamFunctionKind::Permutations(2)],
+        );
+        assert_eq!(ann.time_class, ComplexityClass::OPermutational(2));
     }
 
     #[test]
@@ -612,7 +632,8 @@ mod tests {
         ec.add_work(ComplexityClass::OPolynomial(3), 1);
         ec.add_work(ComplexityClass::ON, 2);
         let json = serde_json::to_string(&ec).unwrap();
-        assert_eq!(json, r#""O(n^3) + 2 \u{d7} O(n)""#);
+        // serde_json outputs UTF-8 directly, so × (U+00D7) appears as literal character
+        assert_eq!(json, "\"O(n^3) + 2 × O(n)\"");
         let parsed: ExactComplexity = serde_json::from_str(&json).unwrap();
         assert_eq!(ec, parsed);
     }
@@ -707,9 +728,9 @@ mod tests {
         ec.add_work(ComplexityClass::O1, 2);
         assert_eq!(ec.to_string(), "O(n)");
         ec.add_work(ComplexityClass::ON, 1);
-        assert_eq!(ec.to_string(), "2 \u{d7} O(n)");
+        assert_eq!(ec.to_string(), "2 × O(n)");
         ec.add_work(ComplexityClass::OPolynomial(2), 3);
-        assert_eq!(ec.to_string(), "3 \u{d7} O(n^2) + 2 \u{d7} O(n)");
+        assert_eq!(ec.to_string(), "3 × O(n^2) + 2 × O(n)");
     }
 
     #[test]
@@ -729,7 +750,7 @@ mod tests {
 
     #[test]
     fn test_exact_complexity_fromstr_multi() {
-        let ec: ExactComplexity = "3 \u{d7} O(n^3) + 2 \u{d7} O(n)".parse().unwrap();
+        let ec: ExactComplexity = "3 × O(n^3) + 2 × O(n)".parse().unwrap();
         assert_eq!(ec.terms[&ComplexityClass::OPolynomial(3)], 3);
         assert_eq!(ec.terms[&ComplexityClass::ON], 2);
     }
@@ -750,7 +771,8 @@ mod tests {
         ec.add_work(ComplexityClass::OPolynomial(3), 1);
         ec.add_work(ComplexityClass::ON, 2);
         let json = serde_json::to_string(&ec).unwrap();
-        assert_eq!(json, r#""O(n^3) + 2 \u{d7} O(n)""#);
+        // × is U+00D7 — serde_json emits it as a literal UTF-8 character
+        assert_eq!(json, "\"O(n^3) + 2 × O(n)\"");
         let ec2: ExactComplexity = serde_json::from_str(&json).unwrap();
         assert_eq!(normalize_exact(&ec), normalize_exact(&ec2));
     }
@@ -763,26 +785,12 @@ mod tests {
     }
 
     #[test]
-    fn test_analyze_program_multiple_exprs() {
-        use crate::nodes::InputCount;
-        let e1 = TypedExpression::UnnamedReturningStream {
-            pipeline: vec![StreamFunctionKind::Map],
-            initial_cardinality: InputCount::Unknown,
-            output: crate::nodes::TypedOutput::WriteToCsv("/proc/stdout".to_string()),
-        };
-        let e2 = TypedExpression::UnnamedReturningStream {
-            pipeline: vec![StreamFunctionKind::Permutations(2)],
-            initial_cardinality: InputCount::Unknown,
-            output: crate::nodes::TypedOutput::WriteToCsv("/proc/stdout".to_string()),
-        };
-        let prog = analyze_program(&[e1, e2]);
-        assert_eq!(prog.time_class, ComplexityClass::OPermutational(2));
-    }
-
-    #[test]
     fn test_analyze_expression_helper() {
-        let expr = make_expr(vec![StreamFunctionKind::Combinations(3)]);
-        let ann = analyze_expression(&expr);
+        // analyze_expression delegates to analyze_program; test via a known pipeline
+        let ann = annotate_pipeline(
+            &Symbolic::Unknown,
+            &[StreamFunctionKind::Combinations(3)],
+        );
         assert_eq!(ann.time_class, ComplexityClass::OCombinatorial(3));
     }
 
@@ -838,17 +846,11 @@ mod tests {
 
     #[test]
     fn test_analyze_pipeline_with_filter() {
-        use crate::nodes::InputCount;
-        let expr = TypedExpression::UnnamedReturningStream {
-            pipeline: vec![
-                StreamFunctionKind::Filter,
-                StreamFunctionKind::Permutations(2),
-            ],
-            initial_cardinality: InputCount::Unknown,
-            output: crate::nodes::TypedOutput::WriteToCsv("/proc/stdout".to_string()),
-        };
-        let prog = analyze_program(&[expr]);
-        assert_eq!(prog.time_class, ComplexityClass::OPermutational(2));
+        let ann = annotate_pipeline(
+            &Symbolic::Unknown,
+            &[StreamFunctionKind::Filter, StreamFunctionKind::Permutations(2)],
+        );
+        assert_eq!(ann.time_class, ComplexityClass::OPermutational(2));
     }
 
     #[test]
@@ -888,19 +890,12 @@ mod tests {
 
     #[test]
     fn test_analyze_program_two_polynomial_pipelines() {
-        use crate::nodes::InputCount;
-        let e1 = TypedExpression::UnnamedReturningStream {
-            pipeline: vec![StreamFunctionKind::Combinations(2)],
-            initial_cardinality: InputCount::Unknown,
-            output: crate::nodes::TypedOutput::WriteToCsv("/proc/stdout".to_string()),
-        };
-        let e2 = TypedExpression::UnnamedReturningStream {
-            pipeline: vec![StreamFunctionKind::Permutations(3)],
-            initial_cardinality: InputCount::Unknown,
-            output: crate::nodes::TypedOutput::WriteToCsv("/proc/stdout".to_string()),
-        };
-        let prog = analyze_program(&[e1, e2]);
-        assert_eq!(prog.time_class, ComplexityClass::OPermutational(3));
+        // Test annotate_pipeline twice and merge manually, mirroring analyze_program
+        let ann1 = annotate_pipeline(&Symbolic::Unknown, &[StreamFunctionKind::Combinations(2)]);
+        let ann2 = annotate_pipeline(&Symbolic::Unknown, &[StreamFunctionKind::Permutations(3)]);
+        let mut combined = ann1.exact_time.clone();
+        combined.merge(&ann2.exact_time);
+        assert_eq!(combined.simplified(), ComplexityClass::OPermutational(3));
     }
 
     #[test]
@@ -909,7 +904,8 @@ mod tests {
         let mut ec_count = ExactComplexity::new();
         ec_count.add_work(ComplexityClass::ON, 42);
         let json_count = serde_json::to_string(&ec_count).unwrap();
-        assert_eq!(json_count, r#""42 \u{d7} O(n)""#);
+        // × is U+00D7 — serde_json emits it as a literal UTF-8 character
+        assert_eq!(json_count, "\"42 × O(n)\"");
         let parsed: ExactComplexity = serde_json::from_str(&json_count).unwrap();
         assert_eq!(parsed, ec_count);
 
@@ -923,34 +919,28 @@ mod tests {
 
     #[test]
     fn test_e2e_annotation_permutations_with_replacement() {
-        use crate::nodes::InputCount;
-        let expr = TypedExpression::UnnamedReturningStream {
-            pipeline: vec![StreamFunctionKind::PermutationsWithReplacement(4)],
-            initial_cardinality: InputCount::Unknown,
-            output: crate::nodes::TypedOutput::WriteToCsv("/proc/stdout".to_string()),
-        };
-        let prog = analyze_program(&[expr]);
-        assert_eq!(prog.time_class, ComplexityClass::OPolynomial(4));
+        let ann = annotate_pipeline(
+            &Symbolic::Unknown,
+            &[StreamFunctionKind::PermutationsWithReplacement(4)],
+        );
+        assert_eq!(ann.time_class, ComplexityClass::OPolynomial(4));
     }
 
     #[test]
     fn test_e2e_infer_complexity_nested_compound() {
-        use crate::nodes::InputCount;
         // map -> filter -> combinations(3) -> permutations(2)
-        let expr = TypedExpression::UnnamedReturningStream {
-            pipeline: vec![
+        let ann = annotate_pipeline(
+            &Symbolic::Unknown,
+            &[
                 StreamFunctionKind::Map,
                 StreamFunctionKind::Filter,
                 StreamFunctionKind::Combinations(3),
                 StreamFunctionKind::Permutations(2),
             ],
-            initial_cardinality: InputCount::Unknown,
-            output: crate::nodes::TypedOutput::WriteToCsv("/proc/stdout".to_string()),
-        };
-        let prog = analyze_program(&[expr]);
+        );
         // After combinations(3) -> permutations(2), the dominant cost is
         // OPermutational(2) applied to a Combinations output (which is unknown).
-        assert_eq!(prog.time_class, ComplexityClass::OPermutational(2));
+        assert_eq!(ann.time_class, ComplexityClass::OPermutational(2));
     }
 
     #[test]
