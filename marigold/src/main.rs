@@ -58,10 +58,7 @@ fn get_file_name_argument(args: &Args) -> Option<String> {
     use MarigoldCommand::*;
 
     match &args.command {
-        Some(Run {
-            unoptimized: _,
-            file,
-        }) => file.clone(),
+        Some(Run { file, .. }) => file.clone(),
         Some(Install { file }) => file.clone(),
         Some(Uninstall { file }) => file.clone(),
         Some(Clean { file }) => file.clone(),
@@ -180,7 +177,7 @@ fn invoke_cargo(
                 args.push("--release");
             }
             args.extend(["--manifest-path", path_str]);
-            Command::new("cargo").args(&args).spawn()?.wait()?
+            Command::new("cargo").args(args).spawn()?.wait()?
         }
         CargoInvocation::Install => Command::new("cargo")
             .args(["install", "--path", path_str])
@@ -726,7 +723,7 @@ mod cache_tests {
         );
         assert!(
             result.is_err(),
-            "prepare_cache should reject program_contents containing '{}{}'",
+            "prepare_cache should reject program_contents containing '{}{}'" ,
             "}",
             ")"
         );
