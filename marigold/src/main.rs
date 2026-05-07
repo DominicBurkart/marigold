@@ -723,7 +723,7 @@ mod cache_tests {
         );
         assert!(
             result.is_err(),
-            "prepare_cache should reject program_contents containing '{}{}'" ,
+            "prepare_cache should reject program_contents containing '{}{}'",
             "}",
             ")"
         );
