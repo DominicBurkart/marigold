@@ -11,14 +11,3 @@ error: marigold parse error: Bounded type validation failed:
    | |_____^
    |
    = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
-
-error[E0282]: type annotations needed
-  --> compile_fail/negative_bounds_uint.rs:6:13
-   |
- 6 |       let _ = m!(
-   |  _____________^
- 7 | |         struct Temp {
- 8 | |             reading: uint[-10, -1]
-...  |
-12 | |     .await
-   | |__________^ cannot infer type

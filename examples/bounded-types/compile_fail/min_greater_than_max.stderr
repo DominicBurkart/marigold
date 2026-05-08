@@ -11,14 +11,3 @@ error: marigold parse error: Bounded type validation failed:
    | |_____^
    |
    = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
-
-error[E0282]: type annotations needed
-  --> compile_fail/min_greater_than_max.rs:6:13
-   |
- 6 |       let _ = m!(
-   |  _____________^
- 7 | |         struct Sensor {
- 8 | |             reading: int[100, 0]
-...  |
-12 | |     .await
-   | |__________^ cannot infer type
