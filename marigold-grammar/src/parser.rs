@@ -14,7 +14,7 @@
 //! Explicitly create a parser instance:
 //! ```ignore
 //! let parser = PestParser::new();
-//! let result = parser.parse("range(0, 1).return")?;
+//! let result = parser.parse("range(0, 1).return");
 //! ```
 
 use pest::Parser;
@@ -135,29 +135,23 @@ impl PestParser {
     fn validate_bounded_types(
         expressions: &[crate::nodes::TypedExpression],
     ) -> Result<Option<crate::bound_resolution::ResolvedBounds>, String> {
-        use crate::nodes::TypedExpression;
+        let symbol_table = crate::symbol_table::SymbolTable::from_expressions(expressions);
 
-        let has_bounded = expressions.iter().any(|e| {
-            if let TypedExpression::StructDeclaration(s) = e {
-                s.fields.iter().any(|(_, t)| {
-                    matches!(
-                        t,
-                        crate::nodes::Type::BoundedInt { .. }
-                            | crate::nodes::Type::BoundedUint { .. }
-                    )
-                })
-            } else {
-                false
-            }
-        });
-
-        if !has_bounded {
+        if !symbol_table.has_bounded_types() {
             return Ok(None);
         }
 
-        let resolved = crate::bound_resolution::resolve_bounds(expressions)
-            .map_err(|e| format!("Bound resolution error: {}", e))?;
-        Ok(Some(resolved))
+        let mut resolver = crate::bound_resolution::BoundResolver::new(&symbol_table);
+        match resolver.resolve_all() {
+            Ok(bounds) => Ok(Some(bounds)),
+            Err(errors) => {
+                let error_messages: Vec<String> = errors.iter().map(|e| format!("{}", e)).collect();
+                Err(format!(
+                    "Bounded type validation failed:\n  - {}",
+                    error_messages.join("\n  - ")
+                ))
+            }
+        }
     }
 
     fn generate_rust_code(
@@ -197,8 +191,36 @@ impl PestParser {
                 }
                 TypedExpression::StructDeclaration(s) => {
                     if let Some(bounds) = &resolved_bounds {
-                        let field_bounds = bounds.get(&s.name);
-                        output_parts.push(s.code_with_bounds(field_bounds));
+                        let field_bounds = bounds.get(&s.name, "");
+                        // build a per-field map for code_with_bounds
+                        let field_bounds_map: Option<
+                            std::collections::HashMap<
+                                String,
+                                crate::nodes::ResolvedFieldBounds,
+                            >,
+                        > = {
+                            let map: std::collections::HashMap<String, crate::nodes::ResolvedFieldBounds> = s
+                                .fields
+                                .iter()
+                                .filter_map(|(fname, _)| {
+                                    bounds.get(&s.name, fname).map(|b| {
+                                        (
+                                            fname.clone(),
+                                            crate::nodes::ResolvedFieldBounds {
+                                                min: b.min,
+                                                max: b.max,
+                                            },
+                                        )
+                                    })
+                                })
+                                .collect();
+                            if map.is_empty() {
+                                None
+                            } else {
+                                Some(map)
+                            }
+                        };
+                        output_parts.push(s.code_with_bounds(field_bounds_map.as_ref()));
                     } else {
                         output_parts.push(s.code());
                     }
@@ -429,10 +451,7 @@ mod negative_tests {
     #[test]
     fn test_reject_fold_insufficient_args() {
         let result = parse_marigold("range(0, 10).fold().return");
-        assert!(
-            result.is_err(),
-            "Should reject fold() without arguments"
-        );
+        assert!(result.is_err(), "Should reject fold() without arguments");
     }
 
     #[test]
@@ -680,12 +699,9 @@ mod keep_first_n_tests {
 
     #[test]
     fn test_keep_first_n_parses() {
-        let result = parse_marigold("nums = range(0, 100)\nrange(0, 10).keep_first_n(5, nums).return");
-        assert!(
-            result.is_ok(),
-            "keep_first_n should parse: {:?}",
-            result
-        );
+        let result =
+            parse_marigold("nums = range(0, 100)\nrange(0, 10).keep_first_n(5, nums).return");
+        assert!(result.is_ok(), "keep_first_n should parse: {:?}", result);
     }
 
     #[test]
@@ -754,8 +770,7 @@ mod stream_variable_tests {
 
     #[test]
     fn test_stream_variable_with_transform() {
-        let result =
-            parse_marigold("data = range(0, 10)\ndata.filter(is_even).return");
+        let result = parse_marigold("data = range(0, 10)\ndata.filter(is_even).return");
         assert!(
             result.is_ok(),
             "stream variable with transform should parse: {:?}",
@@ -821,7 +836,8 @@ mod fn_declaration_tests {
 
     #[test]
     fn test_fn_with_complex_body_parses() {
-        let result = parse_marigold("fn clamp(x: i32) -> i32 { if x > 100 { 100 } else { x } }");
+        let result =
+            parse_marigold("fn clamp(x: i32) -> i32 { if x > 100 { 100 } else { x } }");
         assert!(
             result.is_ok(),
             "fn with complex body should parse: {:?}",
@@ -1065,7 +1081,10 @@ mod bounded_type_tests {
         let code = result.unwrap();
         assert!(code.contains("_MIN"), "Should generate MIN constant");
         assert!(code.contains("_MAX"), "Should generate MAX constant");
-        assert!(code.contains("_CARDINALITY"), "Should generate CARDINALITY constant");
+        assert!(
+            code.contains("_CARDINALITY"),
+            "Should generate CARDINALITY constant"
+        );
     }
 
     #[test]
@@ -1240,11 +1259,8 @@ mod struct_enum_tests {
 
     #[test]
     fn test_enum_range_known_input_count() {
-        // Verify that range(EnumName) resolves to a statically-known InputCount so that
-        // complexity analysis can treat the pipeline correctly.
         let result = parse_marigold("enum Words { Hello, World, } range(Words).return");
         assert!(result.is_ok(), "Should parse range(EnumName): {:?}", result);
-        // If InputCount was properly resolved, analyze should return Known cardinality.
         let complexity = PestParser::analyze("enum Words { Hello, World, } range(Words).return");
         assert!(
             complexity.is_ok(),
@@ -1255,9 +1271,6 @@ mod struct_enum_tests {
 
     #[test]
     fn test_reject_range_with_numeric_single_arg() {
-        // `range(42)` must not accidentally match the `range(EnumName)` branch:
-        // `free_text_identifier` requires a leading letter/underscore, so a pure
-        // numeric argument is unambiguously rejected at the grammar level.
         let result = parse_marigold("range(42).return");
         assert!(
             result.is_err(),
@@ -1267,9 +1280,6 @@ mod struct_enum_tests {
 
     #[test]
     fn test_reject_range_with_undeclared_enum() {
-        // `range(NonExistent)` parses grammatically (it looks like an identifier)
-        // but must be rejected during semantic validation when the name is not a
-        // declared enum in the program.
         let result = parse_marigold("range(NonExistent).return");
         assert!(
             result.is_err(),
