@@ -43,6 +43,7 @@ mod tests {
     // tests/combinations_edge_cases.rs exercise the full crate public API. Do not remove
     // one set thinking the other makes it redundant — both levels of coverage are
     // independently valuable.
+
     use super::Combinable;
     use futures::stream::StreamExt;
 
