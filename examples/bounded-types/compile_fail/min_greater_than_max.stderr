@@ -1,4 +1,4 @@
-error: marigold parse error: MarigoldParseError("Bounded type validation failed:\n  - Bounds violation for field 'Sensor.reading': min (100) is greater than max (0)")
+error: proc macro panicked
   --> compile_fail/min_greater_than_max.rs:6:13
    |
  6 |       let _ = m!(
@@ -9,4 +9,4 @@ error: marigold parse error: MarigoldParseError("Bounded type validation failed:
 11 | |     )
    | |_____^
    |
-   = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = help: message: marigold parsing error: MarigoldParseError("Bounded type validation failed:\n  - Bounds violation for field 'Sensor.reading': min (100) is greater than max (0)")

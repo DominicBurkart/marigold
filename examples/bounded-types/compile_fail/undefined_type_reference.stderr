@@ -1,4 +1,4 @@
-error: marigold parse error: MarigoldParseError("Bounded type validation failed:\n  - Undefined type: 'NonExistent'")
+error: proc macro panicked
   --> compile_fail/undefined_type_reference.rs:6:13
    |
  6 |       let _ = m!(
@@ -9,4 +9,4 @@ error: marigold parse error: MarigoldParseError("Bounded type validation failed:
 11 | |     )
    | |_____^
    |
-   = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = help: message: marigold parsing error: MarigoldParseError("Bounded type validation failed:\n  - Undefined type: 'NonExistent'")
