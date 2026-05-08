@@ -145,7 +145,7 @@ impl PestParser {
         match resolver.resolve_all() {
             Ok(bounds) => Ok(Some(bounds)),
             Err(errors) => {
-                let error_messages: Vec<String> = errors.iter().map(|e| format!("{}", e)).collect();
+                let error_messages: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
                 Err(format!(
                     "Bounded type validation failed:\n  - {}",
                     error_messages.join("\n  - ")
