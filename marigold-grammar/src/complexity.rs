@@ -234,7 +234,7 @@ impl fmt::Display for ExactComplexity {
                 if *count == 1 {
                     class.to_string()
                 } else {
-                    format!("{count} × {class}")
+                    format!("{count} \u{00d7} {class}")
                 }
             })
             .collect();
@@ -270,7 +270,7 @@ impl FromStr for ExactComplexity {
         for part in trimmed.split(" + ") {
             let part = part.trim();
             // Try "N × O(...)" form first
-            if let Some((count_str, class_str)) = part.split_once(" × ") {
+            if let Some((count_str, class_str)) = part.split_once(" \u{00d7} ") {
                 let count: u64 = count_str
                     .trim()
                     .parse()
@@ -344,12 +344,16 @@ pub struct StepAnnotation {
 }
 
 /// Annotation for an entire Marigold program (or pipeline segment).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProgramAnnotation {
     pub time_class: ComplexityClass,
     pub space_class: ComplexityClass,
     pub exact_time: ExactComplexity,
 }
+
+/// Type alias retained for compatibility with `parser.rs` and `lib.rs`
+/// which still refer to `ProgramComplexity` by name.
+pub type ProgramComplexity = ProgramAnnotation;
 
 /// The per-element work done by a single stream operation, given the
 /// cardinality of the input stream.
@@ -632,8 +636,8 @@ mod tests {
         ec.add_work(ComplexityClass::OPolynomial(3), 1);
         ec.add_work(ComplexityClass::ON, 2);
         let json = serde_json::to_string(&ec).unwrap();
-        // serde_json outputs UTF-8 directly, so × (U+00D7) appears as literal character
-        assert_eq!(json, "\"O(n^3) + 2 × O(n)\"");
+        // serde_json outputs UTF-8 directly, so \u{00d7} (U+00D7) appears as literal character
+        assert_eq!(json, "\"O(n^3) + 2 \u{00d7} O(n)\"");
         let parsed: ExactComplexity = serde_json::from_str(&json).unwrap();
         assert_eq!(ec, parsed);
     }
@@ -728,9 +732,9 @@ mod tests {
         ec.add_work(ComplexityClass::O1, 2);
         assert_eq!(ec.to_string(), "O(n)");
         ec.add_work(ComplexityClass::ON, 1);
-        assert_eq!(ec.to_string(), "2 × O(n)");
+        assert_eq!(ec.to_string(), "2 \u{00d7} O(n)");
         ec.add_work(ComplexityClass::OPolynomial(2), 3);
-        assert_eq!(ec.to_string(), "3 × O(n^2) + 2 × O(n)");
+        assert_eq!(ec.to_string(), "3 \u{00d7} O(n^2) + 2 \u{00d7} O(n)");
     }
 
     #[test]
@@ -750,7 +754,7 @@ mod tests {
 
     #[test]
     fn test_exact_complexity_fromstr_multi() {
-        let ec: ExactComplexity = "3 × O(n^3) + 2 × O(n)".parse().unwrap();
+        let ec: ExactComplexity = "3 \u{00d7} O(n^3) + 2 \u{00d7} O(n)".parse().unwrap();
         assert_eq!(ec.terms[&ComplexityClass::OPolynomial(3)], 3);
         assert_eq!(ec.terms[&ComplexityClass::ON], 2);
     }
@@ -771,8 +775,8 @@ mod tests {
         ec.add_work(ComplexityClass::OPolynomial(3), 1);
         ec.add_work(ComplexityClass::ON, 2);
         let json = serde_json::to_string(&ec).unwrap();
-        // × is U+00D7 — serde_json emits it as a literal UTF-8 character
-        assert_eq!(json, "\"O(n^3) + 2 × O(n)\"");
+        // \u{00d7} is U+00D7 — serde_json emits it as a literal UTF-8 character
+        assert_eq!(json, "\"O(n^3) + 2 \u{00d7} O(n)\"");
         let ec2: ExactComplexity = serde_json::from_str(&json).unwrap();
         assert_eq!(normalize_exact(&ec), normalize_exact(&ec2));
     }
@@ -904,8 +908,8 @@ mod tests {
         let mut ec_count = ExactComplexity::new();
         ec_count.add_work(ComplexityClass::ON, 42);
         let json_count = serde_json::to_string(&ec_count).unwrap();
-        // × is U+00D7 — serde_json emits it as a literal UTF-8 character
-        assert_eq!(json_count, "\"42 × O(n)\"");
+        // \u{00d7} is U+00D7 — serde_json emits it as a literal UTF-8 character
+        assert_eq!(json_count, "\"42 \u{00d7} O(n)\"");
         let parsed: ExactComplexity = serde_json::from_str(&json_count).unwrap();
         assert_eq!(parsed, ec_count);
 
