@@ -39,11 +39,6 @@ fn bench_range_map_return(c: &mut Criterion) {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
-
-    c.bench_function("pest_range_map_return", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 }
 
 /// Benchmark chained stream operations
@@ -54,11 +49,6 @@ fn bench_chained_operations(c: &mut Criterion) {
             .combinations(2)
             .return
     "#;
-
-    c.bench_function("pest_chained_operations", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 
     c.bench_function("pest_chained_operations", |b| {
         let parser = PestParser::new();
@@ -80,11 +70,6 @@ fn bench_filter_operation(c: &mut Criterion) {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
-
-    c.bench_function("pest_filter_operation", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 }
 
 /// Benchmark struct declaration
@@ -97,11 +82,6 @@ fn bench_struct_declaration(c: &mut Criterion) {
 
         range(0, 10).return
     "#;
-
-    c.bench_function("pest_struct_declaration", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 
     c.bench_function("pest_struct_declaration", |b| {
         let parser = PestParser::new();
@@ -129,11 +109,6 @@ fn bench_enum_declaration(c: &mut Criterion) {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
-
-    c.bench_function("pest_enum_declaration", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 }
 
 /// Benchmark enum with default variant
@@ -153,11 +128,6 @@ fn bench_enum_default_variant(c: &mut Criterion) {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
-
-    c.bench_function("pest_enum_default_variant", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 }
 
 /// Benchmark stream variable declaration
@@ -165,11 +135,6 @@ fn bench_stream_variable(c: &mut Criterion) {
     let input = r#"
         x = range(0, 100)
     "#;
-
-    c.bench_function("pest_stream_variable", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 
     c.bench_function("pest_stream_variable", |b| {
         let parser = PestParser::new();
@@ -189,11 +154,6 @@ fn bench_permutations_with_replacement(c: &mut Criterion) {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
-
-    c.bench_function("pest_permutations_with_replacement", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 }
 
 /// Benchmark keep_first_n with external function
@@ -206,11 +166,6 @@ fn bench_keep_first_n(c: &mut Criterion) {
             .keep_first_n(10, sorter)
             .return
     "#;
-
-    c.bench_function("pest_keep_first_n", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 
     c.bench_function("pest_keep_first_n", |b| {
         let parser = PestParser::new();
@@ -242,11 +197,6 @@ fn bench_complex_csv_example(c: &mut Criterion) {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
-
-    c.bench_function("pest_complex_csv_example", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 }
 
 /// Benchmark complex example with multiple streams
@@ -273,11 +223,6 @@ fn bench_multiple_streams(c: &mut Criterion) {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
-
-    c.bench_function("pest_multiple_streams", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 }
 
 /// Benchmark write_file operation
@@ -290,21 +235,11 @@ fn bench_write_file(c: &mut Criterion) {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
-
-    c.bench_function("pest_write_file", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 }
 
 /// Benchmark empty input (baseline)
 fn bench_empty_input(c: &mut Criterion) {
     let input = "";
-
-    c.bench_function("pest_empty_input", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 
     c.bench_function("pest_empty_input", |b| {
         let parser = PestParser::new();
@@ -334,11 +269,6 @@ fn bench_deeply_nested(c: &mut Criterion) {
         let parser = PestParser::new();
         b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
     });
-
-    c.bench_function("pest_deeply_nested", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 }
 
 /// Benchmark color palette picker example (real-world use case)
@@ -352,11 +282,6 @@ fn bench_color_palette_picker(c: &mut Criterion) {
             .keep_first_n(20, compare_contrast)
             .return
     "#;
-
-    c.bench_function("pest_color_palette_picker", |b| {
-        let parser = PestParser::new();
-        b.iter(|| parser.parse(black_box(input)).expect("Pest parse failed"));
-    });
 
     c.bench_function("pest_color_palette_picker", |b| {
         let parser = PestParser::new();
