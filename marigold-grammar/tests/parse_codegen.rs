@@ -47,16 +47,16 @@ fn assert_parse_fails(src: &str) {
 // Valid-program tests
 // ---------------------------------------------------------------------------
 
-/// A simple range + map pipeline should produce code that references `map`.
+/// A simple range + map pipeline should produce code that calls `.map(`.
 #[test]
 fn parse_simple_range_map() {
-    assert_parse_contains("range(0, 5).map(double).return", &["map"]);
+    assert_parse_contains("range(0, 5).map(double).return", &[".map("]);
 }
 
-/// A range + filter pipeline should produce code that references `filter`.
+/// A range + filter pipeline should produce code that calls `.filter(`.
 #[test]
 fn parse_filter() {
-    assert_parse_contains("range(0, 10).filter(is_positive).return", &["filter"]);
+    assert_parse_contains("range(0, 10).filter(is_positive).return", &[".filter("]);
 }
 
 /// A range + fold pipeline should produce code that references `fold`.
@@ -88,17 +88,30 @@ fn parse_inclusive_range() {
     );
 }
 
-/// Stream variable syntax: `my_stream = range(0, 5)` followed by `my_stream.return`.
-/// Both lines form a single Marigold program (whitespace/newlines are ignored by
-/// the grammar, so the two expressions can be separated by a newline).
+/// Stream variable syntax: `my_stream = range(0, 5)` followed by
+/// `my_stream.return`. Both lines form a single Marigold program; the grammar
+/// treats whitespace (including newlines) as a delimiter between statements.
+/// A second variant separated by a space confirms whitespace tolerance
+/// explicitly.
 #[test]
 fn parse_stream_var() {
-    let src = "my_stream = range(0, 5)\nmy_stream.return";
-    let result = marigold_parse(src);
+    // Newline-separated variant.
+    let src_newline = "my_stream = range(0, 5)\nmy_stream.return";
+    let result = marigold_parse(src_newline);
     assert!(
         result.is_ok(),
-        "Expected stream-variable program to parse successfully; got: {:?}",
+        "Expected stream-variable program (newline-separated) to parse successfully; got: {:?}",
         result.err()
+    );
+
+    // Space-separated variant — confirms whitespace tolerance is not specific
+    // to newlines.
+    let src_space = "my_stream = range(0, 5) my_stream.return";
+    let result2 = marigold_parse(src_space);
+    assert!(
+        result2.is_ok(),
+        "Expected stream-variable program (space-separated) to parse successfully; got: {:?}",
+        result2.err()
     );
 }
 
@@ -106,7 +119,7 @@ fn parse_stream_var() {
 #[test]
 fn parse_stream_var_with_map() {
     let src = "data = range(0, 10)\ndata.map(double).return";
-    assert_parse_contains(src, &["map"]);
+    assert_parse_contains(src, &[".map("]);
 }
 
 /// A `struct` declaration should parse successfully and produce code that
@@ -129,8 +142,8 @@ fn parse_struct_decl() {
     );
 }
 
-/// An `enum` declaration should parse and the variant names should appear in
-/// the generated code.
+/// An `enum` declaration should parse and both the enum name and at least one
+/// variant name should appear in the generated code.
 #[test]
 fn parse_enum_decl() {
     let src = "enum Color { Red = \"red\", Green = \"green\" }\nrange(0, 1).return";
@@ -144,6 +157,11 @@ fn parse_enum_decl() {
     assert!(
         code.contains("Color"),
         "Expected generated code to reference 'Color'; got:\n{}",
+        code
+    );
+    assert!(
+        code.contains("Red"),
+        "Expected generated code to reference variant 'Red'; got:\n{}",
         code
     );
 }
@@ -201,33 +219,32 @@ fn parse_combinations() {
     );
 }
 
-/// filter_map pipeline should produce code that references `filter_map`.
+/// filter_map pipeline should produce code that calls `.filter_map(`.
 #[test]
 fn parse_filter_map() {
-    assert_parse_contains("range(0, 10).filter_map(to_even).return", &["filter_map"]);
+    assert_parse_contains("range(0, 10).filter_map(to_even).return", &[".filter_map("]);
 }
 
 /// A multi-consumer program: one stream variable consumed by two output streams.
-/// This exercises the stream-variable fan-out path in the code generator.
+/// This exercises the stream-variable fan-out path in the code generator and
+/// verifies that the generated code contains the `MultiConsumerStream` wrapper.
 #[test]
 fn parse_multi_consumer() {
     let src = "data = range(0, 5)\ndata.return\ndata.return";
-    let result = marigold_parse(src);
-    assert!(
-        result.is_ok(),
-        "Expected multi-consumer program to parse successfully; got: {:?}",
-        result.err()
-    );
+    assert_parse_contains(src, &["MultiConsumerStream"]);
 }
 
 // ---------------------------------------------------------------------------
 // Invalid-input tests
 // ---------------------------------------------------------------------------
 
-/// A completely non-Marigold string should be rejected.
+/// Input that can never be valid Marigold syntax should be rejected.
+/// Using `"@@@"` rather than a bare identifier ensures this remains a true
+/// negative regardless of future grammar evolution (bare identifiers might
+/// eventually become valid stream-variable references).
 #[test]
 fn parse_invalid_syntax_fails() {
-    assert_parse_fails("definitely_not_valid");
+    assert_parse_fails("@@@");
 }
 
 /// A stream with no output function should fail (bare `range(0,5)` is not a

@@ -111,12 +111,22 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
 // which deadlocks once the channel buffer fills up with more than one item.
 // Gating on `feature = "tokio"` ensures the spawned background task and the
 // collecting futures run concurrently on the tokio multi-thread scheduler.
+//
+// NOTE: coverage gap — the `async-std` spawn path (`#[cfg(feature = "async-std")]`)
+// is not exercised here. A follow-up should add a parallel test block gated on
+// `#[cfg(all(test, feature = "async-std"))]` to cover that runtime branch.
 #[cfg(all(test, feature = "tokio"))]
 mod tests {
     use super::MultiConsumerStream;
     use futures::stream::StreamExt;
 
     /// A single consumer receives all items from the source stream, in order.
+    ///
+    /// Ordering is deterministic here because `futures::channel::mpsc` provides
+    /// FIFO delivery guarantees: items are enqueued in source order and the
+    /// single receiver dequeues them in the same order. The ordering guarantee
+    /// comes from the FIFO channel contract, not from an inherent property of
+    /// `MultiConsumerStream` itself.
     #[tokio::test]
     async fn single_consumer_receives_all() {
         let source = futures::stream::iter(vec![1i32, 2, 3]);
@@ -131,6 +141,11 @@ mod tests {
 
     /// Two independent consumers both receive every item from the source stream.
     /// This validates the broadcast / fan-out semantics of `MultiConsumerStream`.
+    ///
+    /// Each consumer receives the *complete* sequence `[1, 2, 3]` — this is a
+    /// broadcast model, not a partitioning/sharding model. Both channels are
+    /// independent FIFO queues fed by the same background task, so each
+    /// consumer sees all items in source order.
     #[tokio::test]
     async fn two_consumers_both_receive_all() {
         let source = futures::stream::iter(vec![1i32, 2, 3]);
@@ -152,6 +167,10 @@ mod tests {
     }
 
     /// A `MultiConsumerStream` with no consumers completes without error.
+    ///
+    /// This is intentionally a smoke test for "no panic / no deadlock" only.
+    /// There are no receivers to assert against; correctness here means the
+    /// background task drains the source and returns without blocking.
     #[tokio::test]
     async fn no_consumers_completes_cleanly() {
         let source = futures::stream::iter(vec![1i32, 2, 3]);
