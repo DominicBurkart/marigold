@@ -34,6 +34,15 @@ where
 
 #[cfg(test)]
 mod tests {
+    // Note on test overlap: several tests in this module
+    // (combinations_k_zero, combinations_k_equals_length, combinations_k_exceeds_length,
+    // combinations_empty_stream, combinations_single_item) have structural counterparts
+    // in marigold-impl/tests/combinations_edge_cases.rs that arrived via the merge from
+    // main. The duplication is intentional: the inline tests here exercise the Combinable
+    // impl directly without the DSL layer, while the integration tests in
+    // tests/combinations_edge_cases.rs exercise the full crate public API. Do not remove
+    // one set thinking the other makes it redundant — both levels of coverage are
+    // independently valuable.
     use super::Combinable;
     use futures::stream::StreamExt;
 
