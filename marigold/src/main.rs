@@ -539,15 +539,14 @@ mod tests {
 
 #[cfg(all(test, feature = "cli"))]
 mod cache_tests {
-    use std::fs;
     use super::*;
+    use std::fs;
 
     #[test]
     fn test_prepare_cache_creates_files() {
         let tmp = tempfile::tempdir().unwrap();
-        let project_dir =
-            prepare_cache(tmp.path(), "my_prog", "range(0, 1).return", "0.1.0", None)
-                .expect("prepare_cache failed");
+        let project_dir = prepare_cache(tmp.path(), "my_prog", "range(0, 1).return", "0.1.0", None)
+            .expect("prepare_cache failed");
         assert!(project_dir.join("src/main.rs").exists());
         assert!(project_dir.join("Cargo.toml").exists());
         let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).unwrap();
@@ -582,7 +581,7 @@ mod cache_tests {
     #[test]
     fn test_clean_all_empty() {
         let tmp = tempfile::tempdir().unwrap();
-        let (_, path) = tmp.keep().unwrap();
+        let path = tmp.keep();
         clean_all_cache(&path).expect("should succeed on empty dir");
         assert!(!path.exists());
     }
@@ -590,7 +589,7 @@ mod cache_tests {
     #[test]
     fn test_clean_all_with_programs() {
         let tmp = tempfile::tempdir().unwrap();
-        let (_, path) = tmp.keep().unwrap();
+        let path = tmp.keep();
         prepare_cache(&path, "prog_a", "range(0, 1).return", "0.1.0", None).unwrap();
         prepare_cache(&path, "prog_b", "range(0, 2).return", "0.1.0", None).unwrap();
         clean_all_cache(&path).unwrap();
