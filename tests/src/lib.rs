@@ -1,4 +1,7 @@
 #[cfg(test)]
+mod oracle;
+
+#[cfg(test)]
 mod tests {
     use marigold::m;
     use marigold::marigold_impl::StreamExt;
@@ -162,6 +165,39 @@ mod tests {
     // }
 
     #[tokio::test]
+    async fn test_enum_range() {
+        let r = m!(
+            enum Words { Hello, World, }
+            range(Words).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(r.len(), 2);
+        assert_eq!(format!("{:?}", r[0]), "Hello");
+        assert_eq!(format!("{:?}", r[1]), "World");
+    }
+
+    #[tokio::test]
+    async fn test_enum_range_with_filter() {
+        let r = m!(
+            fn is_hello(w: Words) -> bool {
+                matches!(w, Words::Hello)
+            }
+
+            enum Words { Hello, World, }
+            range(Words)
+                .filter(is_hello)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(r.len(), 1);
+        assert_eq!(format!("{:?}", r[0]), "Hello");
+    }
+
+    #[tokio::test]
     async fn test_select_all_multiple_streams() {
         let result = m!(
             select_all(range(0, 3), range(10, 13)).return
@@ -184,5 +220,176 @@ mod tests {
         .collect::<Vec<_>>()
         .await;
         assert_eq!(result, vec![0, 1, 2, 3]);
+    }
+
+    // --- New tests below ---
+
+    #[tokio::test]
+    async fn test_empty_range() {
+        let result = m!(
+            range(0, 0).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert!(result.is_empty(), "range(0,0) should produce empty stream");
+    }
+
+    #[tokio::test]
+    async fn test_single_element_range() {
+        let result = m!(
+            range(0, 1).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0]);
+    }
+
+    #[tokio::test]
+    async fn test_chained_maps() {
+        fn double(v: i32) -> i32 {
+            v * 2
+        }
+        fn inc(v: i32) -> i32 {
+            v + 1
+        }
+
+        let result = m!(
+            range(0, 3)
+                .map(double)
+                .map(inc)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![1, 3, 5]);
+    }
+
+    #[tokio::test]
+    async fn test_combinations_standalone() {
+        let result = m!(
+            range(0, 4)
+                .combinations(2)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // C(4,2) = 6
+        assert_eq!(result.len(), 6);
+        assert_eq!(result[0], [0i32, 1]);
+        assert_eq!(result[5], [2i32, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_map_identity() {
+        fn identity(v: i32) -> i32 {
+            v
+        }
+
+        let result = m!(
+            range(0, 5)
+                .map(identity)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[tokio::test]
+    async fn test_filter_none_match() {
+        fn always_false(_i: i32) -> bool {
+            false
+        }
+
+        let result = m!(
+            range(0, 10)
+                .filter(always_false)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert!(
+            result.is_empty(),
+            "Filter that matches nothing should produce empty stream"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_filter_all_match() {
+        fn always_true(_i: i32) -> bool {
+            true
+        }
+
+        let result = m!(
+            range(0, 5)
+                .filter(always_true)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[tokio::test]
+    async fn test_large_range() {
+        let result = m!(
+            range(0, 1000).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result.len(), 1000);
+        assert_eq!(result[0], 0);
+        assert_eq!(result[999], 999);
+    }
+
+    #[tokio::test]
+    async fn test_fn_declaration_in_macro() {
+        let result = m!(
+            fn square(x: i32) -> i32 {
+                x * x
+            }
+
+            range(1, 5)
+                .map(square)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![1, 4, 9, 16]);
+    }
+
+    #[tokio::test]
+    async fn test_inclusive_range_single() {
+        let result = m!(
+            range(5, =5).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![5]);
+    }
+
+    #[tokio::test]
+    async fn test_select_all_three_streams() {
+        let result = m!(
+            select_all(range(0, 2), range(10, 12), range(20, 22)).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+
+        // select_all ordering is non-deterministic for concurrent streams, so sort before comparing
+        let mut sorted = result.clone();
+        sorted.sort();
+        assert_eq!(sorted, vec![0, 1, 10, 11, 20, 21]);
     }
 }
