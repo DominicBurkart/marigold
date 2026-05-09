@@ -13,27 +13,23 @@ pub fn marigold(item: TokenStream) -> TokenStream {
     let s = item.to_string();
     match marigold_parse(&s) {
         Ok(generated) => {
-            let src = format!(
-                "{{
-{}
+            let src = format!("{{
+{generated}
 }}
-",
-                generated
-            );
+");
             match src.parse() {
                 Ok(ts) => ts,
                 Err(e) => {
                     let msg = format!(
-                        "marigold internal error: generated code failed to lex: {}. \
-                         Please file a bug at https://github.com/DominicBurkart/marigold/issues",
-                        e
+                        "marigold internal error: generated code failed to lex: {e}. \
+                         Please file a bug at https://github.com/DominicBurkart/marigold/issues"
                     );
                     quote! { compile_error!(#msg) }.into()
                 }
             }
         }
         Err(e) => {
-            let msg = format!("marigold parse error: {}", e);
+            let msg = format!("marigold parse error: {e}");
             quote! { compile_error!(#msg) }.into()
         }
     }
