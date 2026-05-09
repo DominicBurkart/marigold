@@ -389,9 +389,15 @@ pub enum Symbolic {
     /// Prefix-truncation (e.g. `take_while`): the output is a contiguous prefix
     /// of the input. Behaves identically to `Filtered` for cardinality / time /
     /// space classification today, but is preserved as a distinct variant so
-    /// future analyses can exploit the prefix-preservation guarantee
-    /// (ordering preservation, early upstream termination, tighter bounds when
-    /// the input cardinality is known).
+    /// future analyses can exploit the prefix-preservation guarantee.
+    ///
+    /// Note: on `upper_bound` alone, `TakeWhile` and `Filtered` are genuinely
+    /// equivalent — both are bounded above by `inner.upper_bound()`. The future
+    /// wins live elsewhere: ordering-preservation proofs (a prefix of an
+    /// ordered stream is still ordered), early upstream termination, and
+    /// `min(known_constant, inner)`-shaped cardinality refinements when a
+    /// constant prefix length is provable. Lower-bound analysis is the more
+    /// likely first beneficiary, not the upper bound.
     TakeWhile(Box<Symbolic>),
     Permutations {
         n: Box<Symbolic>,
@@ -1291,15 +1297,18 @@ mod tests {
         assert_eq!(f.upper_bound(), tw.upper_bound());
         assert_eq!(f.contains_unknown(), tw.contains_unknown());
         assert_eq!(f.try_evaluate(), tw.try_evaluate());
-        assert_eq!(f.classify_as_cardinality(), {
-            // Cardinality::Bounded uses the symbolic inside; since the variant
-            // is distinct, the bounded values themselves are not equal — but
-            // both should be Bounded.
-            match tw.classify_as_cardinality() {
-                Cardinality::Bounded(_) => Cardinality::Bounded(f.clone()),
-                other => other,
-            }
-        });
+        // Cardinality::Bounded wraps the originating symbolic, so the two
+        // values are not equal as a whole — but they must both classify as
+        // Bounded. Assert each independently to avoid a tautological
+        // comparison that would silently pass if `tw` returned `Unknown`.
+        assert!(matches!(
+            f.classify_as_cardinality(),
+            Cardinality::Bounded(_)
+        ));
+        assert!(matches!(
+            tw.classify_as_cardinality(),
+            Cardinality::Bounded(_)
+        ));
     }
 
     #[test]
@@ -2308,6 +2317,21 @@ mod proptests {
             if let (Some(exact), Some(upper)) = (sym.try_evaluate(), sym.upper_bound()) {
                 prop_assert!(upper >= exact, "upper_bound ({upper}) must be >= try_evaluate ({exact})");
             }
+        }
+    }
+
+    proptest! {
+        // #222: lock in the propagate_cardinality contract for TakeWhile —
+        // for *any* input cardinality `c`, routing it through
+        // StreamFunctionKind::TakeWhile must yield Symbolic::TakeWhile(Box::new(c))
+        // (and never collapse back into Filtered or any other variant). The
+        // existing unit test only covers the Constant case; this proptest
+        // covers Unknown, Filtered, Permutations, Combinations, Min, Sum, and
+        // a nested TakeWhile.
+        #[test]
+        fn test_propagate_cardinality_take_while_wraps_input(sym in arb_symbolic()) {
+            let result = propagate_cardinality(sym.clone(), &StreamFunctionKind::TakeWhile);
+            prop_assert_eq!(result, Symbolic::TakeWhile(Box::new(sym)));
         }
     }
 
