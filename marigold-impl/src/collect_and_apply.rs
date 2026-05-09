@@ -31,11 +31,38 @@ mod tests {
     use super::CollectAndAppliable;
 
     #[tokio::test]
-    async fn collect_and_apply() {
+    async fn collect_and_apply_basic() {
         assert_eq!(
             futures::stream::iter(1..=3).collect_and_apply(|x| x).await,
             vec![1, 2, 3]
         );
+    }
+
+    /// An empty stream delivers an empty Vec to the applied function.
+    #[tokio::test]
+    async fn collect_and_apply_empty_stream() {
+        let result: Vec<i32> = futures::stream::iter(Vec::<i32>::new())
+            .collect_and_apply(|v| v)
+            .await;
+        assert!(result.is_empty());
+    }
+
+    /// The applied function can transform the collected data arbitrarily.
+    #[tokio::test]
+    async fn collect_and_apply_transform() {
+        let sum: i32 = futures::stream::iter(vec![1i32, 2, 3, 4])
+            .collect_and_apply(|v| v.iter().sum())
+            .await;
+        assert_eq!(sum, 10);
+    }
+
+    /// A single-element stream passes a one-element Vec.
+    #[tokio::test]
+    async fn collect_and_apply_single_element() {
+        let result: Vec<u8> = futures::stream::iter(vec![99u8])
+            .collect_and_apply(|v| v)
+            .await;
+        assert_eq!(result, vec![99u8]);
     }
 
     #[tokio::test]
