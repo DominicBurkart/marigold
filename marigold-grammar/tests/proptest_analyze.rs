@@ -466,10 +466,6 @@ proptest! {
             );
         }
     }
-}
-
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// Adding one more streaming step to an unnamed program must not decrease program_time.
     ///
@@ -483,7 +479,7 @@ proptest! {
     ) {
         // Parse the base program so we can compute its complexity.
         let base_result = marigold_grammar::marigold_analyze(&prog.source);
-        prop_assume!(base_result.is_ok());
+        prop_assert!(base_result.is_ok(), "Base program failed to analyze:\n{}\nError: {:?}", prog.source, base_result.err());
         let base_complexity = base_result.unwrap();
 
         // Insert the extra streaming step just before the terminal output verb.
@@ -498,7 +494,7 @@ proptest! {
                 prog.source.rfind(needle.as_str()).map(|pos| pos) // position of the dot
             })
             .max();
-        prop_assume!(insert_pos.is_some());
+        prop_assert!(insert_pos.is_some(), "Could not find output keyword in generated program:\n{}", prog.source);
         let pos = insert_pos.unwrap();
 
         let extended_source = format!(
@@ -509,8 +505,7 @@ proptest! {
         );
 
         let extended_result = marigold_grammar::marigold_analyze(&extended_source);
-        // If the extended program fails to parse for any reason, skip (don't fail).
-        prop_assume!(extended_result.is_ok());
+        prop_assert!(extended_result.is_ok(), "Extended program failed to analyze:\n{}\nError: {:?}", extended_source, extended_result.err());
         let extended_complexity = extended_result.unwrap();
 
         prop_assert!(

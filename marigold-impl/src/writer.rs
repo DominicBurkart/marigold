@@ -60,7 +60,7 @@ impl tokio::io::AsyncWrite for Writer {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "io"))]
 mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
