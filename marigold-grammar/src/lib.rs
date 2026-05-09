@@ -62,9 +62,6 @@
 //! - **Code generation**: Dominates runtime, scales with program complexity
 //! - **Binary size**: Pest parser adds ~40KB to binary size
 
-#[macro_use]
-extern crate lazy_static;
-
 extern crate proc_macro;
 
 pub use itertools;
