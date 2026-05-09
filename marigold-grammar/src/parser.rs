@@ -14,7 +14,7 @@
 //! Explicitly create a parser instance:
 //! ```ignore
 //! let parser = PestParser::new();
-//! let result = parser.parse("range(0, 1).return")?;
+//! let result = parser.parse("range(0, 1).return");
 //! ```
 
 use pest::Parser;
@@ -59,7 +59,7 @@ impl PestParser {
         input: &str,
     ) -> Result<crate::complexity::ProgramComplexity, MarigoldParseError> {
         let pairs = MarigoldPestParser::parse(Rule::program, input)
-            .map_err(|e| MarigoldParseError(e.to_string()))?;
+            .map_err(|e| MarigoldParseError(format!("{}", e)))?;
         let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)
             .map_err(MarigoldParseError)?;
         Self::resolve_enum_range_counts(&mut expressions).map_err(MarigoldParseError)?;
@@ -70,7 +70,7 @@ impl PestParser {
     fn parse_input(input: &str) -> Result<String, String> {
         // Stage 1: Parse with Pest grammar
         let pairs =
-            MarigoldPestParser::parse(Rule::program, input).map_err(|e| e.to_string())?;
+            MarigoldPestParser::parse(Rule::program, input).map_err(|e| format!("{}", e))?;
 
         // Stage 2: Build AST from parse tree
         let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)?;
@@ -145,8 +145,7 @@ impl PestParser {
         match resolver.resolve_all() {
             Ok(bounds) => Ok(Some(bounds)),
             Err(errors) => {
-                let error_messages: Vec<String> =
-                    errors.iter().map(|e| e.to_string()).collect();
+                let error_messages: Vec<String> = errors.iter().map(|e| format!("{}", e)).collect();
                 Err(format!(
                     "Bounded type validation failed:\n  - {}",
                     error_messages.join("\n  - ")
@@ -574,7 +573,7 @@ mod negative_tests {
 
     #[test]
     fn test_reject_read_file_missing_format() {
-        let result = parse_marigold("read_file(\"data.csv\").return");
+        let result = parse_marigold("read_file(\"data.csv\")");
         assert!(
             result.is_err(),
             "Should reject read_file() without format argument"
@@ -1235,8 +1234,7 @@ mod struct_enum_tests {
 
     #[test]
     fn test_multiple_enums_and_structs() {
-        let result =
-            parse_marigold("enum A { X, Y, } enum B { P, Q, } struct C { a: A, b: B, }");
+        let result = parse_marigold("enum A { X, Y, } enum B { P, Q, } struct C { a: A, b: B, }");
         assert!(
             result.is_ok(),
             "multiple enums and struct should parse: {:?}",
