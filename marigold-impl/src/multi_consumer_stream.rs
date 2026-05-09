@@ -115,8 +115,12 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
 // NOTE: coverage gap — the `async-std` spawn path (`#[cfg(feature = "async-std")]`)
 // is not exercised here. A follow-up should add a parallel test block gated on
 // `#[cfg(all(test, feature = "async-std"))]` to cover that runtime branch.
+//
+// NOTE: named `tokio_tests` (not `tests`) to avoid a duplicate-module compile
+// error with PR #128, which also adds a `#[cfg(all(test, feature = "tokio"))]`
+// block to this file.
 #[cfg(all(test, feature = "tokio"))]
-mod tests {
+mod tokio_tests {
     use super::MultiConsumerStream;
     use futures::stream::StreamExt;
 
