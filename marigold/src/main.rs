@@ -97,16 +97,26 @@ fn prepare_cache(
     }
 
     let program_project_dir = cache_root.join(program_name);
-    let program_src_dir = program_project_dir.join("src");
 
-    std::fs::create_dir_all(&program_src_dir)?;
+    // Use a staging directory to make writes atomic: build the project layout
+    // under `{program_name}.__marigold_tmp__` first, then rename it over the
+    // final directory.  This prevents a partial-write failure (e.g. main.rs
+    // written but Cargo.toml write fails) from leaving an orphaned directory
+    // that cargo would later refuse to build.
+    let staging_dir = cache_root.join(format!("{program_name}.__marigold_tmp__"));
+
+    // Clean up any leftover staging dir from a previous failed attempt.
+    if staging_dir.exists() {
+        std::fs::remove_dir_all(&staging_dir)?;
+    }
+
+    let staging_src_dir = staging_dir.join("src");
+    std::fs::create_dir_all(&staging_src_dir)?;
 
     std::fs::write(
-        program_src_dir.join("main.rs"),
+        staging_src_dir.join("main.rs"),
         format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}"),
     )?;
-
-    let manifest_path = program_project_dir.join("Cargo.toml");
 
     let marigold_dep = if let Some(path) = workspace_path {
         format!("marigold = {{ path = \"{path}\", features = [\"tokio\", \"io\"]}}\n")
@@ -117,7 +127,7 @@ fn prepare_cache(
     };
 
     std::fs::write(
-        &manifest_path,
+        staging_dir.join("Cargo.toml"),
         format!(
             r#"[package]
 name = "{program_name}"
@@ -131,6 +141,14 @@ tokio = {{ version = "1", features = ["full"]}}
 "#
         ),
     )?;
+
+    // Atomically replace the final project directory with the fully-written
+    // staging directory.  Remove any pre-existing project dir first (rename
+    // over a non-empty directory fails on some platforms).
+    if program_project_dir.exists() {
+        std::fs::remove_dir_all(&program_project_dir)?;
+    }
+    std::fs::rename(&staging_dir, &program_project_dir)?;
 
     Ok(program_project_dir)
 }
@@ -725,6 +743,39 @@ mod cache_tests {
             "prepare_cache should reject program_contents containing '{}{}'",
             "}",
             ")"
+        );
+    }
+
+    /// Verifies that prepare_cache writes are effectively atomic: a second
+    /// invocation that would clobber an existing cache always leaves the project
+    /// directory in a fully-written state, never half-written.
+    #[test]
+    fn test_prepare_cache_atomic_overwrite() {
+        let tmp = tempfile::tempdir().unwrap();
+        // First write succeeds.
+        prepare_cache(tmp.path(), "prog", "range(0, 1).return", "0.1.0", None).unwrap();
+        // Second write with different contents also succeeds and the project dir
+        // is consistent: both files must exist and Cargo.toml must reflect the
+        // new version rather than being absent or stale.
+        let project_dir =
+            prepare_cache(tmp.path(), "prog", "range(0, 2).return", "0.1.1", None).unwrap();
+        assert!(
+            project_dir.join("Cargo.toml").exists(),
+            "Cargo.toml must exist after second prepare_cache"
+        );
+        assert!(
+            project_dir.join("src/main.rs").exists(),
+            "src/main.rs must exist after second prepare_cache"
+        );
+        let toml = fs::read_to_string(project_dir.join("Cargo.toml")).unwrap();
+        assert!(
+            toml.contains("0.1.1"),
+            "Cargo.toml should reflect the updated marigold version"
+        );
+        // No staging directory should remain after a successful prepare_cache.
+        assert!(
+            !tmp.path().join("prog.__marigold_tmp__").exists(),
+            "staging dir should be cleaned up after successful prepare_cache"
         );
     }
 }
