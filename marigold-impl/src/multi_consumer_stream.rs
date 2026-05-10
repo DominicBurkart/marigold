@@ -100,3 +100,71 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
         (0, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream::StreamExt;
+
+    #[tokio::test]
+    async fn run_future_as_stream_yields_nothing() {
+        let fut = Box::pin(async { 42u32 });
+        let stream = RunFutureAsStream::<u32, u32, _>::new(fut);
+        let items: Vec<u32> = stream.collect().await;
+        assert!(items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_future_as_stream_size_hint() {
+        let fut = Box::pin(async { () });
+        let stream = RunFutureAsStream::<u32, (), _>::new(fut);
+        assert_eq!(stream.size_hint(), (0, None));
+    }
+
+    #[tokio::test]
+    async fn multi_consumer_stream_no_consumers_runs_without_panic() {
+        let inner = futures::stream::iter(vec![1u32, 2, 3]);
+        let mcs = MultiConsumerStream::new(inner);
+        mcs.run().await;
+    }
+
+    #[tokio::test]
+    async fn multi_consumer_stream_empty_inner_stream() {
+        let inner = futures::stream::iter(Vec::<u32>::new());
+        let mut mcs = MultiConsumerStream::new(inner);
+        let rx = mcs.get();
+        // Spawn consumer before run() so the channel is drained concurrently
+        let h = tokio::spawn(async move { rx.collect::<Vec<_>>().await });
+        mcs.run().await;
+        let items = h.await.unwrap();
+        assert!(items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn multi_consumer_stream_one_consumer_receives_all_items() {
+        let inner = futures::stream::iter(vec![1u32, 2, 3]);
+        let mut mcs = MultiConsumerStream::new(inner);
+        let rx = mcs.get();
+        // Spawn consumer before run() to avoid deadlock with BUFFER_SIZE=1
+        let h = tokio::spawn(async move { rx.collect::<Vec<_>>().await });
+        mcs.run().await;
+        let items = h.await.unwrap();
+        assert_eq!(items, vec![1u32, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn multi_consumer_stream_two_consumers_both_receive_all_items() {
+        let inner = futures::stream::iter(vec![1u32, 2, 3]);
+        let mut mcs = MultiConsumerStream::new(inner);
+        let rx1 = mcs.get();
+        let rx2 = mcs.get();
+        // Spawn both consumers before run() to avoid deadlock with BUFFER_SIZE=1
+        let h1 = tokio::spawn(async move { rx1.collect::<Vec<_>>().await });
+        let h2 = tokio::spawn(async move { rx2.collect::<Vec<_>>().await });
+        mcs.run().await;
+        let items1 = h1.await.unwrap();
+        let items2 = h2.await.unwrap();
+        assert_eq!(items1, vec![1u32, 2, 3]);
+        assert_eq!(items2, vec![1u32, 2, 3]);
+    }
+}
