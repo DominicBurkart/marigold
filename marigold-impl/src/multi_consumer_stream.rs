@@ -101,7 +101,11 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
     }
 }
 
-#[cfg(all(test, any(feature = "tokio", feature = "async-std")))]
+// These tests use #[tokio::test], tokio::spawn, and tokio::task::yield_now(),
+// which are all tokio-specific. They must only compile when the tokio feature
+// is active; gating on `any(feature = "tokio", feature = "async-std")` would
+// cause compilation failures under --features async-std (no tokio runtime).
+#[cfg(all(test, feature = "tokio"))]
 mod tests {
     use super::*;
     use futures::stream::StreamExt;

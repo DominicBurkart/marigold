@@ -445,24 +445,29 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
     }
 
+    // These two tests call super::derive_program_name and super::MarigoldCommand,
+    // which are only defined under #[cfg(feature = "cli")]. Gate them accordingly
+    // so that `cargo test` (no features) compiles successfully.
+    #[cfg(feature = "cli")]
     #[test]
     fn derive_program_name_handles_paths_and_fallbacks() {
         use super::derive_program_name;
 
-        // Real source file → snake-cased stem.
+        // Real source file -> snake-cased stem.
         assert_eq!(
             derive_program_name(Some("/tmp/HelloWorld.marigold")),
             "hello_world"
         );
-        // No path supplied → stable fallback.
+        // No path supplied -> stable fallback.
         assert_eq!(derive_program_name(None), "marigold_program");
-        // Single-character stems are too short to be useful Cargo package names → fallback.
+        // Single-character stems are too short to be useful Cargo package names -> fallback.
         assert_eq!(derive_program_name(Some("a.marigold")), "marigold_program");
         // Names that snake-case to leading/trailing underscores are stripped so the
         // resulting Cargo package name is still valid.
         assert_eq!(derive_program_name(Some("_Foo_.marigold")), "foo");
     }
 
+    #[cfg(feature = "cli")]
     #[test]
     fn marigold_command_file_extracts_path_for_each_variant() {
         use super::MarigoldCommand;
