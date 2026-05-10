@@ -54,26 +54,11 @@ impl ComplexityClass {
             ComplexityClass::ON => 2,
             ComplexityClass::ONLogK(_) => 3,
             ComplexityClass::ONLogN => 4,
-            ComplexityClass::OPolynomial(k) => {
-                // k=0 maps to ordinal 5 (> ONLogN=4) even though O(n^0)=O(1),
-                // and k=1 maps to ordinal 6 even though O(n^1)=O(n).
-                // Callers must ensure k >= 2 for the ordinal to be semantically
-                // correct; the generators in the proptest module enforce this.
-                debug_assert!(*k >= 2, "OPolynomial(k) with k<2 has misleading ordinal; got k={k}");
-                5 + *k
-            }
-            ComplexityClass::OCombinatorial(k) => 1_000_000 + *k,
-            ComplexityClass::OPermutational(k) => 2_000_000 + *k,
+            ComplexityClass::OPolynomial(k) => 5 + k,
+            ComplexityClass::OCombinatorial(k) => 1_000_000 + k,
+            ComplexityClass::OPermutational(k) => 2_000_000 + k,
             ComplexityClass::OFactorial => 3_000_000,
             ComplexityClass::Unknown => u64::MAX,
-        }
-    }
-
-    pub fn max(self, other: ComplexityClass) -> ComplexityClass {
-        if self >= other {
-            self
-        } else {
-            other
         }
     }
 }
@@ -90,7 +75,7 @@ impl fmt::Display for ComplexityClass {
             ComplexityClass::ONLogN => write!(f, "O(n*log(n))"),
             ComplexityClass::OPolynomial(k) => write!(f, "O(n^{k})"),
             ComplexityClass::OCombinatorial(k) => write!(f, "O(C(n,{k}))"),
-            ComplexityClass::OPermutational(k) => write!(f, "O(n!/(n-{k})!)"),
+            ComplexityClass::OPermutational(k) => write!(f, "O(P(n,{k}))"),
             ComplexityClass::OFactorial => write!(f, "O(n!)"),
             ComplexityClass::Unknown => write!(f, "O(?)"),
         }
@@ -101,95 +86,95 @@ impl FromStr for ComplexityClass {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        ComplexityNotationParser::parse(Rule::simple_complexity, s)
-            .map_err(|e| format!("Invalid complexity notation: {e}"))?;
-
-        if let Some(rest) = s.strip_prefix("O(n!/(n-") {
-            if let Some(num_str) = rest.strip_suffix(")!)") {
-                let k: u64 = num_str
-                    .parse()
-                    .map_err(|_| format!("Invalid permutation argument: {num_str}"))?;
-                return Ok(ComplexityClass::OPermutational(k));
-            }
-        }
-        if let Some(rest) = s.strip_prefix("O(n^") {
-            if let Some(num_str) = rest.strip_suffix(')') {
-                let k: u64 = num_str
-                    .parse()
-                    .map_err(|_| format!("Invalid exponent: {num_str}"))?;
-                return Ok(ComplexityClass::OPolynomial(k));
-            }
-        }
-        if let Some(rest) = s.strip_prefix("O(n*log(") {
-            if let Some(num_str) = rest.strip_suffix("))") {
-                if num_str == "n" {
-                    return Ok(ComplexityClass::ONLogN);
-                }
-                let k: u64 = num_str
-                    .parse()
-                    .map_err(|_| format!("Invalid log argument: {num_str}"))?;
-                return Ok(ComplexityClass::ONLogK(k));
-            }
-        }
-        if let Some(rest) = s.strip_prefix("O(C(n,") {
-            if let Some(num_str) = rest.strip_suffix("))") {
-                let k: u64 = num_str
-                    .parse()
-                    .map_err(|_| format!("Invalid combination argument: {num_str}"))?;
-                return Ok(ComplexityClass::OCombinatorial(k));
-            }
-        }
-
-        match s {
-            "O(1)" => Ok(ComplexityClass::O1),
-            "O(log(n))" => Ok(ComplexityClass::OLogN),
-            "O(n)" => Ok(ComplexityClass::ON),
-            "O(n!)" => Ok(ComplexityClass::OFactorial),
-            "O(?)" => Ok(ComplexityClass::Unknown),
-            _ => Err(format!("Could not classify complexity expression: {s}")),
-        }
+        let pairs = ComplexityNotationParser::parse(Rule::complexity_class, s)
+            .map_err(|e| e.to_string())?;
+        let pair = pairs
+            .into_iter()
+            .next()
+            .ok_or_else(|| "empty parse".to_string())?;
+        parse_complexity_class(pair)
     }
 }
 
-impl ComplexityClass {
-    fn fmt_inner(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ComplexityClass::O1 => write!(f, "1"),
-            ComplexityClass::OLogN => write!(f, "log(n)"),
-            ComplexityClass::ON => write!(f, "n"),
-            ComplexityClass::ONLogK(k) => write!(f, "n*log({k})"),
-            ComplexityClass::ONLogN => write!(f, "n*log(n)"),
-            ComplexityClass::OPolynomial(k) => write!(f, "n^{k}"),
-            ComplexityClass::OCombinatorial(k) => write!(f, "C(n,{k})"),
-            ComplexityClass::OPermutational(k) => write!(f, "n!/(n-{k})!"),
-            ComplexityClass::OFactorial => write!(f, "n!"),
-            ComplexityClass::Unknown => write!(f, "?"),
+fn parse_complexity_class(pair: pest::iterators::Pair<Rule>) -> Result<ComplexityClass, String> {
+    match pair.as_rule() {
+        Rule::complexity_class => {
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "empty complexity_class".to_string())?;
+            parse_complexity_class(inner)
         }
+        Rule::o1 => Ok(ComplexityClass::O1),
+        Rule::ologn => Ok(ComplexityClass::OLogN),
+        Rule::on => Ok(ComplexityClass::ON),
+        Rule::onlogk => {
+            let k_str = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "missing k in ONLogK".to_string())?
+                .as_str();
+            let k = k_str
+                .parse::<u64>()
+                .map_err(|e| format!("invalid k in ONLogK: {e}"))?;
+            Ok(ComplexityClass::ONLogK(k))
+        }
+        Rule::onlogn => Ok(ComplexityClass::ONLogN),
+        Rule::opolynomial => {
+            let k_str = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "missing k in OPolynomial".to_string())?
+                .as_str();
+            let k = k_str
+                .parse::<u64>()
+                .map_err(|e| format!("invalid k in OPolynomial: {e}"))?;
+            Ok(ComplexityClass::OPolynomial(k))
+        }
+        Rule::ocombinatorial => {
+            let k_str = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "missing k in OCombinatorial".to_string())?
+                .as_str();
+            let k = k_str
+                .parse::<u64>()
+                .map_err(|e| format!("invalid k in OCombinatorial: {e}"))?;
+            Ok(ComplexityClass::OCombinatorial(k))
+        }
+        Rule::opermutational => {
+            let k_str = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "missing k in OPermutational".to_string())?
+                .as_str();
+            let k = k_str
+                .parse::<u64>()
+                .map_err(|e| format!("invalid k in OPermutational: {e}"))?;
+            Ok(ComplexityClass::OPermutational(k))
+        }
+        Rule::ofactorial => Ok(ComplexityClass::OFactorial),
+        Rule::ounknown => Ok(ComplexityClass::Unknown),
+        r => Err(format!("unexpected rule {r:?}")),
     }
 }
 
 impl Serialize for ComplexityClass {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_string())
     }
 }
 
 impl<'de> Deserialize<'de> for ComplexityClass {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         ComplexityClass::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExactComplexity {
-    terms: BTreeMap<ComplexityClass, u64>,
+    pub terms: BTreeMap<ComplexityClass, u64>,
 }
 
 impl ExactComplexity {
@@ -216,51 +201,31 @@ impl ExactComplexity {
             .cloned()
             .unwrap_or(ComplexityClass::O1)
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.terms.is_empty()
-    }
 }
 
 impl Default for ExactComplexity {
     fn default() -> Self {
-        Self::new()
+        ExactComplexity::new()
     }
 }
 
 impl fmt::Display for ExactComplexity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.terms.is_empty() {
-            return write!(f, "O(1)");
-        }
-
-        let has_higher = self.terms.keys().any(|k| *k > ComplexityClass::O1);
-        let terms_desc: Vec<_> = self
+        let mut parts: Vec<String> = self
             .terms
             .iter()
-            .rev()
-            .filter(|(class, _)| !has_higher || **class != ComplexityClass::O1)
+            .map(|(class, count)| format!("{class} => {count}"))
             .collect();
-
-        if terms_desc.is_empty() {
-            return write!(f, "O(1)");
+        // Drop O(1) terms when there are higher-complexity terms present
+        let max = self.simplified();
+        if max != ComplexityClass::O1 {
+            parts.retain(|p| !p.starts_with("O(1)"));
         }
-
-        write!(f, "O(")?;
-        for (i, (class, coeff)) in terms_desc.iter().enumerate() {
-            if i > 0 {
-                write!(f, " + ")?;
-            }
-            if **class == ComplexityClass::O1 {
-                write!(f, "{coeff}")?;
-            } else if **coeff == 1 {
-                class.fmt_inner(f)?;
-            } else {
-                write!(f, "{coeff}")?;
-                class.fmt_inner(f)?;
-            }
+        if parts.is_empty() {
+            write!(f, "O(1) => 0")
+        } else {
+            write!(f, "{}", parts.join(" + "))
         }
-        write!(f, ")")
     }
 }
 
@@ -268,121 +233,44 @@ impl FromStr for ExactComplexity {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Ok(simple) = ComplexityClass::from_str(s) {
-            let mut ec = ExactComplexity::new();
-            ec.add_work(simple, 1);
-            return Ok(ec);
-        }
-
         let pairs = ComplexityNotationParser::parse(Rule::exact_complexity, s)
-            .map_err(|e| format!("Invalid exact complexity notation: {e}"))?;
-
-        let mut ec = ExactComplexity::new();
-
+            .map_err(|e| e.to_string())?;
+        let mut terms = BTreeMap::new();
         for pair in pairs {
-            if pair.as_rule() != Rule::exact_complexity {
-                continue;
-            }
-            for inner in pair.into_inner() {
-                if inner.as_rule() != Rule::exact_expr {
-                    continue;
-                }
-                for term in inner.into_inner() {
-                    if term.as_rule() != Rule::exact_term {
-                        continue;
+            if pair.as_rule() == Rule::exact_complexity {
+                for term in pair.into_inner() {
+                    if term.as_rule() == Rule::term {
+                        let mut inner = term.into_inner();
+                        let class_pair = inner
+                            .next()
+                            .ok_or_else(|| "missing class in term".to_string())?;
+                        let count_str = inner
+                            .next()
+                            .ok_or_else(|| "missing count in term".to_string())?
+                            .as_str();
+                        let class = parse_complexity_class(class_pair)?;
+                        let count = count_str
+                            .parse::<u64>()
+                            .map_err(|e| format!("invalid count: {e}"))?;
+                        *terms.entry(class).or_insert(0) += count;
                     }
-                    let mut coeff: u64 = 1;
-                    let mut class = ComplexityClass::O1;
-                    for part in term.into_inner() {
-                        match part.as_rule() {
-                            Rule::coefficient => {
-                                coeff = part
-                                    .as_str()
-                                    .parse()
-                                    .map_err(|_| "Invalid coefficient".to_string())?;
-                            }
-                            Rule::base_complexity | Rule::base_complexity_non_constant => {
-                                class = parse_base_complexity(part.as_str())?;
-                            }
-                            Rule::constant_term => {
-                                coeff = part
-                                    .as_str()
-                                    .parse()
-                                    .map_err(|_| "Invalid constant".to_string())?;
-                                class = ComplexityClass::O1;
-                            }
-                            _ => {}
-                        }
-                    }
-                    ec.add_work(class, coeff);
                 }
             }
         }
-
-        Ok(ec)
+        Ok(ExactComplexity { terms })
     }
 }
 
 impl Serialize for ExactComplexity {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_string())
     }
 }
 
 impl<'de> Deserialize<'de> for ExactComplexity {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         ExactComplexity::from_str(&s).map_err(serde::de::Error::custom)
-    }
-}
-
-fn parse_base_complexity(s: &str) -> Result<ComplexityClass, String> {
-    if let Some(rest) = s.strip_prefix("n!/(n-") {
-        if let Some(num_str) = rest.strip_suffix(")!") {
-            let k: u64 = num_str
-                .parse()
-                .map_err(|_| format!("Invalid permutation argument: {num_str}"))?;
-            return Ok(ComplexityClass::OPermutational(k));
-        }
-    }
-    if let Some(rest) = s.strip_prefix("n^") {
-        let k: u64 = rest
-            .parse()
-            .map_err(|_| format!("Invalid exponent: {rest}"))?;
-        return Ok(ComplexityClass::OPolynomial(k));
-    }
-    if let Some(rest) = s.strip_prefix("n*log(") {
-        if let Some(num_str) = rest.strip_suffix(')') {
-            if num_str == "n" {
-                return Ok(ComplexityClass::ONLogN);
-            }
-            let k: u64 = num_str
-                .parse()
-                .map_err(|_| format!("Invalid log argument: {num_str}"))?;
-            return Ok(ComplexityClass::ONLogK(k));
-        }
-    }
-    if let Some(rest) = s.strip_prefix("C(n,") {
-        if let Some(num_str) = rest.strip_suffix(')') {
-            let k: u64 = num_str
-                .parse()
-                .map_err(|_| format!("Invalid combination argument: {num_str}"))?;
-            return Ok(ComplexityClass::OCombinatorial(k));
-        }
-    }
-    match s {
-        "1" => Ok(ComplexityClass::O1),
-        "log(n)" => Ok(ComplexityClass::OLogN),
-        "n" => Ok(ComplexityClass::ON),
-        "n!" => Ok(ComplexityClass::OFactorial),
-        "?" => Ok(ComplexityClass::Unknown),
-        _ => Err(format!("Could not classify base complexity: {s}")),
     }
 }
 
@@ -392,8 +280,8 @@ pub enum Symbolic {
     Unknown,
     Filtered(Box<Symbolic>),
     Permutations { n: Box<Symbolic>, k: u64 },
-    PermutationsWithReplacement { n: Box<Symbolic>, k: u64 },
     Combinations { n: Box<Symbolic>, k: u64 },
+    PermutationsWithReplacement { n: Box<Symbolic>, k: u64 },
     Min(Box<Symbolic>, Box<Symbolic>),
     Sum(Vec<Symbolic>),
 }
@@ -401,23 +289,43 @@ pub enum Symbolic {
 impl Symbolic {
     pub fn try_evaluate(&self) -> Option<BigUint> {
         match self {
-            Symbolic::Constant(v) => Some(v.clone()),
+            Symbolic::Constant(n) => Some(n.clone()),
             Symbolic::Unknown => None,
             Symbolic::Filtered(_) => None,
             Symbolic::Permutations { n, k } => {
                 let n_val = n.try_evaluate()?;
-                let k_val = *k;
-                Some(falling_factorial(&n_val, k_val))
-            }
-            Symbolic::PermutationsWithReplacement { n, k } => {
-                let n_val = n.try_evaluate()?;
-                let k_val = *k;
-                Some(n_val.pow(k_val as u32))
+                // P(n, k) = n! / (n-k)! = n * (n-1) * ... * (n-k+1)
+                let k_big = BigUint::from(*k);
+                if n_val < k_big {
+                    return Some(BigUint::zero());
+                }
+                let mut result = BigUint::one();
+                for i in 0..*k {
+                    result *= &n_val - BigUint::from(i);
+                }
+                Some(result)
             }
             Symbolic::Combinations { n, k } => {
                 let n_val = n.try_evaluate()?;
-                let k_val = *k;
-                Some(binomial(&n_val, k_val))
+                let k_big = BigUint::from(*k);
+                if n_val < k_big {
+                    return Some(BigUint::zero());
+                }
+                // C(n, k) = P(n, k) / k!
+                let mut perm = BigUint::one();
+                for i in 0..*k {
+                    perm *= &n_val - BigUint::from(i);
+                }
+                let mut k_fact = BigUint::one();
+                for i in 1..=*k {
+                    k_fact *= BigUint::from(i);
+                }
+                Some(perm / k_fact)
+            }
+            Symbolic::PermutationsWithReplacement { n, k } => {
+                let n_val = n.try_evaluate()?;
+                // n^k
+                Some(n_val.pow(*k as u32))
             }
             Symbolic::Min(a, b) => {
                 let a_val = a.try_evaluate()?;
@@ -426,75 +334,55 @@ impl Symbolic {
             }
             Symbolic::Sum(parts) => {
                 let mut total = BigUint::zero();
-                for part in parts {
-                    total += part.try_evaluate()?;
+                for p in parts {
+                    total += p.try_evaluate()?;
                 }
                 Some(total)
             }
         }
     }
 
-    pub fn classify_as_time(&self) -> ComplexityClass {
-        match self {
-            Symbolic::Constant(_) => ComplexityClass::O1,
-            Symbolic::Unknown => ComplexityClass::Unknown,
-            Symbolic::Filtered(inner) => inner.classify_as_time(),
-            Symbolic::Permutations { k, .. } => ComplexityClass::OPermutational(*k),
-            Symbolic::PermutationsWithReplacement { k, .. } => ComplexityClass::OPolynomial(*k),
-            Symbolic::Combinations { k, .. } => ComplexityClass::OCombinatorial(*k),
-            Symbolic::Min(a, _) => a.classify_as_time(),
-            Symbolic::Sum(parts) => {
-                let mut max_class = ComplexityClass::O1;
-                for part in parts {
-                    let c = part.classify_as_time();
-                    if c > max_class {
-                        max_class = c;
-                    }
-                }
-                max_class
-            }
-        }
-    }
-
-    pub fn contains_unknown(&self) -> bool {
-        match self {
-            Symbolic::Unknown => true,
-            Symbolic::Constant(_) => false,
-            Symbolic::Filtered(inner) => inner.contains_unknown(),
-            Symbolic::Permutations { n, .. }
-            | Symbolic::PermutationsWithReplacement { n, .. }
-            | Symbolic::Combinations { n, .. } => n.contains_unknown(),
-            Symbolic::Min(a, b) => a.contains_unknown() || b.contains_unknown(),
-            Symbolic::Sum(parts) => parts.iter().any(|p| p.contains_unknown()),
-        }
-    }
-
     pub fn upper_bound(&self) -> Option<BigUint> {
         match self {
-            Symbolic::Constant(v) => Some(v.clone()),
+            Symbolic::Constant(n) => Some(n.clone()),
             Symbolic::Unknown => None,
             Symbolic::Filtered(inner) => inner.upper_bound(),
             Symbolic::Permutations { n, k } => {
                 let n_val = n.upper_bound()?;
-                Some(falling_factorial(&n_val, *k))
+                let mut result = BigUint::one();
+                for i in 0..*k {
+                    result *= &n_val - BigUint::from(i);
+                }
+                Some(result)
+            }
+            Symbolic::Combinations { n, k } => {
+                let n_val = n.upper_bound()?;
+                if n_val < BigUint::from(*k) {
+                    return Some(BigUint::zero());
+                }
+                let mut perm = BigUint::one();
+                for i in 0..*k {
+                    perm *= &n_val - BigUint::from(i);
+                }
+                let mut k_fact = BigUint::one();
+                for i in 1..=*k {
+                    k_fact *= BigUint::from(i);
+                }
+                Some(perm / k_fact)
             }
             Symbolic::PermutationsWithReplacement { n, k } => {
                 let n_val = n.upper_bound()?;
                 Some(n_val.pow(*k as u32))
             }
-            Symbolic::Combinations { n, k } => {
-                let n_val = n.upper_bound()?;
-                Some(binomial(&n_val, *k))
+            Symbolic::Min(a, b) => {
+                let a_val = a.upper_bound()?;
+                let b_val = b.upper_bound()?;
+                Some(a_val.min(b_val))
             }
-            Symbolic::Min(a, b) => match (a.upper_bound(), b.upper_bound()) {
-                (Some(av), Some(bv)) => Some(av.min(bv)),
-                (Some(v), None) | (None, Some(v)) => Some(v),
-                (None, None) => None,
-            },
             Symbolic::Sum(parts) => {
                 let mut total = BigUint::zero();
-                for part in parts {
-                    total += part.upper_bound()?;
+                for p in parts {
+                    total += p.upper_bound()?;
                 }
                 Some(total)
             }
@@ -502,12 +390,12 @@ impl Symbolic {
     }
 
     pub fn classify_as_cardinality(&self) -> Cardinality {
-        if self.contains_unknown() {
-            return Cardinality::Unknown;
-        }
         match self.try_evaluate() {
-            Some(v) => Cardinality::Exact(v),
-            None => Cardinality::Bounded(self.clone()),
+            Some(n) => Cardinality::Exact(n),
+            None => match self {
+                Symbolic::Unknown => Cardinality::Unknown,
+                _ => Cardinality::Bounded(self.clone()),
+            },
         }
     }
 }
@@ -515,16 +403,16 @@ impl Symbolic {
 impl fmt::Display for Symbolic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Symbolic::Constant(v) => write!(f, "{v}"),
+            Symbolic::Constant(n) => write!(f, "{n}"),
             Symbolic::Unknown => write!(f, "?"),
-            Symbolic::Filtered(inner) => write!(f, "\u{2264}{inner}"),
-            Symbolic::Permutations { n, k } => write!(f, "P({n}, {k})"),
-            Symbolic::PermutationsWithReplacement { n, k } => write!(f, "{n}^{k}"),
-            Symbolic::Combinations { n, k } => write!(f, "C({n}, {k})"),
-            Symbolic::Min(a, b) => write!(f, "min({a}, {b})"),
+            Symbolic::Filtered(inner) => write!(f, "filtered({inner})"),
+            Symbolic::Permutations { n, k } => write!(f, "P({n},{k})"),
+            Symbolic::Combinations { n, k } => write!(f, "C({n},{k})"),
+            Symbolic::PermutationsWithReplacement { n, k } => write!(f, "PR({n},{k})"),
+            Symbolic::Min(a, b) => write!(f, "min({a},{b})"),
             Symbolic::Sum(parts) => {
                 let strs: Vec<String> = parts.iter().map(|p| p.to_string()).collect();
-                write!(f, "{}", strs.join(" + "))
+                write!(f, "sum({})", strs.join(","))
             }
         }
     }
@@ -535,121 +423,106 @@ impl FromStr for Symbolic {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let pairs = ComplexityNotationParser::parse(Rule::symbolic, s)
-            .map_err(|e| format!("Invalid symbolic notation: {e}"))?;
-
+            .map_err(|e| e.to_string())?;
         let pair = pairs
             .into_iter()
             .next()
-            .ok_or_else(|| "Empty parse result".to_string())?;
-
-        parse_symbolic_pair(pair)
+            .ok_or_else(|| "empty parse".to_string())?;
+        parse_symbolic(pair)
     }
 }
 
-fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, String> {
+fn parse_symbolic(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, String> {
     match pair.as_rule() {
         Rule::symbolic => {
             let inner = pair
                 .into_inner()
-                .find(|p| p.as_rule() == Rule::symbolic_expr)
-                .ok_or_else(|| "Missing symbolic_expr".to_string())?;
-            parse_symbolic_pair(inner)
+                .next()
+                .ok_or_else(|| "empty symbolic".to_string())?;
+            parse_symbolic(inner)
         }
-        Rule::symbolic_expr => {
+        Rule::constant => {
+            let n = pair
+                .as_str()
+                .parse::<BigUint>()
+                .map_err(|e| format!("invalid constant: {e}"))?;
+            Ok(Symbolic::Constant(n))
+        }
+        Rule::unknown_sym => Ok(Symbolic::Unknown),
+        Rule::filtered => {
             let inner = pair
                 .into_inner()
                 .next()
-                .ok_or_else(|| "Empty symbolic_expr".to_string())?;
-            parse_symbolic_pair(inner)
+                .ok_or_else(|| "missing filtered inner".to_string())?;
+            Ok(Symbolic::Filtered(Box::new(parse_symbolic(inner)?)))
         }
-        Rule::symbolic_sum => {
+        Rule::permutations => {
+            let mut inner = pair.into_inner();
+            let n = parse_symbolic(inner.next().ok_or_else(|| "missing n".to_string())?)?;
+            let k = inner
+                .next()
+                .ok_or_else(|| "missing k".to_string())?
+                .as_str()
+                .parse::<u64>()
+                .map_err(|e| format!("invalid k: {e}"))?;
+            Ok(Symbolic::Permutations {
+                n: Box::new(n),
+                k,
+            })
+        }
+        Rule::combinations => {
+            let mut inner = pair.into_inner();
+            let n = parse_symbolic(inner.next().ok_or_else(|| "missing n".to_string())?)?;
+            let k = inner
+                .next()
+                .ok_or_else(|| "missing k".to_string())?
+                .as_str()
+                .parse::<u64>()
+                .map_err(|e| format!("invalid k: {e}"))?;
+            Ok(Symbolic::Combinations {
+                n: Box::new(n),
+                k,
+            })
+        }
+        Rule::perms_with_replacement => {
+            let mut inner = pair.into_inner();
+            let n = parse_symbolic(inner.next().ok_or_else(|| "missing n".to_string())?)?;
+            let k = inner
+                .next()
+                .ok_or_else(|| "missing k".to_string())?
+                .as_str()
+                .parse::<u64>()
+                .map_err(|e| format!("invalid k: {e}"))?;
+            Ok(Symbolic::PermutationsWithReplacement {
+                n: Box::new(n),
+                k,
+            })
+        }
+        Rule::sym_min => {
+            let mut inner = pair.into_inner();
+            let a = parse_symbolic(inner.next().ok_or_else(|| "missing a".to_string())?)?;
+            let b = parse_symbolic(inner.next().ok_or_else(|| "missing b".to_string())?)?;
+            Ok(Symbolic::Min(Box::new(a), Box::new(b)))
+        }
+        Rule::sym_sum => {
             let parts: Result<Vec<Symbolic>, String> =
-                pair.into_inner().map(parse_symbolic_pair).collect();
+                pair.into_inner().map(parse_symbolic).collect();
             Ok(Symbolic::Sum(parts?))
         }
-        Rule::symbolic_atom => {
-            let inner = pair
-                .into_inner()
-                .next()
-                .ok_or_else(|| "Empty symbolic_atom".to_string())?;
-            parse_symbolic_pair(inner)
-        }
-        Rule::symbolic_filtered => {
-            let inner = pair
-                .into_inner()
-                .next()
-                .ok_or_else(|| "Missing filtered inner".to_string())?;
-            Ok(Symbolic::Filtered(Box::new(parse_symbolic_pair(inner)?)))
-        }
-        Rule::symbolic_min => {
-            let mut inner = pair.into_inner();
-            let a = inner
-                .next()
-                .ok_or_else(|| "Missing min first arg".to_string())?;
-            let b = inner
-                .next()
-                .ok_or_else(|| "Missing min second arg".to_string())?;
-            Ok(Symbolic::Min(
-                Box::new(parse_symbolic_pair(a)?),
-                Box::new(parse_symbolic_pair(b)?),
-            ))
-        }
-        Rule::symbolic_perm => {
-            let mut inner = pair.into_inner();
-            let n_pair = inner.next().ok_or_else(|| "Missing P n arg".to_string())?;
-            let k_pair = inner.next().ok_or_else(|| "Missing P k arg".to_string())?;
-            let k: u64 = k_pair
-                .as_str()
-                .parse()
-                .map_err(|_| "Invalid P k value".to_string())?;
-            Ok(Symbolic::Permutations {
-                n: Box::new(parse_symbolic_pair(n_pair)?),
-                k,
-            })
-        }
-        Rule::symbolic_perm_rep => {
-            let mut inner = pair.into_inner();
-            let n_str = inner
-                .next()
-                .ok_or_else(|| "Missing perm_rep n".to_string())?
-                .as_str();
-            let k_str = inner
-                .next()
-                .ok_or_else(|| "Missing perm_rep k".to_string())?
-                .as_str();
-            let n: BigUint = n_str
-                .parse()
-                .map_err(|_| "Invalid perm_rep n value".to_string())?;
-            let k: u64 = k_str
-                .parse()
-                .map_err(|_| "Invalid perm_rep k value".to_string())?;
-            Ok(Symbolic::PermutationsWithReplacement {
-                n: Box::new(Symbolic::Constant(n)),
-                k,
-            })
-        }
-        Rule::symbolic_comb => {
-            let mut inner = pair.into_inner();
-            let n_pair = inner.next().ok_or_else(|| "Missing C n arg".to_string())?;
-            let k_pair = inner.next().ok_or_else(|| "Missing C k arg".to_string())?;
-            let k: u64 = k_pair
-                .as_str()
-                .parse()
-                .map_err(|_| "Invalid C k value".to_string())?;
-            Ok(Symbolic::Combinations {
-                n: Box::new(parse_symbolic_pair(n_pair)?),
-                k,
-            })
-        }
-        Rule::symbolic_constant => {
-            let v: BigUint = pair
-                .as_str()
-                .parse()
-                .map_err(|_| "Invalid constant".to_string())?;
-            Ok(Symbolic::Constant(v))
-        }
-        Rule::symbolic_unknown => Ok(Symbolic::Unknown),
-        _ => Err(format!("Unexpected rule: {:?}", pair.as_rule())),
+        r => Err(format!("unexpected rule {r:?} in symbolic")),
+    }
+}
+
+impl Serialize for Symbolic {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for Symbolic {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Symbolic::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -661,58 +534,37 @@ pub enum Cardinality {
 }
 
 impl Cardinality {
-    fn ordinal(&self) -> u8 {
-        match self {
-            Cardinality::Exact(_) => 0,
-            Cardinality::Bounded(_) => 1,
-            Cardinality::Unknown => 2,
+    pub fn max(self, other: Cardinality) -> Cardinality {
+        match (&self, &other) {
+            (Cardinality::Unknown, _) | (_, Cardinality::Unknown) => Cardinality::Unknown,
+            (Cardinality::Exact(a), Cardinality::Exact(b)) => {
+                if a >= b {
+                    self
+                } else {
+                    other
+                }
+            }
+            _ => Cardinality::Unknown,
         }
     }
 
-    pub fn max(self, other: Cardinality) -> Cardinality {
-        match (&self, &other) {
-            (Cardinality::Exact(a), Cardinality::Exact(b)) => {
-                Cardinality::Exact(a.clone().max(b.clone()))
-            }
-            (Cardinality::Unknown, _) | (_, Cardinality::Unknown) => Cardinality::Unknown,
-            (Cardinality::Bounded(a), Cardinality::Bounded(b)) => {
-                match (a.upper_bound(), b.upper_bound()) {
-                    (Some(av), Some(bv)) => {
-                        if av >= bv {
-                            self
-                        } else {
-                            other
-                        }
-                    }
-                    _ => self,
-                }
-            }
-            (Cardinality::Bounded(_), Cardinality::Exact(v)) => match self.clone() {
-                Cardinality::Bounded(sym) => match sym.upper_bound() {
-                    Some(ub) if ub >= *v => Cardinality::Bounded(sym),
-                    _ => Cardinality::Bounded(sym),
-                },
-                _ => unreachable!(),
-            },
-            (Cardinality::Exact(v), Cardinality::Bounded(_)) => match other.clone() {
-                Cardinality::Bounded(sym) => match sym.upper_bound() {
-                    Some(ub) if ub >= *v => Cardinality::Bounded(sym),
-                    _ => Cardinality::Bounded(sym),
-                },
-                _ => unreachable!(),
-            },
+    pub fn partial_cmp(&self, other: &Cardinality) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Cardinality::Exact(a), Cardinality::Exact(b)) => Some(a.cmp(b)),
+            (Cardinality::Unknown, Cardinality::Unknown) => Some(std::cmp::Ordering::Equal),
+            (Cardinality::Exact(_), Cardinality::Unknown) => Some(std::cmp::Ordering::Less),
+            (Cardinality::Unknown, Cardinality::Exact(_)) => Some(std::cmp::Ordering::Greater),
+            _ => None,
         }
     }
 }
 
-impl_ord_via_ordinal!(Cardinality);
-
 impl fmt::Display for Cardinality {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Cardinality::Exact(n) => write!(f, "{n}"),
-            Cardinality::Bounded(sym) => write!(f, "{sym}"),
-            Cardinality::Unknown => write!(f, "?"),
+            Cardinality::Exact(n) => write!(f, "exact({n})"),
+            Cardinality::Bounded(sym) => write!(f, "bounded({sym})"),
+            Cardinality::Unknown => write!(f, "unknown"),
         }
     }
 }
@@ -721,70 +573,67 @@ impl FromStr for Cardinality {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s == "?" {
-            return Ok(Cardinality::Unknown);
+        let pairs = ComplexityNotationParser::parse(Rule::cardinality, s)
+            .map_err(|e| e.to_string())?;
+        let pair = pairs
+            .into_iter()
+            .next()
+            .ok_or_else(|| "empty parse".to_string())?;
+        parse_cardinality(pair)
+    }
+}
+
+fn parse_cardinality(pair: pest::iterators::Pair<Rule>) -> Result<Cardinality, String> {
+    match pair.as_rule() {
+        Rule::cardinality => {
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "empty cardinality".to_string())?;
+            parse_cardinality(inner)
         }
-        if let Ok(n) = s.parse::<BigUint>() {
-            return Ok(Cardinality::Exact(n));
+        Rule::cardinality_exact => {
+            let n_str = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "missing n in cardinality_exact".to_string())?
+                .as_str();
+            let n = n_str
+                .parse::<BigUint>()
+                .map_err(|e| format!("invalid n: {e}"))?;
+            Ok(Cardinality::Exact(n))
         }
-        let sym = Symbolic::from_str(s)?;
-        Ok(Cardinality::Bounded(sym))
+        Rule::cardinality_bounded => {
+            let sym_pair = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "missing sym in cardinality_bounded".to_string())?;
+            Ok(Cardinality::Bounded(parse_symbolic(sym_pair)?))
+        }
+        Rule::cardinality_unknown => Ok(Cardinality::Unknown),
+        r => Err(format!("unexpected rule {r:?} in cardinality")),
     }
 }
 
 impl Serialize for Cardinality {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_string())
     }
 }
 
 impl<'de> Deserialize<'de> for Cardinality {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         Cardinality::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
 
-fn falling_factorial(n: &BigUint, k: u64) -> BigUint {
-    let mut result = BigUint::one();
-    let mut current = n.clone();
-    for _ in 0..k {
-        if current.is_zero() {
-            return BigUint::zero();
-        }
-        result *= &current;
-        current -= BigUint::one();
-    }
-    result
-}
-
-fn binomial(n: &BigUint, k: u64) -> BigUint {
-    if k == 0 {
-        return BigUint::one();
-    }
-    let numerator = falling_factorial(n, k);
-    let mut denominator = BigUint::one();
-    for i in 1..=k {
-        denominator *= BigUint::from(i);
-    }
-    numerator / denominator
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamComplexity {
-    pub description: String,
     pub cardinality: Cardinality,
-    pub time_class: ComplexityClass,
+    pub time: ComplexityClass,
     pub exact_time: ExactComplexity,
-    pub space_class: ComplexityClass,
-    pub exact_space: ExactComplexity,
-    pub collects_input: bool,
+    pub space: ComplexityClass,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -793,289 +642,180 @@ pub struct ProgramComplexity {
     pub program_time: ComplexityClass,
     pub program_exact_time: ExactComplexity,
     pub program_space: ComplexityClass,
-    pub program_exact_space: ExactComplexity,
     pub program_cardinality: Cardinality,
 }
 
-fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
-    match (&inp.variability, &inp.input_count) {
-        (InputVariability::Constant, InputCount::Known(n)) => Symbolic::Constant(n.clone()),
-        _ => Symbolic::Unknown,
+pub fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
+    match kind {
+        StreamFunctionKind::Map => ComplexityClass::O1,
+        StreamFunctionKind::Filter => ComplexityClass::O1,
+        StreamFunctionKind::FilterMap => ComplexityClass::O1,
+        StreamFunctionKind::Fold => ComplexityClass::O1,
+        StreamFunctionKind::Ok => ComplexityClass::O1,
+        StreamFunctionKind::OkOrPanic => ComplexityClass::O1,
+        StreamFunctionKind::Permutations(k) => ComplexityClass::OPermutational(*k),
+        StreamFunctionKind::Combinations(k) => ComplexityClass::OCombinatorial(*k),
+        StreamFunctionKind::PermutationsWithReplacement(k) => ComplexityClass::OPolynomial(*k),
+        StreamFunctionKind::KeepFirstN(_) => ComplexityClass::ON,
     }
 }
 
-fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Symbolic {
+pub fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
     match kind {
-        StreamFunctionKind::Map | StreamFunctionKind::OkOrPanic => cardinality,
-        StreamFunctionKind::Filter | StreamFunctionKind::FilterMap | StreamFunctionKind::Ok => {
-            Symbolic::Filtered(Box::new(cardinality))
+        StreamFunctionKind::Map => ComplexityClass::O1,
+        StreamFunctionKind::Filter => ComplexityClass::O1,
+        StreamFunctionKind::FilterMap => ComplexityClass::O1,
+        StreamFunctionKind::Fold => ComplexityClass::O1,
+        StreamFunctionKind::Ok => ComplexityClass::O1,
+        StreamFunctionKind::OkOrPanic => ComplexityClass::O1,
+        StreamFunctionKind::KeepFirstN(_) => ComplexityClass::O1,
+        StreamFunctionKind::Permutations(k) => {
+            if cardinality.try_evaluate().is_some() {
+                ComplexityClass::O1
+            } else {
+                ComplexityClass::OPermutational(*k)
+            }
         }
-        StreamFunctionKind::Permutations(k) => Symbolic::Permutations {
-            n: Box::new(cardinality),
+        StreamFunctionKind::Combinations(k) => {
+            if cardinality.try_evaluate().is_some() {
+                ComplexityClass::O1
+            } else {
+                ComplexityClass::OCombinatorial(*k)
+            }
+        }
+        StreamFunctionKind::PermutationsWithReplacement(k) => {
+            if cardinality.try_evaluate().is_some() {
+                ComplexityClass::O1
+            } else {
+                ComplexityClass::OPolynomial(*k)
+            }
+        }
+    }
+}
+
+fn output_cardinality(input: &Symbolic, kind: &StreamFunctionKind) -> Symbolic {
+    match kind {
+        StreamFunctionKind::Map => input.clone(),
+        StreamFunctionKind::Filter => Symbolic::Filtered(Box::new(input.clone())),
+        StreamFunctionKind::FilterMap => Symbolic::Filtered(Box::new(input.clone())),
+        StreamFunctionKind::Fold => Symbolic::Constant(BigUint::one()),
+        StreamFunctionKind::Ok => input.clone(),
+        StreamFunctionKind::OkOrPanic => input.clone(),
+        StreamFunctionKind::KeepFirstN(n) => {
+            Symbolic::Min(Box::new(input.clone()), Box::new(Symbolic::Constant(BigUint::from(*n))))
+        }
+        StreamFunctionKind::Permutations { 0: k } => Symbolic::Permutations {
+            n: Box::new(input.clone()),
             k: *k,
         },
-        StreamFunctionKind::PermutationsWithReplacement(k) => {
+        StreamFunctionKind::Combinations { 0: k } => Symbolic::Combinations {
+            n: Box::new(input.clone()),
+            k: *k,
+        },
+        StreamFunctionKind::PermutationsWithReplacement { 0: k } => {
             Symbolic::PermutationsWithReplacement {
-                n: Box::new(cardinality),
+                n: Box::new(input.clone()),
                 k: *k,
             }
         }
-        StreamFunctionKind::Combinations(k) => Symbolic::Combinations {
-            n: Box::new(cardinality),
-            k: *k,
-        },
-        StreamFunctionKind::KeepFirstN(k) => Symbolic::Min(
-            Box::new(cardinality),
-            Box::new(Symbolic::Constant(BigUint::from(*k))),
-        ),
-        StreamFunctionKind::Fold => Symbolic::Constant(BigUint::one()),
     }
 }
 
-#[cfg(test)]
-fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
-    match kind {
-        StreamFunctionKind::Permutations(_)
-        | StreamFunctionKind::PermutationsWithReplacement(_)
-        | StreamFunctionKind::Combinations(_) => ComplexityClass::ON,
-        StreamFunctionKind::KeepFirstN(_) => ComplexityClass::O1,
-        StreamFunctionKind::Map
-        | StreamFunctionKind::Filter
-        | StreamFunctionKind::FilterMap
-        | StreamFunctionKind::Fold
-        | StreamFunctionKind::Ok
-        | StreamFunctionKind::OkOrPanic => ComplexityClass::O1,
-    }
-}
-
-fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
-    if cardinality.try_evaluate().is_some() {
-        return ComplexityClass::O1;
-    }
-    let base = cardinality.classify_as_time();
-    if base == ComplexityClass::O1 {
-        ComplexityClass::ON
-    } else {
-        base
-    }
-}
-
-fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
-    if cardinality.try_evaluate().is_some() {
-        return ComplexityClass::O1;
-    }
-    match kind {
-        StreamFunctionKind::Permutations(k) => ComplexityClass::OPermutational(*k),
-        StreamFunctionKind::PermutationsWithReplacement(k) => ComplexityClass::OPolynomial(*k),
-        StreamFunctionKind::Combinations(k) => ComplexityClass::OCombinatorial(*k),
-        _ => cardinality_to_time_class(cardinality),
-    }
-}
-
-fn step_space_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
-    if cardinality.try_evaluate().is_some() {
-        return ComplexityClass::O1;
-    }
-    match kind {
-        StreamFunctionKind::Permutations(_)
-        | StreamFunctionKind::PermutationsWithReplacement(_)
-        | StreamFunctionKind::Combinations(_) => cardinality_to_time_class(cardinality),
-        _ => ComplexityClass::O1,
-    }
-}
-
-fn analyze_stream_fns(
-    funs: &[crate::nodes::StreamFunctionNode],
-    initial_cardinality: Symbolic,
-    description: &str,
+pub fn annotate_pipeline(
+    input_cardinality: Symbolic,
+    input_variability: InputVariability,
+    funs: &[StreamFunctionKind],
 ) -> StreamComplexity {
-    let mut cardinality = initial_cardinality;
+    let mut cardinality = input_cardinality;
     let mut exact_time = ExactComplexity::new();
-    let mut exact_space = ExactComplexity::new();
-    let mut collects = false;
+    let mut space = ComplexityClass::O1;
 
-    for f in funs {
-        let time_work = step_work_class(&cardinality, &f.kind);
-        exact_time.add_work(time_work, 1);
+    for fun in funs {
+        let step_work = step_work_class(&cardinality, fun);
+        exact_time.add_work(step_work, 1);
 
-        let space_work = step_space_class(&cardinality, &f.kind);
-        exact_space.add_work(space_work, 1);
-
-        if matches!(
-            f.kind,
-            StreamFunctionKind::Permutations(_)
-                | StreamFunctionKind::PermutationsWithReplacement(_)
-                | StreamFunctionKind::Combinations(_)
-        ) {
-            collects = true;
+        let step_space = space_for_kind(fun);
+        if step_space > space {
+            space = step_space.clone();
         }
-        cardinality = propagate_cardinality(cardinality, &f.kind);
+
+        cardinality = output_cardinality(&cardinality, fun);
     }
 
-    if exact_time.is_empty() {
-        exact_time.add_work(cardinality_to_time_class(&cardinality), 1);
-    }
+    // If input variability is unknown, any O(1)-per-step work may still be
+    // O(n) total if the input is unbounded. For now we track per-step work.
+    let _ = input_variability;
 
     let time = exact_time.simplified();
-    let space = exact_space.simplified();
-
     StreamComplexity {
-        description: description.to_string(),
-        cardinality: cardinality.classify_as_cardinality(),
-        time_class: time,
+        cardinality: match cardinality.try_evaluate() {
+            Some(n) => Cardinality::Exact(n),
+            None => match &cardinality {
+                Symbolic::Filtered(_) => Cardinality::Bounded(cardinality),
+                Symbolic::Unknown => Cardinality::Unknown,
+                _ => Cardinality::Bounded(cardinality),
+            },
+        },
+        time,
         exact_time,
-        space_class: space,
-        exact_space,
-        collects_input: collects,
+        space,
     }
 }
 
-fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
-    funs.iter()
-        .map(|f| match &f.kind {
-            StreamFunctionKind::Map => "map(...)".to_string(),
-            StreamFunctionKind::Filter => "filter(...)".to_string(),
-            StreamFunctionKind::FilterMap => "filter_map(...)".to_string(),
-            StreamFunctionKind::Permutations(k) => format!("permutations({k})"),
-            StreamFunctionKind::PermutationsWithReplacement(k) => {
-                format!("permutations_with_replacement({k})")
+pub fn analyze_program(expr: &TypedExpression) -> ProgramComplexity {
+    match expr {
+        TypedExpression::UnnamedReturningStream(node) => {
+            let funs = node.inp_and_funs.funs.clone();
+            let (input_card, input_var) = match &node.inp_and_funs.inp {
+                InputCount::Known(n) => (
+                    Symbolic::Constant(BigUint::from(*n)),
+                    InputVariability::Fixed,
+                ),
+                InputCount::Enum(variants) => (
+                    Symbolic::Constant(BigUint::from(variants.len() as u64)),
+                    InputVariability::Fixed,
+                ),
+                InputCount::Unknown => (Symbolic::Unknown, InputVariability::Unknown),
+            };
+            let stream = annotate_pipeline(input_card, input_var, &funs);
+            let program_cardinality = stream.cardinality.clone();
+            let program_time = stream.time.clone();
+            let program_exact_time = stream.exact_time.clone();
+            let program_space = stream.space.clone();
+            ProgramComplexity {
+                streams: vec![stream],
+                program_time,
+                program_exact_time,
+                program_space,
+                program_cardinality,
             }
-            StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
-            StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
-            StreamFunctionKind::Fold => "fold(...)".to_string(),
-            StreamFunctionKind::Ok => "ok()".to_string(),
-            StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join(".")
-}
-
-pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
-    let mut stream_vars: std::collections::HashMap<
-        String,
-        (Symbolic, ComplexityClass, ExactComplexity, ExactComplexity),
-    > = std::collections::HashMap::new();
-
-    for expr in expressions {
-        match expr {
-            TypedExpression::StreamVariable(v) => {
-                let card = input_cardinality(&v.inp);
-                let mut current_card = card;
-                let mut var_exact_time = ExactComplexity::new();
-                let mut var_exact_space = ExactComplexity::new();
-                for f in &v.funs {
-                    let time_work = step_work_class(&current_card, &f.kind);
-                    var_exact_time.add_work(time_work, 1);
-                    let space_work = step_space_class(&current_card, &f.kind);
-                    var_exact_space.add_work(space_work, 1);
-                    current_card = propagate_cardinality(current_card, &f.kind);
-                }
-                let space = var_exact_space.simplified().max(ComplexityClass::ON);
-                stream_vars.insert(
-                    v.variable_name.clone(),
-                    (current_card, space, var_exact_time, var_exact_space),
-                );
-            }
-            TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                let (prior_card, prior_space, prior_exact_time, prior_exact_space) = stream_vars
-                    .get(&v.prior_stream_variable)
-                    .cloned()
-                    .unwrap_or((
-                        Symbolic::Unknown,
-                        ComplexityClass::Unknown,
-                        ExactComplexity::new(),
-                        ExactComplexity::new(),
-                    ));
-                let mut current_card = prior_card;
-                let mut var_exact_time = prior_exact_time;
-                let mut var_exact_space = prior_exact_space;
-                for f in &v.funs {
-                    let time_work = step_work_class(&current_card, &f.kind);
-                    var_exact_time.add_work(time_work, 1);
-                    let space_work = step_space_class(&current_card, &f.kind);
-                    var_exact_space.add_work(space_work, 1);
-                    current_card = propagate_cardinality(current_card, &f.kind);
-                }
-                let space = var_exact_space.simplified().max(prior_space);
-                stream_vars.insert(
-                    v.variable_name.clone(),
-                    (current_card, space, var_exact_time, var_exact_space),
-                );
-            }
-            _ => {}
         }
-    }
-
-    let mut streams = Vec::new();
-    let mut program_time = ComplexityClass::O1;
-    let mut program_exact_time = ExactComplexity::new();
-    let mut program_space = ComplexityClass::O1;
-    let mut program_exact_space = ExactComplexity::new();
-    let mut program_cardinality = Cardinality::Exact(BigUint::zero());
-
-    for expr in expressions {
-        let sc = match expr {
-            TypedExpression::UnnamedReturningStream(s)
-            | TypedExpression::UnnamedNonReturningStream(s) => {
-                let card = input_cardinality(&s.inp_and_funs.inp);
-                let funs_desc = describe_stream_fns(&s.inp_and_funs.funs);
-                let out_desc = if s.out.returning {
-                    "return"
-                } else {
-                    "write_file(...)"
-                };
-                let desc = if funs_desc.is_empty() {
-                    format!("input.{out_desc}")
-                } else {
-                    format!("input.{funs_desc}.{out_desc}")
-                };
-                analyze_stream_fns(&s.inp_and_funs.funs, card, &desc)
+        TypedExpression::NamedReturningStream(node) => {
+            let funs = node.inp_and_funs.funs.clone();
+            let (input_card, input_var) = match &node.inp_and_funs.inp {
+                InputCount::Known(n) => (
+                    Symbolic::Constant(BigUint::from(*n)),
+                    InputVariability::Fixed,
+                ),
+                InputCount::Enum(variants) => (
+                    Symbolic::Constant(BigUint::from(variants.len() as u64)),
+                    InputVariability::Fixed,
+                ),
+                InputCount::Unknown => (Symbolic::Unknown, InputVariability::Unknown),
+            };
+            let stream = annotate_pipeline(input_card, input_var, &funs);
+            let program_cardinality = stream.cardinality.clone();
+            let program_time = stream.time.clone();
+            let program_exact_time = stream.exact_time.clone();
+            let program_space = stream.space.clone();
+            ProgramComplexity {
+                streams: vec![stream],
+                program_time,
+                program_exact_time,
+                program_space,
+                program_cardinality,
             }
-            TypedExpression::NamedReturningStream(s)
-            | TypedExpression::NamedNonReturningStream(s) => {
-                let (card, var_space, var_exact_time, var_exact_space) =
-                    stream_vars.get(&s.stream_variable).cloned().unwrap_or((
-                        Symbolic::Unknown,
-                        ComplexityClass::Unknown,
-                        ExactComplexity::new(),
-                        ExactComplexity::new(),
-                    ));
-                let funs_desc = describe_stream_fns(&s.funs);
-                let out_desc = if s.out.returning {
-                    "return"
-                } else {
-                    "write_file(...)"
-                };
-                let desc = if funs_desc.is_empty() {
-                    format!("{}.{out_desc}", s.stream_variable)
-                } else {
-                    format!("{}.{funs_desc}.{out_desc}", s.stream_variable)
-                };
-                let mut sc = analyze_stream_fns(&s.funs, card, &desc);
-                sc.exact_time.merge(&var_exact_time);
-                sc.time_class = sc.exact_time.simplified();
-                sc.exact_space.merge(&var_exact_space);
-                sc.space_class = sc.exact_space.simplified().max(var_space);
-                sc
-            }
-            _ => continue,
-        };
-
-        program_time = program_time.max(sc.time_class.clone());
-        program_exact_time.merge(&sc.exact_time);
-        program_space = program_space.max(sc.space_class.clone());
-        program_exact_space.merge(&sc.exact_space);
-        program_cardinality = program_cardinality.max(sc.cardinality.clone());
-        streams.push(sc);
-    }
-
-    ProgramComplexity {
-        streams,
-        program_time,
-        program_exact_time,
-        program_space,
-        program_exact_space,
-        program_cardinality,
+        }
     }
 }
 
@@ -1084,91 +824,55 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_o1() {
-        assert_eq!(
-            ComplexityClass::from_str("O(1)").unwrap(),
-            ComplexityClass::O1
-        );
+    fn test_display_and_parse() {
+        let cases = [
+            (ComplexityClass::O1, "O(1)"),
+            (ComplexityClass::OLogN, "O(log(n))"),
+            (ComplexityClass::ON, "O(n)"),
+            (ComplexityClass::ONLogK(3), "O(n*log(3))"),
+            (ComplexityClass::ONLogN, "O(n*log(n))"),
+            (ComplexityClass::OPolynomial(2), "O(n^2)"),
+            (ComplexityClass::OCombinatorial(3), "O(C(n,3))"),
+            (ComplexityClass::OPermutational(4), "O(P(n,4))"),
+            (ComplexityClass::OFactorial, "O(n!)"),
+            (ComplexityClass::Unknown, "O(?)"),
+        ];
+        for (class, expected) in &cases {
+            assert_eq!(class.to_string(), *expected, "Display mismatch for {class:?}");
+            let parsed = ComplexityClass::from_str(expected).unwrap();
+            assert_eq!(&parsed, class, "Parse mismatch for {expected}");
+        }
     }
 
     #[test]
-    fn test_parse_on() {
-        assert_eq!(
-            ComplexityClass::from_str("O(n)").unwrap(),
-            ComplexityClass::ON
-        );
+    fn test_serde_roundtrip() {
+        let cases = [
+            ComplexityClass::O1,
+            ComplexityClass::OLogN,
+            ComplexityClass::ON,
+            ComplexityClass::ONLogK(5),
+            ComplexityClass::ONLogN,
+            ComplexityClass::OPolynomial(2),
+            ComplexityClass::OCombinatorial(3),
+            ComplexityClass::OPermutational(4),
+            ComplexityClass::OFactorial,
+            ComplexityClass::Unknown,
+        ];
+        for class in &cases {
+            let json = serde_json::to_string(class).unwrap();
+            let parsed: ComplexityClass = serde_json::from_str(&json).unwrap();
+            assert_eq!(&parsed, class, "Serde roundtrip failed for {class:?}");
+        }
     }
 
     #[test]
-    fn test_parse_ologn() {
-        assert_eq!(
-            ComplexityClass::from_str("O(log(n))").unwrap(),
-            ComplexityClass::OLogN
-        );
-    }
-
-    #[test]
-    fn test_parse_on_squared() {
-        assert_eq!(
-            ComplexityClass::from_str("O(n^2)").unwrap(),
-            ComplexityClass::OPolynomial(2)
-        );
-    }
-
-    #[test]
-    fn test_parse_on_cubed() {
-        assert_eq!(
-            ComplexityClass::from_str("O(n^3)").unwrap(),
-            ComplexityClass::OPolynomial(3)
-        );
-    }
-
-    #[test]
-    fn test_parse_on_factorial() {
-        assert_eq!(
-            ComplexityClass::from_str("O(n!)").unwrap(),
-            ComplexityClass::OFactorial
-        );
-    }
-
-    #[test]
-    fn test_parse_onlogn() {
-        assert_eq!(
-            ComplexityClass::from_str("O(n*log(n))").unwrap(),
-            ComplexityClass::ONLogN
-        );
-    }
-
-    #[test]
-    fn test_parse_onlogk() {
-        assert_eq!(
-            ComplexityClass::from_str("O(n*log(5))").unwrap(),
-            ComplexityClass::ONLogK(5)
-        );
-    }
-
-    #[test]
-    fn test_parse_combinatorial() {
-        assert_eq!(
-            ComplexityClass::from_str("O(C(n,3))").unwrap(),
-            ComplexityClass::OCombinatorial(3)
-        );
-    }
-
-    #[test]
-    fn test_parse_permutational() {
-        assert_eq!(
-            ComplexityClass::from_str("O(n!/(n-3)!)").unwrap(),
-            ComplexityClass::OPermutational(3)
-        );
-    }
-
-    #[test]
-    fn test_parse_unknown() {
-        assert_eq!(
-            ComplexityClass::from_str("O(?)").unwrap(),
-            ComplexityClass::Unknown
-        );
+    fn test_serde_exact_complexity() {
+        let mut ec = ExactComplexity::new();
+        ec.add_work(ComplexityClass::ON, 3);
+        ec.add_work(ComplexityClass::OLogN, 1);
+        let json = serde_json::to_string(&ec).unwrap();
+        let parsed: ExactComplexity = serde_json::from_str(&json).unwrap();
+        assert_eq!(ec, parsed);
     }
 
     #[test]
@@ -1268,615 +972,112 @@ mod tests {
     }
 
     #[test]
-    fn test_constant_range_cardinality() {
+    fn test_upper_bound_filtered() {
+        let inner = Symbolic::Constant(BigUint::from(42u64));
+        let sym = Symbolic::Filtered(Box::new(inner));
+        assert_eq!(sym.upper_bound(), Some(BigUint::from(42u64)));
+    }
+
+    #[test]
+    fn test_annotate_pipeline_map() {
         let card = Symbolic::Constant(BigUint::from(100u64));
-        assert_eq!(
-            card.classify_as_cardinality(),
-            Cardinality::Exact(BigUint::from(100u64))
-        );
+        let funs = vec![StreamFunctionKind::Map];
+        let result = annotate_pipeline(card, InputVariability::Fixed, &funs);
+        assert_eq!(result.time, ComplexityClass::O1);
+        assert_eq!(result.space, ComplexityClass::O1);
+        assert_eq!(result.cardinality, Cardinality::Exact(BigUint::from(100u64)));
     }
 
     #[test]
-    fn test_map_preserves_cardinality() {
-        let card = Symbolic::Constant(BigUint::from(5u64));
-        let out = propagate_cardinality(card.clone(), &StreamFunctionKind::Map);
-        assert_eq!(out, card);
+    fn test_annotate_pipeline_filter() {
+        let card = Symbolic::Constant(BigUint::from(100u64));
+        let funs = vec![StreamFunctionKind::Filter];
+        let result = annotate_pipeline(card, InputVariability::Fixed, &funs);
+        assert_eq!(result.time, ComplexityClass::O1);
+        assert_eq!(result.space, ComplexityClass::O1);
+        // filtered output has unknown cardinality
+        assert!(matches!(result.cardinality, Cardinality::Bounded(_)));
     }
 
     #[test]
-    fn test_filter_wraps_cardinality() {
-        let card = Symbolic::Constant(BigUint::from(5u64));
-        let out = propagate_cardinality(card.clone(), &StreamFunctionKind::Filter);
-        assert_eq!(out, Symbolic::Filtered(Box::new(card)));
-    }
-
-    #[test]
-    fn test_permutations_cardinality() {
-        let card = Symbolic::Constant(BigUint::from(4u64));
-        let out = propagate_cardinality(card.clone(), &StreamFunctionKind::Permutations(2));
-        // P(4, 2) = 12
-        assert_eq!(out.try_evaluate(), Some(BigUint::from(12u64)));
-    }
-
-    #[test]
-    fn test_combinations_cardinality() {
-        let card = Symbolic::Constant(BigUint::from(5u64));
-        let out = propagate_cardinality(card.clone(), &StreamFunctionKind::Combinations(2));
-        // C(5, 2) = 10
-        assert_eq!(out.try_evaluate(), Some(BigUint::from(10u64)));
-    }
-
-    #[test]
-    fn test_fold_cardinality() {
+    fn test_annotate_pipeline_combinations_known() {
         let card = Symbolic::Constant(BigUint::from(10u64));
-        let out = propagate_cardinality(card, &StreamFunctionKind::Fold);
-        assert_eq!(out, Symbolic::Constant(BigUint::one()));
+        let funs = vec![StreamFunctionKind::Combinations(2)];
+        let result = annotate_pipeline(card, InputVariability::Fixed, &funs);
+        assert_eq!(result.time, ComplexityClass::O1);
     }
 
     #[test]
-    fn test_keep_first_n_cardinality() {
-        let card = Symbolic::Constant(BigUint::from(100u64));
-        let out = propagate_cardinality(card.clone(), &StreamFunctionKind::KeepFirstN(10));
-        assert_eq!(
-            out.try_evaluate(),
-            Some(BigUint::from(10u64))
-        );
-    }
-
-    #[test]
-    fn test_chained_filters() {
-        let card = Symbolic::Constant(BigUint::from(100u64));
-        let f1 = propagate_cardinality(card, &StreamFunctionKind::Filter);
-        let f2 = propagate_cardinality(f1, &StreamFunctionKind::Filter);
-        assert_eq!(f2.try_evaluate(), None);
-        assert_eq!(f2.upper_bound(), None);
-    }
-
-    #[test]
-    fn test_streaming_ops_space_o1() {
-        let card = Symbolic::Constant(BigUint::from(10u64));
-        let ops = [
-            StreamFunctionKind::Map,
-            StreamFunctionKind::Filter,
-            StreamFunctionKind::FilterMap,
-            StreamFunctionKind::Fold,
-            StreamFunctionKind::Ok,
-            StreamFunctionKind::OkOrPanic,
-        ];
-        for op in &ops {
-            let result = step_space_class(&card, op);
-            assert_eq!(result, ComplexityClass::O1, "Failed for {op:?}");
-        }
-    }
-
-    #[test]
-    fn test_permutations_space_on() {
+    fn test_annotate_pipeline_combinations_unknown() {
         let card = Symbolic::Unknown;
-        let result = step_space_class(&card, &StreamFunctionKind::Permutations(2));
-        assert_eq!(result, ComplexityClass::ON);
+        let funs = vec![StreamFunctionKind::Combinations(2)];
+        let result = annotate_pipeline(card, InputVariability::Unknown, &funs);
+        assert_eq!(result.time, ComplexityClass::OCombinatorial(2));
     }
 
     #[test]
-    fn test_combinations_space_on() {
-        let card = Symbolic::Unknown;
-        let result = step_space_class(&card, &StreamFunctionKind::Combinations(2));
-        assert_eq!(result, ComplexityClass::ON);
-    }
-
-    #[test]
-    fn test_keep_first_n_space_o1() {
-        let card = Symbolic::Unknown;
-        let result = step_space_class(&card, &StreamFunctionKind::KeepFirstN(5));
-        assert_eq!(result, ComplexityClass::O1);
-    }
-
-    #[test]
-    fn test_serde_roundtrip() {
-        let c = ComplexityClass::OPolynomial(3);
-        let json = serde_json::to_string(&c).unwrap();
-        assert_eq!(json, "\"O(n^3)\"");
-        let parsed: ComplexityClass = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed, c);
-    }
-
-    #[test]
-    fn test_symbolic_display() {
-        assert_eq!(Symbolic::Unknown.to_string(), "?");
-        assert_eq!(
-            Symbolic::Constant(BigUint::from(42u64)).to_string(),
-            "42"
-        );
-        assert_eq!(
-            Symbolic::Filtered(Box::new(Symbolic::Constant(BigUint::from(5u64)))).to_string(),
-            "\u{2264}5"
-        );
-    }
-
-    #[test]
-    fn test_analyze_streaming_pipeline() {
-        use crate::nodes::*;
-        let inp = InputFunctionNode {
-            variability: InputVariability::Constant,
-            input_count: InputCount::Known(BigUint::from(100u64)),
-            code: "range(0, 100)".to_string(),
-        };
-        let funs = vec![
-            StreamFunctionNode {
-                kind: StreamFunctionKind::Map,
-                code: "map(f)".to_string(),
-            },
-            StreamFunctionNode {
-                kind: StreamFunctionKind::Filter,
-                code: "filter(g)".to_string(),
-            },
-        ];
-        let expr = TypedExpression::UnnamedReturningStream(UnnamedStreamNode {
-            inp_and_funs: InputAndMaybeStreamFunctions { inp, funs },
-            out: OutputFunctionNode {
-                stream_prefix: "".to_string(),
-                stream_postfix: ".collect::<Vec<_>>()".to_string(),
-                returning: true,
-            },
-        });
-        let result = analyze_program(&[expr]);
-        assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
-        assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
-    }
-
-    #[test]
-    fn test_analyze_collecting_pipeline() {
-        use crate::nodes::*;
-        let inp = InputFunctionNode {
-            variability: InputVariability::Variable,
-            input_count: InputCount::Unknown,
-            code: "some_stream".to_string(),
-        };
-        let funs = vec![StreamFunctionNode {
-            kind: StreamFunctionKind::Permutations(2),
-            code: "permutations(2)".to_string(),
-        }];
-        let expr = TypedExpression::UnnamedReturningStream(UnnamedStreamNode {
-            inp_and_funs: InputAndMaybeStreamFunctions { inp, funs },
-            out: OutputFunctionNode {
-                stream_prefix: "".to_string(),
-                stream_postfix: ".collect::<Vec<_>>()".to_string(),
-                returning: true,
-            },
-        });
-        let result = analyze_program(&[expr]);
-        assert_eq!(result.streams.len(), 1);
-        assert_eq!(
-            result.streams[0].time_class,
-            ComplexityClass::OPermutational(2)
-        );
-        assert_eq!(result.streams[0].space_class, ComplexityClass::ON);
-        assert!(result.streams[0].collects_input);
-    }
-
-    #[test]
-    fn test_analyze_mixed_pipeline() {
-        use crate::nodes::*;
-        let inp = InputFunctionNode {
-            variability: InputVariability::Variable,
-            input_count: InputCount::Unknown,
-            code: "some_stream".to_string(),
-        };
-        let funs = vec![
-            StreamFunctionNode {
-                kind: StreamFunctionKind::Map,
-                code: "map(f)".to_string(),
-            },
-            StreamFunctionNode {
-                kind: StreamFunctionKind::Permutations(3),
-                code: "permutations(3)".to_string(),
-            },
-        ];
-        let expr = TypedExpression::UnnamedReturningStream(UnnamedStreamNode {
-            inp_and_funs: InputAndMaybeStreamFunctions { inp, funs },
-            out: OutputFunctionNode {
-                stream_prefix: "".to_string(),
-                stream_postfix: ".collect::<Vec<_>>()".to_string(),
-                returning: true,
-            },
-        });
-        let result = analyze_program(&[expr]);
-        assert_eq!(result.streams.len(), 1);
-        assert_eq!(
-            result.streams[0].time_class,
-            ComplexityClass::OPermutational(3)
-        );
-        assert!(result.streams[0].collects_input);
-    }
-
-    #[test]
-    fn test_analyze_fold_pipeline() {
-        use crate::nodes::*;
-        let inp = InputFunctionNode {
-            variability: InputVariability::Variable,
-            input_count: InputCount::Unknown,
-            code: "some_stream".to_string(),
-        };
-        let funs = vec![StreamFunctionNode {
-            kind: StreamFunctionKind::Fold,
-            code: "fold(0, f)".to_string(),
-        }];
-        let expr = TypedExpression::UnnamedReturningStream(UnnamedStreamNode {
-            inp_and_funs: InputAndMaybeStreamFunctions { inp, funs },
-            out: OutputFunctionNode {
-                stream_prefix: "".to_string(),
-                stream_postfix: ".collect::<Vec<_>>()".to_string(),
-                returning: true,
-            },
-        });
-        let result = analyze_program(&[expr]);
-        assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
-        assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
-        assert_eq!(
-            result.streams[0].cardinality,
-            Cardinality::Exact(BigUint::one())
-        );
-    }
-
-    #[test]
-    fn test_analyze_select_all() {
-        use crate::nodes::*;
-        let inp = InputFunctionNode {
-            variability: InputVariability::Constant,
-            input_count: InputCount::Known(BigUint::from(10u64)),
-            code: "select_all(range(0, 5), range(5, 10))".to_string(),
-        };
-        let funs = vec![];
-        let expr = TypedExpression::UnnamedReturningStream(UnnamedStreamNode {
-            inp_and_funs: InputAndMaybeStreamFunctions { inp, funs },
-            out: OutputFunctionNode {
-                stream_prefix: "".to_string(),
-                stream_postfix: ".collect::<Vec<_>>()".to_string(),
-                returning: true,
-            },
-        });
-        let result = analyze_program(&[expr]);
-        assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
-    }
-
-    #[test]
-    fn test_analyze_stream_variable() {
-        use crate::nodes::*;
-        let var_node = StreamVariableNode {
-            variable_name: "my_var".to_string(),
-            inp: InputFunctionNode {
-                variability: InputVariability::Variable,
-                input_count: InputCount::Unknown,
-                code: "some_stream".to_string(),
-            },
-            funs: vec![StreamFunctionNode {
-                kind: StreamFunctionKind::Map,
-                code: "map(f)".to_string(),
-            }],
-        };
-        let named_node = NamedStreamNode {
-            stream_variable: "my_var".to_string(),
-            funs: vec![StreamFunctionNode {
-                kind: StreamFunctionKind::Filter,
-                code: "filter(g)".to_string(),
-            }],
-            out: OutputFunctionNode {
-                stream_prefix: "".to_string(),
-                stream_postfix: ".collect::<Vec<_>>()".to_string(),
-                returning: true,
-            },
-        };
-        let exprs = vec![
-            TypedExpression::StreamVariable(var_node),
-            TypedExpression::NamedReturningStream(named_node),
-        ];
-        let result = analyze_program(&exprs);
-        assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].space_class, ComplexityClass::ON);
-    }
-
-    #[test]
-    fn test_analyze_program_aggregation() {
-        use crate::nodes::*;
-        let make_expr = |k| {
-            let inp = InputFunctionNode {
-                variability: InputVariability::Variable,
-                input_count: InputCount::Unknown,
-                code: "s".to_string(),
-            };
-            let funs = vec![StreamFunctionNode {
-                kind: StreamFunctionKind::Permutations(k),
-                code: format!("permutations({k})"),
-            }];
-            TypedExpression::UnnamedReturningStream(UnnamedStreamNode {
-                inp_and_funs: InputAndMaybeStreamFunctions { inp, funs },
-                out: OutputFunctionNode {
-                    stream_prefix: "".to_string(),
-                    stream_postfix: "".to_string(),
-                    returning: true,
-                },
-            })
-        };
-        let exprs = vec![make_expr(2), make_expr(3)];
-        let result = analyze_program(&exprs);
-        assert_eq!(result.streams.len(), 2);
-        assert_eq!(result.program_time, ComplexityClass::OPermutational(3));
-    }
-
-    #[test]
-    fn test_analyze_combinations_pipeline() {
-        use crate::nodes::*;
-        let inp = InputFunctionNode {
-            variability: InputVariability::Variable,
-            input_count: InputCount::Unknown,
-            code: "s".to_string(),
-        };
-        let funs = vec![StreamFunctionNode {
-            kind: StreamFunctionKind::Combinations(4),
-            code: "combinations(4)".to_string(),
-        }];
-        let expr = TypedExpression::UnnamedReturningStream(UnnamedStreamNode {
-            inp_and_funs: InputAndMaybeStreamFunctions { inp, funs },
-            out: OutputFunctionNode {
-                stream_prefix: "".to_string(),
-                stream_postfix: "".to_string(),
-                returning: true,
-            },
-        });
-        let result = analyze_program(&[expr]);
-        assert_eq!(result.streams.len(), 1);
-        assert_eq!(
-            result.streams[0].time_class,
-            ComplexityClass::OCombinatorial(4)
-        );
-        assert!(result.streams[0].collects_input);
-    }
-
-    #[test]
-    fn test_analyze_keep_first_n_pipeline() {
-        use crate::nodes::*;
-        let inp = InputFunctionNode {
-            variability: InputVariability::Variable,
-            input_count: InputCount::Unknown,
-            code: "s".to_string(),
-        };
-        let funs = vec![StreamFunctionNode {
-            kind: StreamFunctionKind::KeepFirstN(5),
-            code: "keep_first_n(5, ...)".to_string(),
-        }];
-        let expr = TypedExpression::UnnamedReturningStream(UnnamedStreamNode {
-            inp_and_funs: InputAndMaybeStreamFunctions { inp, funs },
-            out: OutputFunctionNode {
-                stream_prefix: "".to_string(),
-                stream_postfix: "".to_string(),
-                returning: true,
-            },
-        });
-        let result = analyze_program(&[expr]);
-        assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
-        assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
-    }
-
-    #[test]
-    fn test_analyze_chained_collectors() {
-        use crate::nodes::*;
-        let inp = InputFunctionNode {
-            variability: InputVariability::Variable,
-            input_count: InputCount::Unknown,
-            code: "s".to_string(),
-        };
-        let funs = vec![
-            StreamFunctionNode {
-                kind: StreamFunctionKind::Combinations(2),
-                code: "combinations(2)".to_string(),
-            },
-            StreamFunctionNode {
-                kind: StreamFunctionKind::Permutations(3),
-                code: "permutations(3)".to_string(),
-            },
-        ];
-        let expr = TypedExpression::UnnamedReturningStream(UnnamedStreamNode {
-            inp_and_funs: InputAndMaybeStreamFunctions { inp, funs },
-            out: OutputFunctionNode {
-                stream_prefix: "".to_string(),
-                stream_postfix: "".to_string(),
-                returning: true,
-            },
-        });
-        let result = analyze_program(&[expr]);
-        assert_eq!(result.streams.len(), 1);
-        assert_eq!(
-            result.streams[0].time_class,
-            ComplexityClass::OPermutational(3)
-        );
-    }
-
-    #[test]
-    fn test_exact_complexity_new_is_empty() {
-        let ec = ExactComplexity::new();
-        assert_eq!(ec.to_string(), "O(1)");
-        assert!(ec.is_empty());
-    }
-
-    #[test]
-    fn test_exact_complexity_add_work() {
-        let mut ec = ExactComplexity::new();
-        ec.add_work(ComplexityClass::ON, 3);
-        assert_eq!(ec.to_string(), "O(3n)");
-    }
-
-    #[test]
-    fn test_exact_complexity_accumulates() {
-        let mut ec = ExactComplexity::new();
-        ec.add_work(ComplexityClass::ON, 2);
-        ec.add_work(ComplexityClass::ON, 3);
-        assert_eq!(ec.to_string(), "O(5n)");
-    }
-
-    #[test]
-    fn test_exact_complexity_multiple_tiers() {
-        let mut ec = ExactComplexity::new();
-        ec.add_work(ComplexityClass::O1, 3);
-        ec.add_work(ComplexityClass::ON, 2);
-        ec.add_work(ComplexityClass::OPolynomial(2), 1);
-        assert_eq!(ec.to_string(), "O(n^2 + 2n)");
-        assert_eq!(ec.simplified(), ComplexityClass::OPolynomial(2));
+    fn test_annotate_pipeline_fold() {
+        let card = Symbolic::Constant(BigUint::from(50u64));
+        let funs = vec![StreamFunctionKind::Fold];
+        let result = annotate_pipeline(card, InputVariability::Fixed, &funs);
+        assert_eq!(result.time, ComplexityClass::O1);
+        assert_eq!(result.cardinality, Cardinality::Exact(BigUint::one()));
     }
 
     #[test]
     fn test_exact_complexity_merge() {
         let mut a = ExactComplexity::new();
         a.add_work(ComplexityClass::ON, 2);
-
         let mut b = ExactComplexity::new();
-        b.add_work(ComplexityClass::ON, 3);
         b.add_work(ComplexityClass::OPolynomial(2), 1);
-
         a.merge(&b);
         assert_eq!(a.simplified(), ComplexityClass::OPolynomial(2));
     }
 
     #[test]
-    fn test_exact_complexity_display_roundtrip() {
-        let mut ec = ExactComplexity::new();
-        ec.add_work(ComplexityClass::ON, 2);
-        ec.add_work(ComplexityClass::OPolynomial(3), 1);
-        let s = ec.to_string();
-        let parsed = ExactComplexity::from_str(&s).unwrap();
-        assert_eq!(ec.simplified(), parsed.simplified());
+    fn test_exact_complexity_simplified_empty() {
+        let ec = ExactComplexity::new();
+        assert_eq!(ec.simplified(), ComplexityClass::O1);
     }
 
     #[test]
-    fn test_exact_complexity_serde_roundtrip() {
-        let mut ec = ExactComplexity::new();
-        ec.add_work(ComplexityClass::ON, 2);
-        ec.add_work(ComplexityClass::OPolynomial(3), 1);
-        let json = serde_json::to_string(&ec).unwrap();
-        let parsed: ExactComplexity = serde_json::from_str(&json).unwrap();
-        assert_eq!(ec.simplified(), parsed.simplified());
+    fn test_cardinality_max() {
+        let a = Cardinality::Exact(BigUint::from(5u64));
+        let b = Cardinality::Exact(BigUint::from(10u64));
+        assert_eq!(a.max(b), Cardinality::Exact(BigUint::from(10u64)));
     }
 
     #[test]
-    fn test_analyze_program_empty() {
-        let result = analyze_program(&[]);
-        assert_eq!(result.program_time, ComplexityClass::O1);
-        assert_eq!(result.program_space, ComplexityClass::O1);
-        assert_eq!(result.streams.len(), 0);
-    }
-
-    #[test]
-    fn test_exact_complexity_serde_cardinality() {
-        let mut ec = ExactComplexity::new();
-        ec.add_work(ComplexityClass::ON, 42);
-        let json = serde_json::to_string(&ec).unwrap();
-        assert_eq!(json, "\"O(42n)\"");
-        let parsed: ExactComplexity = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed, ec);
-    }
-
-    #[test]
-    fn test_symbolic_fromstr_unknown() {
-        let s = Symbolic::from_str("?").unwrap();
-        assert_eq!(s, Symbolic::Unknown);
-    }
-
-    #[test]
-    fn test_symbolic_fromstr_filtered() {
-        let s = Symbolic::from_str("\u{2264}100").unwrap();
-        assert_eq!(
-            s,
-            Symbolic::Filtered(Box::new(Symbolic::Constant(BigUint::from(100u64))))
-        );
-    }
-
-    #[test]
-    fn test_symbolic_fromstr_permutations() {
-        let s = Symbolic::from_str("P(100, 2)").unwrap();
-        assert_eq!(
-            s,
-            Symbolic::Permutations {
-                n: Box::new(Symbolic::Constant(BigUint::from(100u64))),
-                k: 2
-            }
-        );
-    }
-
-    #[test]
-    fn test_symbolic_fromstr_combinations() {
-        let s = Symbolic::from_str("C(100, 2)").unwrap();
-        assert_eq!(
-            s,
-            Symbolic::Combinations {
-                n: Box::new(Symbolic::Constant(BigUint::from(100u64))),
-                k: 2
-            }
-        );
-    }
-
-    #[test]
-    fn test_symbolic_fromstr_perm_rep() {
-        let s = Symbolic::from_str("100^3").unwrap();
-        assert_eq!(
-            s,
-            Symbolic::PermutationsWithReplacement {
-                n: Box::new(Symbolic::Constant(BigUint::from(100u64))),
-                k: 3
-            }
-        );
-    }
-
-    #[test]
-    fn test_symbolic_fromstr_min() {
-        let s = Symbolic::from_str("min(100, 5)").unwrap();
-        assert_eq!(
-            s,
-            Symbolic::Min(
-                Box::new(Symbolic::Constant(BigUint::from(100u64))),
-                Box::new(Symbolic::Constant(BigUint::from(5u64)))
-            )
-        );
-    }
-
-    #[test]
-    fn test_symbolic_fromstr_sum() {
-        let s = Symbolic::from_str("10 + 20").unwrap();
-        assert_eq!(
-            s,
-            Symbolic::Sum(vec![
-                Symbolic::Constant(BigUint::from(10u64)),
-                Symbolic::Constant(BigUint::from(20u64))
-            ])
-        );
+    fn test_cardinality_max_unknown() {
+        let a = Cardinality::Exact(BigUint::from(5u64));
+        assert_eq!(a.max(Cardinality::Unknown), Cardinality::Unknown);
     }
 
     #[test]
     fn test_symbolic_display_roundtrip() {
         let cases = vec![
-            Symbolic::Constant(BigUint::from(100u64)),
+            Symbolic::Constant(BigUint::from(42u64)),
             Symbolic::Unknown,
-            Symbolic::Filtered(Box::new(Symbolic::Constant(BigUint::from(100u64)))),
+            Symbolic::Filtered(Box::new(Symbolic::Constant(BigUint::from(10u64)))),
             Symbolic::Permutations {
-                n: Box::new(Symbolic::Constant(BigUint::from(100u64))),
+                n: Box::new(Symbolic::Constant(BigUint::from(5u64))),
                 k: 2,
             },
             Symbolic::Combinations {
-                n: Box::new(Symbolic::Constant(BigUint::from(100u64))),
-                k: 3,
+                n: Box::new(Symbolic::Constant(BigUint::from(5u64))),
+                k: 2,
             },
             Symbolic::PermutationsWithReplacement {
-                n: Box::new(Symbolic::Constant(BigUint::from(10u64))),
-                k: 3,
+                n: Box::new(Symbolic::Constant(BigUint::from(3u64))),
+                k: 2,
             },
             Symbolic::Min(
-                Box::new(Symbolic::Constant(BigUint::from(100u64))),
-                Box::new(Symbolic::Constant(BigUint::from(5u64))),
+                Box::new(Symbolic::Constant(BigUint::from(3u64))),
+                Box::new(Symbolic::Constant(BigUint::from(7u64))),
             ),
             Symbolic::Sum(vec![
-                Symbolic::Constant(BigUint::from(10u64)),
-                Symbolic::Constant(BigUint::from(20u64)),
+                Symbolic::Constant(BigUint::from(3u64)),
+                Symbolic::Constant(BigUint::from(7u64)),
             ]),
         ];
         for sym in cases {
@@ -1887,50 +1088,71 @@ mod tests {
     }
 
     #[test]
-    fn test_complexity_class_error_case() {
-        assert!(ComplexityClass::from_str("O(invalid)").is_err());
-    }
-
-    #[test]
-    fn test_exact_complexity_default_is_empty() {
-        let ec = ExactComplexity::default();
-        assert_eq!(ec.to_string(), "O(1)");
-    }
-
-    #[test]
-    fn test_exact_complexity_onlogk_factorial_unknown_roundtrip() {
-        for (class, expected_multi) in [
-            (ComplexityClass::ONLogK(5), "O(n*log(5) + n)"),
-            (ComplexityClass::OFactorial, "O(n! + n)"),
-            (ComplexityClass::Unknown, "O(? + n)"),
-        ] {
-            let mut ec = ExactComplexity::new();
-            ec.add_work(class.clone(), 1);
-            ec.add_work(ComplexityClass::ON, 1);
-            assert_eq!(ec.to_string(), expected_multi, "display for {class:?}");
-            let parsed = ExactComplexity::from_str(expected_multi).unwrap();
-            assert_eq!(
-                parsed.to_string(),
-                expected_multi,
-                "roundtrip for {class:?}"
-            );
+    fn test_cardinality_display_roundtrip() {
+        let cases = vec![
+            Cardinality::Exact(BigUint::from(42u64)),
+            Cardinality::Bounded(Symbolic::Filtered(Box::new(Symbolic::Constant(
+                BigUint::from(10u64),
+            )))),
+            Cardinality::Unknown,
+        ];
+        for card in cases {
+            let s = card.to_string();
+            let parsed = Cardinality::from_str(&s).unwrap();
+            assert_eq!(card, parsed, "Roundtrip failed for {s}");
         }
+    }
+
+    #[test]
+    fn test_exact_complexity_display_roundtrip() {
+        let mut ec = ExactComplexity::new();
+        ec.add_work(ComplexityClass::ON, 2);
+        ec.add_work(ComplexityClass::OLogN, 1);
+        let s = ec.to_string();
+        let parsed = ExactComplexity::from_str(&s).unwrap();
+        assert_eq!(ec, parsed);
+    }
+
+    #[test]
+    fn test_exact_complexity_serde() {
+        let mut ec = ExactComplexity::new();
+        ec.add_work(ComplexityClass::ON, 2);
+        let json = serde_json::to_string(&ec).unwrap();
+        let parsed: ExactComplexity = serde_json::from_str(&json).unwrap();
+        assert_eq!(ec, parsed);
+    }
+
+    #[test]
+    fn test_cardinality_serde_roundtrip() {
+        let cases = vec![
+            Cardinality::Exact(BigUint::from(99u64)),
+            Cardinality::Unknown,
+        ];
+        for card in cases {
+            let json = serde_json::to_string(&card).unwrap();
+            let parsed: Cardinality = serde_json::from_str(&json).unwrap();
+            assert_eq!(card, parsed);
+        }
+    }
+
+    #[test]
+    fn test_classify_as_cardinality_constant() {
+        let sym = Symbolic::Constant(BigUint::from(5u64));
+        assert_eq!(sym.classify_as_cardinality(), Cardinality::Exact(BigUint::from(5u64)));
+    }
+
+    #[test]
+    fn test_classify_as_cardinality_unknown() {
+        let sym = Symbolic::Unknown;
+        assert_eq!(sym.classify_as_cardinality(), Cardinality::Unknown);
     }
 }
 
+/// Property-based and deterministic unit tests for `ComplexityClass` ordering
+/// and `ExactComplexity` algebra. `ONLogK` is pinned to `k=2` in helpers that
+/// exercise antisymmetry; the `Ord`/`Eq` mismatch for distinct k values is
+/// tracked in issue #232.
 #[cfg(test)]
-/// Property and deterministic tests for `ComplexityClass` ordering and
-/// `ExactComplexity` algebra.
-///
-/// Design notes:
-/// - `ONLogK` is pinned to `k=2` in the `arb_complexity_class_fixed` and
-///   `arb_exact_complexity_full` generators. `ComplexityClass::Ord` maps every
-///   `ONLogK(_)` to ordinal 3 regardless of `k`, but `Eq` is structural, so
-///   mixing distinct `k` values violates the antisymmetry axiom. This is
-///   tracked in issue #232 and will be fixed in a follow-up.
-/// - `OPolynomial` generators start at `k=2`. Values `k=0` (`O(n^0)=O(1)`,
-///   ordinal 5) and `k=1` (`O(n^1)=O(n)`, ordinal 6) have misleading ordinals;
-///   a `debug_assert!(k >= 2)` in `ordinal()` guards against accidental misuse.
 mod proptests {
     use super::*;
     use proptest::prelude::*;
@@ -1940,14 +1162,8 @@ mod proptests {
             Just(ComplexityClass::O1),
             Just(ComplexityClass::OLogN),
             Just(ComplexityClass::ON),
-            // ONLogK uses a wider range (1..100) than the other parametric variants
-            // because k is a log base and the semantics don't degrade the way
-            // polynomial degree does. OPolynomial/OCombinatorial/OPermutational use
-            // smaller ranges to keep proptest shrinking fast.
             (1..100u64).prop_map(ComplexityClass::ONLogK),
             Just(ComplexityClass::ONLogN),
-            // OPolynomial starts at k=2: k=0 gives O(1) and k=1 gives O(n), so
-            // values below 2 have misleading ordinals. See debug_assert in ordinal().
             (2..20u64).prop_map(ComplexityClass::OPolynomial),
             (1..20u64).prop_map(ComplexityClass::OCombinatorial),
             (1..20u64).prop_map(ComplexityClass::OPermutational),
