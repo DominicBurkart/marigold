@@ -514,6 +514,11 @@ mod tests {
     /// Directly exercises the non-tokio path's `n == 0` early-return guard.
     /// Compiled only when neither `tokio` nor `async-std` feature is active, so this
     /// test uses `futures::executor::block_on` instead of `#[tokio::test]`.
+    /// NOTE: This cfg gate means the test only runs in configurations where neither
+    /// `tokio` nor `async-std` is enabled — a configuration that is rarely exercised in CI
+    /// (most CI jobs enable `tokio`). The test is kept for completeness, but a dedicated
+    /// CI job without async-runtime features would be needed for it to provide active
+    /// regression protection. See tracking follow-up for adding such a CI job.
     #[cfg(not(any(feature = "tokio", feature = "async-std")))]
     #[test]
     fn non_tokio_n_zero_returns_empty() {
@@ -550,7 +555,10 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+// The proptests module calls `tokio::runtime::Runtime::new()` in its `run_keep_first_n` helper,
+// so it requires the `tokio` feature to compile. Gated with `#[cfg(all(test, feature = "tokio"))]`
+// following the same pattern as the `multi_consumer_stream` tests module.
+#[cfg(all(test, feature = "tokio"))]
 mod proptests {
     use super::KeepFirstN;
     use futures::stream::StreamExt;
@@ -582,6 +590,9 @@ mod proptests {
             prop_assert_eq!(result.len(), std::cmp::min(n, items.len()));
         }
 
+        /// n starts at 1 (not 0) because at n=0 the expected set is empty and the result is
+        /// always empty regardless — there is nothing to get wrong, and the n=0 regression is
+        /// fully covered by `result_length_is_min_of_n_and_input_len` (which uses 0..60).
         #[test]
         fn result_contains_top_n_values(
             items in proptest::collection::vec(-1000i32..1000, 1..50),
