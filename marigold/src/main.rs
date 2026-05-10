@@ -40,6 +40,22 @@ enum MarigoldCommand {
 }
 
 #[cfg(feature = "cli")]
+impl MarigoldCommand {
+    /// Returns the Marigold source file path the command was invoked with, if any.
+    /// `CleanAll` does not take a file.
+    fn file(&self) -> Option<&str> {
+        match self {
+            MarigoldCommand::Run { file, .. }
+            | MarigoldCommand::Install { file }
+            | MarigoldCommand::Uninstall { file }
+            | MarigoldCommand::Clean { file }
+            | MarigoldCommand::Analyze { file } => file.as_deref(),
+            MarigoldCommand::CleanAll => None,
+        }
+    }
+}
+
+#[cfg(feature = "cli")]
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -53,34 +69,48 @@ fn main() {
     eprintln!("Marigold needs to be installed with the cli feature (`cargo install --force marigold -F cli`)");
 }
 
+/// Read a Marigold program from `path`, or stdin if `path` is `None`. Trims trailing whitespace.
 #[cfg(feature = "cli")]
-fn get_file_name_argument(args: &Args) -> Option<String> {
-    use MarigoldCommand::*;
+fn read_program_contents(path: Option<&str>) -> std::io::Result<String> {
+    use std::io::Read;
 
-    match &args.command {
-        Some(Run {
-            unoptimized: _,
-            file,
-        }) => file.clone(),
-        Some(Install { file }) => file.clone(),
-        Some(Uninstall { file }) => file.clone(),
-        Some(Clean { file }) => file.clone(),
-        Some(Analyze { file }) => file.clone(),
-        Some(CleanAll) => None,
-        None => None,
-    }
+    let raw = match path {
+        Some(path) => std::fs::read_to_string(path)?,
+        None => {
+            let mut stdin = String::new();
+            std::io::stdin().lock().read_to_string(&mut stdin)?;
+            stdin
+        }
+    };
+    Ok(raw.trim().to_string())
+}
+
+/// Derive a Cargo-package-friendly program name from the source file path.
+/// Falls back to "marigold_program" when no path is supplied or the stem is too short.
+#[cfg(feature = "cli")]
+fn derive_program_name(file: Option<&str>) -> String {
+    use convert_case::{Case, Casing};
+
+    const FALLBACK: &str = "marigold_program";
+
+    let stem = file
+        .and_then(|p| std::path::Path::new(p).file_stem().and_then(|s| s.to_str()))
+        .filter(|s| s.len() > 1)
+        .unwrap_or(FALLBACK);
+
+    let snake = stem.to_case(Case::Snake);
+    snake
+        .trim_start_matches('_')
+        .trim_end_matches('_')
+        .to_string()
 }
 
 #[cfg(feature = "cli")]
 fn main() -> Result<()> {
-    use MarigoldCommand::*;
-
-    use convert_case::{Case, Casing};
-    use std::io;
-    use std::io::Read;
     use std::process::Command;
 
     const RUST_EDITION: &str = "2021";
+    const MARIGOLD_VERSION: &str = env!("CARGO_PKG_VERSION");
 
     let args = Args::parse();
 
@@ -88,109 +118,74 @@ fn main() -> Result<()> {
         .expect("could not locate user's home directory for marigold cache")
         .join(".marigold");
 
-    let file_name_argument = get_file_name_argument(&args);
+    let file_name_argument = args
+        .command
+        .as_ref()
+        .and_then(|c| c.file())
+        .map(String::from);
 
-    let program_name = {
-        let mut file_name = match &file_name_argument {
-            Some(path) => {
-                let stem = std::path::Path::new(path)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("marigold_program");
-                if stem.len() > 1 {
-                    stem.to_string()
-                } else {
-                    "marigold_program".to_string()
-                }
-            }
-            None => "marigold_program".to_string(),
-        };
-
-        file_name = file_name.to_case(Case::Snake);
-        file_name = file_name
-            .strip_prefix("_")
-            .map(|s| s.to_string())
-            .unwrap_or(file_name);
-        file_name = file_name
-            .strip_suffix("_")
-            .map(|s| s.to_string())
-            .unwrap_or(file_name);
-        file_name
-    };
-
+    let program_name = derive_program_name(file_name_argument.as_deref());
     let program_project_dir = marigold_cache_directory.join(&program_name);
 
-    let command = match args.command {
-        Some(ref command) => match command {
-            Run {
-                unoptimized: _,
-                file: _,
-            } => "run",
-            Install { file: _ } => "install",
-            Uninstall { file: _ } => std::process::exit(
+    // Handle commands that exit early without building the cached project.
+    match args.command.as_ref() {
+        Some(MarigoldCommand::Uninstall { .. }) => {
+            std::process::exit(
                 Command::new("cargo")
                     .args(["uninstall", &program_name])
                     .spawn()?
                     .wait()?
                     .code()
                     .unwrap_or(0),
-            ),
-            Clean { file: _ } => {
-                std::fs::remove_dir_all(&program_project_dir)?;
-                std::process::exit(0);
+            );
+        }
+        Some(MarigoldCommand::Clean { .. }) => {
+            std::fs::remove_dir_all(&program_project_dir)?;
+            std::process::exit(0);
+        }
+        Some(MarigoldCommand::CleanAll) => {
+            if marigold_cache_directory.exists() {
+                std::fs::remove_dir_all(&marigold_cache_directory)?;
             }
-            CleanAll => {
-                if marigold_cache_directory.exists() {
-                    std::fs::remove_dir_all(&marigold_cache_directory)?;
-                }
-                std::process::exit(0);
-            }
-            Analyze { file: _ } => {
-                let program_contents = match &file_name_argument {
-                    Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
-                    None => {
-                        let mut stdin = String::new();
-                        io::stdin().lock().read_to_string(&mut stdin)?;
-                        stdin.trim().to_string()
-                    }
-                };
-                let result = marigold_grammar::marigold_analyze(&program_contents)
-                    .map_err(|e| anyhow::anyhow!("{}", e))?;
-                let json = serde_json::to_string_pretty(&result)?;
-                println!("{json}");
-                std::process::exit(0);
-            }
-        },
-        None => "run", // default is run.
+            std::process::exit(0);
+        }
+        Some(MarigoldCommand::Analyze { .. }) => {
+            let program_contents = read_program_contents(file_name_argument.as_deref())?;
+            let result = marigold_grammar::marigold_analyze(&program_contents)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            std::process::exit(0);
+        }
+        Some(MarigoldCommand::Run { .. }) | Some(MarigoldCommand::Install { .. }) | None => {}
+    }
+
+    // Default command (no subcommand) is `run`.
+    let cargo_subcommand = match args.command {
+        Some(MarigoldCommand::Install { .. }) => "install",
+        _ => "run",
     };
 
     let program_src_dir = program_project_dir.join("src");
-
     std::fs::create_dir_all(&program_src_dir)?;
 
-    let program_contents = match file_name_argument {
-        Some(path) => std::fs::read_to_string(&path)?.trim().to_string(),
-        None => {
-            let mut stdin = String::new();
-            io::stdin().lock().read_to_string(&mut stdin)?;
-            stdin.trim().to_string()
-        }
-    };
+    let program_contents = read_program_contents(file_name_argument.as_deref())?;
 
     std::fs::write(
         program_src_dir.join("main.rs"),
-        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}")
-            .as_str(),
+        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}"),
     )?;
-
-    const MARIGOLD_VERSION: &str = env!("CARGO_PKG_VERSION");
 
     let manifest_path = program_project_dir.join("Cargo.toml");
 
-    let marigold_dep = if let Ok(workspace_path) = std::env::var("MARIGOLD_WORKSPACE_PATH") {
-        format!(r#"marigold = {{ path = "{workspace_path}", features = ["tokio", "io"]}}"#)
-    } else {
-        format!(r#"marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}"#)
+    let marigold_dep = match std::env::var("MARIGOLD_WORKSPACE_PATH") {
+        Ok(workspace_path) => {
+            format!(r#"marigold = {{ path = "{workspace_path}", features = ["tokio", "io"]}}"#)
+        }
+        Err(_) => {
+            format!(
+                r#"marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}"#
+            )
+        }
     };
 
     std::fs::write(
@@ -209,57 +204,36 @@ tokio = {{ version = "1", features = ["full"]}}
         ),
     )?;
 
-    let exit_status = {
-        if command == "run" {
-            let unoptimized = {
-                if let Some(Run {
-                    unoptimized,
-                    file: _,
-                }) = &args.command
-                {
-                    *unoptimized
-                } else {
-                    false
-                }
-            };
-            if unoptimized {
-                Command::new("cargo")
-                    .args([
-                        command,
-                        "--manifest-path",
-                        manifest_path
-                            .to_str()
-                            .expect("Marigold could not parse cache manifest path as utf-8"),
-                    ])
-                    .spawn()?
-                    .wait()?
-            } else {
-                Command::new("cargo")
-                    .args([
-                        command,
-                        "--release",
-                        "--manifest-path",
-                        manifest_path
-                            .to_str()
-                            .expect("Marigold could not parse cache manifest path as utf-8"),
-                    ])
-                    .spawn()?
-                    .wait()?
-            }
-        } else {
-            Command::new("cargo")
-                .args([
-                    command,
-                    "--path",
-                    program_project_dir
-                        .to_str()
-                        .expect("Marigold could not parse cache manifest path as utf-8"),
-                ])
-                .spawn()?
-                .wait()?
+    // Build the cargo invocation. `run` targets the manifest in place (with optional --release),
+    // `install` installs from the cached project path.
+    let mut cargo_args: Vec<&str> = vec![cargo_subcommand];
+    if cargo_subcommand == "run" {
+        let unoptimized = matches!(
+            args.command,
+            Some(MarigoldCommand::Run {
+                unoptimized: true,
+                ..
+            })
+        );
+        if !unoptimized {
+            cargo_args.push("--release");
         }
-    };
+        cargo_args.push("--manifest-path");
+        cargo_args.push(
+            manifest_path
+                .to_str()
+                .expect("Marigold could not parse cache manifest path as utf-8"),
+        );
+    } else {
+        cargo_args.push("--path");
+        cargo_args.push(
+            program_project_dir
+                .to_str()
+                .expect("Marigold could not parse cache manifest path as utf-8"),
+        );
+    }
 
+    let exit_status = Command::new("cargo").args(&cargo_args).spawn()?.wait()?;
     std::process::exit(exit_status.code().unwrap_or(0));
 }
 
@@ -469,5 +443,60 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // These two tests call super::derive_program_name and super::MarigoldCommand,
+    // which are only defined under #[cfg(feature = "cli")]. Gate them accordingly
+    // so that `cargo test` (no features) compiles successfully.
+    #[cfg(feature = "cli")]
+    #[test]
+    fn derive_program_name_handles_paths_and_fallbacks() {
+        use super::derive_program_name;
+
+        // Real source file -> snake-cased stem.
+        assert_eq!(
+            derive_program_name(Some("/tmp/HelloWorld.marigold")),
+            "hello_world"
+        );
+        // No path supplied -> stable fallback.
+        assert_eq!(derive_program_name(None), "marigold_program");
+        // Single-character stems are too short to be useful Cargo package names -> fallback.
+        assert_eq!(derive_program_name(Some("a.marigold")), "marigold_program");
+        // Names that snake-case to leading/trailing underscores are stripped so the
+        // resulting Cargo package name is still valid.
+        assert_eq!(derive_program_name(Some("_Foo_.marigold")), "foo");
+    }
+
+    #[cfg(feature = "cli")]
+    #[test]
+    fn marigold_command_file_extracts_path_for_each_variant() {
+        use super::MarigoldCommand;
+
+        let path = Some("prog.marigold".to_string());
+        assert_eq!(
+            MarigoldCommand::Run {
+                unoptimized: false,
+                file: path.clone()
+            }
+            .file(),
+            Some("prog.marigold")
+        );
+        assert_eq!(
+            MarigoldCommand::Install { file: path.clone() }.file(),
+            Some("prog.marigold")
+        );
+        assert_eq!(
+            MarigoldCommand::Uninstall { file: path.clone() }.file(),
+            Some("prog.marigold")
+        );
+        assert_eq!(
+            MarigoldCommand::Clean { file: path.clone() }.file(),
+            Some("prog.marigold")
+        );
+        assert_eq!(
+            MarigoldCommand::Analyze { file: path }.file(),
+            Some("prog.marigold")
+        );
+        assert_eq!(MarigoldCommand::CleanAll.file(), None);
     }
 }
