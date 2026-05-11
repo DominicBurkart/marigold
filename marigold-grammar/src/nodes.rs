@@ -809,4 +809,533 @@ mod tests {
         assert_eq!(select_smallest_unsigned_type(65535), "u16");
         assert_eq!(select_smallest_unsigned_type(65536), "u32");
     }
+
+    // ------------------------------------------------------------------
+    // Code-generation invariants for the AST node `code()` methods.
+    //
+    // The `code()` family is the bridge from the parsed AST to the Rust
+    // source that the `m!` macro expands to. Before this commit none of
+    // the per-node code emitters were unit-tested in isolation; bugs were
+    // only surfaced through end-to-end macro expansion, which makes
+    // diagnosis expensive and lets regressions in code shape slip in.
+    //
+    // The tests below pin the *shape* of the emitted code (block
+    // wrappers, dot-chaining, `let mut` declarations, trait derives,
+    // `__marigold_variants()` helpers, etc.). They are intentionally
+    // assertion-substring-based rather than full string-equality so that
+    // formatting tweaks (whitespace) don't break them — only structural
+    // regressions do.
+    //
+    // Invariants exercised here:
+    //
+    //   A. **Block wrapper.** Every stream-emitting node's `code()` is
+    //      wrapped in `{use ::marigold::marigold_impl::*; ... }` so that
+    //      the generated Rust resolves the marigold trait imports.
+    //   B. **Dot-chaining.** Stream functions are joined with `.` after
+    //      the input, with no leading/trailing dots when the list is
+    //      empty.
+    //   C. **`TypedExpression::From` dispatch.** Returning/non-returning
+    //      stream nodes are dispatched to the right variant based on
+    //      `out.returning`. (No data is lost.)
+    //   D. **Variable declarations.** `StreamVariableNode::declaration_code`
+    //      and `StreamVariableFromPriorStreamVariableNode::declaration_code`
+    //      always emit `let mut <name> = ...` so that downstream
+    //      runner_code can mutate the value.
+    //   E. **Runner code.** `runner_code()` always references the
+    //      variable it was built for and wraps its `.run()` in a
+    //      `RunFutureAsStream`.
+    //   F. **Struct/enum codegen.** The emitted decls always carry the
+    //      core derives (`Clone`, `Debug`, `Eq`, `PartialEq`) and the
+    //      enum codegen always emits the `__marigold_variants()`
+    //      reflection helper.
+    //   G. **Enum `unit_variant_count`.** A `WithDefaultValue` default
+    //      variant is counted in `__marigold_variants()`; a `Sized`
+    //      default variant is not (it cannot be `Copy`-constructed).
+    //   H. **Fn codegen.** `FnDeclarationNode::code` emits `const fn` so
+    //      that the body can be evaluated at macro/compile time.
+
+    fn dummy_input(code: &str) -> InputFunctionNode {
+        InputFunctionNode {
+            variability: InputVariability::Constant,
+            input_count: InputCount::Known(num_bigint::BigUint::from(0u32)),
+            code: code.to_string(),
+        }
+    }
+
+    fn dummy_fn(code: &str) -> StreamFunctionNode {
+        StreamFunctionNode {
+            kind: StreamFunctionKind::Map,
+            code: code.to_string(),
+        }
+    }
+
+    fn dummy_output(prefix: &str, postfix: &str, returning: bool) -> OutputFunctionNode {
+        OutputFunctionNode {
+            stream_prefix: prefix.to_string(),
+            stream_postfix: postfix.to_string(),
+            returning,
+        }
+    }
+
+    // ---- InputAndMaybeStreamFunctions::code --------------------------
+
+    #[test]
+    fn input_and_funs_code_no_funs_is_just_input() {
+        // Invariant B: with zero stream funs, the rendered code is just
+        // the input's code (no trailing dot).
+        let n = InputAndMaybeStreamFunctions {
+            inp: dummy_input("range(0, 10)"),
+            funs: vec![],
+        };
+        assert_eq!(n.code(), "range(0, 10)");
+    }
+
+    #[test]
+    fn input_and_funs_code_single_fun_dot_joined() {
+        // Invariant B: a single fun appears as `input.fun`.
+        let n = InputAndMaybeStreamFunctions {
+            inp: dummy_input("range(0, 10)"),
+            funs: vec![dummy_fn("filter(is_odd)")],
+        };
+        assert_eq!(n.code(), "range(0, 10).filter(is_odd)");
+    }
+
+    #[test]
+    fn input_and_funs_code_multiple_funs_dot_joined_in_order() {
+        // Invariant B: multiple funs appear in source order, all joined
+        // by `.`.
+        let n = InputAndMaybeStreamFunctions {
+            inp: dummy_input("range(0, 10)"),
+            funs: vec![
+                dummy_fn("filter(is_odd)"),
+                dummy_fn("map(square)"),
+                dummy_fn("keep_first_n(2, asc)"),
+            ],
+        };
+        assert_eq!(
+            n.code(),
+            "range(0, 10).filter(is_odd).map(square).keep_first_n(2, asc)"
+        );
+    }
+
+    // ---- UnnamedStreamNode::code -------------------------------------
+
+    #[test]
+    fn unnamed_stream_code_wraps_with_marigold_use_block() {
+        // Invariants A + B: the whole emission is wrapped in
+        // `{use ::marigold::marigold_impl::*; ... }`, and prefix/postfix
+        // surround the input+funs.
+        let n = UnnamedStreamNode {
+            inp_and_funs: InputAndMaybeStreamFunctions {
+                inp: dummy_input("range(0, 3)"),
+                funs: vec![dummy_fn("filter(is_odd)")],
+            },
+            out: dummy_output("PREFIX_", "_POSTFIX", true),
+        };
+        let code = n.code();
+        assert!(
+            code.starts_with("{use ::marigold::marigold_impl::*;"),
+            "missing marigold use block; got: {code}"
+        );
+        assert!(code.ends_with('}'), "must close brace; got: {code}");
+        assert!(code.contains("PREFIX_range(0, 3).filter(is_odd)_POSTFIX"));
+    }
+
+    // ---- TypedExpression::From dispatch ------------------------------
+
+    #[test]
+    fn typed_expression_from_unnamed_dispatches_on_returning() {
+        // Invariant C: `returning = true` -> UnnamedReturningStream;
+        // `returning = false` -> UnnamedNonReturningStream.
+        let returning = UnnamedStreamNode {
+            inp_and_funs: InputAndMaybeStreamFunctions {
+                inp: dummy_input("range(0, 1)"),
+                funs: vec![],
+            },
+            out: dummy_output("", "", true),
+        };
+        assert!(matches!(
+            TypedExpression::from(returning),
+            TypedExpression::UnnamedReturningStream(_)
+        ));
+
+        let non_returning = UnnamedStreamNode {
+            inp_and_funs: InputAndMaybeStreamFunctions {
+                inp: dummy_input("range(0, 1)"),
+                funs: vec![],
+            },
+            out: dummy_output("", "", false),
+        };
+        assert!(matches!(
+            TypedExpression::from(non_returning),
+            TypedExpression::UnnamedNonReturningStream(_)
+        ));
+    }
+
+    #[test]
+    fn typed_expression_from_named_dispatches_on_returning() {
+        // Invariant C: same dispatch behaviour for NamedStreamNode.
+        let returning = NamedStreamNode {
+            stream_variable: "s".to_string(),
+            funs: vec![],
+            out: dummy_output("", "", true),
+        };
+        assert!(matches!(
+            TypedExpression::from(returning),
+            TypedExpression::NamedReturningStream(_)
+        ));
+
+        let non_returning = NamedStreamNode {
+            stream_variable: "s".to_string(),
+            funs: vec![],
+            out: dummy_output("", "", false),
+        };
+        assert!(matches!(
+            TypedExpression::from(non_returning),
+            TypedExpression::NamedNonReturningStream(_)
+        ));
+    }
+
+    // ---- NamedStreamNode::code ---------------------------------------
+
+    #[test]
+    fn named_stream_code_with_no_funs_calls_get_without_extra_dot() {
+        // Invariant B: an empty fun list yields `<var>.get()` exactly —
+        // no spurious trailing dot.
+        let n = NamedStreamNode {
+            stream_variable: "digits".to_string(),
+            funs: vec![],
+            out: dummy_output("", "", true),
+        };
+        let code = n.code();
+        assert!(code.contains("digits.get()"), "got: {code}");
+        // Make sure we did not emit `digits.get().` with nothing after.
+        assert!(!code.contains("digits.get()."), "got: {code}");
+    }
+
+    #[test]
+    fn named_stream_code_with_funs_dot_joins_after_get() {
+        // Invariant B: funs are chained off `.get()`.
+        let n = NamedStreamNode {
+            stream_variable: "digits".to_string(),
+            funs: vec![dummy_fn("map(double)"), dummy_fn("filter(positive)")],
+            out: dummy_output("", "", true),
+        };
+        let code = n.code();
+        assert!(
+            code.contains("digits.get().map(double).filter(positive)"),
+            "got: {code}"
+        );
+    }
+
+    #[test]
+    fn named_stream_code_wraps_with_marigold_use_block() {
+        // Invariant A.
+        let n = NamedStreamNode {
+            stream_variable: "s".to_string(),
+            funs: vec![],
+            out: dummy_output("", "", true),
+        };
+        let code = n.code();
+        assert!(code.starts_with("{use ::marigold::marigold_impl::*;"));
+        assert!(code.ends_with('}'));
+    }
+
+    // ---- StreamVariableNode codegen ----------------------------------
+
+    #[test]
+    fn stream_variable_declaration_emits_let_mut_and_multi_consumer_stream() {
+        // Invariant D: declaration_code emits `let mut <name> = ...`
+        // wrapping a MultiConsumerStream::new(...).
+        let n = StreamVariableNode {
+            variable_name: "digits".to_string(),
+            inp: dummy_input("range(0, 10)"),
+            funs: vec![],
+        };
+        let code = n.declaration_code();
+        assert!(code.contains("let mut digits = "), "got: {code}");
+        assert!(
+            code.contains("MultiConsumerStream::new(range(0, 10))"),
+            "got: {code}"
+        );
+        assert!(code.ends_with(';'), "decl must end with `;`; got: {code}");
+    }
+
+    #[test]
+    fn stream_variable_declaration_with_funs_dot_joins() {
+        // Invariant B + D.
+        let n = StreamVariableNode {
+            variable_name: "evens".to_string(),
+            inp: dummy_input("range(0, 10)"),
+            funs: vec![dummy_fn("filter(is_even)")],
+        };
+        let code = n.declaration_code();
+        assert!(
+            code.contains("MultiConsumerStream::new(range(0, 10).filter(is_even))"),
+            "got: {code}"
+        );
+    }
+
+    #[test]
+    fn stream_variable_runner_code_references_variable_and_runs() {
+        // Invariant E.
+        let n = StreamVariableNode {
+            variable_name: "digits".to_string(),
+            inp: dummy_input("range(0, 1)"),
+            funs: vec![],
+        };
+        let code = n.runner_code();
+        assert!(code.contains("digits.run()"), "got: {code}");
+        assert!(code.contains("RunFutureAsStream::new"), "got: {code}");
+    }
+
+    // ---- StreamVariableFromPriorStreamVariableNode codegen ----------
+
+    #[test]
+    fn stream_variable_from_prior_declaration_uses_prior_get() {
+        // Invariant D: declaration must reference `prior.get()`.
+        let n = StreamVariableFromPriorStreamVariableNode {
+            variable_name: "odds".to_string(),
+            prior_stream_variable: "digits".to_string(),
+            funs: vec![dummy_fn("filter(is_odd)")],
+        };
+        let code = n.declaration_code();
+        assert!(code.contains("let mut odds = "), "got: {code}");
+        assert!(
+            code.contains("MultiConsumerStream::new(digits.get().filter(is_odd))"),
+            "got: {code}"
+        );
+    }
+
+    #[test]
+    fn stream_variable_from_prior_declaration_no_funs_no_extra_dot() {
+        // Invariant B: no funs -> no spurious trailing dot.
+        let n = StreamVariableFromPriorStreamVariableNode {
+            variable_name: "alias".to_string(),
+            prior_stream_variable: "digits".to_string(),
+            funs: vec![],
+        };
+        let code = n.declaration_code();
+        assert!(
+            code.contains("MultiConsumerStream::new(digits.get())"),
+            "got: {code}"
+        );
+        // No trailing dot after .get().
+        assert!(
+            !code.contains("digits.get()."),
+            "must not emit dangling dot; got: {code}"
+        );
+    }
+
+    #[test]
+    fn stream_variable_from_prior_runner_code_references_self_variable() {
+        // Invariant E.
+        let n = StreamVariableFromPriorStreamVariableNode {
+            variable_name: "odds".to_string(),
+            prior_stream_variable: "digits".to_string(),
+            funs: vec![],
+        };
+        let code = n.runner_code();
+        assert!(code.contains("odds.run()"), "got: {code}");
+        assert!(code.contains("RunFutureAsStream::new"), "got: {code}");
+    }
+
+    // ---- FnDeclarationNode::code -------------------------------------
+
+    #[test]
+    fn fn_declaration_emits_const_fn_with_params_and_body() {
+        // Invariant H: const fn so the body is usable in const contexts.
+        let n = FnDeclarationNode {
+            name: "is_odd".to_string(),
+            parameters: vec![("i".to_string(), "&i32".to_string())],
+            output_type: "bool".to_string(),
+            body: "i.wrapping_rem(2) == 1".to_string(),
+        };
+        assert_eq!(
+            n.code(),
+            "const fn is_odd(i: &i32) -> bool {i.wrapping_rem(2) == 1}"
+        );
+    }
+
+    #[test]
+    fn fn_declaration_with_multiple_parameters_comma_separated() {
+        let n = FnDeclarationNode {
+            name: "add".to_string(),
+            parameters: vec![
+                ("a".to_string(), "i32".to_string()),
+                ("b".to_string(), "i32".to_string()),
+            ],
+            output_type: "i32".to_string(),
+            body: "a + b".to_string(),
+        };
+        assert_eq!(n.code(), "const fn add(a: i32, b: i32) -> i32 {a + b}");
+    }
+
+    #[test]
+    fn fn_declaration_with_no_parameters_emits_empty_paren_list() {
+        let n = FnDeclarationNode {
+            name: "zero".to_string(),
+            parameters: vec![],
+            output_type: "i32".to_string(),
+            body: "0".to_string(),
+        };
+        assert_eq!(n.code(), "const fn zero() -> i32 {0}");
+    }
+
+    // ---- StructDeclarationNode::code ---------------------------------
+
+    #[test]
+    fn struct_decl_code_emits_derive_struct_with_fields() {
+        // Invariant F: core derives must be present, struct name must
+        // match, and each field must appear with `name: type,`.
+        let n = StructDeclarationNode {
+            name: "Cat".to_string(),
+            fields: vec![
+                ("meowing".to_string(), Type::Bool),
+                ("age".to_string(), Type::U8),
+            ],
+        };
+        let code = n.code();
+        assert!(code.contains("#[derive("), "got: {code}");
+        for d in ["Copy", "Clone", "Debug", "Eq", "PartialEq"] {
+            assert!(code.contains(d), "missing derive {d}; got: {code}");
+        }
+        assert!(code.contains("struct Cat {"), "got: {code}");
+        assert!(code.contains("meowing: bool,"), "got: {code}");
+        assert!(code.contains("age: u8,"), "got: {code}");
+        // The closing brace must be present.
+        assert!(code.contains('}'), "got: {code}");
+    }
+
+    #[test]
+    fn struct_decl_code_no_fields_still_emits_struct() {
+        // Invariant F: zero-field structs are valid and must compile.
+        let n = StructDeclarationNode {
+            name: "Empty".to_string(),
+            fields: vec![],
+        };
+        let code = n.code();
+        assert!(code.contains("struct Empty {"), "got: {code}");
+    }
+
+    #[test]
+    fn struct_decl_code_with_bounds_emits_constants() {
+        // Invariant F: `code_with_bounds` adds `pub const FIELD_MIN/MAX
+        // /CARDINALITY` for bounded-int fields.
+        use std::collections::HashMap;
+        let mut bounds = HashMap::new();
+        bounds.insert(
+            "age".to_string(),
+            ResolvedFieldBounds { min: 0, max: 200 },
+        );
+        let n = StructDeclarationNode {
+            name: "Cat".to_string(),
+            fields: vec![(
+                "age".to_string(),
+                Type::BoundedUint {
+                    min: BoundExpr::Literal(0),
+                    max: BoundExpr::Literal(200),
+                },
+            )],
+        };
+        let code = n.code_with_bounds(Some(&bounds));
+        assert!(code.contains("impl Cat"), "got: {code}");
+        assert!(code.contains("AGE_MIN"), "got: {code}");
+        assert!(code.contains("AGE_MAX"), "got: {code}");
+        assert!(code.contains("AGE_CARDINALITY"), "got: {code}");
+        // 0..=200 -> cardinality 201, which fits in u8 (max 255).
+        assert!(code.contains("AGE_CARDINALITY: u8 = 201;"), "got: {code}");
+    }
+
+    // ---- EnumDeclarationNode::code -----------------------------------
+
+    #[test]
+    fn enum_decl_code_emits_core_derives_and_variants() {
+        // Invariant F.
+        let n = EnumDeclarationNode {
+            name: "Sound".to_string(),
+            variants: vec![("Meow".to_string(), None), ("Bark".to_string(), None)],
+            default_variant: None,
+        };
+        let code = n.code();
+        for d in ["Copy", "Clone", "Debug", "Eq", "PartialEq"] {
+            assert!(code.contains(d), "missing derive {d}; got: {code}");
+        }
+        assert!(code.contains("enum Sound {"), "got: {code}");
+        assert!(code.contains("Meow,"), "got: {code}");
+        assert!(code.contains("Bark,"), "got: {code}");
+    }
+
+    #[test]
+    fn enum_decl_code_emits_marigold_variants_reflection() {
+        // Invariant F: the `__marigold_variants()` helper is generated
+        // for every enum so that `range(Enum)` can enumerate them.
+        let n = EnumDeclarationNode {
+            name: "Sound".to_string(),
+            variants: vec![("Meow".to_string(), None), ("Bark".to_string(), None)],
+            default_variant: None,
+        };
+        let code = n.code();
+        assert!(
+            code.contains("fn __marigold_variants() -> [Sound; 2]"),
+            "got: {code}"
+        );
+        assert!(code.contains("[Sound::Meow, Sound::Bark]"), "got: {code}");
+    }
+
+    #[test]
+    fn enum_decl_unit_variant_count_excludes_sized_default() {
+        // Invariant G: a `Sized` default variant cannot be
+        // copy-constructed and so is excluded from the unit count.
+        let n = EnumDeclarationNode {
+            name: "Sound".to_string(),
+            variants: vec![("Meow".to_string(), None), ("Bark".to_string(), None)],
+            default_variant: Some(DefaultEnumVariant::Sized("Other".to_string(), 32)),
+        };
+        assert_eq!(n.unit_variant_count(), 2);
+        // And the marigold_variants array also excludes it.
+        let code = n.code();
+        assert!(
+            code.contains("fn __marigold_variants() -> [Sound; 2]"),
+            "got: {code}"
+        );
+    }
+
+    #[test]
+    fn enum_decl_unit_variant_count_includes_with_default_value() {
+        // Invariant G: a `WithDefaultValue` default variant *is* a unit
+        // variant and so is counted.
+        let n = EnumDeclarationNode {
+            name: "Sound".to_string(),
+            variants: vec![("Meow".to_string(), None)],
+            default_variant: Some(DefaultEnumVariant::WithDefaultValue(
+                "Unknown".to_string(),
+                "??".to_string(),
+            )),
+        };
+        assert_eq!(n.unit_variant_count(), 2);
+        let code = n.code();
+        assert!(
+            code.contains("fn __marigold_variants() -> [Sound; 2]"),
+            "got: {code}"
+        );
+        assert!(code.contains("Sound::Meow, Sound::Unknown"), "got: {code}");
+    }
+
+    #[test]
+    fn enum_decl_unit_variant_count_empty_variants() {
+        // Invariant G: an enum with no variants and no default reports
+        // zero unit variants — this is the lower-bound boundary.
+        let n = EnumDeclarationNode {
+            name: "Void".to_string(),
+            variants: vec![],
+            default_variant: None,
+        };
+        assert_eq!(n.unit_variant_count(), 0);
+        let code = n.code();
+        assert!(
+            code.contains("fn __marigold_variants() -> [Void; 0]"),
+            "got: {code}"
+        );
+    }
 }
