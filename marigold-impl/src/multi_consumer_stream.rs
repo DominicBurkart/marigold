@@ -100,3 +100,82 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
         (0, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream;
+    use futures::StreamExt;
+
+    #[tokio::test]
+    async fn test_empty_stream_no_items() {
+        let s = stream::iter(vec![] as Vec<u32>);
+        let mut mcs = MultiConsumerStream::new(s);
+        let mut rx = mcs.get();
+        mcs.run().await;
+        assert!(rx.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_single_receiver_collects_all_items() {
+        let s = stream::iter(vec![10u32, 20, 30]);
+        let mut mcs = MultiConsumerStream::new(s);
+        let mut rx = mcs.get();
+
+        // Run producer and consumer concurrently to avoid blocking on the
+        // bounded channel (BUFFER_SIZE = 1).
+        let (_, collected) = tokio::join!(
+            mcs.run(),
+            async move {
+                let mut out = vec![];
+                while let Some(v) = rx.next().await {
+                    out.push(v);
+                }
+                out
+            }
+        );
+        assert_eq!(collected, vec![10u32, 20, 30]);
+    }
+
+    #[tokio::test]
+    async fn test_two_receivers_each_get_all_items() {
+        let s = stream::iter(vec![1u32, 2, 3]);
+        let mut mcs = MultiConsumerStream::new(s);
+        let mut rx1 = mcs.get();
+        let mut rx2 = mcs.get();
+
+        let collect1 = async move {
+            let mut out = vec![];
+            while let Some(v) = rx1.next().await {
+                out.push(v);
+            }
+            out
+        };
+        let collect2 = async move {
+            let mut out = vec![];
+            while let Some(v) = rx2.next().await {
+                out.push(v);
+            }
+            out
+        };
+
+        let (_, c1, c2) = tokio::join!(mcs.run(), collect1, collect2);
+        assert_eq!(c1, vec![1u32, 2, 3]);
+        assert_eq!(c2, vec![1u32, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_run_future_as_stream_yields_nothing() {
+        let fut = Box::pin(async { 42u32 });
+        let mut stream: RunFutureAsStream<u32, u32, _> = RunFutureAsStream::new(fut);
+        let result = stream.next().await;
+        assert!(result.is_none(), "RunFutureAsStream should never yield items");
+    }
+
+    #[test]
+    fn test_run_future_as_stream_size_hint() {
+        let fut = Box::pin(async { () });
+        let stream: RunFutureAsStream<u32, (), _> = RunFutureAsStream::new(fut);
+        assert_eq!(stream.size_hint(), (0, None));
+    }
+}
