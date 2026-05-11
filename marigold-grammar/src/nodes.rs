@@ -1224,10 +1224,7 @@ mod tests {
         // /CARDINALITY` for bounded-int fields.
         use std::collections::HashMap;
         let mut bounds = HashMap::new();
-        bounds.insert(
-            "age".to_string(),
-            ResolvedFieldBounds { min: 0, max: 200 },
-        );
+        bounds.insert("age".to_string(), ResolvedFieldBounds { min: 0, max: 200 });
         let n = StructDeclarationNode {
             name: "Cat".to_string(),
             fields: vec![(
