@@ -109,7 +109,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_stream_no_items() {
-        let s = stream::iter(vec![] as Vec<u32>);
+        let s = stream::iter(Vec::<u32>::new());
         let mut mcs = MultiConsumerStream::new(s);
         let mut rx = mcs.get();
         mcs.run().await;
@@ -121,7 +121,6 @@ mod tests {
         let s = stream::iter(vec![10u32, 20, 30]);
         let mut mcs = MultiConsumerStream::new(s);
         let mut rx = mcs.get();
-
         // Run producer and consumer concurrently to avoid blocking on the
         // bounded channel (BUFFER_SIZE = 1).
         let (_, collected) = tokio::join!(
@@ -169,7 +168,7 @@ mod tests {
         let fut = Box::pin(async { 42u32 });
         let mut stream: RunFutureAsStream<u32, u32, _> = RunFutureAsStream::new(fut);
         let result = stream.next().await;
-        assert!(result.is_none(), "RunFutureAsStream should never yield items");
+        assert!(result.is_none());
     }
 
     #[test]
