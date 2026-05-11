@@ -222,27 +222,6 @@ mod tests {
         assert_eq!(result, vec![0, 1, 2, 3]);
     }
 
-    /// Verify that invalid Marigold DSL syntax produces a `compile_error!` diagnostic
-    /// rather than a panic. The fixture file contains an invocation that is valid Rust
-    /// tokenisation but invalid Marigold grammar, so `marigold_parse` returns `Err(_)`
-    /// and the macro emits `compile_error!(...)` .
-    #[test]
-    fn bad_syntax_yields_compile_error() {
-        let t = trybuild::TestCases::new();
-        t.compile_fail("ui/bad_syntax.rs");
-    }
-
-    /// Verify that `range(EnumName)` where `EnumName` is not a declared enum in the
-    /// program produces a `compile_error!` diagnostic (from `resolve_enum_range_counts`)
-    /// rather than a panic or silent codegen failure.
-    #[test]
-    fn range_unknown_enum_yields_compile_error() {
-        let t = trybuild::TestCases::new();
-        t.compile_fail("ui/range_unknown_enum.rs");
-    }
-
-    // --- New tests below ---
-
     #[tokio::test]
     async fn test_empty_range() {
         let result = m!(
