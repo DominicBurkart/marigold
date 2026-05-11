@@ -131,7 +131,7 @@ mod tests {
                     out.push(v);
                 }
                 out
-            }
+            },
         );
         assert_eq!(collected, vec![10u32, 20, 30]);
     }
