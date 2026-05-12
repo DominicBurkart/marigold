@@ -1,0 +1,105 @@
+name:                aeneas
+
+on:                  [push]
+
+env:
+  CARGO_TERM_COLOR:  always
+  AENEAS_SHA:        "42c0e90dacf486f7d3ed5b6cde3a9a81f04915a4"
+
+jobs:
+  aeneas-proofs:
+    name:            Aeneas + Lean proofs
+    runs-on:         ubuntu-latest
+    timeout-minutes: 45
+    steps:
+    - uses:          actions/checkout@v4
+
+    - name:          Pin Aeneas SHA from file
+      id:            aeneas-sha
+      run: |
+        set -euxo pipefail
+        echo "sha=$(cat dev_docs/aeneas/aeneas-version.txt)" >> "$GITHUB_OUTPUT"
+
+    - name:          Cache OCaml/opam + Aeneas build
+      uses:          actions/cache@v4
+      with:
+        path: |
+          ~/.opam
+          ${{ github.workspace }}/.aeneas-build
+        key: aeneas-${{ steps.aeneas-sha.outputs.sha }}-${{ hashFiles('dev_docs/aeneas/proofs/lean-toolchain') }}
+
+    - name:          Set up OCaml
+      uses:          ocaml/setup-ocaml@v3
+      with:
+        ocaml-compiler: "5.3.0"
+
+    - name:          Set up Lean (elan)
+      run: |
+        set -euxo pipefail
+        curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+          | sh -s -- -y --default-toolchain "$(cat dev_docs/aeneas/proofs/lean-toolchain)"
+        echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+    - name:          Set up Rust (for Charon)
+      uses:          dtolnay/rust-toolchain@stable
+
+    - name:          Build Aeneas + Charon from source
+      run: |
+        set -euxo pipefail
+        if [ ! -d .aeneas-build/aeneas ]; then
+          mkdir -p .aeneas-build
+          git clone https://github.com/AeneasVerif/aeneas.git .aeneas-build/aeneas
+        fi
+        cd .aeneas-build/aeneas
+        git fetch --all
+        git checkout "${{ steps.aeneas-sha.outputs.sha }}"
+        # setup-charon pulls in Charon as a submodule/dependency.
+        make setup-charon
+        make
+        echo "${{ github.workspace }}/.aeneas-build/aeneas/bin" >> "$GITHUB_PATH"
+        # Charon ends up in charon/target/release/charon — add it too.
+        echo "${{ github.workspace }}/.aeneas-build/aeneas/charon/bin" >> "$GITHUB_PATH"
+
+    - name:          Sanity check installed tools
+      run: |
+        set -euxo pipefail
+        which charon aeneas lake || true
+        aeneas --help | head -20 || true
+        charon --help | head -20 || true
+        lake --version || true
+
+    - name:          Run Charon on marigold-impl
+      run: |
+        set -euxo pipefail
+        cd marigold-impl
+        charon cargo --preset=aeneas
+
+    - name:          Run Aeneas (LLBC -> Lean)
+      run: |
+        set -euxo pipefail
+        LLBC=$(find marigold-impl/target -name "*.llbc" | head -n1)
+        if [ -z "$LLBC" ]; then
+          echo "ERROR: no .llbc file produced by Charon" >&2
+          find marigold-impl/target -maxdepth 4 -type f | head -30 >&2
+          exit 1
+        fi
+        echo "Using LLBC: $LLBC"
+        aeneas -backend lean "$LLBC" -o dev_docs/aeneas/proofs/generated/
+
+    - name:          Verify generated output is committed
+      run: |
+        set -euxo pipefail
+        # MVP behaviour: we allow the generated/ directory to be empty
+        # until the first successful extraction is committed. Once a
+        # non-empty extraction is committed, this step will fail on drift.
+        if [ -n "$(ls -A dev_docs/aeneas/proofs/generated/ 2>/dev/null | grep -v '^\.gitkeep$' || true)" ]; then
+          git diff --exit-code dev_docs/aeneas/proofs/generated/
+        else
+          echo "WARNING: generated/ is empty — MVP stub mode. Drift check skipped."
+        fi
+
+    - name:          Build Lean proofs (lake build)
+      run: |
+        set -euxo pipefail
+        cd dev_docs/aeneas/proofs
+        lake build
