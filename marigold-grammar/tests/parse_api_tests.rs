@@ -77,6 +77,39 @@ fn parse_keep_first_n() {
 }
 
 #[test]
+fn parse_take() {
+    // Issue #85: take(n) yields at most the first n items.
+    let result = marigold_grammar::marigold_parse("range(0, 10).take(5).return");
+    assert!(result.is_ok(), "take should parse: {:?}", result);
+}
+
+#[test]
+fn parse_take_zero() {
+    // take(0) is well-defined (yields no items) and must parse.
+    let result = marigold_grammar::marigold_parse("range(0, 10).take(0).return");
+    assert!(result.is_ok(), "take(0) should parse: {:?}", result);
+}
+
+#[test]
+fn parse_take_then_map() {
+    // Issue #85 hints at #103 (take_while) building on take. Verify take
+    // composes with downstream stream functions.
+    let result = marigold_grammar::marigold_parse("range(0, 10).take(5).map(double).return");
+    assert!(result.is_ok(), "take.map chain should parse: {:?}", result);
+}
+
+#[test]
+fn parse_filter_then_take() {
+    // take after filter is the canonical "first n matching" pattern.
+    let result = marigold_grammar::marigold_parse("range(0, 100).filter(is_even).take(3).return");
+    assert!(
+        result.is_ok(),
+        "filter.take chain should parse: {:?}",
+        result
+    );
+}
+
+#[test]
 fn parse_empty_input_succeeds() {
     // The parser intentionally returns Ok for empty programs (generates a trivial async wrapper).
     let result = marigold_grammar::marigold_parse("");
