@@ -1,4 +1,4 @@
-error: proc macro panicked
+error: marigold parse error: MarigoldParseError("Bounded type validation failed:\n  - Bounds violation for field 'Sensor.reading': uint[] cannot have negative min value (-1)")
   --> compile_fail/negative_min_uint.rs:6:13
    |
  6 |       let _ = m!(
@@ -9,4 +9,4 @@ error: proc macro panicked
 11 | |     )
    | |_____^
    |
-   = help: message: marigold parsing error: MarigoldParseError("Bounded type validation failed:\n  - Bounds violation for field 'Sensor.reading': uint[] cannot have negative min value (-1)")
+   = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)

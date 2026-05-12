@@ -466,6 +466,59 @@ proptest! {
             );
         }
     }
+
+    /// Adding one more streaming step to an unnamed program must not decrease program_time.
+    ///
+    /// This encodes the complexity monotonicity invariant: a longer pipeline cannot be
+    /// cheaper to execute than a shorter one, because every additional operation adds at
+    /// least O(1) work per element (and the input is still iterated in full).
+    #[test]
+    fn adding_streaming_step_does_not_decrease_complexity(
+        prog in arb_unnamed_stream_program(),
+        extra_fn in arb_streaming_fn(),
+    ) {
+        // Parse the base program so we can compute its complexity.
+        let base_result = marigold_grammar::marigold_analyze(&prog.source);
+        prop_assert!(base_result.is_ok(), "Base program failed to analyze:\n{}\nError: {:?}", prog.source, base_result.err());
+        let base_complexity = base_result.unwrap();
+
+        // Insert the extra streaming step just before the terminal output verb.
+        // The source has the form `<input><chain>.<output>`, so we find the last
+        // '.' that precedes the output keyword and insert `.extra` before it.
+        let output_keywords = ["return", "write_file"];
+        let insert_pos = output_keywords
+            .iter()
+            .filter_map(|kw| {
+                // find the last occurrence of `.<kw>` to locate the output verb
+                let needle = format!(".{kw}");
+                prog.source.rfind(needle.as_str()).map(|pos| pos) // position of the dot
+            })
+            .max();
+        prop_assert!(insert_pos.is_some(), "Could not find output keyword in generated program:\n{}", prog.source);
+        let pos = insert_pos.unwrap();
+
+        let extended_source = format!(
+            "{}.{}{}",
+            &prog.source[..pos],
+            extra_fn.text,
+            &prog.source[pos..]
+        );
+
+        let extended_result = marigold_grammar::marigold_analyze(&extended_source);
+        prop_assert!(extended_result.is_ok(), "Extended program failed to analyze:\n{}\nError: {:?}", extended_source, extended_result.err());
+        let extended_complexity = extended_result.unwrap();
+
+        prop_assert!(
+            extended_complexity.program_time >= base_complexity.program_time,
+            "Complexity decreased after adding a step!\n\
+             Base program ({:?}):\n{}\n\
+             Extended program ({:?}):\n{}",
+            base_complexity.program_time,
+            prog.source,
+            extended_complexity.program_time,
+            extended_source,
+        );
+    }
 }
 
 /// Targeted regression test: stream variable ending with fold, empty output chain.
