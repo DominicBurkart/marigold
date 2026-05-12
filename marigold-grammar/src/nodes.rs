@@ -734,7 +734,7 @@ impl FnDeclarationNode {
         let output_type = &self.output_type;
         let body = &self.body;
 
-        format!("const fn {name}({parameters_string}) -> {output_type} {{{body}}}")
+        format!("fn {name}({parameters_string}) -> {output_type} {{{body}}}")
     }
 }
 
