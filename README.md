@@ -78,6 +78,19 @@ Output:
 4
 ```
 
+### Supported I/O formats
+
+`read_file` and `write_file` both dispatch on a format keyword:
+
+| keyword              | meaning                                         |
+|----------------------|-------------------------------------------------|
+| `csv`                | CSV rows via `csv-async` (default).             |
+| `json`               | Single top-level JSON array (`[..., ..., ...]`).|
+| `jsonl` / `ndjson`   | Newline-delimited JSON — one value per line.    |
+
+All formats support optional gzip compression through the existing
+`compression=gz` parameter or a `.gz` file extension.
+
 ### Static Analysis
 
 Marigold can statically analyze your program's complexity:
