@@ -45,14 +45,13 @@ where
     }
 }
 
-/// Internal logic for keep_first_n. This is in a separate function so that we can get the full
-/// type of the binary heap, which includes a lambda for reversing the ordering fromt the passed
-/// sort_by function. By declaring a new function, we can use generics to describe its type, and
-/// then can use that type while unsafely casting pointers.
+/// Internal logic for keep_first_n. This is a separate function so that Rust can infer the full
+/// type of the reversed-comparator binary heap via generics. The heap type includes the concrete
+/// lambda type of the reversed ordering, which cannot be named at the call site.
 ///
-/// This implementation wraps items with their stream index to provide deterministic tie-breaking
-/// when the user's comparison function returns Equal. Lower indices (earlier in stream) are
-/// preferred to ensure consistent results even with parallel processing.
+/// Items are wrapped with their stream index to provide deterministic tie-breaking when the
+/// caller's comparator returns `Equal`. Lower indices (earlier in the stream) are preferred,
+/// ensuring consistent results across runs even with concurrent processing.
 #[cfg(any(feature = "tokio", feature = "async-std"))]
 async fn impl_keep_first_n<SInput, T, F, FReversed>(
     sinput: SInput,
