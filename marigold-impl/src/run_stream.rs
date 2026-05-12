@@ -39,8 +39,9 @@ mod tests {
     use super::*;
     use futures::stream::StreamExt;
 
+    /// run_stream preserves all items from the inner stream in order.
     #[tokio::test]
-    async fn combinations() {
+    async fn passthrough_preserves_items() {
         assert_eq!(
             run_stream(futures::stream::iter(0_u32..3_u32))
                 .collect::<Vec<_>>()
