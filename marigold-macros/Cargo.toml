@@ -17,6 +17,8 @@ io = ["marigold-grammar/io"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+proc-macro2 = "1"
+quote = "1"
 
 [dependencies.marigold-grammar]
 path = "../marigold-grammar"
