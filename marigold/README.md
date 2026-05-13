@@ -20,14 +20,14 @@ Rust programs.
 use marigold::m;
 
 let odd_digits = m!(
-  fn is_odd(i: &i32) -> bool {
+  fn is_odd(i: i32) -> bool {
     i.wrapping_rem(2) == 1
   }
 
   range(0, 10)
     .filter(is_odd)
     .return
-).await.collect::<Vec<_>>();
+).await.collect::<Vec<_>>().await;
 
 println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
 ```
