@@ -101,87 +101,136 @@ impl<T: std::marker::Send + Unpin + 'static, O, F: Future<Output = O>> Stream
     }
 }
 
-// These tests use `#[tokio::test]` and depend on tokio's multi-threaded runtime to drive
-// `run()` (which spawns via `crate::async_runtime::spawn`) concurrently with the receivers.
-// Without the tokio (or async-std) feature the spawn call is absent and tests would deadlock.
-#[cfg(all(test, any(feature = "tokio", feature = "async-std")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use futures::stream::StreamExt;
 
-    // Helper: run the MultiConsumerStream and collect from a single receiver concurrently.
-    // Without a spawning async runtime the `run()` future and the `collect()` future must
-    // be polled together; otherwise `run()` blocks on a full channel while the receiver
-    // is not yet being polled, causing a deadlock.
-    async fn run_and_collect_one(
-        source: impl Stream<Item = i32> + Unpin + Send + 'static,
-    ) -> Vec<i32> {
-        let mut mcs = MultiConsumerStream::new(source);
-        let rx = mcs.get();
-        futures::join!(mcs.run(), rx.collect::<Vec<i32>>()).1
+    // `RunFutureAsStream` should always yield `None` once the wrapped future
+    // resolves and otherwise propagates `Pending`. These invariants matter
+    // because in generated marigold code the future drives a
+    // `MultiConsumerStream::run`, and downstream consumers poll the wrapper
+    // alongside their receivers.
+    #[tokio::test]
+    async fn run_future_as_stream_completes_with_none() {
+        let fut = Box::pin(async {});
+        let mut s: RunFutureAsStream<u8, (), _> = RunFutureAsStream::new(fut);
+        assert_eq!(s.next().await, None);
     }
 
     #[tokio::test]
-    async fn single_consumer_receives_all_items() {
-        let source = futures::stream::iter(vec![1, 2, 3]);
-        let result = run_and_collect_one(source).await;
-        assert_eq!(result, vec![1, 2, 3]);
+    async fn run_future_as_stream_size_hint_is_unbounded() {
+        let fut = Box::pin(async {});
+        let s: RunFutureAsStream<u8, (), _> = RunFutureAsStream::new(fut);
+        assert_eq!(s.size_hint(), (0, None));
     }
 
-    #[tokio::test]
-    async fn two_consumers_both_receive_all_items() {
-        let source = futures::stream::iter(vec![10, 20, 30]);
-        let mut mcs = MultiConsumerStream::new(source);
-        let rx1 = mcs.get();
-        let rx2 = mcs.get();
-        // run() and both collects must be driven concurrently to avoid a channel
-        // backpressure deadlock (BUFFER_SIZE = 1 means run() blocks as soon as the
-        // buffer fills up if the receivers are not being polled).
-        let (_, r1, r2): ((), Vec<i32>, Vec<i32>) = futures::join!(
-            mcs.run(),
-            rx1.collect::<Vec<i32>>(),
-            rx2.collect::<Vec<i32>>(),
-        );
-        assert_eq!(r1, vec![10, 20, 30]);
-        assert_eq!(r2, vec![10, 20, 30]);
-    }
+    // The remaining tests exercise concurrent fan-out, which only happens
+    // when an async runtime is enabled (otherwise `MultiConsumerStream::run`
+    // is sequential and would deadlock against the BUFFER_SIZE-1 channel
+    // when consumers haven't been awaited yet).
+    #[cfg(any(feature = "tokio", feature = "async-std"))]
+    mod runtime {
+        use super::super::MultiConsumerStream;
+        use futures::stream::StreamExt;
 
-    #[tokio::test]
-    async fn empty_stream_produces_no_items() {
-        let source = futures::stream::iter(Vec::<i32>::new());
-        let result = run_and_collect_one(source).await;
-        assert!(result.is_empty());
-    }
+        // Single-consumer fan-out should be a faithful relay of the source
+        // stream, in order, with end-of-stream signalled by the receiver
+        // closing.
+        #[tokio::test]
+        async fn single_consumer_receives_all_items_in_order() {
+            let source = futures::stream::iter(0u32..10);
+            let mut mcs = MultiConsumerStream::new(source);
+            let recv = mcs.get();
+            mcs.run().await;
+            let collected: Vec<u32> = recv.collect().await;
+            assert_eq!(collected, (0u32..10).collect::<Vec<_>>());
+        }
 
-    #[tokio::test]
-    async fn single_consumer_no_items_dropped_under_backpressure() {
-        // Verifies that no items are dropped when the source stream is much longer than
-        // BUFFER_SIZE (=1). After the first item is sent, run() must block waiting for
-        // the receiver to drain the channel before it can send the second item.
-        // futures::join! keeps both futures polled cooperatively so neither starves.
-        // This directly exercises the backpressure scenario fixed by the join! refactor.
-        let source = futures::stream::iter(0..100i32);
-        let result = run_and_collect_one(source).await;
-        let expected: Vec<i32> = (0..100).collect();
-        assert_eq!(result, expected);
-    }
+        // Every registered consumer must observe the entire source stream.
+        #[tokio::test]
+        async fn multiple_consumers_each_receive_full_stream() {
+            let source = futures::stream::iter(vec![10i32, 20, 30, 40, 50]);
+            let mut mcs = MultiConsumerStream::new(source);
+            let r1 = mcs.get();
+            let r2 = mcs.get();
+            let r3 = mcs.get();
+            mcs.run().await;
+            let (a, b, c) = futures::join!(
+                r1.collect::<Vec<_>>(),
+                r2.collect::<Vec<_>>(),
+                r3.collect::<Vec<_>>()
+            );
+            let expected = vec![10, 20, 30, 40, 50];
+            assert_eq!(a, expected);
+            assert_eq!(b, expected);
+            assert_eq!(c, expected);
+        }
 
-    #[tokio::test]
-    async fn run_future_as_stream_yields_none_when_future_completes() {
-        // `RunFutureAsStream<T, O, F>`: T is the stream *item* type (never actually
-        // yielded — the stream always terminates with None), O is the future's output
-        // type. The stream only drives the future to completion.
-        let fut = Box::pin(async { 42 });
-        let mut stream = RunFutureAsStream::<i32, _, _>::new(fut);
-        // When the future is ready, poll_next should return Ready(None)
-        let result: Vec<i32> = (&mut stream).collect().await;
-        assert!(result.is_empty());
-    }
+        // An empty source yields empty consumers but must still terminate
+        // (no hang waiting on items that never arrive).
+        #[tokio::test]
+        async fn empty_source_produces_empty_consumers() {
+            let source = futures::stream::iter(Vec::<u8>::new());
+            let mut mcs = MultiConsumerStream::new(source);
+            let r1 = mcs.get();
+            let r2 = mcs.get();
+            mcs.run().await;
+            let (a, b) = futures::join!(r1.collect::<Vec<_>>(), r2.collect::<Vec<_>>());
+            assert!(a.is_empty());
+            assert!(b.is_empty());
+        }
 
-    #[tokio::test]
-    async fn run_future_as_stream_size_hint() {
-        let fut = Box::pin(async { () });
-        let stream = RunFutureAsStream::<i32, _, _>::new(fut);
-        assert_eq!(stream.size_hint(), (0, None));
+        // Registering zero consumers is allowed; `run` must still drain the
+        // source and return.
+        #[tokio::test]
+        async fn no_consumers_still_terminates() {
+            let source = futures::stream::iter(0u32..3);
+            let mcs = MultiConsumerStream::new(source);
+            // No `.get()` calls. If run() ever blocked without consumers,
+            // tokio::test's default timeout would fail this test.
+            mcs.run().await;
+        }
+
+        // Each consumer must terminate (receiver closes) once the source
+        // stream is exhausted, so downstream `.collect()` does not hang.
+        #[tokio::test]
+        async fn consumers_terminate_after_source_exhaustion() {
+            let source = futures::stream::iter(vec![1u8]);
+            let mut mcs = MultiConsumerStream::new(source);
+            let mut r = mcs.get();
+            mcs.run().await;
+            assert_eq!(r.next().await, Some(1));
+            assert_eq!(r.next().await, None);
+        }
+
+        // Consumers must be able to poll concurrently without one blocking
+        // another beyond the BUFFER_SIZE backpressure window. This guards
+        // against a regression where `feed` is replaced with a serial
+        // `send_all`-style call that would prevent fast consumers from
+        // making progress when a slow consumer exists.
+        #[tokio::test]
+        async fn slow_consumer_does_not_lose_items() {
+            let source = futures::stream::iter(0u32..50);
+            let mut mcs = MultiConsumerStream::new(source);
+            let fast = mcs.get();
+            let slow = mcs.get();
+            mcs.run().await;
+
+            // Slow consumer yields between items but must still get all of them.
+            let slow_task = async {
+                let mut out = Vec::new();
+                let mut s = slow;
+                while let Some(v) = s.next().await {
+                    tokio::task::yield_now().await;
+                    out.push(v);
+                }
+                out
+            };
+            let (fast_out, slow_out) = futures::join!(fast.collect::<Vec<_>>(), slow_task);
+            let expected: Vec<u32> = (0u32..50).collect();
+            assert_eq!(fast_out, expected);
+            assert_eq!(slow_out, expected);
+        }
     }
 }
