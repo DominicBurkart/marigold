@@ -579,7 +579,10 @@ mod tests {
 
         // description: String
         assert!(
-            stream.get("description").map(|v| v.is_string()).unwrap_or(false),
+            stream
+                .get("description")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
             "stream entry missing string 'description' field; got: {stream}"
         );
 
@@ -615,7 +618,10 @@ mod tests {
 
         // collects_input: bool
         assert!(
-            stream.get("collects_input").map(|v| v.is_boolean()).unwrap_or(false),
+            stream
+                .get("collects_input")
+                .map(|v| v.is_boolean())
+                .unwrap_or(false),
             "stream entry missing boolean 'collects_input' field; got: {stream}"
         );
 
