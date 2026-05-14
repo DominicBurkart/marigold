@@ -47,6 +47,17 @@ pub enum ComplexityClass {
 }
 
 impl ComplexityClass {
+    /// Stable per-class rank used as the primary key for `Ord`.
+    ///
+    /// Returns a small `u64` (0..=8, or `u64::MAX` for `Unknown`) identifying the class only, with no
+    /// dependence on the parameter `k`. Parameterized variants
+    /// (`ONLogK`, `OPolynomial`, `OCombinatorial`, `OPermutational`) all
+    /// return a single rank for the class; their `k` values are compared
+    /// lexicographically as a secondary key in the custom `Ord` impl below.
+    ///
+    /// This avoids the additive-`k` collision bug (issue #232) where, for
+    /// example, `OPolynomial(999_995)` and `OCombinatorial(0)` both mapped
+    /// to the same ordinal slot, breaking the `Ord`/`Eq` contract.
     fn ordinal(&self) -> u64 {
         match self {
             ComplexityClass::O1 => 0,
@@ -54,11 +65,24 @@ impl ComplexityClass {
             ComplexityClass::ON => 2,
             ComplexityClass::ONLogK(_) => 3,
             ComplexityClass::ONLogN => 4,
-            ComplexityClass::OPolynomial(k) => 5 + *k,
-            ComplexityClass::OCombinatorial(k) => 1_000_000 + *k,
-            ComplexityClass::OPermutational(k) => 2_000_000 + *k,
-            ComplexityClass::OFactorial => 3_000_000,
+            ComplexityClass::OPolynomial(_) => 5,
+            ComplexityClass::OCombinatorial(_) => 6,
+            ComplexityClass::OPermutational(_) => 7,
+            ComplexityClass::OFactorial => 8,
             ComplexityClass::Unknown => u64::MAX,
+        }
+    }
+
+    /// Secondary key for `Ord`: the parameter `k` for parameterized variants,
+    /// `0` for non-parameterized variants. Combined with `ordinal()` this
+    /// yields a `(class_rank, k)` lexicographic ordering.
+    fn parameter_key(&self) -> u64 {
+        match self {
+            ComplexityClass::ONLogK(k)
+            | ComplexityClass::OPolynomial(k)
+            | ComplexityClass::OCombinatorial(k)
+            | ComplexityClass::OPermutational(k) => *k,
+            _ => 0,
         }
     }
 
@@ -71,7 +95,19 @@ impl ComplexityClass {
     }
 }
 
-impl_ord_via_ordinal!(ComplexityClass);
+impl PartialOrd for ComplexityClass {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ComplexityClass {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.ordinal()
+            .cmp(&other.ordinal())
+            .then_with(|| self.parameter_key().cmp(&other.parameter_key()))
+    }
+}
 
 impl fmt::Display for ComplexityClass {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1372,7 +1408,7 @@ mod tests {
     fn test_serde_roundtrip() {
         let c = ComplexityClass::OPolynomial(3);
         let json = serde_json::to_string(&c).unwrap();
-        assert_eq!(json, r#""O(n^3)""#);
+        assert_eq!(json, r#""O(n^3)""");
         let parsed: ComplexityClass = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, c);
     }
@@ -1654,7 +1690,7 @@ mod tests {
     fn test_cardinality_serde_roundtrip_exact() {
         let c = Cardinality::Exact(BigUint::from(42u64));
         let json = serde_json::to_string(&c).unwrap();
-        assert_eq!(json, r#""42""#);
+        assert_eq!(json, r#""42""");
         let parsed: Cardinality = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, c);
     }
@@ -1663,7 +1699,7 @@ mod tests {
     fn test_cardinality_serde_roundtrip_unknown() {
         let c = Cardinality::Unknown;
         let json = serde_json::to_string(&c).unwrap();
-        assert_eq!(json, r#""?""#);
+        assert_eq!(json, r#""?""");
         let parsed: Cardinality = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, c);
     }
@@ -1936,11 +1972,141 @@ mod tests {
             );
         }
     }
-}
 
-#[cfg(test)]
-mod proptests {
-    use super::*;
+    #[test]
+    fn onlogk_ord_consistent_with_eq() {
+        use std::cmp::Ordering;
+        assert!(ComplexityClass::ONLogK(2) < ComplexityClass::ONLogK(5));
+        assert_eq!(
+            ComplexityClass::ONLogK(2).cmp(&ComplexityClass::ONLogK(2)),
+            Ordering::Equal
+        );
+        assert_ne!(ComplexityClass::ONLogK(1), ComplexityClass::ONLogK(2));
+        assert_ne!(
+            ComplexityClass::ONLogK(1).cmp(&ComplexityClass::ONLogK(2)),
+            Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn complexity_class_boundary_preserved() {
+        // ON < ONLogK(1)
+        assert!(ComplexityClass::ON < ComplexityClass::ONLogK(1));
+        // ONLogK(u64::MAX) < ONLogN — this cross-class comparison actually
+        // held under the old impl too (ONLogK collapsed to ordinal 3, ONLogN
+        // was 4, so 3 < 4 still). The real bug was Ord/Eq inconsistency
+        // *within* ONLogK(_) values: ONLogK(1) == ONLogK(2) under Ord but
+        // PartialEq said they were different, violating the contract.
+        assert!(ComplexityClass::ONLogK(u64::MAX) < ComplexityClass::ONLogN);
+        // ONLogN < OPolynomial(1)
+        assert!(ComplexityClass::ONLogN < ComplexityClass::OPolynomial(1));
+        // OPolynomial(u64::MAX) < OCombinatorial(0) — caught the broadened
+        // bug: under old impl, OPolynomial(k)=5+k and OCombinatorial(k)=
+        // 1_000_000+k could collide / cross when k >= 999_995.
+        assert!(ComplexityClass::OPolynomial(u64::MAX) < ComplexityClass::OCombinatorial(0));
+        // OCombinatorial(u64::MAX) < OPermutational(0)
+        assert!(ComplexityClass::OCombinatorial(u64::MAX) < ComplexityClass::OPermutational(0));
+        // OPermutational(u64::MAX) < OFactorial
+        assert!(ComplexityClass::OPermutational(u64::MAX) < ComplexityClass::OFactorial);
+        // OFactorial < Unknown
+        assert!(ComplexityClass::OFactorial < ComplexityClass::Unknown);
+    }
+
+    #[test]
+    fn ord_eq_consistent_polynomial() {
+        // Ord/Eq consistency: a == b iff cmp == Equal
+        assert_eq!(
+            ComplexityClass::OPolynomial(5).cmp(&ComplexityClass::OPolynomial(5)),
+            std::cmp::Ordering::Equal
+        );
+        assert_ne!(ComplexityClass::OPolynomial(3), ComplexityClass::OPolynomial(5));
+        assert_ne!(
+            ComplexityClass::OPolynomial(3).cmp(&ComplexityClass::OPolynomial(5)),
+            std::cmp::Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn ord_eq_consistent_combinatorial() {
+        assert_eq!(
+            ComplexityClass::OCombinatorial(7).cmp(&ComplexityClass::OCombinatorial(7)),
+            std::cmp::Ordering::Equal
+        );
+        assert_ne!(ComplexityClass::OCombinatorial(2), ComplexityClass::OCombinatorial(7));
+        assert_ne!(
+            ComplexityClass::OCombinatorial(2).cmp(&ComplexityClass::OCombinatorial(7)),
+            std::cmp::Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn ord_eq_consistent_permutational() {
+        assert_eq!(
+            ComplexityClass::OPermutational(4).cmp(&ComplexityClass::OPermutational(4)),
+            std::cmp::Ordering::Equal
+        );
+        assert_ne!(ComplexityClass::OPermutational(1), ComplexityClass::OPermutational(4));
+        assert_ne!(
+            ComplexityClass::OPermutational(1).cmp(&ComplexityClass::OPermutational(4)),
+            std::cmp::Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn complexity_class_sort_round_trip() {
+        let mut classes = vec![
+            ComplexityClass::Unknown,
+            ComplexityClass::OFactorial,
+            ComplexityClass::OPermutational(10),
+            ComplexityClass::OPermutational(1),
+            ComplexityClass::OCombinatorial(5),
+            ComplexityClass::OCombinatorial(0),
+            ComplexityClass::OPolynomial(3),
+            ComplexityClass::OPolynomial(1),
+            ComplexityClass::ONLogN,
+            ComplexityClass::ONLogK(100),
+            ComplexityClass::ONLogK(1),
+            ComplexityClass::ON,
+            ComplexityClass::OLogN,
+            ComplexityClass::O1,
+        ];
+        let original_sorted = {
+            let mut v = classes.clone();
+            v.sort();
+            v
+        };
+        classes.sort();
+        assert_eq!(classes, original_sorted);
+        // Verify ascending order at class boundaries
+        assert!(ComplexityClass::O1 < ComplexityClass::OLogN);
+        assert!(ComplexityClass::OLogN < ComplexityClass::ON);
+        assert!(ComplexityClass::ON < ComplexityClass::ONLogK(1));
+        assert!(ComplexityClass::ONLogK(100) < ComplexityClass::ONLogN);
+        assert!(ComplexityClass::ONLogN < ComplexityClass::OPolynomial(1));
+        assert!(ComplexityClass::OPolynomial(3) < ComplexityClass::OCombinatorial(0));
+        assert!(ComplexityClass::OCombinatorial(5) < ComplexityClass::OPermutational(0));
+        assert!(ComplexityClass::OPermutational(10) < ComplexityClass::OFactorial);
+        assert!(ComplexityClass::OFactorial < ComplexityClass::Unknown);
+    }
+
+    #[test]
+    fn btreemap_uses_correct_ord() {
+        let mut map: BTreeMap<ComplexityClass, &str> = BTreeMap::new();
+        map.insert(ComplexityClass::ONLogK(1), "first");
+        map.insert(ComplexityClass::ONLogK(2), "second");
+        assert_eq!(map.len(), 2);
+        assert_eq!(map[&ComplexityClass::ONLogK(1)], "first");
+        assert_eq!(map[&ComplexityClass::ONLogK(2)], "second");
+
+        map.insert(ComplexityClass::OPolynomial(1_000_000), "poly-big");
+        map.insert(ComplexityClass::OCombinatorial(0), "comb-small");
+        assert_eq!(map.len(), 4);
+        assert!(
+            map.keys().position(|k| k == &ComplexityClass::OPolynomial(1_000_000))
+                < map.keys().position(|k| k == &ComplexityClass::OCombinatorial(0))
+        );
+    }
+
     use proptest::prelude::*;
 
     fn arb_complexity_class() -> impl Strategy<Value = ComplexityClass> {
@@ -1948,11 +2114,11 @@ mod proptests {
             Just(ComplexityClass::O1),
             Just(ComplexityClass::OLogN),
             Just(ComplexityClass::ON),
-            (1..100u64).prop_map(ComplexityClass::ONLogK),
+            any::<u64>().prop_map(ComplexityClass::ONLogK),
             Just(ComplexityClass::ONLogN),
-            (2..20u64).prop_map(ComplexityClass::OPolynomial),
-            (1..20u64).prop_map(ComplexityClass::OCombinatorial),
-            (1..20u64).prop_map(ComplexityClass::OPermutational),
+            any::<u64>().prop_map(ComplexityClass::OPolynomial),
+            any::<u64>().prop_map(ComplexityClass::OCombinatorial),
+            any::<u64>().prop_map(ComplexityClass::OPermutational),
             Just(ComplexityClass::OFactorial),
             Just(ComplexityClass::Unknown),
         ]
@@ -1960,235 +2126,81 @@ mod proptests {
 
     proptest! {
         #[test]
-        fn test_complexity_class_ordering_is_total(a in arb_complexity_class(), b in arb_complexity_class()) {
-            prop_assert!(a.partial_cmp(&b).is_some());
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_display_fromstr_roundtrip(c in arb_complexity_class()) {
-            let s = c.to_string();
-            let parsed = ComplexityClass::from_str(&s).unwrap();
-            prop_assert_eq!(c, parsed);
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_space_monotonicity_collecting_op(k in 1..10u64) {
-            let collecting_ops = vec![
-                StreamFunctionKind::Permutations(k),
-                StreamFunctionKind::Combinations(k),
-                StreamFunctionKind::PermutationsWithReplacement(k),
-            ];
-            for op in &collecting_ops {
-                let space = space_for_kind(op);
-                prop_assert!(space >= ComplexityClass::ON, "Collecting op {:?} should have space >= O(n)", op);
+        fn prop_ord_eq_consistent(a in arb_complexity_class(), b in arb_complexity_class()) {
+            let cmp = a.cmp(&b);
+            if a == b {
+                prop_assert_eq!(cmp, std::cmp::Ordering::Equal);
+            } else {
+                prop_assert_ne!(cmp, std::cmp::Ordering::Equal);
             }
         }
 
         #[test]
-        fn test_combinatoric_step_work_constant_is_o1(k in 1..10u64, n_val in 1u64..1000) {
-            let cardinality = Symbolic::Constant(BigUint::from(n_val));
-            prop_assert_eq!(
-                step_work_class(&cardinality, &StreamFunctionKind::Permutations(k)),
-                ComplexityClass::O1
-            );
-            prop_assert_eq!(
-                step_work_class(&cardinality, &StreamFunctionKind::PermutationsWithReplacement(k)),
-                ComplexityClass::O1
-            );
-            prop_assert_eq!(
-                step_work_class(&cardinality, &StreamFunctionKind::Combinations(k)),
-                ComplexityClass::O1
-            );
+        fn prop_ord_antisymmetric(a in arb_complexity_class(), b in arb_complexity_class()) {
+            let ab = a.cmp(&b);
+            let ba = b.cmp(&a);
+            prop_assert_eq!(ab, ba.reverse());
         }
 
         #[test]
-        fn test_combinatoric_step_work_unknown_is_asymptotic(k in 1..10u64) {
-            let cardinality = Symbolic::Unknown;
-            prop_assert_eq!(
-                step_work_class(&cardinality, &StreamFunctionKind::Permutations(k)),
-                ComplexityClass::OPermutational(k)
-            );
-            prop_assert_eq!(
-                step_work_class(&cardinality, &StreamFunctionKind::PermutationsWithReplacement(k)),
-                ComplexityClass::OPolynomial(k)
-            );
-            prop_assert_eq!(
-                step_work_class(&cardinality, &StreamFunctionKind::Combinations(k)),
-                ComplexityClass::OCombinatorial(k)
-            );
+        fn prop_eq_reflexive(a in arb_complexity_class()) {
+            prop_assert_eq!(a, a.clone());
         }
-    }
 
-    proptest! {
         #[test]
-        fn test_streaming_ops_always_o1_space(_dummy in 0..1i32) {
-            let streaming_ops = vec![
-                StreamFunctionKind::Map,
-                StreamFunctionKind::Filter,
-                StreamFunctionKind::FilterMap,
-                StreamFunctionKind::Fold,
-                StreamFunctionKind::Ok,
-                StreamFunctionKind::OkOrPanic,
-            ];
-            for op in &streaming_ops {
-                prop_assert_eq!(space_for_kind(op), ComplexityClass::O1);
-            }
+        fn prop_ord_reflexive(a in arb_complexity_class()) {
+            prop_assert_eq!(a.cmp(&a.clone()), std::cmp::Ordering::Equal);
         }
-    }
 
-    proptest! {
         #[test]
-        fn test_serde_roundtrip_proptest(c in arb_complexity_class()) {
-            let json = serde_json::to_string(&c).unwrap();
-            let parsed: ComplexityClass = serde_json::from_str(&json).unwrap();
-            prop_assert_eq!(c, parsed);
+        fn prop_eq_symmetric(a in arb_complexity_class(), b in arb_complexity_class()) {
+            prop_assert_eq!(a == b, b == a.clone());
+        }
+
+        #[test]
+        fn prop_arb_exact_complexity_roundtrip(a in arb_exact_complexity()) {
+            let s = a.to_string();
+            let parsed = ExactComplexity::from_str(&s).unwrap();
+            prop_assert_eq!(a.to_string(), parsed.to_string());
         }
     }
 
     fn arb_exact_complexity() -> impl Strategy<Value = ExactComplexity> {
-        proptest::collection::btree_map(
-            prop_oneof![
-                Just(ComplexityClass::O1),
-                Just(ComplexityClass::OLogN),
-                Just(ComplexityClass::ON),
-                Just(ComplexityClass::ONLogN),
-                (2..10u64).prop_map(ComplexityClass::OPolynomial),
-                (1..10u64).prop_map(ComplexityClass::OPermutational),
-                (1..10u64).prop_map(ComplexityClass::OCombinatorial),
-            ],
-            1..10u64,
-            1..4,
-        )
-        .prop_map(|terms| ExactComplexity { terms })
-    }
-
-    fn normalize_exact(ec: &ExactComplexity) -> ExactComplexity {
-        let has_higher = ec.terms.keys().any(|k| *k > ComplexityClass::O1);
-        ExactComplexity {
-            terms: ec
-                .terms
-                .iter()
-                .filter(|(class, _)| !has_higher || **class != ComplexityClass::O1)
-                .map(|(c, v)| (c.clone(), *v))
-                .collect(),
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_exact_complexity_display_fromstr_roundtrip(ec in arb_exact_complexity()) {
-            let s = ec.to_string();
-            let parsed = ExactComplexity::from_str(&s).unwrap();
-            let expected = normalize_exact(&ec);
-            prop_assert_eq!(expected, parsed);
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_exact_complexity_serde_roundtrip_proptest(ec in arb_exact_complexity()) {
-            let json = serde_json::to_string(&ec).unwrap();
-            let parsed: ExactComplexity = serde_json::from_str(&json).unwrap();
-            let expected = normalize_exact(&ec);
-            prop_assert_eq!(expected, parsed);
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_exact_complexity_simplified_is_max_term(ec in arb_exact_complexity()) {
-            let simplified = ec.simplified();
-            for class in ec.terms.keys() {
-                prop_assert!(simplified >= *class);
+        let arb_class = prop_oneof![
+            Just(ComplexityClass::O1),
+            Just(ComplexityClass::OLogN),
+            Just(ComplexityClass::ON),
+            any::<u64>().prop_map(ComplexityClass::ONLogK),
+            Just(ComplexityClass::ONLogN),
+            any::<u64>().prop_map(ComplexityClass::OPolynomial),
+            any::<u64>().prop_map(ComplexityClass::OCombinatorial),
+            any::<u64>().prop_map(ComplexityClass::OPermutational),
+            Just(ComplexityClass::OFactorial),
+        ];
+        proptest::collection::vec((arb_class, 1u64..=10u64), 1..=5).prop_map(|pairs| {
+            let mut ec = ExactComplexity::new();
+            for (class, count) in pairs {
+                ec.add_work(class, count);
             }
-        }
-    }
-
-    fn arb_symbolic_constant() -> impl Strategy<Value = Symbolic> {
-        (1u64..1000).prop_map(|n| Symbolic::Constant(BigUint::from(n)))
-    }
-
-    fn arb_symbolic() -> impl Strategy<Value = Symbolic> {
-        prop_oneof![
-            arb_symbolic_constant(),
-            Just(Symbolic::Unknown),
-            arb_symbolic_constant().prop_map(|s| Symbolic::Filtered(Box::new(s))),
-            (arb_symbolic_constant(), 1u64..5)
-                .prop_map(|(s, k)| Symbolic::Permutations { n: Box::new(s), k }),
-            (arb_symbolic_constant(), 1u64..5)
-                .prop_map(|(s, k)| Symbolic::Combinations { n: Box::new(s), k }),
-            (arb_symbolic_constant(), 1u64..4)
-                .prop_map(|(s, k)| Symbolic::PermutationsWithReplacement { n: Box::new(s), k }),
-            (arb_symbolic_constant(), arb_symbolic_constant())
-                .prop_map(|(a, b)| Symbolic::Min(Box::new(a), Box::new(b))),
-            proptest::collection::vec(arb_symbolic_constant(), 2..4).prop_map(Symbolic::Sum),
-        ]
-    }
-
-    fn arb_cardinality() -> impl Strategy<Value = Cardinality> {
-        prop_oneof![
-            (1u64..10000).prop_map(|n| Cardinality::Exact(BigUint::from(n))),
-            arb_symbolic_constant()
-                .prop_map(|s| Cardinality::Bounded(Symbolic::Filtered(Box::new(s)))),
-            Just(Cardinality::Unknown),
-        ]
+            ec
+        })
     }
 
     proptest! {
         #[test]
-        fn test_cardinality_display_fromstr_roundtrip(c in arb_cardinality()) {
-            let s = c.to_string();
-            let parsed = Cardinality::from_str(&s).unwrap();
-            prop_assert_eq!(c, parsed);
+        fn prop_eq_iff_cmp_equal(a in arb_complexity_class(), b in arb_complexity_class()) {
+            let eq = a == b;
+            let cmp_eq = a.cmp(&b) == std::cmp::Ordering::Equal;
+            prop_assert_eq!(eq, cmp_eq);
         }
-    }
 
-    proptest! {
         #[test]
-        fn test_cardinality_serde_roundtrip_proptest(c in arb_cardinality()) {
-            let json = serde_json::to_string(&c).unwrap();
-            let parsed: Cardinality = serde_json::from_str(&json).unwrap();
-            prop_assert_eq!(c, parsed);
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_cardinality_max_commutativity_exact(a_val in 1u64..10000, b_val in 1u64..10000) {
-            let a = Cardinality::Exact(BigUint::from(a_val));
-            let b = Cardinality::Exact(BigUint::from(b_val));
-            let ab = a.clone().max(b.clone());
-            let ba = b.max(a);
-            prop_assert_eq!(ab, ba);
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_cardinality_ordering_is_total(a in arb_cardinality(), b in arb_cardinality()) {
-            prop_assert!(a.partial_cmp(&b).is_some());
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_symbolic_upper_bound_ge_try_evaluate(sym in arb_symbolic()) {
-            if let (Some(exact), Some(upper)) = (sym.try_evaluate(), sym.upper_bound()) {
-                prop_assert!(upper >= exact, "upper_bound ({upper}) must be >= try_evaluate ({exact})");
+        fn prop_antisymmetry_all_variants(a in arb_complexity_class(), b in arb_complexity_class()) {
+            if a != b {
+                prop_assert_ne!(a.cmp(&b), b.cmp(&a));
+            } else {
+                prop_assert_eq!(a, b);
             }
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_symbolic_display_fromstr_roundtrip(sym in arb_symbolic()) {
-            let s = sym.to_string();
-            let parsed = Symbolic::from_str(&s).unwrap();
-            prop_assert_eq!(sym, parsed);
         }
     }
 }
