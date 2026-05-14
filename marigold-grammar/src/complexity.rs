@@ -510,7 +510,7 @@ impl fmt::Display for Symbolic {
         match self {
             Symbolic::Constant(v) => write!(f, "{v}"),
             Symbolic::Unknown => write!(f, "?"),
-            Symbolic::Filtered(inner) => write!(f, "≤{inner}"),
+            Symbolic::Filtered(inner) => write!(f, "\u{2264}{inner}"),
             Symbolic::Permutations { n, k } => write!(f, "P({n}, {k})"),
             Symbolic::PermutationsWithReplacement { n, k } => write!(f, "{n}^{k}"),
             Symbolic::Combinations { n, k } => write!(f, "C({n}, {k})"),
@@ -674,10 +674,24 @@ impl Cardinality {
             (Cardinality::Exact(v1), Cardinality::Exact(v2)) => {
                 Cardinality::Exact(v1.clone().min(v2.clone()))
             }
-            (Cardinality::Bounded(sym), Cardinality::Exact(v))
-            | (Cardinality::Exact(v), Cardinality::Bounded(sym)) => {
+            // Bounded(sym).meet(&Exact(v)): if sym is already bounded by v, keep self;
+            // otherwise constrain to Min(sym, v).
+            (Cardinality::Bounded(sym), Cardinality::Exact(v)) => {
                 match sym.upper_bound() {
                     Some(ub) if ub <= *v => self,
+                    _ => Cardinality::Bounded(
+                        Symbolic::Min(
+                            Box::new(sym.clone()),
+                            Box::new(Symbolic::Constant(v.clone())),
+                        )
+                    ),
+                }
+            }
+            // Exact(v).meet(&Bounded(sym)): if sym is already bounded by v, return
+            // the bounded side; otherwise constrain to Min(sym, v).
+            (Cardinality::Exact(v), Cardinality::Bounded(sym)) => {
+                match sym.upper_bound() {
+                    Some(ub) if ub <= *v => other.clone(),
                     _ => Cardinality::Bounded(
                         Symbolic::Min(
                             Box::new(sym.clone()),
@@ -692,20 +706,6 @@ impl Cardinality {
                     Box::new(s2.clone()),
                 ))
             }
-            (Cardinality::Bounded(_), Cardinality::Exact(v)) => match self.clone() {
-                Cardinality::Bounded(sym) => match sym.upper_bound() {
-                    Some(ub) if ub >= *v => Cardinality::Bounded(sym),
-                    _ => Cardinality::Bounded(sym),
-                },
-                _ => unreachable!(),
-            },
-            (Cardinality::Exact(v), Cardinality::Bounded(_)) => match other.clone() {
-                Cardinality::Bounded(sym) => match sym.upper_bound() {
-                    Some(ub) if ub >= *v => Cardinality::Bounded(sym),
-                    _ => Cardinality::Bounded(sym),
-                },
-                _ => unreachable!(),
-            },
         }
     }
 }
@@ -1174,7 +1174,7 @@ mod tests {
     fn test_symbolic_filter_display() {
         let inner = Symbolic::Constant(BigUint::from(5u64));
         let filtered = Symbolic::Filtered(Box::new(inner));
-        assert_eq!(filtered.to_string(), "≤5");
+        assert_eq!(filtered.to_string(), "\u{2264}5");
     }
 
     #[test]
@@ -1456,7 +1456,7 @@ mod tests {
         let cases = [
             "10",
             "?",
-            "≤10",
+            "\u{2264}10",
             "P(100, 3)",
             "100^2",
             "C(100, 2)",
@@ -1496,7 +1496,7 @@ mod tests {
             ("O(log(n))", ComplexityClass::OLogN),
             ("O(n)", ComplexityClass::ON),
             ("O(n!)", ComplexityClass::OFactorial),
-            ("O(?)", ComplexityClass::Unknown),
+            ("O(?)" , ComplexityClass::Unknown),
             ("O(n^2)", ComplexityClass::OPolynomial(2)),
             ("O(n*log(n))", ComplexityClass::ONLogN),
             ("O(n*log(3))", ComplexityClass::ONLogK(3)),
@@ -1573,6 +1573,22 @@ mod tests {
         let result = c1.meet(&c2);
         // bounded meet exact should produce a bounded (min of the two)
         assert!(matches!(result, Cardinality::Bounded(_)));
+    }
+
+    #[test]
+    fn test_cardinality_meet_exact_bounded() {
+        // Exact(v).meet(&Bounded(sym)) must return the bounded side, not Exact(v).
+        // Previously an or-pattern returned `self` (Exact(3)) when the Exact arm
+        // fired, giving the wrong result.
+        let sym = Symbolic::Filtered(Box::new(Symbolic::Constant(BigUint::from(100u64))));
+        let c_exact = Cardinality::Exact(BigUint::from(50u64));
+        let c_bounded = Cardinality::Bounded(sym);
+        let result = c_exact.meet(&c_bounded);
+        assert!(
+            matches!(result, Cardinality::Bounded(_)),
+            "Exact.meet(&Bounded) should return Bounded, got {:?}",
+            result
+        );
     }
 
     #[test]
