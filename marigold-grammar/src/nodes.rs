@@ -254,6 +254,12 @@ pub enum StreamFunctionKind {
     Map,
     Filter,
     FilterMap,
+    /// Prefix-truncation: yields only a contiguous prefix of the input. Distinct
+    /// from `Filter` so the cardinality analyzer can preserve prefix semantics
+    /// (see #222). Cardinality / time / space classifications today match
+    /// `Filter`; the distinct kind exists so future analyses can exploit the
+    /// prefix-preservation guarantee.
+    TakeWhile,
     Permutations(u64),
     PermutationsWithReplacement(u64),
     Combinations(u64),
