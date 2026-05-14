@@ -1,5 +1,1 @@
-// `double` is intentionally not declared as a FnDeclaration in this program.
-// It exercises the "extern / imported user function" path in the analyzer:
-// the analyzer treats it as O(1) (StreamFunctionKind::UserDefined with no fn_map entry),
-// but the absence of a FnDeclaration means assumes_o1_user_fns remains false.
 range(0, 10).map(double).return
