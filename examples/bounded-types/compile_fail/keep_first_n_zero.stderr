@@ -1,0 +1,20 @@
+error: proc macro panicked
+ --> compile_fail/keep_first_n_zero.rs:6:13
+  |
+6 |       let _ = m!(
+  |  _____________^
+7 | |         range(0, 10).keep_first_n(0, compare).return
+8 | |     )
+  | |_____^
+  |
+  = help: message: marigold parsing error: MarigoldParseError("keep_first_n(0) is a no-op — the input stream is never polled. Remove the call or pass a non-zero literal.")
+
+error[E0282]: type annotations needed
+ --> compile_fail/keep_first_n_zero.rs:6:13
+  |
+6 |       let _ = m!(
+  |  _____________^
+7 | |         range(0, 10).keep_first_n(0, compare).return
+8 | |     )
+9 | |     .await
+  | |__________^ cannot infer type
