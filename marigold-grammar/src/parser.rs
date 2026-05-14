@@ -8,7 +8,7 @@
 //!
 //! Parse Marigold code:
 //! ```ignore
-//! let result = parse_marigold("range(0, 1).return")?;
+//! let result = parse_marigold("range(0, 1).return");
 //! ```
 //!
 //! Explicitly create a parser instance:
@@ -69,8 +69,7 @@ impl PestParser {
     /// Internal function: parse input and build AST
     fn parse_input(input: &str) -> Result<String, String> {
         // Stage 1: Parse with Pest grammar
-        let pairs =
-            MarigoldPestParser::parse(Rule::program, input).map_err(|e| e.to_string())?;
+        let pairs = MarigoldPestParser::parse(Rule::program, input).map_err(|e| e.to_string())?;
 
         // Stage 2: Build AST from parse tree
         let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)?;

@@ -10,4 +10,4 @@ error: marigold parse error: Bounded type validation failed:
 11 | |     )
    | |_____^
    |
-   = help: message: marigold parsing error: MarigoldParseError("Bounded type validation failed:\n  - Bounds violation for field 'Sensor.reading': uint[] cannot have negative min value (-1)")
+   = note: this error originates in the macro `marigold::m` (in Nightly builds, run with -Z macro-backtrace for more info)
