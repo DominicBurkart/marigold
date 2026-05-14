@@ -161,12 +161,13 @@ impl NamedStreamNode {
         let intermediate = match self.funs.len() {
             0 => "".to_string(),
             _ => format!(
-                ".",
-            ) + &self.funs
+                ".{}",
+                self.funs
                     .iter()
                     .map(|f| f.code.as_str())
                     .collect::<Vec<_>>()
-                    .join("."),
+                    .join(".")
+            ),
         };
         let stream_prefix = &self.out.stream_prefix;
         let stream_postfix = &self.out.stream_postfix;
@@ -188,12 +189,13 @@ impl StreamVariableNode {
             0 => "".to_string(),
             _ => {
                 format!(
-                    ".",
-                ) + &self.funs
+                    ".{}",
+                    self.funs
                         .iter()
                         .map(|f| f.code.as_str())
                         .collect::<Vec<_>>()
                         .join(".")
+                )
             }
         };
         format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({inp}{intermediate})}};")
@@ -224,12 +226,13 @@ impl StreamVariableFromPriorStreamVariableNode {
             0 => "".to_string(),
             _ => {
                 format!(
-                    ".",
-                ) + &self.funs
+                    ".{}",
+                    self.funs
                         .iter()
                         .map(|f| f.code.as_str())
                         .collect::<Vec<_>>()
                         .join(".")
+                )
             }
         };
         format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({prior_stream_variable}.get(){intermediate})}};")
