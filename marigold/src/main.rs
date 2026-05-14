@@ -188,9 +188,11 @@ fn main() -> Result<()> {
     let manifest_path = program_project_dir.join("Cargo.toml");
 
     let marigold_dep = if let Ok(workspace_path) = std::env::var("MARIGOLD_WORKSPACE_PATH") {
-        format!(r#"marigold = {{ path = "{workspace_path}", features = ["tokio", "io"]}}"#)
+        format!(r#"marigold = {{ path = "{workspace_path}", features = ["tokio", "io"]}}"
+"#)
     } else {
-        format!(r#"marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}"#)
+        format!(r#"marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}"
+"#)
     };
 
     std::fs::write(
@@ -485,6 +487,10 @@ mod tests {
     ///
     /// The program `range(0, 100).write_file("...", csv)` is a single-stream
     /// pipeline, so `streams` must contain exactly one element.
+    ///
+    /// `ComplexityClass`, `ExactComplexity`, and `Cardinality` all implement
+    /// custom `Serialize` that calls `serialize_str`, so those fields must be
+    /// JSON strings (not objects or nulls).
     #[test]
     fn test_analyze_command() {
         let binary = &*BINARY;
@@ -543,34 +549,40 @@ mod tests {
             "expected exactly 1 stream in analyze output; got: {json}"
         );
 
-        // program_time: ComplexityClass
+        // program_time: ComplexityClass (serializes as a string)
         assert!(
-            json.get("program_time").is_some(),
-            "JSON output missing 'program_time' field; got: {json}"
+            json.get("program_time").map(|v| v.is_string()).unwrap_or(false),
+            "JSON output missing or non-string 'program_time' field; got: {json}"
         );
 
-        // program_exact_time: ExactComplexity
+        // program_exact_time: ExactComplexity (serializes as a string)
         assert!(
-            json.get("program_exact_time").is_some(),
-            "JSON output missing 'program_exact_time' field; got: {json}"
+            json.get("program_exact_time")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "JSON output missing or non-string 'program_exact_time' field; got: {json}"
         );
 
-        // program_space: ComplexityClass
+        // program_space: ComplexityClass (serializes as a string)
         assert!(
-            json.get("program_space").is_some(),
-            "JSON output missing 'program_space' field; got: {json}"
+            json.get("program_space").map(|v| v.is_string()).unwrap_or(false),
+            "JSON output missing or non-string 'program_space' field; got: {json}"
         );
 
-        // program_exact_space: ExactComplexity
+        // program_exact_space: ExactComplexity (serializes as a string)
         assert!(
-            json.get("program_exact_space").is_some(),
-            "JSON output missing 'program_exact_space' field; got: {json}"
+            json.get("program_exact_space")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "JSON output missing or non-string 'program_exact_space' field; got: {json}"
         );
 
-        // program_cardinality: Cardinality
+        // program_cardinality: Cardinality (serializes as a string)
         assert!(
-            json.get("program_cardinality").is_some(),
-            "JSON output missing 'program_cardinality' field; got: {json}"
+            json.get("program_cardinality")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "JSON output missing or non-string 'program_cardinality' field; got: {json}"
         );
 
         // --- StreamComplexity fields for the single stream entry ---
@@ -586,34 +598,49 @@ mod tests {
             "stream entry missing string 'description' field; got: {stream}"
         );
 
-        // cardinality: Cardinality
+        // cardinality: Cardinality (serializes as a string)
         assert!(
-            stream.get("cardinality").is_some(),
-            "stream entry missing 'cardinality' field; got: {stream}"
+            stream
+                .get("cardinality")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "stream entry missing or non-string 'cardinality' field; got: {stream}"
         );
 
-        // time_class: ComplexityClass
+        // time_class: ComplexityClass (serializes as a string)
         assert!(
-            stream.get("time_class").is_some(),
-            "stream entry missing 'time_class' field; got: {stream}"
+            stream
+                .get("time_class")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "stream entry missing or non-string 'time_class' field; got: {stream}"
         );
 
-        // exact_time: ExactComplexity
+        // exact_time: ExactComplexity (serializes as a string)
         assert!(
-            stream.get("exact_time").is_some(),
-            "stream entry missing 'exact_time' field; got: {stream}"
+            stream
+                .get("exact_time")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "stream entry missing or non-string 'exact_time' field; got: {stream}"
         );
 
-        // space_class: ComplexityClass
+        // space_class: ComplexityClass (serializes as a string)
         assert!(
-            stream.get("space_class").is_some(),
-            "stream entry missing 'space_class' field; got: {stream}"
+            stream
+                .get("space_class")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "stream entry missing or non-string 'space_class' field; got: {stream}"
         );
 
-        // exact_space: ExactComplexity
+        // exact_space: ExactComplexity (serializes as a string)
         assert!(
-            stream.get("exact_space").is_some(),
-            "stream entry missing 'exact_space' field; got: {stream}"
+            stream
+                .get("exact_space")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "stream entry missing or non-string 'exact_space' field; got: {stream}"
         );
 
         // collects_input: bool
