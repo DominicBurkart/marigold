@@ -253,6 +253,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_take_while_after_map() {
+        fn double(v: i32) -> i32 {
+            v * 2
+        }
+        fn less_than_10(i: &i32) -> bool {
+            *i < 10
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 10)
+                .map(double)
+                .take_while(less_than_10)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![0, 2, 4, 6, 8]
+        );
+    }
+
+    #[tokio::test]
     async fn test_take_while_always_true() {
         fn always_true(_i: &i32) -> bool {
             true
