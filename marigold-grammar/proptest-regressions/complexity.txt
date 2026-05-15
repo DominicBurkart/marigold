@@ -6,3 +6,6 @@
 # everyone who runs the test benefits from these saved cases.
 cc cf2b89f25b3d2bb0028f56e5baf52534c9c153863883adc83e56a56005677c68 # shrinks to ec = ExactComplexity { terms: {ONLogK(1): 1, ONLogK(2): 1} }
 cc 1a36c6bf7c8b3434c690424e6fb84041cd9bef77d7e43623ba892934864e54ca # shrinks to ec = ExactComplexity { terms: {ONLogK(1): 1, ONLogK(2): 1} }
+cc a74b251be664c0bb296f4e73909b19a6a7f769f91734a7601404c6b53cd6b5bc # shrinks to sym = PermutationsWithReplacement { n: Unknown, k: 1 }
+cc 75a2b585ed113c327c89958d57a3317f1735cd895bb1e98403124c29ea2f4207 # shrinks to sym = Sum([Sum([Constant(0), Constant(0)]), Constant(0)])
+cc 413ad70270907e9b2ad32d680a8c1246e16e942db6136e7d50540de09a3bbbbc # shrinks to sym = Filtered(Sum([Constant(0), Constant(0)]))

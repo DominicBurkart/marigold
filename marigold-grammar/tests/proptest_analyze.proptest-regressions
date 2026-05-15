@@ -1,0 +1,12 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5332c47a34071b30427a2e5e58214bb5d347745e3449f47533221513b050c1d8 # shrinks to prog = GeneratedProgram { source: "my_stream = range(0, 2)\nmy_stream.fold(0, f).combinations(3).return", expected_stream_count: 1, stream_output_has_collecting: [true], stream_ends_with_fold: [false], stream_only_streaming: [false], uses_stream_variable: true }
+cc 61e6b035d03d21fbaeafd9d93595a827b3a8393f1dceaa5ee5c473db6c055772 # shrinks to prog = GeneratedProgram { source: "data = range(0, 2).permutations(3)\ndata.combinations(2).return\ndata.return", expected_stream_count: 2, stream_output_has_collecting: [true, false], stream_ends_with_fold: [false, false], stream_only_streaming: [false, false], uses_stream_variable: true }
+cc 4702b6f623f239f2378b6c69cb5f59ee06103828a230cd7203b2a2923164108d # shrinks to prog = GeneratedProgram { source: "data = range(0, 2).fold(0, f)\ndata.permutations(3).return\ndata.return", expected_stream_count: 2, stream_output_has_collecting: [true, false], stream_ends_with_fold: [false, true], stream_only_streaming: [false, false], uses_stream_variable: true }
+cc 125c6d3af505aa057375dcf8d6a1770fca384c6c1cff3b8c1947ce7f78959431 # shrinks to prog = GeneratedProgram { source: "data = range(0, 2)\ndata.combinations(2).combinations(3).return\ndata.return", expected_stream_count: 2, stream_output_has_collecting: [true, false], stream_ends_with_fold: [false, false], stream_only_streaming: [false, true], uses_stream_variable: true }
+cc 98cca381db7783926d671bf7862c6f1988b797943254a4315bc36acb6dc8eeb4 # shrinks to prog = GeneratedProgram { source: "range(0, 2).combinations(4).return", expected_stream_count: 1, stream_output_has_collecting: [true], stream_ends_with_fold: [false], stream_only_streaming: [false], uses_stream_variable: false }
+cc f5b5c764a6442ffe661c8c823272d317a0271bed28eebd41f949ad95b6939ee7 # shrinks to prog = GeneratedProgram { source: "range(0, 2).permutations(4).return", expected_stream_count: 1, stream_output_has_collecting: [true], stream_ends_with_fold: [false], stream_only_streaming: [false], uses_stream_variable: false }

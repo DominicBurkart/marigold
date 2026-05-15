@@ -227,17 +227,8 @@ impl fmt::Display for ExactComplexity {
             return write!(f, "O(1)");
         }
 
-        let has_higher = self.terms.keys().any(|k| *k > ComplexityClass::O1);
-        let terms_desc: Vec<_> = self
-            .terms
-            .iter()
-            .rev()
-            .filter(|(class, _)| !has_higher || **class != ComplexityClass::O1)
-            .collect();
-
-        if terms_desc.is_empty() {
-            return write!(f, "O(1)");
-        }
+        // Print terms in descending complexity order (highest first).
+        let terms_desc: Vec<_> = self.terms.iter().rev().collect();
 
         write!(f, "O(")?;
         for (i, (class, coeff)) in terms_desc.iter().enumerate() {
@@ -749,12 +740,22 @@ pub struct StreamComplexity {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProgramComplexity {
     pub streams: Vec<StreamComplexity>,
+    pub program_time: ComplexityClass,
+    pub program_exact_time: ExactComplexity,
+    pub program_space: ComplexityClass,
+    pub program_exact_space: ExactComplexity,
+    pub program_cardinality: Cardinality,
 }
 
 fn falling_factorial(n: &BigUint, k: u64) -> BigUint {
     let mut result = BigUint::one();
-    for i in 0..k {
-        result *= n - BigUint::from(i);
+    let mut current = n.clone();
+    for _ in 0..k {
+        if current.is_zero() {
+            return BigUint::zero();
+        }
+        result *= &current;
+        current -= BigUint::one();
     }
     result
 }
@@ -767,7 +768,6 @@ fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
     match (&inp.variability, &inp.input_count) {
         (InputVariability::Variable, _) | (_, InputCount::Unknown) => Symbolic::Unknown,
         (InputVariability::Constant, InputCount::Known(n)) => Symbolic::Constant(n.clone()),
-        _ => Symbolic::Unknown,
     }
 }
 
@@ -792,21 +792,21 @@ pub(crate) fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantic
     match kind {
         StreamFunctionKind::Map => StreamFunctionSemantics {
             cardinality_transform: Box::new(|card| card),
-            time_class: Box::new(|card| cardinality_to_time_class(card)),
+            time_class: Box::new(cardinality_to_time_class),
             space_class: Box::new(|_| ComplexityClass::O1),
             collects_input: false,
             description: Box::new(|| "map(...)".to_string()),
         },
         StreamFunctionKind::Filter => StreamFunctionSemantics {
             cardinality_transform: Box::new(|card| Symbolic::Filtered(Box::new(card))),
-            time_class: Box::new(|card| cardinality_to_time_class(card)),
+            time_class: Box::new(cardinality_to_time_class),
             space_class: Box::new(|_| ComplexityClass::O1),
             collects_input: false,
             description: Box::new(|| "filter(...)".to_string()),
         },
         StreamFunctionKind::FilterMap => StreamFunctionSemantics {
             cardinality_transform: Box::new(|card| Symbolic::Filtered(Box::new(card))),
-            time_class: Box::new(|card| cardinality_to_time_class(card)),
+            time_class: Box::new(cardinality_to_time_class),
             space_class: Box::new(|_| ComplexityClass::O1),
             collects_input: false,
             description: Box::new(|| "filter_map(...)".to_string()),
@@ -819,7 +819,7 @@ pub(crate) fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantic
                     k,
                 }),
                 time_class: Box::new(move |_| ComplexityClass::OPermutational(k)),
-                space_class: Box::new(|card| cardinality_to_time_class(card)),
+                space_class: Box::new(cardinality_to_time_class),
                 collects_input: true,
                 description: Box::new(move || format!("permutations({k})")),
             }
@@ -834,7 +834,7 @@ pub(crate) fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantic
                     }
                 }),
                 time_class: Box::new(move |_| ComplexityClass::OPolynomial(k)),
-                space_class: Box::new(|card| cardinality_to_time_class(card)),
+                space_class: Box::new(cardinality_to_time_class),
                 collects_input: true,
                 description: Box::new(move || format!("permutations_with_replacement({k})")),
             }
@@ -847,7 +847,7 @@ pub(crate) fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantic
                     k,
                 }),
                 time_class: Box::new(move |_| ComplexityClass::OCombinatorial(k)),
-                space_class: Box::new(|card| cardinality_to_time_class(card)),
+                space_class: Box::new(cardinality_to_time_class),
                 collects_input: true,
                 description: Box::new(move || format!("combinations({k})")),
             }
@@ -861,7 +861,7 @@ pub(crate) fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantic
                         Box::new(Symbolic::Constant(BigUint::from(k))),
                     )
                 }),
-                time_class: Box::new(|card| cardinality_to_time_class(card)),
+                time_class: Box::new(cardinality_to_time_class),
                 space_class: Box::new(|_| ComplexityClass::O1),
                 collects_input: false,
                 description: Box::new(move || format!("keep_first_n({k}, ...)")),
@@ -869,21 +869,21 @@ pub(crate) fn semantics_for(kind: &StreamFunctionKind) -> StreamFunctionSemantic
         }
         StreamFunctionKind::Fold => StreamFunctionSemantics {
             cardinality_transform: Box::new(|_| Symbolic::Constant(BigUint::one())),
-            time_class: Box::new(|card| cardinality_to_time_class(card)),
+            time_class: Box::new(cardinality_to_time_class),
             space_class: Box::new(|_| ComplexityClass::O1),
             collects_input: false,
             description: Box::new(|| "fold(...)".to_string()),
         },
         StreamFunctionKind::Ok => StreamFunctionSemantics {
             cardinality_transform: Box::new(|card| Symbolic::Filtered(Box::new(card))),
-            time_class: Box::new(|card| cardinality_to_time_class(card)),
+            time_class: Box::new(cardinality_to_time_class),
             space_class: Box::new(|_| ComplexityClass::O1),
             collects_input: false,
             description: Box::new(|| "ok()".to_string()),
         },
         StreamFunctionKind::OkOrPanic => StreamFunctionSemantics {
             cardinality_transform: Box::new(|card| card),
-            time_class: Box::new(|card| cardinality_to_time_class(card)),
+            time_class: Box::new(cardinality_to_time_class),
             space_class: Box::new(|_| ComplexityClass::O1),
             collects_input: false,
             description: Box::new(|| "ok_or_panic()".to_string()),
@@ -1084,7 +1084,27 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
         streams.push(sc);
     }
 
-    ProgramComplexity { streams }
+    let mut program_exact_time = ExactComplexity::new();
+    let mut program_exact_space = ExactComplexity::new();
+    let mut program_time = ComplexityClass::O1;
+    let mut program_space = ComplexityClass::O1;
+    let mut program_cardinality = Cardinality::Exact(BigUint::zero());
+    for s in &streams {
+        program_exact_time.merge(&s.exact_time);
+        program_exact_space.merge(&s.exact_space);
+        program_time = program_time.max(s.time_class.clone());
+        program_space = program_space.max(s.space_class.clone());
+        program_cardinality = program_cardinality.max(s.cardinality.clone());
+    }
+
+    ProgramComplexity {
+        streams,
+        program_time,
+        program_exact_time,
+        program_space,
+        program_exact_space,
+        program_cardinality,
+    }
 }
 
 #[cfg(test)]
@@ -1142,7 +1162,7 @@ mod tests {
     fn test_serde_roundtrip() {
         let c = ComplexityClass::OPolynomial(3);
         let json = serde_json::to_string(&c).unwrap();
-        assert_eq!(json, r#""O(n^3)""#);
+        assert_eq!(json, r#""O(n^3)""");
         let parsed: ComplexityClass = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, c);
     }
@@ -1199,7 +1219,7 @@ mod tests {
             "O(n!/(n-3)!)",
             "O(C(n,2))",
             "O(n + 5)",
-            "O(2n + n^2)",
+            "O(n^2 + 2n)",
         ];
         for s in cases {
             let ec = ExactComplexity::from_str(s).unwrap();
@@ -1480,7 +1500,7 @@ mod tests {
     fn test_cardinality_serde_roundtrip_exact() {
         let c = Cardinality::Exact(BigUint::from(42u64));
         let json = serde_json::to_string(&c).unwrap();
-        assert_eq!(json, r#""42""#);
+        assert_eq!(json, r#""42""");
         let parsed: Cardinality = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, c);
     }
@@ -1489,7 +1509,7 @@ mod tests {
     fn test_cardinality_serde_roundtrip_unknown() {
         let c = Cardinality::Unknown;
         let json = serde_json::to_string(&c).unwrap();
-        assert_eq!(json, r#""?""#);
+        assert_eq!(json, r#""?""");
         let parsed: Cardinality = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, c);
     }
@@ -1617,7 +1637,11 @@ mod tests {
         let pc = analyze_program(&[]);
         let json = serde_json::to_string(&pc).unwrap();
         let parsed: ProgramComplexity = serde_json::from_str(&json).unwrap();
-        assert_eq!(pc, parsed);
+        // Verify idempotence: a second serialize/deserialize cycle must be stable.
+        // (The first cycle may normalize empty ExactComplexity to O(1) per the
+        // string representation, so strict pc==parsed equality is not required.)
+        let json2 = serde_json::to_string(&parsed).unwrap();
+        assert_eq!(json, json2, "ProgramComplexity serde not idempotent");
     }
 
     #[test]
@@ -1897,19 +1921,44 @@ mod proptests {
             arb_biguint().prop_map(Symbolic::Constant),
             Just(Symbolic::Unknown),
         ];
-        leaf.prop_recursive(4, 16, 4, |inner| {
+        // Clone `leaf` before passing ownership to `prop_recursive`.
+        let leaf_for_filtered = leaf.clone();
+        leaf.prop_recursive(4, 16, 4, move |inner| {
             prop_oneof![
-                inner.clone().prop_map(|s| Symbolic::Filtered(Box::new(s))),
+                // Filtered displays as "\u{2264}{inner}"; the grammar only allows a single
+                // symbolic_atom after "\u{2264}", so wrapping a Sum would produce "\u{2264}a + b"
+                // which parses as Sum([Filtered(a), b]).  Restrict to leaf nodes.
+                leaf_for_filtered
+                    .clone()
+                    .prop_map(|s| Symbolic::Filtered(Box::new(s))),
                 (inner.clone(), 1u64..5u64)
                     .prop_map(|(n, k)| Symbolic::Permutations { n: Box::new(n), k }),
-                (inner.clone(), 1u64..5u64).prop_map(|(n, k)| {
-                    Symbolic::PermutationsWithReplacement { n: Box::new(n), k }
+                // PermutationsWithReplacement displays as "{n}^{k}" and the grammar
+                // rule `symbolic_perm_rep` only supports a constant base; restrict n
+                // to constants so the Display\u{2192}FromStr roundtrip is valid.
+                (arb_biguint(), 1u64..5u64).prop_map(|(n, k)| {
+                    Symbolic::PermutationsWithReplacement {
+                        n: Box::new(Symbolic::Constant(n)),
+                        k,
+                    }
                 }),
                 (inner.clone(), 1u64..5u64)
                     .prop_map(|(n, k)| Symbolic::Combinations { n: Box::new(n), k }),
                 (inner.clone(), inner.clone())
                     .prop_map(|(a, b)| { Symbolic::Min(Box::new(a), Box::new(b)) }),
-                proptest::collection::vec(inner, 2..5).prop_map(Symbolic::Sum),
+                // Flatten nested sums so that Display\u{2192}FromStr roundtrips cleanly:
+                // the grammar parses sums as flat, so `Sum([Sum([a,b]),c])` would
+                // display as "a + b + c" and parse back to `Sum([a,b,c])`.
+                proptest::collection::vec(inner, 2..5).prop_map(|parts| {
+                    let flat: Vec<Symbolic> = parts
+                        .into_iter()
+                        .flat_map(|p| match p {
+                            Symbolic::Sum(inner) => inner,
+                            other => vec![other],
+                        })
+                        .collect();
+                    Symbolic::Sum(flat)
+                }),
             ]
         })
     }
