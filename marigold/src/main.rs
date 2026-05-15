@@ -188,11 +188,9 @@ fn main() -> Result<()> {
     let manifest_path = program_project_dir.join("Cargo.toml");
 
     let marigold_dep = if let Ok(workspace_path) = std::env::var("MARIGOLD_WORKSPACE_PATH") {
-        format!(r#"marigold = {{ path = "{workspace_path}", features = ["tokio", "io"]}}"
-"#)
+        format!(r#"marigold = {{ path = "{workspace_path}", features = ["tokio", "io"]}}"#)
     } else {
-        format!(r#"marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}"
-"#)
+        format!(r#"marigold = {{ version = "={MARIGOLD_VERSION}", features = ["tokio", "io"]}}"#)
     };
 
     std::fs::write(
@@ -551,7 +549,9 @@ mod tests {
 
         // program_time: ComplexityClass (serializes as a string)
         assert!(
-            json.get("program_time").map(|v| v.is_string()).unwrap_or(false),
+            json.get("program_time")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
             "JSON output missing or non-string 'program_time' field; got: {json}"
         );
 
@@ -565,7 +565,9 @@ mod tests {
 
         // program_space: ComplexityClass (serializes as a string)
         assert!(
-            json.get("program_space").map(|v| v.is_string()).unwrap_or(false),
+            json.get("program_space")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
             "JSON output missing or non-string 'program_space' field; got: {json}"
         );
 
