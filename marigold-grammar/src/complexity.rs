@@ -85,7 +85,7 @@ impl fmt::Display for ComplexityClass {
             ComplexityClass::OCombinatorial(k) => write!(f, "O(C(n,{k}))"),
             ComplexityClass::OPermutational(k) => write!(f, "O(n!/(n-{k})!)"),
             ComplexityClass::OFactorial => write!(f, "O(n!)"),
-            ComplexityClass::Unknown => write!(f, "O(?)"),
+            ComplexityClass::Unknown => write!(f, "O(?))"),
         }
     }
 }
@@ -1590,7 +1590,7 @@ mod tests {
             ("O(log(n))", ComplexityClass::OLogN),
             ("O(n)", ComplexityClass::ON),
             ("O(n!)", ComplexityClass::OFactorial),
-            ("O(?)", ComplexityClass::Unknown),
+            ("O(?))", ComplexityClass::Unknown),
             ("O(n^2)", ComplexityClass::OPolynomial(2)),
             ("O(n*log(n))", ComplexityClass::ONLogN),
             ("O(n*log(3))", ComplexityClass::ONLogK(3)),
@@ -1986,7 +1986,7 @@ mod proptests {
             ec.add_work(ComplexityClass::O1, n % 10);
             ec
         })) {
-            let mut a2 = a.clone();
+            let a2 = a.clone();
             a.merge(&b);
             let mut b2 = b.clone();
             b2.merge(&a2);
