@@ -1239,7 +1239,7 @@ mod tests {
     #[test]
     fn test_propagate_cardinality_filter() {
         let card = Symbolic::Constant(BigUint::from(100u64));
-        let result = propagate_cardinality(card, &StreamFunctionKind::Filter);
+        let result = propagate_cardinality(card.clone(), &StreamFunctionKind::Filter);
         assert_eq!(result, Symbolic::Filtered(Box::new(card)));
     }
 
