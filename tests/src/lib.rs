@@ -3,17 +3,16 @@ mod oracle;
 
 /// Compile-fail tests: verify that invalid Marigold DSL emits `compile_error!`
 /// diagnostics instead of panicking at the proc-macro layer.
+///
+/// All `.compile_fail()` calls must share a single `TestCases` instance within
+/// a single `#[test]` function — trybuild panics if a second `TestCases::new()`
+/// is created while another test is still running.
 #[cfg(test)]
 mod compile_fail_tests {
     #[test]
-    fn bad_syntax_yields_compile_error() {
+    fn ui() {
         let t = trybuild::TestCases::new();
         t.compile_fail("ui/bad_syntax.rs");
-    }
-
-    #[test]
-    fn range_unknown_enum_yields_compile_error() {
-        let t = trybuild::TestCases::new();
         t.compile_fail("ui/range_unknown_enum.rs");
     }
 }
