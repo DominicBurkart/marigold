@@ -1,0 +1,5 @@
+fn add_one(x: i32) -> i32 {
+    x + 1
+}
+
+range(0, 10).map(add_one).return

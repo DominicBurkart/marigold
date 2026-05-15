@@ -788,6 +788,12 @@ pub struct ProgramComplexity {
     pub program_space: ComplexityClass,
     pub program_exact_space: ExactComplexity,
     pub program_cardinality: Cardinality,
+    /// When true, the analysis assumes user-defined functions are O(1); set when any
+    /// `FnDeclaration` node exists in the program. Callers should treat complexity results
+    /// conservatively if this flag is true, because the actual cost of those functions is
+    /// not analyzed.
+    #[serde(default)]
+    pub assumes_o1_user_fns: bool,
 }
 
 fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
@@ -944,6 +950,7 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
 }
 
 pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
+    let mut has_fn_declaration = false;
     let mut stream_vars: std::collections::HashMap<
         String,
         (Symbolic, ComplexityClass, ExactComplexity, ExactComplexity),
@@ -951,6 +958,9 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
 
     for expr in expressions {
         match expr {
+            TypedExpression::FnDeclaration(_) => {
+                has_fn_declaration = true;
+            }
             TypedExpression::StreamVariable(v) => {
                 let card = input_cardinality(&v.inp);
                 let mut current_card = card;
@@ -1069,6 +1079,7 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
         program_space,
         program_exact_space,
         program_cardinality,
+        assumes_o1_user_fns: has_fn_declaration,
     }
 }
 
