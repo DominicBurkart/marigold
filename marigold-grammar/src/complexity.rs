@@ -239,7 +239,7 @@ impl fmt::Display for ExactComplexity {
             return write!(f, "O(1)");
         }
 
-        write!(f, "O("))?;
+        write!(f, "O(")?;
         for (i, (class, coeff)) in terms_desc.iter().enumerate() {
             if i > 0 {
                 write!(f, " + ")?;
@@ -600,10 +600,14 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
                 k,
             })
         }
-        Rule::symbolic_perm_with_replacement => {
+        Rule::symbolic_perm_rep => {
             let mut inner = pair.into_inner();
-            let n_pair = inner.next().ok_or_else(|| "Missing n^k n arg".to_string())?;
-            let k_pair = inner.next().ok_or_else(|| "Missing n^k k arg".to_string())?;
+            let n_pair = inner
+                .next()
+                .ok_or_else(|| "Missing n^k n arg".to_string())?;
+            let k_pair = inner
+                .next()
+                .ok_or_else(|| "Missing n^k k arg".to_string())?;
             let k: u64 = k_pair
                 .as_str()
                 .parse()
@@ -626,7 +630,6 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
                 k,
             })
         }
-        Rule::symbolic_min => unreachable!("handled above"),
         Rule::symbolic_constant => {
             let v: BigUint = pair
                 .as_str()
@@ -635,19 +638,6 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
             Ok(Symbolic::Constant(v))
         }
         Rule::symbolic_unknown => Ok(Symbolic::Unknown),
-        Rule::symbolic_min_expr => {
-            let mut inner = pair.into_inner();
-            let a = inner
-                .next()
-                .ok_or_else(|| "Missing min_expr first arg".to_string())?;
-            let b = inner
-                .next()
-                .ok_or_else(|| "Missing min_expr second arg".to_string())?;
-            Ok(Symbolic::Min(
-                Box::new(parse_symbolic_pair(a)?),
-                Box::new(parse_symbolic_pair(b)?),
-            ))
-        }
         r => Err(format!("Unexpected rule: {r:?}")),
     }
 }
@@ -676,35 +666,24 @@ impl Cardinality {
             }
             // Bounded(sym).meet(&Exact(v)): if sym is already bounded by v, keep self;
             // otherwise constrain to Min(sym, v).
-            (Cardinality::Bounded(sym), Cardinality::Exact(v)) => {
-                match sym.upper_bound() {
-                    Some(ub) if ub <= *v => self,
-                    _ => Cardinality::Bounded(
-                        Symbolic::Min(
-                            Box::new(sym.clone()),
-                            Box::new(Symbolic::Constant(v.clone())),
-                        )
-                    ),
-                }
-            }
+            (Cardinality::Bounded(sym), Cardinality::Exact(v)) => match sym.upper_bound() {
+                Some(ub) if ub <= *v => self,
+                _ => Cardinality::Bounded(Symbolic::Min(
+                    Box::new(sym.clone()),
+                    Box::new(Symbolic::Constant(v.clone())),
+                )),
+            },
             // Exact(v).meet(&Bounded(sym)): if sym is already bounded by v, return
             // the bounded side; otherwise constrain to Min(sym, v).
-            (Cardinality::Exact(v), Cardinality::Bounded(sym)) => {
-                match sym.upper_bound() {
-                    Some(ub) if ub <= *v => other.clone(),
-                    _ => Cardinality::Bounded(
-                        Symbolic::Min(
-                            Box::new(sym.clone()),
-                            Box::new(Symbolic::Constant(v.clone())),
-                        )
-                    ),
-                }
-            }
+            (Cardinality::Exact(v), Cardinality::Bounded(sym)) => match sym.upper_bound() {
+                Some(ub) if ub <= *v => other.clone(),
+                _ => Cardinality::Bounded(Symbolic::Min(
+                    Box::new(sym.clone()),
+                    Box::new(Symbolic::Constant(v.clone())),
+                )),
+            },
             (Cardinality::Bounded(s1), Cardinality::Bounded(s2)) => {
-                Cardinality::Bounded(Symbolic::Min(
-                    Box::new(s1.clone()),
-                    Box::new(s2.clone()),
-                ))
+                Cardinality::Bounded(Symbolic::Min(Box::new(s1.clone()), Box::new(s2.clone())))
             }
         }
     }
@@ -785,7 +764,7 @@ fn binomial(n: &BigUint, k: u64) -> BigUint {
 }
 
 fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
-    match (&inp.variability, &inp.count) {
+    match (&inp.variability, &inp.input_count) {
         (InputVariability::Variable, _) | (_, InputCount::Unknown) => Symbolic::Unknown,
         (InputVariability::Constant, InputCount::Known(n)) => Symbolic::Constant(n.clone()),
         _ => Symbolic::Unknown,
@@ -997,46 +976,112 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
 }
 
 pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
-    let mut stream_vars: std::collections::HashMap<String, Symbolic> =
-        std::collections::HashMap::new();
-    let mut streams = Vec::new();
+    let mut stream_vars: std::collections::HashMap<
+        String,
+        (Symbolic, ComplexityClass, ExactComplexity, ExactComplexity),
+    > = std::collections::HashMap::new();
 
     for expr in expressions {
         match expr {
-            TypedExpression::Stream(stream) => {
-                let initial_cardinality = stream
-                    .input
-                    .as_ref()
-                    .map(|inp| input_cardinality(inp))
-                    .unwrap_or(Symbolic::Unknown);
-
-                let complexity = analyze_stream_fns(
-                    &stream.fns,
-                    initial_cardinality.clone(),
-                    &describe_stream_fns(&stream.fns),
-                );
-
-                if let Some(name) = &stream.output_var {
-                    stream_vars.insert(name.clone(), initial_cardinality);
+            TypedExpression::StreamVariable(v) => {
+                let card = input_cardinality(&v.inp);
+                let mut current_card = card;
+                let mut var_exact_time = ExactComplexity::new();
+                let mut var_exact_space = ExactComplexity::new();
+                for f in &v.funs {
+                    let time_work = step_work_class(&current_card, &f.kind);
+                    var_exact_time.add_work(time_work, 1);
+                    let space_work = step_space_class(&current_card, &f.kind);
+                    var_exact_space.add_work(space_work, 1);
+                    current_card = propagate_cardinality(current_card, &f.kind);
                 }
-
-                streams.push(complexity);
-            }
-            TypedExpression::Connection(conn) => {
-                let initial_cardinality = stream_vars
-                    .get(&conn.source)
-                    .cloned()
-                    .unwrap_or(Symbolic::Unknown);
-
-                let complexity = analyze_stream_fns(
-                    &conn.fns,
-                    initial_cardinality,
-                    &describe_stream_fns(&conn.fns),
+                let space = var_exact_space.simplified().max(ComplexityClass::ON);
+                stream_vars.insert(
+                    v.variable_name.clone(),
+                    (current_card, space, var_exact_time, var_exact_space),
                 );
-
-                streams.push(complexity);
             }
+            TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
+                let (prior_card, prior_space, prior_exact_time, prior_exact_space) = stream_vars
+                    .get(&v.prior_stream_variable)
+                    .cloned()
+                    .unwrap_or((
+                        Symbolic::Unknown,
+                        ComplexityClass::Unknown,
+                        ExactComplexity::new(),
+                        ExactComplexity::new(),
+                    ));
+                let mut current_card = prior_card;
+                let mut var_exact_time = prior_exact_time;
+                let mut var_exact_space = prior_exact_space;
+                for f in &v.funs {
+                    let time_work = step_work_class(&current_card, &f.kind);
+                    var_exact_time.add_work(time_work, 1);
+                    let space_work = step_space_class(&current_card, &f.kind);
+                    var_exact_space.add_work(space_work, 1);
+                    current_card = propagate_cardinality(current_card, &f.kind);
+                }
+                let space = var_exact_space.simplified().max(prior_space);
+                stream_vars.insert(
+                    v.variable_name.clone(),
+                    (current_card, space, var_exact_time, var_exact_space),
+                );
+            }
+            _ => {}
         }
+    }
+
+    let mut streams = Vec::new();
+
+    for expr in expressions {
+        let sc = match expr {
+            TypedExpression::UnnamedReturningStream(s)
+            | TypedExpression::UnnamedNonReturningStream(s) => {
+                let card = input_cardinality(&s.inp_and_funs.inp);
+                let funs_desc = describe_stream_fns(&s.inp_and_funs.funs);
+                let out_desc = if s.out.returning {
+                    "return"
+                } else {
+                    "write_file(...)"
+                };
+                let desc = if funs_desc.is_empty() {
+                    format!("input.{out_desc}")
+                } else {
+                    format!("input.{funs_desc}.{out_desc}")
+                };
+                analyze_stream_fns(&s.inp_and_funs.funs, card, &desc)
+            }
+            TypedExpression::NamedReturningStream(s)
+            | TypedExpression::NamedNonReturningStream(s) => {
+                let (card, var_space, var_exact_time, var_exact_space) =
+                    stream_vars.get(&s.stream_variable).cloned().unwrap_or((
+                        Symbolic::Unknown,
+                        ComplexityClass::Unknown,
+                        ExactComplexity::new(),
+                        ExactComplexity::new(),
+                    ));
+                let funs_desc = describe_stream_fns(&s.funs);
+                let out_desc = if s.out.returning {
+                    "return"
+                } else {
+                    "write_file(...)"
+                };
+                let desc = if funs_desc.is_empty() {
+                    format!("{}.{out_desc}", s.stream_variable)
+                } else {
+                    format!("{}.{funs_desc}.{out_desc}", s.stream_variable)
+                };
+                let mut sc = analyze_stream_fns(&s.funs, card, &desc);
+                sc.exact_time.merge(&var_exact_time);
+                sc.time_class = sc.exact_time.simplified();
+                sc.exact_space.merge(&var_exact_space);
+                sc.space_class = sc.exact_space.simplified().max(var_space);
+                sc
+            }
+            _ => continue,
+        };
+
+        streams.push(sc);
     }
 
     ProgramComplexity { streams }
@@ -1066,7 +1111,12 @@ mod tests {
                 if i == j {
                     assert_eq!(classes[i], classes[j]);
                 } else {
-                    assert!(classes[i] < classes[j], "{:?} should be < {:?}", classes[i], classes[j]);
+                    assert!(
+                        classes[i] < classes[j],
+                        "{:?} should be < {:?}",
+                        classes[i],
+                        classes[j]
+                    );
                 }
             }
         }
@@ -1074,16 +1124,25 @@ mod tests {
 
     #[test]
     fn test_complexity_class_max() {
-        assert_eq!(ComplexityClass::ON.max(ComplexityClass::O1), ComplexityClass::ON);
-        assert_eq!(ComplexityClass::O1.max(ComplexityClass::ON), ComplexityClass::ON);
-        assert_eq!(ComplexityClass::ON.max(ComplexityClass::ON), ComplexityClass::ON);
+        assert_eq!(
+            ComplexityClass::ON.max(ComplexityClass::O1),
+            ComplexityClass::ON
+        );
+        assert_eq!(
+            ComplexityClass::O1.max(ComplexityClass::ON),
+            ComplexityClass::ON
+        );
+        assert_eq!(
+            ComplexityClass::ON.max(ComplexityClass::ON),
+            ComplexityClass::ON
+        );
     }
 
     #[test]
     fn test_serde_roundtrip() {
         let c = ComplexityClass::OPolynomial(3);
         let json = serde_json::to_string(&c).unwrap();
-        assert_eq!(json, r#""O(n^3)""");
+        assert_eq!(json, r#""O(n^3)""#);
         let parsed: ComplexityClass = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, c);
     }
@@ -1267,7 +1326,10 @@ mod tests {
     #[test]
     fn test_stream_with_map() {
         use crate::nodes::StreamFunctionNode;
-        let funs = vec![StreamFunctionNode { kind: StreamFunctionKind::Map }];
+        let funs = vec![StreamFunctionNode {
+            kind: StreamFunctionKind::Map,
+            code: String::new(),
+        }];
         let result = analyze_stream_fns(&funs, Symbolic::Unknown, "test");
         assert_eq!(result.time_class, ComplexityClass::Unknown);
     }
@@ -1275,9 +1337,10 @@ mod tests {
     #[test]
     fn test_collects_input_flag() {
         use crate::nodes::StreamFunctionNode;
-        let funs = vec![
-            StreamFunctionNode { kind: StreamFunctionKind::Permutations(2) },
-        ];
+        let funs = vec![StreamFunctionNode {
+            kind: StreamFunctionKind::Permutations(2),
+            code: String::new(),
+        }];
         let result = analyze_stream_fns(&funs, Symbolic::Unknown, "test");
         assert!(result.collects_input);
     }
@@ -1285,9 +1348,10 @@ mod tests {
     #[test]
     fn test_no_collect_for_map() {
         use crate::nodes::StreamFunctionNode;
-        let funs = vec![
-            StreamFunctionNode { kind: StreamFunctionKind::Map },
-        ];
+        let funs = vec![StreamFunctionNode {
+            kind: StreamFunctionKind::Map,
+            code: String::new(),
+        }];
         let result = analyze_stream_fns(&funs, Symbolic::Unknown, "test");
         assert!(!result.collects_input);
     }
@@ -1296,8 +1360,14 @@ mod tests {
     fn test_describe_stream_fns() {
         use crate::nodes::StreamFunctionNode;
         let funs = vec![
-            StreamFunctionNode { kind: StreamFunctionKind::Map },
-            StreamFunctionNode { kind: StreamFunctionKind::Filter },
+            StreamFunctionNode {
+                kind: StreamFunctionKind::Map,
+                code: String::new(),
+            },
+            StreamFunctionNode {
+                kind: StreamFunctionKind::Filter,
+                code: String::new(),
+            },
         ];
         let desc = describe_stream_fns(&funs);
         assert_eq!(desc, "map(...).filter(...)");
@@ -1323,7 +1393,10 @@ mod tests {
 
     #[test]
     fn test_cardinality_to_time_class_unknown() {
-        assert_eq!(cardinality_to_time_class(&Symbolic::Unknown), ComplexityClass::Unknown);
+        assert_eq!(
+            cardinality_to_time_class(&Symbolic::Unknown),
+            ComplexityClass::Unknown
+        );
     }
 
     #[test]
@@ -1407,7 +1480,7 @@ mod tests {
     fn test_cardinality_serde_roundtrip_exact() {
         let c = Cardinality::Exact(BigUint::from(42u64));
         let json = serde_json::to_string(&c).unwrap();
-        assert_eq!(json, r#""42""");
+        assert_eq!(json, r#""42""#);
         let parsed: Cardinality = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, c);
     }
@@ -1416,7 +1489,7 @@ mod tests {
     fn test_cardinality_serde_roundtrip_unknown() {
         let c = Cardinality::Unknown;
         let json = serde_json::to_string(&c).unwrap();
-        assert_eq!(json, r#""?""");
+        assert_eq!(json, r#""?""#);
         let parsed: Cardinality = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, c);
     }
@@ -1463,7 +1536,8 @@ mod tests {
             "min(100, 5)",
         ];
         for s in cases {
-            let sym = Symbolic::from_str(s).unwrap_or_else(|e| panic!("parse error for '{s}': {e}"));
+            let sym =
+                Symbolic::from_str(s).unwrap_or_else(|e| panic!("parse error for '{s}': {e}"));
             assert_eq!(sym.to_string(), s, "roundtrip failed for '{s}'");
         }
     }
@@ -1496,7 +1570,7 @@ mod tests {
             ("O(log(n))", ComplexityClass::OLogN),
             ("O(n)", ComplexityClass::ON),
             ("O(n!)", ComplexityClass::OFactorial),
-            ("O(?)" , ComplexityClass::Unknown),
+            ("O(?)", ComplexityClass::Unknown),
             ("O(n^2)", ComplexityClass::OPolynomial(2)),
             ("O(n*log(n))", ComplexityClass::ONLogN),
             ("O(n*log(3))", ComplexityClass::ONLogK(3)),
@@ -1528,12 +1602,11 @@ mod tests {
     #[test]
     fn test_stream_complexity_serde() {
         use crate::nodes::StreamFunctionNode;
-        let funs = vec![StreamFunctionNode { kind: StreamFunctionKind::Map }];
-        let sc = analyze_stream_fns(
-            &funs,
-            Symbolic::Constant(BigUint::from(100u64)),
-            "test",
-        );
+        let funs = vec![StreamFunctionNode {
+            kind: StreamFunctionKind::Map,
+            code: String::new(),
+        }];
+        let sc = analyze_stream_fns(&funs, Symbolic::Constant(BigUint::from(100u64)), "test");
         let json = serde_json::to_string(&sc).unwrap();
         let parsed: StreamComplexity = serde_json::from_str(&json).unwrap();
         assert_eq!(sc, parsed);
@@ -1612,8 +1685,14 @@ mod tests {
     fn test_analyze_stream_fns_description() {
         use crate::nodes::StreamFunctionNode;
         let funs = vec![
-            StreamFunctionNode { kind: StreamFunctionKind::Permutations(2) },
-            StreamFunctionNode { kind: StreamFunctionKind::Filter },
+            StreamFunctionNode {
+                kind: StreamFunctionKind::Permutations(2),
+                code: String::new(),
+            },
+            StreamFunctionNode {
+                kind: StreamFunctionKind::Filter,
+                code: String::new(),
+            },
         ];
         let result = analyze_stream_fns(&funs, Symbolic::Constant(BigUint::from(100u64)), "desc");
         assert_eq!(result.description, "desc");
@@ -1622,18 +1701,27 @@ mod tests {
     #[test]
     fn test_symbolic_classify_as_cardinality_exact() {
         let s = Symbolic::Constant(BigUint::from(5u64));
-        assert_eq!(s.classify_as_cardinality(), Cardinality::Exact(BigUint::from(5u64)));
+        assert_eq!(
+            s.classify_as_cardinality(),
+            Cardinality::Exact(BigUint::from(5u64))
+        );
     }
 
     #[test]
     fn test_symbolic_classify_as_cardinality_bounded() {
         let s = Symbolic::Filtered(Box::new(Symbolic::Constant(BigUint::from(100u64))));
-        assert!(matches!(s.classify_as_cardinality(), Cardinality::Bounded(_)));
+        assert!(matches!(
+            s.classify_as_cardinality(),
+            Cardinality::Bounded(_)
+        ));
     }
 
     #[test]
     fn test_symbolic_classify_as_cardinality_unknown() {
-        assert_eq!(Symbolic::Unknown.classify_as_cardinality(), Cardinality::Unknown);
+        assert_eq!(
+            Symbolic::Unknown.classify_as_cardinality(),
+            Cardinality::Unknown
+        );
     }
 
     #[test]
@@ -1812,20 +1900,15 @@ mod proptests {
         leaf.prop_recursive(4, 16, 4, |inner| {
             prop_oneof![
                 inner.clone().prop_map(|s| Symbolic::Filtered(Box::new(s))),
-                (inner.clone(), 1u64..5u64).prop_map(|(n, k)| Symbolic::Permutations {
-                    n: Box::new(n),
-                    k,
-                }),
+                (inner.clone(), 1u64..5u64)
+                    .prop_map(|(n, k)| Symbolic::Permutations { n: Box::new(n), k }),
                 (inner.clone(), 1u64..5u64).prop_map(|(n, k)| {
                     Symbolic::PermutationsWithReplacement { n: Box::new(n), k }
                 }),
-                (inner.clone(), 1u64..5u64).prop_map(|(n, k)| Symbolic::Combinations {
-                    n: Box::new(n),
-                    k,
-                }),
-                (inner.clone(), inner.clone()).prop_map(|(a, b)| {
-                    Symbolic::Min(Box::new(a), Box::new(b))
-                }),
+                (inner.clone(), 1u64..5u64)
+                    .prop_map(|(n, k)| Symbolic::Combinations { n: Box::new(n), k }),
+                (inner.clone(), inner.clone())
+                    .prop_map(|(a, b)| { Symbolic::Min(Box::new(a), Box::new(b)) }),
                 proptest::collection::vec(inner, 2..5).prop_map(Symbolic::Sum),
             ]
         })
