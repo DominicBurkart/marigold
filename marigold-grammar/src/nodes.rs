@@ -133,20 +133,24 @@ pub struct InputAndMaybeStreamFunctions {
 
 impl InputAndMaybeStreamFunctions {
     pub fn code(&self) -> String {
-        let inp = &self.inp.code;
-        match self.funs.len() {
-            0 => inp.to_string(),
-            _ => {
-                let intermediate = self
-                    .funs
-                    .iter()
-                    .map(|f| f.code.as_str())
-                    .collect::<Vec<_>>()
-                    .join(".");
-                format!("{inp}.{intermediate}")
-            }
-        }
+        format!("{}{}", self.inp.code, dot_chain(&self.funs))
     }
+}
+
+/// Builds a leading-dot chain like `.f1.f2.f3` from a slice of stream
+/// functions, or `""` when the slice is empty. Used to compose pipeline
+/// fragments onto an upstream expression (an input function, a stream
+/// variable's `.get()`, etc.).
+fn dot_chain(funs: &[StreamFunctionNode]) -> String {
+    if funs.is_empty() {
+        return String::new();
+    }
+    let mut s = String::new();
+    for f in funs {
+        s.push('.');
+        s.push_str(&f.code);
+    }
+    s
 }
 
 pub struct NamedStreamNode {
@@ -158,17 +162,7 @@ pub struct NamedStreamNode {
 impl NamedStreamNode {
     pub fn code(&self) -> String {
         let stream_variable = &self.stream_variable;
-        let intermediate = match self.funs.len() {
-            0 => "".to_string(),
-            _ => format!(
-                ".{}",
-                self.funs
-                    .iter()
-                    .map(|f| f.code.as_str())
-                    .collect::<Vec<_>>()
-                    .join(".")
-            ),
-        };
+        let intermediate = dot_chain(&self.funs);
         let stream_prefix = &self.out.stream_prefix;
         let stream_postfix = &self.out.stream_postfix;
         format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{stream_variable}.get(){intermediate}{stream_postfix}}}")
@@ -185,19 +179,7 @@ impl StreamVariableNode {
     pub fn declaration_code(&self) -> String {
         let variable_name = &self.variable_name;
         let inp = &self.inp.code;
-        let intermediate = match self.funs.len() {
-            0 => "".to_string(),
-            _ => {
-                format!(
-                    ".{}",
-                    self.funs
-                        .iter()
-                        .map(|f| f.code.as_str())
-                        .collect::<Vec<_>>()
-                        .join(".")
-                )
-            }
-        };
+        let intermediate = dot_chain(&self.funs);
         format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({inp}{intermediate})}};")
     }
 
@@ -222,19 +204,7 @@ impl StreamVariableFromPriorStreamVariableNode {
     pub fn declaration_code(&self) -> String {
         let variable_name = &self.variable_name;
         let prior_stream_variable = &self.prior_stream_variable;
-        let intermediate = match self.funs.len() {
-            0 => "".to_string(),
-            _ => {
-                format!(
-                    ".{}",
-                    self.funs
-                        .iter()
-                        .map(|f| f.code.as_str())
-                        .collect::<Vec<_>>()
-                        .join(".")
-                )
-            }
-        };
+        let intermediate = dot_chain(&self.funs);
         format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({prior_stream_variable}.get(){intermediate})}};")
     }
 

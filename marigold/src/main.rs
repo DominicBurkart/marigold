@@ -57,17 +57,13 @@ fn main() {
 fn get_file_name_argument(args: &Args) -> Option<String> {
     use MarigoldCommand::*;
 
-    match &args.command {
-        Some(Run {
-            unoptimized: _,
-            file,
-        }) => file.clone(),
-        Some(Install { file }) => file.clone(),
-        Some(Uninstall { file }) => file.clone(),
-        Some(Clean { file }) => file.clone(),
-        Some(Analyze { file }) => file.clone(),
-        Some(CleanAll) => None,
-        None => None,
+    match args.command.as_ref()? {
+        Run { file, .. }
+        | Install { file }
+        | Uninstall { file }
+        | Clean { file }
+        | Analyze { file } => file.clone(),
+        CleanAll => None,
     }
 }
 
