@@ -470,4 +470,271 @@ mod tests {
 
         let _ = fs::remove_dir_all(&tmp);
     }
+
+    /// Verify that `marigold analyze` exits successfully and emits valid JSON
+    /// with the complete shape of `ProgramComplexity` and its nested
+    /// `StreamComplexity` entry.
+    ///
+    /// `ProgramComplexity` has six top-level fields:
+    ///   streams, program_time, program_exact_time,
+    ///   program_space, program_exact_space, program_cardinality
+    ///
+    /// Each `StreamComplexity` entry has seven fields:
+    ///   description, cardinality, time_class, exact_time,
+    ///   space_class, exact_space, collects_input
+    ///
+    /// The program `range(0, 100).write_file("...", csv)` is a single-stream
+    /// pipeline, so `streams` must contain exactly one element.
+    ///
+    /// `ComplexityClass`, `ExactComplexity`, and `Cardinality` all implement
+    /// custom `Serialize` that calls `serialize_str`, so those fields must be
+    /// JSON strings (not objects or nulls).
+    #[test]
+    fn test_analyze_command() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("analyze");
+
+        // A simple valid Marigold program: range written to CSV (non-returning terminal).
+        // `analyze` only needs to parse and inspect the pipeline - it does not run it.
+        // We embed the path to a (not-yet-created) tmp file so the program text is valid;
+        // analyze never executes the pipeline, so the file does not need to exist.
+        let output_csv = tmp.join("analyze_output.csv");
+        let marigold_file = tmp.join("test_analyze.marigold");
+        fs::write(
+            &marigold_file,
+            format!(
+                r#"range(0, 100).write_file("{}", csv)"#,
+                output_csv.display()
+            ),
+        )
+        .expect("could not write test file");
+
+        let output = Command::new(&binary)
+            .args(["analyze", marigold_file.to_str().unwrap()])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .output()
+            .expect("could not run marigold analyze");
+
+        assert!(
+            output.status.success(),
+            "marigold analyze failed: stderr = {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8(output.stdout).expect("stdout was not valid UTF-8");
+
+        // The output must be valid JSON.
+        let json: serde_json::Value =
+            serde_json::from_str(&stdout).expect("analyze output was not valid JSON");
+
+        // --- Top-level ProgramComplexity fields ---
+
+        // streams: Vec<StreamComplexity>
+        assert!(
+            json.get("streams").is_some(),
+            "JSON output missing 'streams' field; got: {json}"
+        );
+        assert!(
+            json["streams"].is_array(),
+            "'streams' field should be a JSON array; got: {}",
+            json["streams"]
+        );
+        // Our single-pipeline program must produce exactly one stream entry.
+        assert_eq!(
+            json["streams"].as_array().unwrap().len(),
+            1,
+            "expected exactly 1 stream in analyze output; got: {json}"
+        );
+
+        // program_time: ComplexityClass (serializes as a string)
+        assert!(
+            json.get("program_time")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "JSON output missing or non-string 'program_time' field; got: {json}"
+        );
+
+        // program_exact_time: ExactComplexity (serializes as a string)
+        assert!(
+            json.get("program_exact_time")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "JSON output missing or non-string 'program_exact_time' field; got: {json}"
+        );
+
+        // program_space: ComplexityClass (serializes as a string)
+        assert!(
+            json.get("program_space")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "JSON output missing or non-string 'program_space' field; got: {json}"
+        );
+
+        // program_exact_space: ExactComplexity (serializes as a string)
+        assert!(
+            json.get("program_exact_space")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "JSON output missing or non-string 'program_exact_space' field; got: {json}"
+        );
+
+        // program_cardinality: Cardinality (serializes as a string)
+        assert!(
+            json.get("program_cardinality")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "JSON output missing or non-string 'program_cardinality' field; got: {json}"
+        );
+
+        // --- StreamComplexity fields for the single stream entry ---
+
+        let stream = &json["streams"][0];
+
+        // description: String
+        assert!(
+            stream
+                .get("description")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "stream entry missing string 'description' field; got: {stream}"
+        );
+
+        // cardinality: Cardinality (serializes as a string)
+        assert!(
+            stream
+                .get("cardinality")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "stream entry missing or non-string 'cardinality' field; got: {stream}"
+        );
+
+        // time_class: ComplexityClass (serializes as a string)
+        assert!(
+            stream
+                .get("time_class")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "stream entry missing or non-string 'time_class' field; got: {stream}"
+        );
+
+        // exact_time: ExactComplexity (serializes as a string)
+        assert!(
+            stream
+                .get("exact_time")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "stream entry missing or non-string 'exact_time' field; got: {stream}"
+        );
+
+        // space_class: ComplexityClass (serializes as a string)
+        assert!(
+            stream
+                .get("space_class")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "stream entry missing or non-string 'space_class' field; got: {stream}"
+        );
+
+        // exact_space: ExactComplexity (serializes as a string)
+        assert!(
+            stream
+                .get("exact_space")
+                .map(|v| v.is_string())
+                .unwrap_or(false),
+            "stream entry missing or non-string 'exact_space' field; got: {stream}"
+        );
+
+        // collects_input: bool
+        assert!(
+            stream
+                .get("collects_input")
+                .map(|v| v.is_boolean())
+                .unwrap_or(false),
+            "stream entry missing boolean 'collects_input' field; got: {stream}"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Verify that `marigold analyze` exits with a non-zero status code when
+    /// given a syntactically invalid program, and emits a parse-error message
+    /// on stderr.
+    ///
+    /// Using `.output()` (rather than `.status()`) lets us inspect stderr and
+    /// confirm that the failure is actually a parse error, not some unrelated
+    /// reason (missing workspace path, I/O error, etc.).
+    #[test]
+    fn test_analyze_command_rejects_invalid_program() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("analyze_invalid");
+
+        let marigold_file = tmp.join("invalid.marigold");
+        // Missing closing paren - parser should reject this.
+        fs::write(&marigold_file, "range(0, 10").expect("could not write test file");
+
+        let output = Command::new(&binary)
+            .args(["analyze", marigold_file.to_str().unwrap()])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .output()
+            .expect("could not run marigold analyze");
+
+        assert!(
+            !output.status.success(),
+            "marigold analyze should fail on invalid input but exited with success"
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Parse error"),
+            "expected stderr to contain 'Parse error', got: {stderr:?}"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Verify that `marigold run` correctly writes a CSV file and that the
+    /// Writer produces the expected newline-separated output format.
+    ///
+    /// This is the primary integration test for `writer.rs`: it exercises the
+    /// full path from Marigold DSL -> compiled Rust -> `Writer::file` -> disk.
+    #[test]
+    fn test_write_file_csv_round_trip() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("writer_csv");
+        let csv_file = tmp.join("output.csv");
+
+        // Write integers 0..5 to a CSV file.
+        let marigold_file = tmp.join("writer_test.marigold");
+        fs::write(
+            &marigold_file,
+            format!(r#"range(0, 5).write_file("{}", csv)"#, csv_file.display()),
+        )
+        .expect("could not write marigold program");
+
+        let status = Command::new(&binary)
+            .args(["run", marigold_file.to_str().unwrap()])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold");
+
+        assert!(status.success(), "marigold run failed for writer test");
+
+        // Verify the CSV was created.
+        assert!(
+            csv_file.exists(),
+            "CSV output file was not created by write_file"
+        );
+
+        // Verify content: each integer on its own line, no trailing garbage.
+        let content = fs::read_to_string(&csv_file).expect("could not read CSV output");
+        assert_eq!(
+            content, "0\n1\n2\n3\n4\n",
+            "CSV file content did not match expected output"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }
