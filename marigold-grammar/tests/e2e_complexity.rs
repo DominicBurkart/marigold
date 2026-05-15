@@ -88,7 +88,10 @@ fn assumes_o1_user_fns_serde_roundtrip_true() {
 fn assumes_o1_user_fns_serde_roundtrip_false() {
     // Confirms that the normal round-trip (field present, value false) also works correctly.
     let result = analyze_file("tests/programs/no_fn_decl.marigold");
-    assert!(!result.assumes_o1_user_fns, "precondition: flag must be false");
+    assert!(
+        !result.assumes_o1_user_fns,
+        "precondition: flag must be false"
+    );
     let json = serde_json::to_string(&result).expect("serialize");
     let deserialized: marigold_grammar::complexity::ProgramComplexity =
         serde_json::from_str(&json).expect("deserialize");
