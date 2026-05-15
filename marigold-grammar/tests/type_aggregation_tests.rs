@@ -11,7 +11,7 @@ fn select_all_aggregates_input_counts() {
     // 10 + 20 = 30
     let cardinality = &result.program_cardinality;
     assert_eq!(
-        format!("{}", cardinality),
+        cardinality.to_string(),
         "30",
         "select_all should aggregate input counts"
     );
@@ -21,12 +21,12 @@ fn select_all_aggregates_input_counts() {
 fn single_range_cardinality() {
     let source = "range(0, 50).return";
     let result = marigold_grammar::marigold_analyze(source).unwrap();
-    assert_eq!(format!("{}", result.program_cardinality), "50");
+    assert_eq!(result.program_cardinality.to_string(), "50");
 }
 
 #[test]
 fn chained_map_preserves_cardinality() {
     let source = "range(0, 10).map(double).map(inc).return";
     let result = marigold_grammar::marigold_analyze(source).unwrap();
-    assert_eq!(format!("{}", result.program_cardinality), "10");
+    assert_eq!(result.program_cardinality.to_string(), "10");
 }

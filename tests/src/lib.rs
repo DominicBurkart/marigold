@@ -1,6 +1,22 @@
 #[cfg(test)]
 mod oracle;
 
+/// Compile-fail tests: verify that invalid Marigold DSL emits `compile_error!`
+/// diagnostics instead of panicking at the proc-macro layer.
+///
+/// All `.compile_fail()` calls must share a single `TestCases` instance within
+/// a single `#[test]` function — trybuild panics if a second `TestCases::new()`
+/// is created while another test is still running.
+#[cfg(test)]
+mod compile_fail_tests {
+    #[test]
+    fn ui() {
+        let t = trybuild::TestCases::new();
+        t.compile_fail("ui/bad_syntax.rs");
+        t.compile_fail("ui/range_unknown_enum.rs");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use marigold::m;
@@ -221,8 +237,6 @@ mod tests {
         .await;
         assert_eq!(result, vec![0, 1, 2, 3]);
     }
-
-    // --- New tests below ---
 
     #[tokio::test]
     async fn test_empty_range() {
