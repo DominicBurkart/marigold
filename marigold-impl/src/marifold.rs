@@ -50,4 +50,43 @@ mod tests {
             vec![10]
         );
     }
+
+    #[tokio::test]
+    async fn fold_empty_stream() {
+        // Folding an empty stream should return the init value.
+        assert_eq!(
+            futures::stream::iter(std::iter::empty::<u64>())
+                .marifold(42_u64, |acc, x| async move { acc + x })
+                .await
+                .collect::<Vec<u64>>()
+                .await,
+            vec![42]
+        );
+    }
+
+    #[tokio::test]
+    async fn fold_single_element() {
+        // Folding a single element should apply f once.
+        assert_eq!(
+            futures::stream::iter(vec![7_u32])
+                .marifold(3_u32, |acc, x| async move { acc + x })
+                .await
+                .collect::<Vec<u32>>()
+                .await,
+            vec![10]
+        );
+    }
+
+    #[tokio::test]
+    async fn fold_large_accumulation() {
+        // Sum 0..=100 = 5050
+        assert_eq!(
+            futures::stream::iter(0_u64..=100_u64)
+                .marifold(0_u64, |acc, x| async move { acc + x })
+                .await
+                .collect::<Vec<u64>>()
+                .await,
+            vec![5050]
+        );
+    }
 }
