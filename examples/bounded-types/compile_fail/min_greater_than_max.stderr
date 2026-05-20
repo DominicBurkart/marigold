@@ -19,5 +19,5 @@ error[E0282]: type annotations needed
  7 | |         struct Sensor {
  8 | |             reading: int[100, 0]
 ...  |
-12 |     .await
-   | __________^ cannot infer type
+12 | |     .await
+   | |__________^ cannot infer type
