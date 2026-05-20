@@ -59,3 +59,69 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_writer_write_flush_shutdown() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"hello world").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_empty_write() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_multiple_writes() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"first ").await.unwrap();
+        writer.write_all(b"second").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_writer_write_flush_shutdown() {
+        let path = std::env::temp_dir().join(format!(
+            "marigold_writer_test_{}.txt",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut writer = Writer::file(file);
+        writer.write_all(b"test data").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+        tokio::fs::remove_file(&path).await.ok();
+    }
+
+    #[tokio::test]
+    async fn file_writer_multiple_writes() {
+        let path = std::env::temp_dir().join(format!(
+            "marigold_writer_multi_{}.txt",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut writer = Writer::file(file);
+        writer.write_all(b"line1\n").await.unwrap();
+        writer.write_all(b"line2\n").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+        tokio::fs::remove_file(&path).await.ok();
+    }
+}
