@@ -53,6 +53,75 @@ fn main() {
     eprintln!("Marigold needs to be installed with the cli feature (`cargo install --force marigold -F cli`)");
 }
 
+/// Resolves the directory used to cache generated Cargo projects.
+///
+/// The cache holds ephemeral, regenerable build artifacts, so it lives in the
+/// OS-conventional cache location rather than the user's home directory.
+///
+/// Resolution order:
+/// - If the `MARIGOLD_CACHE_DIR` environment variable is set, its value is
+///   returned verbatim. This is the supported override for power users and is
+///   also how the test suite isolates runs.
+/// - On Linux/BSD: `$XDG_CACHE_HOME/marigold` when `XDG_CACHE_HOME` is set and
+///   absolute, otherwise `~/.cache/marigold`.
+/// - On macOS: `~/Library/Caches/marigold`.
+/// - On Windows: `%LOCALAPPDATA%\marigold\cache`, falling back to
+///   `~\AppData\Local\marigold\cache` when `LOCALAPPDATA` is unset.
+///
+/// Returns an error (rather than panicking) when no directory can be resolved.
+#[cfg(feature = "cli")]
+fn resolve_cache_dir() -> anyhow::Result<std::path::PathBuf> {
+    use std::path::PathBuf;
+
+    if let Some(dir) = std::env::var_os("MARIGOLD_CACHE_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let base = match std::env::var_os("XDG_CACHE_HOME") {
+            Some(value) if std::path::Path::new(&value).is_absolute() => PathBuf::from(value),
+            _ => home::home_dir()
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "could not resolve marigold cache directory: \
+                         neither XDG_CACHE_HOME nor a home directory is available"
+                    )
+                })?
+                .join(".cache"),
+        };
+        Ok(base.join("marigold"))
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = home::home_dir().ok_or_else(|| {
+            anyhow::anyhow!(
+                "could not resolve marigold cache directory: \
+                 user's home directory is not available"
+            )
+        })?;
+        Ok(home.join("Library").join("Caches").join("marigold"))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let base = match std::env::var_os("LOCALAPPDATA") {
+            Some(value) => PathBuf::from(value),
+            None => home::home_dir()
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "could not resolve marigold cache directory: \
+                         neither LOCALAPPDATA nor a home directory is available"
+                    )
+                })?
+                .join("AppData")
+                .join("Local"),
+        };
+        Ok(base.join("marigold").join("cache"))
+    }
+}
+
 #[cfg(feature = "cli")]
 fn get_file_name_argument(args: &Args) -> Option<String> {
     use MarigoldCommand::*;
@@ -84,9 +153,7 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let marigold_cache_directory = home::home_dir()
-        .expect("could not locate user's home directory for marigold cache")
-        .join(".marigold");
+    let marigold_cache_directory = resolve_cache_dir()?;
 
     let file_name_argument = get_file_name_argument(&args);
 
@@ -136,7 +203,11 @@ fn main() -> Result<()> {
                     .unwrap_or(0),
             ),
             Clean { file: _ } => {
-                std::fs::remove_dir_all(&program_project_dir)?;
+                // Treat an already-absent cache dir as success so that
+                // `clean` is idempotent and resilient to prior cache loss.
+                if program_project_dir.exists() {
+                    std::fs::remove_dir_all(&program_project_dir)?;
+                }
                 std::process::exit(0);
             }
             CleanAll => {
@@ -166,6 +237,10 @@ fn main() -> Result<()> {
 
     let program_src_dir = program_project_dir.join("src");
 
+    // Recreate the source directory on every run. `create_dir_all` is a no-op
+    // when the directory already exists, so this self-heals after a full cache
+    // loss (the entire cache dir was deleted) or a partial loss (the project's
+    // `src/` directory was removed) without erroring.
     std::fs::create_dir_all(&program_src_dir)?;
 
     let program_contents = match file_name_argument {
@@ -304,6 +379,7 @@ mod tests {
     fn test_run() {
         let binary = &*BINARY;
         let tmp = create_temp_dir("run");
+        let cache_dir = tmp.join("cache");
         let csv_file = tmp.join("test_run.csv");
 
         let marigold_file = tmp.join("test_run.marigold");
@@ -313,9 +389,9 @@ mod tests {
         )
         .expect("could not write test file");
 
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
-            .env("HOME", &tmp)
+            .env("MARIGOLD_CACHE_DIR", &cache_dir)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold command");
@@ -333,6 +409,7 @@ mod tests {
     fn test_install_and_uninstall() {
         let binary = &*BINARY;
         let tmp = create_temp_dir("install");
+        let cache_dir = tmp.join("cache");
         let install_root = tmp.join("cargo_root");
         fs::create_dir_all(&install_root).expect("could not create install root");
 
@@ -345,9 +422,9 @@ mod tests {
         .expect("could not write test file");
 
         // Install the marigold program as a binary
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["install", marigold_file.to_str().unwrap()])
-            .env("HOME", &tmp)
+            .env("MARIGOLD_CACHE_DIR", &cache_dir)
             .env("CARGO_INSTALL_ROOT", &install_root)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
@@ -371,9 +448,9 @@ mod tests {
         );
 
         // Uninstall
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["uninstall", marigold_file.to_str().unwrap()])
-            .env("HOME", &tmp)
+            .env("MARIGOLD_CACHE_DIR", &cache_dir)
             .env("CARGO_INSTALL_ROOT", &install_root)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
@@ -391,6 +468,7 @@ mod tests {
     fn test_clean() {
         let binary = &*BINARY;
         let tmp = create_temp_dir("clean");
+        let cache_dir = tmp.join("cache");
         let csv_file = tmp.join("test_clean.csv");
 
         let marigold_file = tmp.join("test_clean.marigold");
@@ -401,29 +479,54 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create cache
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
-            .env("HOME", &tmp)
+            .env("MARIGOLD_CACHE_DIR", &cache_dir)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        let cache_dir = tmp.join(".marigold/test_clean");
-        assert!(cache_dir.exists(), "cache should exist after run");
+        let program_dir = cache_dir.join("test_clean");
+        assert!(program_dir.exists(), "cache should exist after run");
 
         // Clean
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["clean", marigold_file.to_str().unwrap()])
-            .env("HOME", &tmp)
+            .env("MARIGOLD_CACHE_DIR", &cache_dir)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold clean");
         assert!(status.success(), "marigold clean failed");
 
         assert!(
-            !cache_dir.exists(),
+            !program_dir.exists(),
             "cache dir should be removed after clean"
+        );
+
+        // `clean` is idempotent: cleaning an already-absent project succeeds.
+        let status = Command::new(binary)
+            .args(["clean", marigold_file.to_str().unwrap()])
+            .env("MARIGOLD_CACHE_DIR", &cache_dir)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold clean");
+        assert!(
+            status.success(),
+            "marigold clean should succeed on an absent cache"
+        );
+
+        // A `run` after `clean` recreates the cache cleanly.
+        let status = Command::new(binary)
+            .args(["run", marigold_file.to_str().unwrap()])
+            .env("MARIGOLD_CACHE_DIR", &cache_dir)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold");
+        assert!(status.success(), "marigold run after clean failed");
+        assert!(
+            program_dir.exists(),
+            "cache should be recreated after run following clean"
         );
 
         let _ = fs::remove_dir_all(&tmp);
@@ -433,6 +536,7 @@ mod tests {
     fn test_clean_all() {
         let binary = &*BINARY;
         let tmp = create_temp_dir("clean_all");
+        let cache_dir = tmp.join("cache");
         let csv_file = tmp.join("test_clean_all.csv");
 
         let marigold_file = tmp.join("test_clean_all.marigold");
@@ -443,29 +547,227 @@ mod tests {
         .expect("could not write test file");
 
         // Run first to create cache
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["run", marigold_file.to_str().unwrap()])
-            .env("HOME", &tmp)
+            .env("MARIGOLD_CACHE_DIR", &cache_dir)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold");
         assert!(status.success(), "marigold run failed");
 
-        let cache_root = tmp.join(".marigold");
-        assert!(cache_root.exists(), "cache should exist after run");
+        assert!(cache_dir.exists(), "cache should exist after run");
 
         // Clean all
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(["clean-all"])
-            .env("HOME", &tmp)
+            .env("MARIGOLD_CACHE_DIR", &cache_dir)
             .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
             .status()
             .expect("could not run marigold clean-all");
         assert!(status.success(), "marigold clean-all failed");
 
         assert!(
-            !cache_root.exists(),
-            "entire cache should be removed after clean-all"
+            !cache_dir.exists(),
+            "the resolved marigold cache dir should be removed after clean-all"
+        );
+        // `clean-all` removes only the resolved cache dir, not its parent.
+        assert!(
+            tmp.exists(),
+            "clean-all must not remove the parent of the cache dir"
+        );
+
+        // A `run` after `clean-all` recreates the cache cleanly.
+        let status = Command::new(binary)
+            .args(["run", marigold_file.to_str().unwrap()])
+            .env("MARIGOLD_CACHE_DIR", &cache_dir)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold");
+        assert!(status.success(), "marigold run after clean-all failed");
+        assert!(
+            cache_dir.join("test_clean_all").exists(),
+            "cache should be recreated after run following clean-all"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_cache_dir_env_override() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("cache_override");
+        // The cache dir is nested so we can prove nothing is written outside it.
+        let cache_dir = tmp.join("custom").join("cache");
+        let csv_file = tmp.join("test_cache_override.csv");
+
+        let marigold_file = tmp.join("test_cache_override.marigold");
+        fs::write(
+            &marigold_file,
+            format!(r#"range(0, 3).write_file("{}", csv)"#, csv_file.display()),
+        )
+        .expect("could not write test file");
+
+        let status = Command::new(binary)
+            .args(["run", marigold_file.to_str().unwrap()])
+            .env("MARIGOLD_CACHE_DIR", &cache_dir)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold command");
+        assert!(status.success(), "marigold run failed");
+
+        let program_dir = cache_dir.join("test_cache_override");
+        assert!(
+            program_dir.join("Cargo.toml").exists(),
+            "generated project should live under MARIGOLD_CACHE_DIR"
+        );
+        assert!(
+            program_dir.join("src").join("main.rs").exists(),
+            "generated source should live under MARIGOLD_CACHE_DIR"
+        );
+        // Nothing should be written to a `.marigold` dir or anywhere else.
+        assert!(
+            !tmp.join(".marigold").exists(),
+            "marigold must not fall back to a ~/.marigold directory"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_cache_recreated_after_full_loss() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("full_loss");
+        let cache_dir = tmp.join("cache");
+        let csv_file = tmp.join("test_full_loss.csv");
+
+        let marigold_file = tmp.join("test_full_loss.marigold");
+        fs::write(
+            &marigold_file,
+            format!(r#"range(0, 3).write_file("{}", csv)"#, csv_file.display()),
+        )
+        .expect("could not write test file");
+
+        let run = || {
+            Command::new(binary)
+                .args(["run", marigold_file.to_str().unwrap()])
+                .env("MARIGOLD_CACHE_DIR", &cache_dir)
+                .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+                .status()
+                .expect("could not run marigold command")
+        };
+
+        // First run populates the cache.
+        assert!(run().success(), "initial marigold run failed");
+        assert!(cache_dir.exists(), "cache should exist after first run");
+
+        // Simulate full cache loss (e.g. OS cleared the temp/cache dir).
+        fs::remove_dir_all(&cache_dir).expect("could not remove cache dir");
+        assert!(!cache_dir.exists(), "cache dir should be gone");
+
+        // The next run must transparently recreate the cache.
+        assert!(run().success(), "marigold run after full cache loss failed");
+        assert!(
+            cache_dir.join("test_full_loss").join("Cargo.toml").exists(),
+            "cache should be recreated after full loss"
+        );
+        assert_eq!(
+            fs::read_to_string(&csv_file).expect("could not read CSV"),
+            "0\n1\n2\n"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_run_recovers_from_partial_cache_loss() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("partial_loss");
+        let cache_dir = tmp.join("cache");
+        let csv_file = tmp.join("test_partial_loss.csv");
+
+        let marigold_file = tmp.join("test_partial_loss.marigold");
+        fs::write(
+            &marigold_file,
+            format!(r#"range(0, 3).write_file("{}", csv)"#, csv_file.display()),
+        )
+        .expect("could not write test file");
+
+        let run = || {
+            Command::new(binary)
+                .args(["run", marigold_file.to_str().unwrap()])
+                .env("MARIGOLD_CACHE_DIR", &cache_dir)
+                .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+                .status()
+                .expect("could not run marigold command")
+        };
+
+        // First run populates the cache.
+        assert!(run().success(), "initial marigold run failed");
+
+        let program_dir = cache_dir.join("test_partial_loss");
+        let generated_main = program_dir.join("src").join("main.rs");
+        let manifest = program_dir.join("Cargo.toml");
+
+        // Partial loss: the generated source file is deleted.
+        fs::remove_file(&generated_main).expect("could not remove generated main.rs");
+        assert!(!generated_main.exists());
+        assert!(
+            run().success(),
+            "marigold run after losing src/main.rs failed"
+        );
+        assert!(generated_main.exists(), "src/main.rs should be regenerated");
+
+        // Partial loss: the whole src/ directory is deleted.
+        fs::remove_dir_all(program_dir.join("src")).expect("could not remove src dir");
+        assert!(run().success(), "marigold run after losing src/ dir failed");
+        assert!(generated_main.exists(), "src/ should be regenerated");
+
+        // Partial loss: the manifest is deleted.
+        fs::remove_file(&manifest).expect("could not remove Cargo.toml");
+        assert!(!manifest.exists());
+        assert!(
+            run().success(),
+            "marigold run after losing Cargo.toml failed"
+        );
+        assert!(manifest.exists(), "Cargo.toml should be regenerated");
+        assert_eq!(
+            fs::read_to_string(&csv_file).expect("could not read CSV"),
+            "0\n1\n2\n"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// On Linux/BSD, with no override set, the cache must land under
+    /// `$XDG_CACHE_HOME/marigold`.
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[test]
+    fn test_default_cache_dir_uses_xdg() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("xdg");
+        let xdg_cache_home = tmp.join("xdg_cache");
+        let csv_file = tmp.join("test_xdg.csv");
+
+        let marigold_file = tmp.join("test_xdg.marigold");
+        fs::write(
+            &marigold_file,
+            format!(r#"range(0, 3).write_file("{}", csv)"#, csv_file.display()),
+        )
+        .expect("could not write test file");
+
+        let status = Command::new(binary)
+            .args(["run", marigold_file.to_str().unwrap()])
+            .env_remove("MARIGOLD_CACHE_DIR")
+            .env("XDG_CACHE_HOME", &xdg_cache_home)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .status()
+            .expect("could not run marigold command");
+        assert!(status.success(), "marigold run failed");
+
+        let expected = xdg_cache_home.join("marigold").join("test_xdg");
+        assert!(
+            expected.join("Cargo.toml").exists(),
+            "generated project should live under $XDG_CACHE_HOME/marigold"
         );
 
         let _ = fs::remove_dir_all(&tmp);
