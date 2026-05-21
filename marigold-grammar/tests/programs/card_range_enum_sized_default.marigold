@@ -1,0 +1,6 @@
+enum Color {
+    Red = "red",
+    Green = "green",
+    default Other(string_64),
+}
+range(Color).return
