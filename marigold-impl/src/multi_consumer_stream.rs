@@ -10,6 +10,9 @@ use futures::stream::StreamExt;
 use futures::task::Context;
 use futures::task::Poll;
 
+// Buffer size of 1 creates back-pressure: the driver won't read the next item from the inner
+// stream until every consumer has accepted the current one. This keeps memory usage O(consumers)
+// rather than O(stream_length) at the cost of throughput when consumers lag.
 const BUFFER_SIZE: usize = 1;
 
 pub struct MultiConsumerStream<
