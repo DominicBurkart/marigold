@@ -155,6 +155,47 @@ fn map_reports_o1_space() {
 }
 
 #[test]
+fn take_while_reports_o1_space() {
+    // card_take_while.marigold: range(0, 10).take_while(less_than_4).return
+    // The input range is compile-time-constant (10 elements), so the take_while
+    // step's work is classified O(1) via the constant-input early return (see
+    // multi_consumer). Space is always O(1) because take_while does not buffer.
+    let result = analyze_file("tests/programs/card_take_while.marigold");
+    assert_eq!(result.streams.len(), 1);
+    assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
+    assert_eq!(
+        result.streams[0].exact_space,
+        ExactComplexity::from_str("O(1)").unwrap()
+    );
+    assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
+}
+
+#[test]
+fn take_while_pipeline() {
+    // Shares the `take_while_with_map.marigold` fixture with the cardinality harness
+    // (`take_while_then_map` in e2e_cardinality.rs). A single fixture eliminates the
+    // drift risk that two byte-identical files would create.
+    // take_while_with_map.marigold: range(0, 10).take_while(less_than_4).map(double).return
+    // - range(0, 10): constant cardinality → O(1)
+    // - take_while(..): constant input cardinality → classified O(1) via the early
+    //   return, but output is Symbolic::Filtered (take_while's stopping point is not
+    //   known at compile time)
+    // - map(..): input is Filtered (try_evaluate == None), so classified O(n)
+    // Total exact_time terms: {O(1): 1, O(n): 1} which renders as "O(n)" (the O(1)
+    // term is hidden when a higher-class term is present).
+    let result = analyze_file("tests/programs/take_while_with_map.marigold");
+    assert_eq!(result.streams.len(), 1);
+    assert_eq!(result.streams[0].time_class, ComplexityClass::ON);
+    assert_eq!(result.streams[0].exact_time.to_string(), "O(n)");
+    assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
+    // exact_space is O(2) because both take_while and map each contribute O(1)
+    assert_eq!(
+        result.streams[0].exact_space,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+}
+
+#[test]
 fn chained_maps() {
     let result = analyze_file("tests/programs/chained_maps.marigold");
     assert_eq!(result.streams.len(), 1);
