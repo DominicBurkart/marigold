@@ -6,15 +6,15 @@
 [![lines of code](https://raw.githubusercontent.com/DominicBurkart/marigold/main/development_metadata/badges/lines_of_code.svg)](https://github.com/DominicBurkart/marigold)
 [![contributors](https://raw.githubusercontent.com/DominicBurkart/marigold/main/development_metadata/badges/contributors.svg)](https://github.com/DominicBurkart/marigold/graphs/contributors)
 [![bench](https://github.com/DominicBurkart/marigold/workflows/bench/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/bench.yaml)
-[![codecov](https://codecov.io/gh/DominicBurkart/nanna-coder/graph/badge.svg?token=47S7xzd3Ny)](https://codecov.io/gh/DominicBurkart/nanna-coder)
+[![codecov](https://codecov.io/gh/DominicBurkart/marigold/graph/badge.svg)](https://codecov.io/gh/DominicBurkart/marigold)
 [![tests](https://github.com/DominicBurkart/marigold/workflows/tests/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/tests.yaml)
 [![style](https://github.com/DominicBurkart/marigold/workflows/style/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/style.yaml)
 [![wasm](https://github.com/DominicBurkart/marigold/workflows/wasm/badge.svg)](https://github.com/DominicBurkart/marigold/actions/workflows/wasm.yaml)
 [![last commit](https://img.shields.io/github/last-commit/dominicburkart/marigold)](https://github.com/DominicBurkart/marigold)
 
 Marigold is an imperative, domain-specific language for data pipelining and
-analysis using async streams. It can be used as a standalone language or within
-Rust programs.
+analysis over async streams. It can be used as a standalone language or
+embedded in Rust programs via a macro.
 
 ```rust
 use marigold::m;
@@ -36,17 +36,19 @@ println!("{:?}", odd_digits); // [1, 3, 5, 7, 9]
 
 ### Install
 
+Via the install script:
+
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/DominicBurkart/marigold/main/install.sh | sh
 ```
 
-Or via cargo:
+Via cargo:
 
 ```sh
 cargo install marigold -F cli
 ```
 
-Or from source:
+From source:
 
 ```sh
 git clone https://github.com/DominicBurkart/marigold.git
@@ -54,7 +56,7 @@ cd marigold
 cargo install --path marigold -F cli
 ```
 
-### Hello World
+### Hello world
 
 Create `hello_world.marigold`:
 
@@ -78,9 +80,9 @@ Output:
 4
 ```
 
-### Static Analysis
+### Static analysis
 
-Marigold can statically analyze your program's complexity:
+Marigold can statically analyze a program's complexity:
 
 ```sh
 marigold analyze hello_world.marigold
@@ -109,14 +111,13 @@ marigold analyze hello_world.marigold
 
 ## Runtimes
 
-By default, Marigold works in a single future and can work with any runtime.
+By default, Marigold runs inside a single future and works with any async
+runtime. Enabling the `tokio` or `async-std` feature lets Marigold spawn
+additional tasks so pipelines can run in parallel on multithreaded runtimes.
 
-The `tokio` and `async-std` features allow Marigold to spawn additional tasks,
-enabling parallelism for multithreaded runtimes.
-
-Marigold supports async tracing, e.g. with tokio-console.
+Async tracing is supported (for example, via `tokio-console`).
 
 ## Platforms
 
-Marigold's CI builds against aarch64, arm, WASM, and x86 targets, and builds
-the x86 target in mac and windows environments.
+CI builds Marigold for aarch64, arm, WASM, and x86 targets, and additionally
+builds the x86 target on macOS and Windows.
