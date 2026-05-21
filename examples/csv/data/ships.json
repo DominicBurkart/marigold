@@ -1,0 +1,5 @@
+[
+  {"class": "Deadalus", "hull": "spherical"},
+  {"class": "Oberth", "hull": "split"},
+  {"class": "Olympic", "hull": "spherical"}
+]

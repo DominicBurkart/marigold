@@ -46,3 +46,7 @@ pub use tokio_util::compat::TokioAsyncReadCompatExt;
 pub use tokio_util::compat::TokioAsyncWriteCompatExt;
 #[cfg(feature = "io")]
 pub mod writer;
+#[cfg(feature = "io")]
+pub use serde_json;
+#[cfg(feature = "io")]
+pub mod json_io;
