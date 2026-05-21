@@ -40,13 +40,6 @@
 use crate::nodes::{BoundExpr, EnumDeclarationNode, StructDeclarationNode, Type, TypedExpression};
 use std::collections::HashMap;
 
-/// Information about an enum type.
-#[derive(Debug, Clone)]
-pub struct EnumInfo {
-    pub name: String,
-    pub variant_count: usize,
-}
-
 #[derive(Debug, Clone)]
 pub struct BoundedFieldInfo {
     pub struct_name: String,
@@ -58,7 +51,7 @@ pub struct BoundedFieldInfo {
 
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
-    enums: HashMap<String, EnumInfo>,
+    enums: HashMap<String, usize>,
     bounded_fields: Vec<BoundedFieldInfo>,
 }
 
@@ -91,13 +84,7 @@ impl SymbolTable {
             variant_count += 1;
         }
 
-        self.enums.insert(
-            enum_node.name.clone(),
-            EnumInfo {
-                name: enum_node.name.clone(),
-                variant_count,
-            },
-        );
+        self.enums.insert(enum_node.name.clone(), variant_count);
     }
 
     fn add_struct_bounded_fields(&mut self, struct_node: &StructDeclarationNode) {
@@ -127,11 +114,7 @@ impl SymbolTable {
     }
 
     pub fn get_enum_len(&self, name: &str) -> Option<usize> {
-        self.enums.get(name).map(|info| info.variant_count)
-    }
-
-    pub fn get_enum_info(&self, name: &str) -> Option<&EnumInfo> {
-        self.enums.get(name)
+        self.enums.get(name).copied()
     }
 
     pub fn get_bounded_fields(&self) -> &[BoundedFieldInfo] {
@@ -140,10 +123,6 @@ impl SymbolTable {
 
     pub fn has_bounded_types(&self) -> bool {
         !self.bounded_fields.is_empty()
-    }
-
-    pub fn enum_names(&self) -> impl Iterator<Item = &String> {
-        self.enums.keys()
     }
 }
 
@@ -280,22 +259,5 @@ mod tests {
         assert_eq!(table.get_enum_len("Color"), Some(3));
         assert_eq!(table.get_enum_len("Size"), Some(5));
         assert!(table.has_bounded_types());
-    }
-
-    #[test]
-    fn test_symbol_table_enum_names_iterator() {
-        let enum1 = create_enum_node("Alpha", 2, false);
-        let enum2 = create_enum_node("Beta", 3, false);
-
-        let exprs = vec![
-            TypedExpression::EnumDeclaration(enum1),
-            TypedExpression::EnumDeclaration(enum2),
-        ];
-        let table = SymbolTable::from_expressions(&exprs);
-
-        let names: Vec<&String> = table.enum_names().collect();
-        assert_eq!(names.len(), 2);
-        assert!(names.iter().any(|&n| n == "Alpha"));
-        assert!(names.iter().any(|&n| n == "Beta"));
     }
 }
