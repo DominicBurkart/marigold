@@ -821,6 +821,14 @@ fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Sy
             Box::new(cardinality),
             Box::new(Symbolic::Constant(BigUint::from(*k))),
         ),
+        // `take(k)` is an upper bound on cardinality. If the input has known
+        // cardinality `n`, the output is exactly `min(n, k)`; if the input is
+        // unknown (e.g. read_file) the output is bounded above by `k`.
+        // Implementation note for #85: this matches `Iterator::take` exactly.
+        StreamFunctionKind::Take(k) => Symbolic::Min(
+            Box::new(cardinality),
+            Box::new(Symbolic::Constant(BigUint::from(*k))),
+        ),
         StreamFunctionKind::Fold => Symbolic::Constant(BigUint::one()),
     }
 }
@@ -831,7 +839,7 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
         StreamFunctionKind::Permutations(_)
         | StreamFunctionKind::PermutationsWithReplacement(_)
         | StreamFunctionKind::Combinations(_) => ComplexityClass::ON,
-        StreamFunctionKind::KeepFirstN(_) => ComplexityClass::O1,
+        StreamFunctionKind::KeepFirstN(_) | StreamFunctionKind::Take(_) => ComplexityClass::O1,
         StreamFunctionKind::Map
         | StreamFunctionKind::Filter
         | StreamFunctionKind::FilterMap
@@ -935,6 +943,7 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
             }
             StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
             StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
+            StreamFunctionKind::Take(k) => format!("take({k})"),
             StreamFunctionKind::Fold => "fold(...)".to_string(),
             StreamFunctionKind::Ok => "ok()".to_string(),
             StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
@@ -1311,6 +1320,38 @@ mod tests {
         assert_eq!(result.try_evaluate(), Some(BigUint::from(5u64)));
     }
 
+    /// Issue #85: when the input is larger than `n`, take yields exactly `n`.
+    #[test]
+    fn test_take_cardinality_under_input() {
+        let card = Symbolic::Constant(BigUint::from(10u64));
+        let result = propagate_cardinality(card, &StreamFunctionKind::Take(5));
+        assert!(matches!(result, Symbolic::Min(_, _)));
+        assert_eq!(result.try_evaluate(), Some(BigUint::from(5u64)));
+    }
+
+    /// Issue #85: when `n` exceeds the input, take yields exactly the input.
+    #[test]
+    fn test_take_cardinality_exceeds_input() {
+        let card = Symbolic::Constant(BigUint::from(3u64));
+        let result = propagate_cardinality(card, &StreamFunctionKind::Take(10));
+        assert!(matches!(result, Symbolic::Min(_, _)));
+        assert_eq!(result.try_evaluate(), Some(BigUint::from(3u64)));
+    }
+
+    /// Issue #85: take after a filter must bound — not exact-set — cardinality.
+    /// `filter` reduces a `Constant(n)` to `Filtered(Constant(n))`; take then
+    /// caps it at `min(Filtered(n), k)` which is still upper-bounded by `k`.
+    #[test]
+    fn test_take_after_filter_bounded() {
+        let card = Symbolic::Constant(BigUint::from(100u64));
+        let after_filter = propagate_cardinality(card, &StreamFunctionKind::Filter);
+        let after_take = propagate_cardinality(after_filter, &StreamFunctionKind::Take(3));
+        // Cannot evaluate exactly because the filter is not pure.
+        assert_eq!(after_take.try_evaluate(), None);
+        // But upper bound is still the take ceiling.
+        assert_eq!(after_take.upper_bound(), Some(BigUint::from(3u64)));
+    }
+
     #[test]
     fn test_chained_filters() {
         let card = Symbolic::Constant(BigUint::from(100u64));
@@ -1364,6 +1405,15 @@ mod tests {
     fn test_keep_first_n_space_o1() {
         assert_eq!(
             space_for_kind(&StreamFunctionKind::KeepFirstN(5)),
+            ComplexityClass::O1
+        );
+    }
+
+    /// Issue #85: take is a pure pass-through; constant space.
+    #[test]
+    fn test_take_space_o1() {
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Take(5)),
             ComplexityClass::O1
         );
     }
@@ -1475,6 +1525,30 @@ mod tests {
                 .unwrap();
         assert_eq!(result.streams.len(), 1);
         assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
+    }
+
+    /// Issue #85: take pipeline reports O(1) space and exact `min(input, n)`
+    /// cardinality.
+    #[test]
+    fn test_analyze_take_pipeline() {
+        let result = crate::parser::PestParser::analyze("range(0, 10).take(5).return").unwrap();
+        assert_eq!(result.streams.len(), 1);
+        assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(5u64))
+        );
+        assert!(!result.streams[0].collects_input);
+    }
+
+    /// Issue #85: when `n` exceeds the input, take is a no-op for cardinality.
+    #[test]
+    fn test_analyze_take_exceeds_input() {
+        let result = crate::parser::PestParser::analyze("range(0, 5).take(10).return").unwrap();
+        assert_eq!(
+            result.streams[0].cardinality,
+            Cardinality::Exact(BigUint::from(5u64))
+        );
     }
 
     #[test]
