@@ -37,7 +37,10 @@
 //! assert_eq!(table.get_enum_len("Color"), Some(3));
 //! ```
 
-use crate::nodes::{BoundExpr, EnumDeclarationNode, StructDeclarationNode, Type, TypedExpression};
+use crate::nodes::{
+    BoundExpr, DefaultEnumVariant, EnumDeclarationNode, StructDeclarationNode, Type,
+    TypedExpression,
+};
 use std::collections::HashMap;
 
 /// Information about an enum type.
@@ -86,10 +89,10 @@ impl SymbolTable {
     }
 
     fn add_enum(&mut self, enum_node: &EnumDeclarationNode) {
-        let mut variant_count = enum_node.variants.len();
-        if enum_node.default_variant.is_some() {
-            variant_count += 1;
-        }
+        let variant_count = match &enum_node.default_variant {
+            Some(DefaultEnumVariant::WithDefaultValue(_, _)) => enum_node.variants.len() + 1,
+            Some(DefaultEnumVariant::Sized(_, _)) | None => enum_node.variants.len(),
+        };
 
         self.enums.insert(
             enum_node.name.clone(),
@@ -175,6 +178,21 @@ mod tests {
         }
     }
 
+    fn create_enum_node_with_sized_default(
+        name: &str,
+        variant_count: usize,
+    ) -> EnumDeclarationNode {
+        let variants: Vec<(String, Option<String>)> = (0..variant_count)
+            .map(|i| (format!("Variant{}", i), Some(format!("v{}", i))))
+            .collect();
+
+        EnumDeclarationNode {
+            name: name.to_string(),
+            variants,
+            default_variant: Some(DefaultEnumVariant::Sized("Other".to_string(), 64)),
+        }
+    }
+
     fn create_struct_with_bounded_field(
         name: &str,
         field_name: &str,
@@ -217,6 +235,16 @@ mod tests {
         let table = SymbolTable::from_expressions(&exprs);
 
         assert_eq!(table.get_enum_len("Status"), Some(3));
+    }
+
+    #[test]
+    fn test_symbol_table_enum_with_sized_default_not_counted() {
+        let enum_node = create_enum_node_with_sized_default("Status", 2);
+        let exprs = vec![TypedExpression::EnumDeclaration(enum_node)];
+        let table = SymbolTable::from_expressions(&exprs);
+
+        // Sized default variant is excluded, matching unit_variant_count() behavior
+        assert_eq!(table.get_enum_len("Status"), Some(2));
     }
 
     #[test]
