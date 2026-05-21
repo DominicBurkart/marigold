@@ -20,6 +20,6 @@ fn test_parse_invalid_syntax() {
         "Invalid syntax should produce a parse error"
     );
     let err = result.unwrap_err();
-    let msg = format!("{}", err);
+    let msg = err.to_string();
     assert!(!msg.is_empty(), "Error message should not be empty");
 }
