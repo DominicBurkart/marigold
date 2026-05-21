@@ -1258,6 +1258,59 @@ mod negative_tests {
     }
 
     #[test]
+    fn test_reject_keep_first_n_zero_literal() {
+        // Issue #211: a static keep_first_n(0) is a no-op (the input stream is
+        // never polled), so the macro should reject it at compile time with a
+        // helpful diagnostic rather than emitting silently dead code.
+        let result = parse_marigold("range(0, 10).keep_first_n(0, compare).return");
+        assert!(
+            result.is_err(),
+            "keep_first_n(0) should be rejected at parse time (no-op)"
+        );
+        let err = result.unwrap_err().0;
+        assert!(
+            err.contains("keep_first_n(0)") && err.contains("no-op"),
+            "Error should mention keep_first_n(0) and no-op, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_keep_first_n_leading_zero_literal() {
+        // Issue #211 follow-up: the n==0 guard is on numeric value (post-`u64` parse),
+        // not lexical form. Lock that in by exercising a leading-zero literal `00` —
+        // this should be rejected just like `0`, so a future grammar/parser refactor
+        // (e.g. switching to a different numeric token shape) cannot silently regress
+        // this check.
+        let result = parse_marigold("range(0, 10).keep_first_n(00, compare).return");
+        assert!(
+            result.is_err(),
+            "keep_first_n(00) should be rejected at parse time (no-op)"
+        );
+        let err = result.unwrap_err().0;
+        assert!(
+            err.contains("keep_first_n(0)") && err.contains("no-op"),
+            "Error should mention keep_first_n(0) and no-op, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_accept_keep_first_n_one_literal() {
+        // Positive smoke test: keep_first_n with non-zero literal continues to
+        // parse and lower correctly after the n==0 guard was added.
+        let result = parse_marigold("range(0, 10).keep_first_n(1, compare).return");
+        assert!(
+            result.is_ok(),
+            "keep_first_n(1) should still parse: {:?}",
+            result
+        );
+        let code = result.unwrap();
+        assert!(
+            code.contains("keep_first_n(1, compare)"),
+            "lowered code should contain keep_first_n(1, compare), got: {code}"
+        );
+    }
+
+    #[test]
     fn test_permutations_generates_array_conversion() {
         let code = parse_marigold("range(0, 5).permutations(2).return")
             .expect("Should parse permutations(2)");
