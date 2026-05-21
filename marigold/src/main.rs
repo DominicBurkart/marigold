@@ -266,8 +266,9 @@ tokio = {{ version = "1", features = ["full"]}}
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::Write;
     use std::path::PathBuf;
-    use std::process::Command;
+    use std::process::{Command, Stdio};
     use std::sync::LazyLock;
 
     /// Build the marigold binary exactly once via `cargo build` and return its path.
@@ -466,6 +467,141 @@ mod tests {
         assert!(
             !cache_root.exists(),
             "entire cache should be removed after clean-all"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// `marigold analyze <file>` should print JSON conforming to the
+    /// `ProgramComplexity` shape advertised in the README. This guards the
+    /// CLI surface against regressions in the JSON contract that downstream
+    /// tools (or users piping output) rely on.
+    #[test]
+    fn test_analyze_file() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("analyze_file");
+
+        let marigold_file = tmp.join("test_analyze.marigold");
+        // Use a simple program with a known cardinality so we can validate
+        // the static analyzer's output shape and (where deterministic) values.
+        fs::write(&marigold_file, "range(0, 5).return").expect("could not write marigold file");
+
+        let output = Command::new(&binary)
+            .args(["analyze", marigold_file.to_str().unwrap()])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .output()
+            .expect("could not run marigold analyze");
+        assert!(
+            output.status.success(),
+            "marigold analyze failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+
+        let stdout = String::from_utf8(output.stdout).expect("analyze stdout was not utf-8");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).expect("analyze output was not valid JSON");
+
+        // Spot-check the documented shape from the README.
+        let streams = parsed
+            .get("streams")
+            .and_then(|v| v.as_array())
+            .expect("expected `streams` array in analyze output");
+        assert!(
+            !streams.is_empty(),
+            "expected at least one stream in analyze output"
+        );
+        for required in [
+            "program_time",
+            "program_exact_time",
+            "program_space",
+            "program_exact_space",
+            "program_cardinality",
+        ] {
+            assert!(
+                parsed.get(required).is_some(),
+                "expected `{required}` field in analyze output: {parsed}"
+            );
+        }
+        // `range(0, 5)` has a known cardinality of 5.
+        assert_eq!(
+            parsed.get("program_cardinality").and_then(|v| v.as_str()),
+            Some("5"),
+            "program_cardinality for range(0, 5).return should be \"5\": {parsed}"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// `marigold analyze` (no file argument) should consume the program from
+    /// stdin and emit the same JSON contract as the file-based path. This is
+    /// the documented behavior used in piped invocations.
+    #[test]
+    fn test_analyze_stdin() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("analyze_stdin");
+
+        let mut child = Command::new(&binary)
+            .args(["analyze"])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("could not spawn marigold analyze");
+
+        {
+            let stdin = child.stdin.as_mut().expect("could not open stdin");
+            stdin
+                .write_all(b"range(0, 7).return")
+                .expect("could not write to stdin");
+        }
+        let output = child
+            .wait_with_output()
+            .expect("could not wait for marigold analyze");
+        assert!(
+            output.status.success(),
+            "marigold analyze (stdin) failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+
+        let stdout = String::from_utf8(output.stdout).expect("analyze stdout was not utf-8");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).expect("analyze stdin output was not valid JSON");
+        assert_eq!(
+            parsed.get("program_cardinality").and_then(|v| v.as_str()),
+            Some("7"),
+            "program_cardinality for range(0, 7).return should be \"7\": {parsed}"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// `marigold analyze` should fail (non-zero exit) and surface a parse
+    /// error on stderr when given syntactically invalid input. Exiting
+    /// successfully on malformed input would silently mask user errors.
+    #[test]
+    fn test_analyze_rejects_invalid_program() {
+        let binary = &*BINARY;
+        let tmp = create_temp_dir("analyze_invalid");
+
+        let marigold_file = tmp.join("invalid.marigold");
+        fs::write(&marigold_file, "this is not marigold @@@")
+            .expect("could not write marigold file");
+
+        let output = Command::new(&binary)
+            .args(["analyze", marigold_file.to_str().unwrap()])
+            .env("HOME", &tmp)
+            .env("MARIGOLD_WORKSPACE_PATH", marigold_workspace_path())
+            .output()
+            .expect("could not run marigold analyze");
+        assert!(
+            !output.status.success(),
+            "marigold analyze should fail on invalid input but exited successfully: stdout={}",
+            String::from_utf8_lossy(&output.stdout),
         );
 
         let _ = fs::remove_dir_all(&tmp);
