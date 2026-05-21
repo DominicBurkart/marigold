@@ -5,6 +5,7 @@ pub use std::cmp::Ordering;
 mod async_runtime;
 pub mod collect_and_apply;
 pub mod combinations;
+pub mod csv_core;
 pub mod keep_first_n;
 pub mod marifold;
 pub mod multi_consumer_stream;
