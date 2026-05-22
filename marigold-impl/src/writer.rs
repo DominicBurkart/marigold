@@ -59,3 +59,73 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn test_vector_writer_write() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_flush() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_multiple_writes() {
+        let mut w = Writer::vector();
+        w.write_all(b"foo").await.unwrap();
+        w.write_all(b"bar").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_file_writer_roundtrip() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("writer_test_{}.bin", std::process::id()));
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"roundtrip").await.unwrap();
+        w.shutdown().await.unwrap();
+
+        let contents = tokio::fs::read(&path).await.unwrap();
+        assert_eq!(contents, b"roundtrip");
+        tokio::fs::remove_file(&path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_file_writer_multiple_writes() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("writer_test_multi_{}.bin", std::process::id()));
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"foo").await.unwrap();
+        w.write_all(b"bar").await.unwrap();
+        w.shutdown().await.unwrap();
+
+        let contents = tokio::fs::read(&path).await.unwrap();
+        assert_eq!(contents, b"foobar");
+        tokio::fs::remove_file(&path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_writer_debug_format() {
+        let w = Writer::vector();
+        let s = format!("{:?}", w);
+        assert!(s.contains("Writer"));
+    }
+}
