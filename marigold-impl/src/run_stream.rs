@@ -48,4 +48,33 @@ mod tests {
             vec![0_u32, 1_u32, 2_u32]
         );
     }
+
+    #[tokio::test]
+    async fn run_stream_empty() {
+        // An empty stream should produce an empty Vec.
+        let result: Vec<u32> = run_stream(futures::stream::iter(std::iter::empty::<u32>()))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, Vec::<u32>::new());
+    }
+
+    #[tokio::test]
+    async fn run_stream_single_element() {
+        // A stream with one element should produce a Vec with that one element.
+        let result = run_stream(futures::stream::iter(vec![42_u32]))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![42_u32]);
+    }
+
+    #[tokio::test]
+    async fn run_stream_large() {
+        // A large stream should preserve all elements in order.
+        let n = 1_000_u32;
+        let result = run_stream(futures::stream::iter(0..n))
+            .collect::<Vec<_>>()
+            .await;
+        let expected: Vec<u32> = (0..n).collect();
+        assert_eq!(result, expected);
+    }
 }
