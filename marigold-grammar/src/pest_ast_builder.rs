@@ -1386,6 +1386,278 @@ mod tests {
         assert_eq!(fields[3].1, Type::Bool);
     }
 
+    // --- build_enum_decl tests ---
+
+    fn parse_enum(input: &str) -> Result<TypedExpression, String> {
+        let pairs =
+            MarigoldPestParser::parse(Rule::enum_decl, input).map_err(|e| e.to_string())?;
+        let pair = pairs.into_iter().next().unwrap();
+        PestAstBuilder::build_enum_decl(pair)
+    }
+
+    #[test]
+    fn test_enum_basic_variants() {
+        let expr = parse_enum("enum Color { red, green, blue }").unwrap();
+        match expr {
+            TypedExpression::EnumDeclaration(node) => {
+                assert_eq!(node.name, "Color");
+                assert_eq!(node.variants.len(), 3);
+                assert_eq!(node.variants[0].0, "red");
+                assert!(node.variants[0].1.is_none());
+                assert!(node.default_variant.is_none());
+            }
+            _ => panic!("Expected EnumDeclaration"),
+        }
+    }
+
+    #[test]
+    fn test_enum_with_serialized_values() {
+        let expr =
+            parse_enum("enum Sound { meow = \"meow\", woof = \"bark\" }").unwrap();
+        match expr {
+            TypedExpression::EnumDeclaration(node) => {
+                assert_eq!(node.name, "Sound");
+                assert_eq!(node.variants.len(), 2);
+                assert_eq!(
+                    node.variants[0],
+                    ("meow".to_string(), Some("meow".to_string()))
+                );
+                assert_eq!(
+                    node.variants[1],
+                    ("woof".to_string(), Some("bark".to_string()))
+                );
+                assert!(node.default_variant.is_none());
+            }
+            _ => panic!("Expected EnumDeclaration"),
+        }
+    }
+
+    #[test]
+    fn test_enum_with_default_variant() {
+        let expr = parse_enum("enum Status { active, default unknown }").unwrap();
+        match expr {
+            TypedExpression::EnumDeclaration(node) => {
+                assert_eq!(node.name, "Status");
+                assert_eq!(node.variants.len(), 1);
+                assert!(matches!(
+                    node.default_variant,
+                    Some(DefaultEnumVariant::WithDefaultValue(_, _))
+                ));
+            }
+            _ => panic!("Expected EnumDeclaration"),
+        }
+    }
+
+    // --- build_fn_decl tests ---
+
+    fn parse_fn(input: &str) -> Result<TypedExpression, String> {
+        let pairs =
+            MarigoldPestParser::parse(Rule::fn_decl, input).map_err(|e| e.to_string())?;
+        let pair = pairs.into_iter().next().unwrap();
+        PestAstBuilder::build_fn_decl(pair)
+    }
+
+    #[test]
+    fn test_fn_single_param() {
+        let expr = parse_fn("fn double(x: i32) -> i32 { x * 2 }").unwrap();
+        match expr {
+            TypedExpression::FnDeclaration(node) => {
+                assert_eq!(node.name, "double");
+                assert_eq!(node.parameters.len(), 1);
+                assert_eq!(node.parameters[0].0, "x");
+                assert_eq!(node.parameters[0].1, "i32");
+                assert_eq!(node.output_type, "i32");
+                assert!(node.body.contains("x * 2"));
+            }
+            _ => panic!("Expected FnDeclaration"),
+        }
+    }
+
+    #[test]
+    fn test_fn_multiple_params() {
+        let expr = parse_fn("fn add(x: i32, y: i32) -> i32 { x + y }").unwrap();
+        match expr {
+            TypedExpression::FnDeclaration(node) => {
+                assert_eq!(node.name, "add");
+                assert_eq!(node.parameters.len(), 2);
+                assert_eq!(node.parameters[0].0, "x");
+                assert_eq!(node.parameters[1].0, "y");
+            }
+            _ => panic!("Expected FnDeclaration"),
+        }
+    }
+
+    #[test]
+    fn test_fn_ref_param() {
+        let expr = parse_fn("fn is_positive(x: &i32) -> bool { *x > 0 }").unwrap();
+        match expr {
+            TypedExpression::FnDeclaration(node) => {
+                assert_eq!(node.parameters[0].1, "&i32");
+            }
+            _ => panic!("Expected FnDeclaration"),
+        }
+    }
+
+    // --- build_range_input tests ---
+
+    fn parse_range_input(input: &str) -> Result<InputFunctionNode, String> {
+        let pairs =
+            MarigoldPestParser::parse(Rule::range_input, input).map_err(|e| e.to_string())?;
+        let pair = pairs.into_iter().next().unwrap();
+        PestAstBuilder::build_range_input(pair)
+    }
+
+    #[test]
+    fn test_range_exclusive() {
+        let node = parse_range_input("range(0, 10)").unwrap();
+        assert_eq!(node.variability, InputVariability::Constant);
+        assert_eq!(
+            node.input_count,
+            InputCount::Known(num_bigint::BigUint::from(10u32))
+        );
+        assert!(node.code.contains("0..10"));
+        assert!(!node.code.contains("..="));
+    }
+
+    #[test]
+    fn test_range_inclusive() {
+        let node = parse_range_input("range(0, =10)").unwrap();
+        assert_eq!(node.variability, InputVariability::Constant);
+        assert_eq!(
+            node.input_count,
+            InputCount::Known(num_bigint::BigUint::from(11u32))
+        );
+        assert!(node.code.contains("0..=10"));
+    }
+
+    #[test]
+    fn test_range_enum() {
+        let node = parse_range_input("range(MyEnum)").unwrap();
+        assert_eq!(node.variability, InputVariability::Constant);
+        assert_eq!(node.input_count, InputCount::Enum("MyEnum".to_string()));
+        assert!(node.code.contains("MyEnum::__marigold_variants()"));
+    }
+
+    // --- build_select_all_input tests ---
+
+    fn parse_select_all_input(input: &str) -> Result<InputFunctionNode, String> {
+        let pairs = MarigoldPestParser::parse(Rule::select_all_input, input)
+            .map_err(|e| e.to_string())?;
+        let pair = pairs.into_iter().next().unwrap();
+        PestAstBuilder::build_select_all_input(pair)
+    }
+
+    #[test]
+    fn test_select_all_two_ranges() {
+        let node = parse_select_all_input("select_all(range(0, 10), range(10, 20))").unwrap();
+        assert_eq!(node.variability, InputVariability::Constant);
+        assert!(node.code.contains("select_all"));
+        assert!(node.code.contains("run_stream"));
+    }
+
+    #[test]
+    fn test_select_all_single_range() {
+        let node = parse_select_all_input("select_all(range(0, 5))").unwrap();
+        assert_eq!(node.variability, InputVariability::Constant);
+        assert_eq!(
+            node.input_count,
+            InputCount::Known(num_bigint::BigUint::from(5u32))
+        );
+        assert!(node.code.contains("select_all"));
+    }
+
+    // --- build_stream_function tests ---
+
+    fn parse_stream_function(input: &str) -> Result<StreamFunctionNode, String> {
+        let pairs = MarigoldPestParser::parse(Rule::stream_function, input)
+            .map_err(|e| e.to_string())?;
+        let pair = pairs.into_iter().next().unwrap();
+        PestAstBuilder::build_stream_function(pair)
+    }
+
+    #[test]
+    fn test_stream_fn_map() {
+        let node = parse_stream_function("map(double)").unwrap();
+        assert_eq!(node.kind, StreamFunctionKind::Map);
+        assert!(node.code.contains("double"));
+    }
+
+    #[test]
+    fn test_stream_fn_filter() {
+        let node = parse_stream_function("filter(is_positive)").unwrap();
+        assert_eq!(node.kind, StreamFunctionKind::Filter);
+        assert!(node.code.contains("is_positive"));
+    }
+
+    #[test]
+    fn test_stream_fn_filter_map() {
+        let node = parse_stream_function("filter_map(try_parse)").unwrap();
+        assert_eq!(node.kind, StreamFunctionKind::FilterMap);
+        assert!(node.code.contains("try_parse"));
+    }
+
+    #[test]
+    fn test_stream_fn_combinations() {
+        let node = parse_stream_function("combinations(2)").unwrap();
+        assert_eq!(node.kind, StreamFunctionKind::Combinations(2));
+        assert!(node.code.contains("combinations(2)"));
+    }
+
+    #[test]
+    fn test_stream_fn_keep_first_n() {
+        let node = parse_stream_function("keep_first_n(5, value_fn)").unwrap();
+        assert_eq!(node.kind, StreamFunctionKind::KeepFirstN(5));
+        assert!(node.code.contains("keep_first_n(5, value_fn)"));
+    }
+
+    #[test]
+    fn test_stream_fn_fold_numeric_init() {
+        let node = parse_stream_function("fold(0, accumulate)").unwrap();
+        assert_eq!(node.kind, StreamFunctionKind::Fold);
+        assert!(node.code.contains("accumulate"));
+        assert!(node.code.contains('0'));
+    }
+
+    #[test]
+    fn test_stream_fn_fold_constructor_init() {
+        let node = parse_stream_function("fold(MyState, combine)").unwrap();
+        assert_eq!(node.kind, StreamFunctionKind::Fold);
+        assert!(node.code.contains("MyState()"));
+        assert!(node.code.contains("combine"));
+    }
+
+    // --- build_output_function tests ---
+
+    fn parse_output_function(input: &str) -> Result<OutputFunctionNode, String> {
+        let pairs = MarigoldPestParser::parse(Rule::output_function, input)
+            .map_err(|e| e.to_string())?;
+        let pair = pairs.into_iter().next().unwrap();
+        PestAstBuilder::build_output_function(pair)
+    }
+
+    #[test]
+    fn test_output_fn_return() {
+        let node = parse_output_function("return").unwrap();
+        assert!(node.returning);
+        assert!(node.stream_prefix.is_empty());
+        assert!(node.stream_postfix.is_empty());
+    }
+
+    #[test]
+    fn test_output_fn_write_file_csv() {
+        let node = parse_output_function("write_file(\"out.csv\", csv)").unwrap();
+        assert!(!node.returning);
+        assert!(node.stream_prefix.contains("out.csv"));
+        assert!(!node.stream_prefix.contains("GzipEncoder"));
+    }
+
+    #[test]
+    fn test_output_fn_write_file_gz_autodetect() {
+        let node = parse_output_function("write_file(\"out.csv.gz\", csv)").unwrap();
+        assert!(!node.returning);
+        assert!(node.stream_prefix.contains("GzipEncoder"));
+    }
+
     fn split_respecting_parens(input: &str) -> Vec<String> {
         let mut result = Vec::new();
         let mut current = String::new();
