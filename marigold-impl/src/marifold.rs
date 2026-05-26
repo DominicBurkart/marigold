@@ -50,4 +50,28 @@ mod tests {
             vec![10]
         );
     }
+
+    #[tokio::test]
+    async fn fold_empty_stream() {
+        assert_eq!(
+            futures::stream::iter(std::iter::empty::<u8>())
+                .marifold(0u8, |acc, x| async move { acc + x })
+                .await
+                .collect::<Vec<u8>>()
+                .await,
+            vec![0]
+        );
+    }
+
+    #[tokio::test]
+    async fn fold_single_element() {
+        assert_eq!(
+            futures::stream::iter(std::iter::once(42u8))
+                .marifold(0u8, |acc, x| async move { acc + x })
+                .await
+                .collect::<Vec<u8>>()
+                .await,
+            vec![42]
+        );
+    }
 }
