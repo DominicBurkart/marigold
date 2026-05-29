@@ -59,3 +59,58 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    // Both WriteTarget arms (Vector and File) must be exercised to satisfy
+    // codecov's 100 % patch requirement on this module.
+
+    #[tokio::test]
+    async fn vector_writer_write_flush_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello").await.expect("write_all failed");
+        w.flush().await.expect("flush failed");
+        w.shutdown().await.expect("shutdown failed");
+    }
+
+    #[tokio::test]
+    async fn vector_writer_multiple_writes() {
+        let mut w = Writer::vector();
+        w.write_all(b"foo").await.unwrap();
+        w.write_all(b"bar").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_writer_write_flush_shutdown() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("out.bin");
+        let file = tokio::fs::File::create(&path)
+            .await
+            .expect("create file");
+        let mut w = Writer::file(file);
+        w.write_all(b"world").await.expect("write_all failed");
+        w.flush().await.expect("flush failed");
+        w.shutdown().await.expect("shutdown failed");
+
+        let bytes = tokio::fs::read(&path).await.expect("read back");
+        assert_eq!(bytes, b"world");
+    }
+
+    #[tokio::test]
+    async fn file_writer_multiple_writes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("multi.bin");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"abc").await.unwrap();
+        w.write_all(b"def").await.unwrap();
+        w.flush().await.unwrap();
+
+        let bytes = tokio::fs::read(&path).await.unwrap();
+        assert_eq!(bytes, b"abcdef");
+    }
+}
