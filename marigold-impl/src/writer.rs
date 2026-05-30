@@ -59,3 +59,104 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use tokio::io::AsyncWriteExt;
+
+    static FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_tmp_path(tag: &str) -> std::path::PathBuf {
+        let n = FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "marigold_writer_{}_{}_{}.bin",
+            std::process::id(),
+            n,
+            tag
+        ))
+    }
+
+    // --- Vector branch ---
+
+    #[tokio::test]
+    async fn vector_write_all_succeeds() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello world").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_flush_succeeds() {
+        let mut w = Writer::vector();
+        w.write_all(b"abc").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_shutdown_succeeds() {
+        let mut w = Writer::vector();
+        w.write_all(b"xyz").await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_empty_write_succeeds() {
+        let mut w = Writer::vector();
+        w.write_all(b"").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_multiple_writes_succeed() {
+        let mut w = Writer::vector();
+        w.write_all(b"chunk-1 ").await.unwrap();
+        w.write_all(b"chunk-2 ").await.unwrap();
+        w.write_all(b"chunk-3").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    // --- File branch ---
+
+    #[tokio::test]
+    async fn file_write_all_succeeds() {
+        let path = unique_tmp_path("write");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"hello file").await.unwrap();
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn file_flush_succeeds() {
+        let path = unique_tmp_path("flush");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"data before flush").await.unwrap();
+        w.flush().await.unwrap();
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn file_shutdown_succeeds() {
+        let path = unique_tmp_path("shutdown");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"final bytes").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn file_empty_write_succeeds() {
+        let path = unique_tmp_path("empty");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+}
