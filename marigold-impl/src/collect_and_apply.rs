@@ -39,6 +39,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn collect_and_apply_empty_stream() {
+        let result = futures::stream::iter(std::iter::empty::<i32>())
+            .collect_and_apply(|v| v)
+            .await;
+        assert!(result.is_empty(), "empty stream should yield empty Vec");
+    }
+
+    #[tokio::test]
+    async fn collect_and_apply_returns_scalar() {
+        let sum = futures::stream::iter(1..=5i32)
+            .collect_and_apply(|v| v.into_iter().sum::<i32>())
+            .await;
+        assert_eq!(sum, 15);
+    }
+
+    #[tokio::test]
     async fn permutations_with_replacement() {
         use futures::StreamExt;
         use genawaiter;

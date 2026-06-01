@@ -50,4 +50,47 @@ mod tests {
             vec![10]
         );
     }
+
+    #[tokio::test]
+    async fn empty_stream_returns_init() {
+        let result = futures::stream::iter(std::iter::empty::<u32>())
+            .marifold(42u32, |acc, x| async move { acc + x })
+            .await
+            .collect::<Vec<u32>>()
+            .await;
+        assert_eq!(result, vec![42]);
+    }
+
+    #[tokio::test]
+    async fn single_element_stream() {
+        let result = futures::stream::iter(vec![7u32])
+            .marifold(0u32, |acc, x| async move { acc + x })
+            .await
+            .collect::<Vec<u32>>()
+            .await;
+        assert_eq!(result, vec![7]);
+    }
+
+    #[tokio::test]
+    async fn string_accumulator() {
+        let result = futures::stream::iter(vec!["a", "b", "c"])
+            .marifold(String::new(), |mut acc, x| async move {
+                acc.push_str(x);
+                acc
+            })
+            .await
+            .collect::<Vec<String>>()
+            .await;
+        assert_eq!(result, vec!["abc".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn result_is_single_item_stream() {
+        let stream = futures::stream::iter(0..3u32)
+            .marifold(0u32, |acc, x| async move { acc + x })
+            .await;
+        let items = stream.collect::<Vec<u32>>().await;
+        assert_eq!(items.len(), 1, "marifold must produce exactly one item");
+        assert_eq!(items[0], 3);
+    }
 }

@@ -59,3 +59,59 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Writer;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_writer_write_all_succeeds() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello, world")
+            .await
+            .expect("write_all to vector should succeed");
+    }
+
+    #[tokio::test]
+    async fn vector_writer_flush_succeeds() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.unwrap();
+        w.flush().await.expect("flush on vector writer should succeed");
+    }
+
+    #[tokio::test]
+    async fn vector_writer_shutdown_succeeds() {
+        let mut w = Writer::vector();
+        w.shutdown()
+            .await
+            .expect("shutdown on vector writer should succeed");
+    }
+
+    #[tokio::test]
+    async fn vector_writer_write_empty_bytes() {
+        let mut w = Writer::vector();
+        w.write_all(b"")
+            .await
+            .expect("writing empty bytes to vector writer should succeed");
+    }
+
+    #[tokio::test]
+    async fn file_writer_write_and_flush() {
+        let path = std::env::temp_dir().join("marigold_writer_test_file.bin");
+        let file = tokio::fs::File::create(&path)
+            .await
+            .expect("create temp file");
+        let mut w = Writer::file(file);
+        w.write_all(b"marigold test bytes")
+            .await
+            .expect("write to file writer should succeed");
+        w.flush().await.expect("flush file writer should succeed");
+        w.shutdown()
+            .await
+            .expect("shutdown file writer should succeed");
+        let content = tokio::fs::read(&path).await.expect("read back temp file");
+        assert_eq!(content, b"marigold test bytes");
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+}
