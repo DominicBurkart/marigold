@@ -59,3 +59,54 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    // Tests for the Vector backend (no filesystem needed).
+    // write_all drives poll_write; flush drives poll_flush; shutdown drives poll_shutdown.
+
+    #[tokio::test]
+    async fn vector_write_flush_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello world").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_empty_write() {
+        let mut w = Writer::vector();
+        w.write_all(b"").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    // Tests for the File backend. These require the `io` feature (tokio/fs).
+    #[cfg(feature = "io")]
+    mod file_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn file_write_flush_shutdown() {
+            let path = std::env::temp_dir().join("marigold_writer_file_test.tmp");
+            let file = tokio::fs::File::create(&path).await.unwrap();
+            let mut w = Writer::file(file);
+            w.write_all(b"hello file").await.unwrap();
+            w.flush().await.unwrap();
+            w.shutdown().await.unwrap();
+            tokio::fs::remove_file(&path).await.ok();
+        }
+
+        #[tokio::test]
+        async fn file_empty_write() {
+            let path = std::env::temp_dir().join("marigold_writer_file_empty_test.tmp");
+            let file = tokio::fs::File::create(&path).await.unwrap();
+            let mut w = Writer::file(file);
+            w.write_all(b"").await.unwrap();
+            w.flush().await.unwrap();
+            tokio::fs::remove_file(&path).await.ok();
+        }
+    }
+}
