@@ -59,3 +59,81 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_writer_write_returns_byte_count() {
+        let mut writer = Writer::vector();
+        let n = writer.write(b"hello world").await.unwrap();
+        assert_eq!(n, 11);
+    }
+
+    #[tokio::test]
+    async fn vector_writer_write_empty_buffer() {
+        let mut writer = Writer::vector();
+        let n = writer.write(b"").await.unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn vector_writer_flush_after_write_succeeds() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"flush test").await.unwrap();
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_shutdown_succeeds() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"shutdown test").await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_multiple_writes_accumulate() {
+        let mut writer = Writer::vector();
+        let n1 = writer.write(b"abc").await.unwrap();
+        let n2 = writer.write(b"de").await.unwrap();
+        assert_eq!(n1, 3);
+        assert_eq!(n2, 2);
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_writer_write_flush_shutdown() {
+        let path = std::env::temp_dir().join("marigold_writer_test.tmp");
+        let _ = tokio::fs::remove_file(&path).await;
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut writer = Writer::file(file);
+        writer.write_all(b"file content").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+        let content = tokio::fs::read(&path).await.unwrap();
+        assert_eq!(content, b"file content");
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn file_writer_empty_write() {
+        let path = std::env::temp_dir().join("marigold_writer_empty_test.tmp");
+        let _ = tokio::fs::remove_file(&path).await;
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut writer = Writer::file(file);
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+        let content = tokio::fs::read(&path).await.unwrap();
+        assert!(content.is_empty());
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[test]
+    fn writer_debug_format_contains_struct_name() {
+        let writer = Writer::vector();
+        let debug = format!("{writer:?}");
+        assert!(debug.contains("Writer"));
+    }
+}
