@@ -30,9 +30,7 @@ mod tests {
 
         #[tokio::test]
         async fn spawn_concurrent_tasks() {
-            let handles: Vec<_> = (0_u32..5)
-                .map(|i| spawn(async move { i * i }))
-                .collect();
+            let handles: Vec<_> = (0_u32..5).map(|i| spawn(async move { i * i })).collect();
             let mut results = Vec::new();
             for h in handles {
                 results.push(h.await.unwrap());

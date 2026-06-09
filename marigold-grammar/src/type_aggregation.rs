@@ -102,8 +102,6 @@ mod tests {
     #[test]
     fn count_single_known() {
         let counts = vec![nodes::InputCount::Known(BigUint::from(42_u32))];
-        assert!(
-            aggregate_input_count(counts) == nodes::InputCount::Known(BigUint::from(42_u32))
-        );
+        assert!(aggregate_input_count(counts) == nodes::InputCount::Known(BigUint::from(42_u32)));
     }
 }
