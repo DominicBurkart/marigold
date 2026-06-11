@@ -59,3 +59,46 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Writer;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_writer_write_returns_byte_count() {
+        let mut w = Writer::vector();
+        let n = w.write(b"hello").await.unwrap();
+        assert_eq!(n, 5);
+    }
+
+    #[tokio::test]
+    async fn vector_writer_write_all_and_flush_succeed() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello world").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_sequential_writes_succeed() {
+        let mut w = Writer::vector();
+        w.write_all(b"foo").await.unwrap();
+        w.write_all(b"bar").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_shutdown_succeeds() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_write_empty_slice() {
+        let mut w = Writer::vector();
+        let n = w.write(b"").await.unwrap();
+        assert_eq!(n, 0);
+        w.flush().await.unwrap();
+    }
+}
