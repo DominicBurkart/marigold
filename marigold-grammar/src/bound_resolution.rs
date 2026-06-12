@@ -748,6 +748,233 @@ mod tests {
     }
 
     #[test]
+    fn test_error_message_undefined_type() {
+        let error = ResolutionError::UndefinedType("Foo".to_string());
+        assert_eq!(format!("{}", error), "Undefined type: 'Foo'");
+    }
+
+    #[test]
+    fn test_error_message_invalid_operation() {
+        let error = ResolutionError::InvalidOperation {
+            type_name: "MyEnum".to_string(),
+            operation: "bogus".to_string(),
+        };
+        let msg = format!("{}", error);
+        assert!(msg.contains("bogus"));
+        assert!(msg.contains("MyEnum"));
+        assert!(msg.contains("len"));
+    }
+
+    #[test]
+    fn test_error_message_division_by_zero() {
+        let error = ResolutionError::DivisionByZero;
+        assert!(format!("{}", error).contains("zero"));
+    }
+
+    #[test]
+    fn test_error_message_bounds_violation() {
+        let error = ResolutionError::BoundsViolation {
+            field: "Foo.bar".to_string(),
+            message: "min exceeds max".to_string(),
+        };
+        let msg = format!("{}", error);
+        assert!(msg.contains("Foo.bar"));
+        assert!(msg.contains("min exceeds max"));
+    }
+
+    #[test]
+    fn test_cardinality_zero_when_max_less_than_min() {
+        let bound = ResolvedBound {
+            struct_name: "S".to_string(),
+            field_name: "f".to_string(),
+            min: 10,
+            max: 5,
+            is_signed: true,
+        };
+        assert_eq!(bound.cardinality(), 0);
+    }
+
+    #[test]
+    fn test_resolved_bounds_iter_and_bounds() {
+        let exprs = vec![
+            create_enum("Color", 3),
+            create_struct_bounded("P", "v", BoundExpr::Literal(0), BoundExpr::Literal(9), true),
+        ];
+        let table = SymbolTable::from_expressions(&exprs);
+        let mut resolver = BoundResolver::new(&table);
+        let bounds = resolver.resolve_all().unwrap();
+
+        let count = bounds.iter().count();
+        assert_eq!(count, 1);
+        let values: Vec<_> = bounds.bounds().collect();
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].min, 0);
+        assert_eq!(values[0].max, 9);
+    }
+
+    #[test]
+    fn test_resolved_bounds_new_is_empty() {
+        let bounds = ResolvedBounds::new();
+        assert_eq!(bounds.iter().count(), 0);
+        assert_eq!(bounds.bounds().count(), 0);
+    }
+
+    #[test]
+    fn test_arithmetic_add() {
+        let table = SymbolTable::new();
+        let mut resolver = BoundResolver::new(&table);
+        let mut visited = HashSet::new();
+        let expr = BoundExpr::BinaryOp {
+            left: Box::new(BoundExpr::Literal(3)),
+            op: ArithOp::Add,
+            right: Box::new(BoundExpr::Literal(4)),
+        };
+        assert_eq!(resolver.resolve_expr(&expr, &mut visited, "test"), Ok(7));
+    }
+
+    #[test]
+    fn test_arithmetic_div_nonzero() {
+        let table = SymbolTable::new();
+        let mut resolver = BoundResolver::new(&table);
+        let mut visited = HashSet::new();
+        let expr = BoundExpr::BinaryOp {
+            left: Box::new(BoundExpr::Literal(10)),
+            op: ArithOp::Div,
+            right: Box::new(BoundExpr::Literal(2)),
+        };
+        assert_eq!(resolver.resolve_expr(&expr, &mut visited, "test"), Ok(5));
+    }
+
+    #[test]
+    fn test_enum_cardinality_op() {
+        let exprs = vec![create_enum("Color", 4)];
+        let table = SymbolTable::from_expressions(&exprs);
+        let mut resolver = BoundResolver::new(&table);
+        let mut visited = HashSet::new();
+        let type_ref = arrayvec::ArrayString::from("Color").unwrap();
+        let result = resolver.resolve_expr(
+            &BoundExpr::TypeReference(type_ref, BoundOp::Cardinality),
+            &mut visited,
+            "test",
+        );
+        assert_eq!(result, Ok(4));
+    }
+
+    #[test]
+    fn test_enum_min_op() {
+        let exprs = vec![create_enum("Color", 5)];
+        let table = SymbolTable::from_expressions(&exprs);
+        let mut resolver = BoundResolver::new(&table);
+        let mut visited = HashSet::new();
+        let type_ref = arrayvec::ArrayString::from("Color").unwrap();
+        let result = resolver.resolve_expr(
+            &BoundExpr::TypeReference(type_ref, BoundOp::Min),
+            &mut visited,
+            "test",
+        );
+        assert_eq!(result, Ok(0));
+    }
+
+    #[test]
+    fn test_struct_field_cross_reference_min_max() {
+        let base_ref_min = arrayvec::ArrayString::from("Base.val").unwrap();
+        let base_ref_max = arrayvec::ArrayString::from("Base.val").unwrap();
+
+        let exprs = vec![
+            create_struct_bounded(
+                "Base",
+                "val",
+                BoundExpr::Literal(2),
+                BoundExpr::Literal(8),
+                true,
+            ),
+            TypedExpression::StructDeclaration(StructDeclarationNode {
+                name: "Derived".to_string(),
+                fields: vec![(
+                    "idx".to_string(),
+                    Type::BoundedInt {
+                        min: BoundExpr::TypeReference(base_ref_min, BoundOp::Min),
+                        max: BoundExpr::TypeReference(base_ref_max, BoundOp::Max),
+                    },
+                )],
+            }),
+        ];
+        let table = SymbolTable::from_expressions(&exprs);
+        let mut resolver = BoundResolver::new(&table);
+        let result = resolver.resolve_all().unwrap();
+        let b = result.get("Derived", "idx").unwrap();
+        assert_eq!(b.min, 2);
+        assert_eq!(b.max, 8);
+    }
+
+    #[test]
+    fn test_struct_field_cross_reference_cardinality() {
+        let field_ref = arrayvec::ArrayString::from("Base.val").unwrap();
+
+        let exprs = vec![
+            create_struct_bounded(
+                "Base",
+                "val",
+                BoundExpr::Literal(0),
+                BoundExpr::Literal(4),
+                true,
+            ),
+            TypedExpression::StructDeclaration(StructDeclarationNode {
+                name: "Derived".to_string(),
+                fields: vec![(
+                    "sz".to_string(),
+                    Type::BoundedUint {
+                        min: BoundExpr::Literal(0),
+                        max: BoundExpr::TypeReference(field_ref, BoundOp::Cardinality),
+                    },
+                )],
+            }),
+        ];
+        let table = SymbolTable::from_expressions(&exprs);
+        let mut resolver = BoundResolver::new(&table);
+        let result = resolver.resolve_all().unwrap();
+        let b = result.get("Derived", "sz").unwrap();
+        assert_eq!(b.max, 5);
+    }
+
+    #[test]
+    fn test_type_reference_uses_cache_on_second_call() {
+        let exprs = vec![
+            create_enum("Color", 3),
+            TypedExpression::StructDeclaration(StructDeclarationNode {
+                name: "P".to_string(),
+                fields: vec![
+                    (
+                        "a".to_string(),
+                        Type::BoundedUint {
+                            min: BoundExpr::Literal(0),
+                            max: BoundExpr::TypeReference(
+                                arrayvec::ArrayString::from("Color").unwrap(),
+                                BoundOp::Len,
+                            ),
+                        },
+                    ),
+                    (
+                        "b".to_string(),
+                        Type::BoundedUint {
+                            min: BoundExpr::Literal(0),
+                            max: BoundExpr::TypeReference(
+                                arrayvec::ArrayString::from("Color").unwrap(),
+                                BoundOp::Len,
+                            ),
+                        },
+                    ),
+                ],
+            }),
+        ];
+        let table = SymbolTable::from_expressions(&exprs);
+        let mut resolver = BoundResolver::new(&table);
+        let result = resolver.resolve_all().unwrap();
+        assert_eq!(result.get("P", "a").unwrap().max, 3);
+        assert_eq!(result.get("P", "b").unwrap().max, 3);
+    }
+
+    #[test]
     fn test_complex_arithmetic_bounds() {
         let color_ref = arrayvec::ArrayString::from("Color").unwrap();
         let exprs = vec![
