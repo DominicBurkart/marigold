@@ -59,3 +59,72 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_writer_write_and_flush() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_multiple_writes() {
+        let mut w = Writer::vector();
+        w.write_all(b"foo").await.unwrap();
+        w.write_all(b"bar").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_empty_write() {
+        let mut w = Writer::vector();
+        w.write_all(b"").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_writer_write_and_flush() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let file = tokio::fs::File::create(tmp.path()).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"hello from file").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_writer_shutdown() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let file = tokio::fs::File::create(tmp.path()).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"data").await.unwrap();
+        w.shutdown().await.unwrap();
+        let contents = std::fs::read(tmp.path()).unwrap();
+        assert_eq!(contents, b"data");
+    }
+
+    #[tokio::test]
+    async fn file_writer_multiple_writes() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let file = tokio::fs::File::create(tmp.path()).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"foo").await.unwrap();
+        w.write_all(b"bar").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+        let contents = std::fs::read(tmp.path()).unwrap();
+        assert_eq!(contents, b"foobar");
+    }
+}
