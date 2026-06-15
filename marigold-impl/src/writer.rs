@@ -59,3 +59,82 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    // ── Vector backend ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn vector_writer_write_and_flush() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello world").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"test data").await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_empty_write_flush_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_multiple_sequential_writes() {
+        let mut w = Writer::vector();
+        w.write_all(b"part1").await.unwrap();
+        w.write_all(b"part2").await.unwrap();
+        w.write_all(b"part3").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    // ── File backend ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn file_writer_write_and_flush() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let f = tokio::fs::File::create(tmp.path()).await.unwrap();
+        let mut w = Writer::file(f);
+        w.write_all(b"hello file").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_writer_shutdown() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let f = tokio::fs::File::create(tmp.path()).await.unwrap();
+        let mut w = Writer::file(f);
+        w.write_all(b"file content").await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_writer_empty_write_flush_shutdown() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let f = tokio::fs::File::create(tmp.path()).await.unwrap();
+        let mut w = Writer::file(f);
+        w.write_all(b"").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_writer_multiple_sequential_writes() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let f = tokio::fs::File::create(tmp.path()).await.unwrap();
+        let mut w = Writer::file(f);
+        w.write_all(b"chunk1").await.unwrap();
+        w.write_all(b"chunk2").await.unwrap();
+        w.flush().await.unwrap();
+    }
+}
