@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn analyze_inclusive_range_cardinality() {
-        // range(0, =4) -> 0,1,2,3,4 -> 5 items
+        // range(0, =4) → 0,1,2,3,4 → 5 items
         let complexity = marigold_analyze("range(0, =4).return").unwrap();
         let cardinality = &complexity.streams[0].cardinality;
         match cardinality {
@@ -437,8 +437,7 @@ mod tests {
 
     #[test]
     fn analyze_select_all_two_streams() {
-        let complexity =
-            marigold_analyze("select_all(range(0, 3), range(10, 13)).return").unwrap();
+        let complexity = marigold_analyze("select_all(range(0, 3), range(10, 13)).return").unwrap();
         // select_all merges multiple streams; we expect at least 1 stream in the analysis
         assert!(!complexity.streams.is_empty());
     }
