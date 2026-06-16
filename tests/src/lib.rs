@@ -392,4 +392,182 @@ mod tests {
         sorted.sort();
         assert_eq!(sorted, vec![0, 1, 10, 11, 20, 21]);
     }
+
+    // --- fold (marifold) tests ---
+
+    #[tokio::test]
+    async fn test_fold_sum() {
+        fn add(acc: i32, v: i32) -> i32 {
+            acc + v
+        }
+
+        let result = m!(
+            range(0, 5)
+                .fold(0, add)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // 0+1+2+3+4 = 10, fold produces exactly 1 item
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], 10);
+    }
+
+    #[tokio::test]
+    async fn test_fold_product() {
+        fn mul(acc: i32, v: i32) -> i32 {
+            acc * v
+        }
+
+        let result = m!(
+            range(1, 6)
+                .fold(1, mul)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // 1*2*3*4*5 = 120
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], 120);
+    }
+
+    #[tokio::test]
+    async fn test_fold_large_range() {
+        fn add(acc: i64, v: i64) -> i64 {
+            acc + v
+        }
+
+        let result = m!(
+            range(0, 100)
+                .fold(0, add)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // sum of 0..99 = 4950
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], 4950);
+    }
+
+    // --- nested / chained operations ---
+
+    #[tokio::test]
+    async fn test_map_then_filter() {
+        fn double(v: i32) -> i32 {
+            v * 2
+        }
+        fn is_big(v: i32) -> bool {
+            v > 4
+        }
+
+        let result = m!(
+            range(0, 5)
+                .map(double)
+                .filter(is_big)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // doubles: 0,2,4,6,8 -> filtered > 4: 6,8
+        assert_eq!(result, vec![6, 8]);
+    }
+
+    #[tokio::test]
+    async fn test_filter_then_map() {
+        fn is_even(v: i32) -> bool {
+            v % 2 == 0
+        }
+        fn square(v: i32) -> i32 {
+            v * v
+        }
+
+        let result = m!(
+            range(0, 6)
+                .filter(is_even)
+                .map(square)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // evens: 0,2,4 -> squared: 0,4,16
+        assert_eq!(result, vec![0, 4, 16]);
+    }
+
+    #[tokio::test]
+    async fn test_map_then_combinations() {
+        fn double(v: i32) -> i32 {
+            v * 2
+        }
+
+        let result = m!(
+            range(0, 4)
+                .map(double)
+                .combinations(2)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // doubles: 0,2,4,6 -> C(4,2)=6 combinations
+        assert_eq!(result.len(), 6);
+        assert_eq!(result[0], [0i32, 2]);
+    }
+
+    #[tokio::test]
+    async fn test_map_then_filter_then_combinations() {
+        fn double(v: i32) -> i32 {
+            v * 2
+        }
+        fn is_positive(v: i32) -> bool {
+            v > 0
+        }
+
+        let result = m!(
+            range(0, 4)
+                .map(double)
+                .filter(is_positive)
+                .combinations(2)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // doubles: 0,2,4,6 -> filter>0: 2,4,6 -> C(3,2)=3 combinations
+        assert_eq!(result.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_permutations_with_replacement_count() {
+        let result = m!(
+            range(0, 2)
+                .permutations_with_replacement(3)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        // 2^3 = 8
+        assert_eq!(result.len(), 8);
+    }
+
+    #[tokio::test]
+    async fn test_enum_range_three_variants() {
+        // enum with 3 variants, check length
+        let r = m!(
+            enum Colors { Red, Green, Blue, }
+            range(Colors).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(r.len(), 3);
+        assert_eq!(format!("{:?}", r[0]), "Red");
+        assert_eq!(format!("{:?}", r[1]), "Green");
+        assert_eq!(format!("{:?}", r[2]), "Blue");
+    }
 }
