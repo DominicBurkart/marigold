@@ -472,7 +472,7 @@ mod tests {
         .await
         .collect::<Vec<_>>()
         .await;
-        // doubles: 0,2,4,6,8 → filtered > 4: 6,8
+        // doubles: 0,2,4,6,8 -> filtered > 4: 6,8
         assert_eq!(result, vec![6, 8]);
     }
 
@@ -494,7 +494,7 @@ mod tests {
         .await
         .collect::<Vec<_>>()
         .await;
-        // evens: 0,2,4 → squared: 0,4,16
+        // evens: 0,2,4 -> squared: 0,4,16
         assert_eq!(result, vec![0, 4, 16]);
     }
 
@@ -513,7 +513,7 @@ mod tests {
         .await
         .collect::<Vec<_>>()
         .await;
-        // doubles: 0,2,4,6 → C(4,2)=6 combinations
+        // doubles: 0,2,4,6 -> C(4,2)=6 combinations
         assert_eq!(result.len(), 6);
         assert_eq!(result[0], [0i32, 2]);
     }
@@ -537,7 +537,7 @@ mod tests {
         .await
         .collect::<Vec<_>>()
         .await;
-        // doubles: 0,2,4,6 → filter>0: 2,4,6 → C(3,2)=3 combinations
+        // doubles: 0,2,4,6 -> filter>0: 2,4,6 -> C(3,2)=3 combinations
         assert_eq!(result.len(), 3);
     }
 
