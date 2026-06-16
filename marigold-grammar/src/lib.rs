@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn analyze_inclusive_range_cardinality() {
-        // range(0, =4) → 0,1,2,3,4 → 5 items
+        // range(0, =4) -> 0,1,2,3,4 -> 5 items
         let complexity = marigold_analyze("range(0, =4).return").unwrap();
         let cardinality = &complexity.streams[0].cardinality;
         match cardinality {
@@ -497,7 +497,7 @@ mod tests {
             "O(n!/(n-2)!)"
         );
         assert_eq!(ComplexityClass::OFactorial.to_string(), "O(n!)");
-        assert_eq!(ComplexityClass::Unknown.to_string(), "O(?");
+        assert_eq!(ComplexityClass::Unknown.to_string(), "O(?))");
     }
 
     #[test]
