@@ -41,6 +41,7 @@ pin-utils = "0.1.0"
 tokio = { version = "1", features = ["full"]}
 criterion = { version = "0.5", features = ["html_reports"] }
 cpu-time = "1.0"
+iai-callgrind = "0.16.1"
 tracing-subscriber = { version = "0.3", features = ["registry"] }
 
 [[bench]]
@@ -72,3 +73,13 @@ required-features = ["tokio"]
 name = "driver_worker_split"
 harness = false
 required-features = ["tokio", "bench-instrumentation"]
+
+[[bench]]
+name = "keep_first_n_iai"
+harness = false
+required-features = ["tokio"]
+
+[[bench]]
+name = "pipeline_stages_iai"
+harness = false
+required-features = ["tokio"]
