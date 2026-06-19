@@ -59,3 +59,52 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[test]
+    fn test_vector_writer_debug() {
+        let writer = Writer::vector();
+        let s = format!("{:?}", writer);
+        assert!(s.contains("Writer"));
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_write() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"hello world").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_flush() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"data").await.unwrap();
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_shutdown() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"content").await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_empty_write() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"").await.unwrap();
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_multiple_writes() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"hello").await.unwrap();
+        writer.write_all(b" world").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+}
