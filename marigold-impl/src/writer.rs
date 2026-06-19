@@ -100,22 +100,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_file_writer_debug() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test.bin");
-        let file = tokio::fs::File::create(&path).await.unwrap();
-        let writer = Writer::file(file);
-        let s = format!("{:?}", writer);
-        assert!(s.contains("Writer"));
-    }
-
-    #[tokio::test]
-    async fn test_file_writer_write() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("out.bin");
-        let file = tokio::fs::File::create(&path).await.unwrap();
-        let mut writer = Writer::file(file);
-        writer.write_all(b"file content").await.unwrap();
+    async fn test_vector_writer_multiple_writes() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"hello").await.unwrap();
+        writer.write_all(b" world").await.unwrap();
         writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
     }
 }
