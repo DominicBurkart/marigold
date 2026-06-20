@@ -1,5 +1,5 @@
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
-use marigold_grammar::parser::{MarigoldParser, MarigoldParseError, PestParser};
+use marigold_grammar::parser::{MarigoldParseError, MarigoldParser, PestParser};
 use std::hint::black_box;
 
 const MULTIPLE_STREAMS: &str = r#"
