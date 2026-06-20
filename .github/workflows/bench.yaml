@@ -1,4 +1,4 @@
-name: bench
+name:                bench
 
 on:
   push:
@@ -7,111 +7,226 @@ on:
     branches: [main]
 
 env:
-  CARGO_TERM_COLOR: always
+  CARGO_TERM_COLOR:  always
+  CARGO_HOME:        /home/runner/.cargo
+  CARGO_INCREMENTAL: 0
 
 jobs:
   cache-baseline:
-    name: Save Criterion baseline
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    name:            Save iai baseline
+    if:              github.event_name == 'push'
+    runs-on:         ubuntu-latest
     permissions:
-      contents: read
+      contents:      read
     steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-    - uses: Swatinem/rust-cache@v2
+    - uses:          actions/checkout@v4
+    - uses:          dtolnay/rust-toolchain@stable
+    - uses:          Swatinem/rust-cache@v2
 
-    - name: Criterion benches — save baseline
-      run: cargo bench --bench keep_first_n --features tokio -- --save-baseline main
-      working-directory: marigold-impl
-    - run: cargo bench --bench per_item_costs --features tokio -- --save-baseline main
-      working-directory: marigold-impl
-    - run: cargo bench --bench pipeline_stages --features tokio -- --save-baseline main
-      working-directory: marigold-impl
-    - run: cargo bench --bench parser_bench -- --save-baseline main
+    - name:          Install valgrind
+      run:           sudo apt-get install -y valgrind
+
+    - name:          Cache iai-callgrind-runner binary
+      id:            cache-runner
+      uses:          actions/cache@v4
+      with:
+        path:        ~/.cargo/bin/iai-callgrind-runner
+        key:         iai-callgrind-runner-${{ runner.os }}-0.16.1
+
+    - name:          Install iai-callgrind-runner
+      if:            steps.cache-runner.outputs.cache-hit != 'true'
+      run:           cargo install iai-callgrind-runner --version 0.16.1 --locked
+
+    - name:          Save iai baseline — parser
+      run:           cargo bench --bench parser_iai -- --save-baseline main
       working-directory: marigold-grammar
-    - run: cargo bench --bench color_picker_bench --features tokio -- --save-baseline main
+
+    - name:          Save iai baseline — keep_first_n
+      run:           cargo bench --bench keep_first_n_iai --features tokio -- --save-baseline main
+      working-directory: marigold-impl
+
+    - name:          Save iai baseline — pipeline_stages
+      run:           cargo bench --bench pipeline_stages_iai --features tokio -- --save-baseline main
+      working-directory: marigold-impl
+
+    - name:          Save iai baseline to cache
+      uses:          actions/cache/save@v4
+      with:
+        path:        target/iai
+        key:         bench-iai-${{ github.sha }}
+
+    - name:          Criterion benches — save wall-clock baseline
+      run:           cargo bench --bench keep_first_n --features tokio -- --save-baseline main
+      working-directory: marigold-impl
+    - run:           cargo bench --bench per_item_costs --features tokio -- --save-baseline main
+      working-directory: marigold-impl
+    - run:           cargo bench --bench pipeline_stages --features tokio -- --save-baseline main
+      working-directory: marigold-impl
+    - run:           cargo bench --bench parser_bench -- --save-baseline main
+      working-directory: marigold-grammar
+    - run:           cargo bench --bench color_picker_bench --features tokio -- --save-baseline main
       working-directory: examples/color-palette-picker
 
-    - name: Custom benches — compile and run
-      run: cargo bench --bench cpu_utilization --features tokio
+    - name:          Custom benches — compile and run
+      run:           cargo bench --bench cpu_utilization --features tokio
       working-directory: marigold-impl
-    - run: cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation"
+    - run:           cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation"
       working-directory: marigold-impl
-    - run: cargo bench --bench map_filter_utilization --features tokio
+    - run:           cargo bench --bench map_filter_utilization --features tokio
       working-directory: marigold-impl
 
-    - name: Save Criterion baseline to cache
-      uses: actions/cache/save@v4
+    - name:          Save Criterion baseline to cache
+      uses:          actions/cache/save@v4
       with:
-        path: target/criterion
-        key: bench-criterion-${{ github.sha }}
+        path:        target/criterion
+        key:         bench-criterion-${{ github.sha }}
 
-    - uses: actions/upload-artifact@v4
-      if: always()
+    - uses:          actions/upload-artifact@v4
+      if:            always()
       with:
-        name: criterion-reports
-        path: target/criterion/
+        name:        criterion-reports
+        path:        target/criterion/
         if-no-files-found: ignore
 
   bench-pr:
-    name: Benches
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    name:            Benches
+    if:              github.event_name == 'pull_request'
+    runs-on:         ubuntu-latest
     permissions:
-      contents: read
+      contents:      read
     steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-    - uses: Swatinem/rust-cache@v2
+    - uses:          actions/checkout@v4
+    - uses:          dtolnay/rust-toolchain@stable
+    - uses:          Swatinem/rust-cache@v2
 
-    - name: Restore Criterion baseline from cache
-      id: restore-baseline
-      uses: actions/cache/restore@v4
+    - name:          Install valgrind
+      run:           sudo apt-get install -y valgrind
+
+    - name:          Cache iai-callgrind-runner binary
+      id:            cache-runner
+      uses:          actions/cache@v4
       with:
-        path: target/criterion
-        key: bench-criterion-${{ github.event.pull_request.base.sha }}
+        path:        ~/.cargo/bin/iai-callgrind-runner
+        key:         iai-callgrind-runner-${{ runner.os }}-0.16.1
+
+    - name:          Install iai-callgrind-runner
+      if:            steps.cache-runner.outputs.cache-hit != 'true'
+      run:           cargo install iai-callgrind-runner --version 0.16.1 --locked
+
+    - name:          Restore iai baseline from cache
+      id:            restore-baseline
+      uses:          actions/cache/restore@v4
+      with:
+        path:        target/iai
+        key:         bench-iai-${{ github.event.pull_request.base.sha }}
+        restore-keys: bench-iai-
+
+    - name:          Run iai benches — compare to baseline (grammar)
+      if:            steps.restore-baseline.outputs.cache-hit != ''
+      run: |
+        cargo bench --bench parser_iai \
+          -- --baseline main --callgrind-limits 'ir=15%' --regression-fail-fast
+      working-directory: marigold-grammar
+
+    - name:          Run iai benches — compare to baseline (impl)
+      if:            steps.restore-baseline.outputs.cache-hit != ''
+      run: |
+        cargo bench --bench keep_first_n_iai --features tokio \
+          -- --baseline main --callgrind-limits 'ir=15%' --regression-fail-fast
+        cargo bench --bench pipeline_stages_iai --features tokio \
+          -- --baseline main --callgrind-limits 'ir=15%' --regression-fail-fast
+      working-directory: marigold-impl
+
+    - name:          Run iai benches — no baseline available (grammar)
+      if:            steps.restore-baseline.outputs.cache-hit == ''
+      run: |
+        echo "No cached iai baseline found — running without comparison"
+        cargo bench --bench parser_iai
+      working-directory: marigold-grammar
+
+    - name:          Run iai benches — no baseline available (impl)
+      if:            steps.restore-baseline.outputs.cache-hit == ''
+      run: |
+        cargo bench --bench keep_first_n_iai --features tokio
+        cargo bench --bench pipeline_stages_iai --features tokio
+      working-directory: marigold-impl
+
+  bench-wallclock:
+    name:            Benches (wall-clock, informational)
+    if:              github.event_name == 'pull_request'
+    runs-on:         ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents:      read
+    steps:
+    - uses:          actions/checkout@v4
+    - uses:          dtolnay/rust-toolchain@stable
+    - uses:          Swatinem/rust-cache@v2
+
+    - name:          Restore Criterion baseline from cache
+      id:            restore-baseline
+      uses:          actions/cache/restore@v4
+      with:
+        path:        target/criterion
+        key:         bench-criterion-${{ github.event.pull_request.base.sha }}
         restore-keys: bench-criterion-
 
-    - name: Criterion benches — compare to baseline
-      if: steps.restore-baseline.outputs.cache-hit != ''
-      run: cargo bench --bench keep_first_n --features tokio -- --baseline main 2>&1 | tee /tmp/bench_keep_first_n.txt
+    - name:          Criterion benches — compare to baseline
+      if:            steps.restore-baseline.outputs.cache-hit != ''
+      run: |
+        cargo bench --bench keep_first_n --features tokio \
+          -- --baseline main 2>&1 | tee /tmp/bench_keep_first_n.txt
+        cargo bench --bench per_item_costs --features tokio \
+          -- --baseline main 2>&1 | tee /tmp/bench_per_item_costs.txt
+        cargo bench --bench pipeline_stages --features tokio \
+          -- --baseline main 2>&1 | tee /tmp/bench_pipeline_stages.txt
       working-directory: marigold-impl
-    - if: steps.restore-baseline.outputs.cache-hit != ''
-      run: cargo bench --bench per_item_costs --features tokio -- --baseline main 2>&1 | tee /tmp/bench_per_item_costs.txt
-      working-directory: marigold-impl
-    - if: steps.restore-baseline.outputs.cache-hit != ''
-      run: cargo bench --bench pipeline_stages --features tokio -- --baseline main 2>&1 | tee /tmp/bench_pipeline_stages.txt
-      working-directory: marigold-impl
-    - if: steps.restore-baseline.outputs.cache-hit != ''
-      run: cargo bench --bench parser_bench -- --baseline main 2>&1 | tee /tmp/bench_parser_bench.txt
+
+    - if:            steps.restore-baseline.outputs.cache-hit != ''
+      run: |
+        cargo bench --bench parser_bench \
+          -- --baseline main 2>&1 | tee /tmp/bench_parser_bench.txt
       working-directory: marigold-grammar
-    - if: steps.restore-baseline.outputs.cache-hit != ''
-      run: cargo bench --bench color_picker_bench --features tokio -- --baseline main 2>&1 | tee /tmp/bench_color_picker_bench.txt
+
+    - if:            steps.restore-baseline.outputs.cache-hit != ''
+      run: |
+        cargo bench --bench color_picker_bench --features tokio \
+          -- --baseline main 2>&1 | tee /tmp/bench_color_picker_bench.txt
       working-directory: examples/color-palette-picker
 
-    - name: Criterion benches — no baseline available
-      if: steps.restore-baseline.outputs.cache-hit == ''
+    - name:          Criterion benches — no baseline available
+      if:            steps.restore-baseline.outputs.cache-hit == ''
       run: |
-        echo "No cached baseline found — running benches without comparison"
+        echo "No cached Criterion baseline — running without comparison"
         cargo bench --bench keep_first_n --features tokio
         cargo bench --bench per_item_costs --features tokio
         cargo bench --bench pipeline_stages --features tokio
       working-directory: marigold-impl
-    - if: steps.restore-baseline.outputs.cache-hit == ''
-      run: cargo bench --bench parser_bench
+
+    - if:            steps.restore-baseline.outputs.cache-hit == ''
+      run:           cargo bench --bench parser_bench
       working-directory: marigold-grammar
-    - if: steps.restore-baseline.outputs.cache-hit == ''
-      run: cargo bench --bench color_picker_bench --features tokio
+
+    - if:            steps.restore-baseline.outputs.cache-hit == ''
+      run:           cargo bench --bench color_picker_bench --features tokio
       working-directory: examples/color-palette-picker
 
-    - name: Custom benches — compile and run
-      run: cargo bench --bench cpu_utilization --features tokio
-      working-directory: marigold-impl
-    - run: cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation"
-      working-directory: marigold-impl
-    - run: cargo bench --bench map_filter_utilization --features tokio
+    - name:          Custom benches — compile and run
+      run:           cargo bench --bench cpu_utilization --features tokio
       working-directory: marigold-impl
 
-    - name: Check for regressions
-      run: bash marigold-impl/benches/check_regression.sh 15 $(ls /tmp/bench_*.txt 2>/dev/null || true)
+    - run:           cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation"
+      working-directory: marigold-impl
+
+    - run:           cargo bench --bench map_filter_utilization --features tokio
+      working-directory: marigold-impl
+
+    - name:          Check for wall-clock regressions (informational only)
+      run:           bash marigold-impl/benches/check_regression.sh 15 $(ls /tmp/bench_*.txt 2>/dev/null || true)
+
+    - uses:          actions/upload-artifact@v4
+      if:            always()
+      with:
+        name:        criterion-reports
+        path:        target/criterion/
+        if-no-files-found: ignore

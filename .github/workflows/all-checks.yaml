@@ -1,0 +1,56 @@
+name: All Checks
+
+on:
+  workflow_run:
+    workflows:
+      - "aarch64"
+      - "arm7"
+      - "bench"
+      - "mac_x86"
+      - "style"
+      - "tests"
+      - "wasm"
+      - "windows_x86"
+      - "x86"
+    types: [completed]
+
+jobs:
+  all-checks:
+    name: All Checks Passed
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify gate covers all CI workflows
+        run: |
+          set -euo pipefail
+          gate_workflows=$(yq -r '.on.workflow_run.workflows | .[]' .github/workflows/all-checks.yaml | sort)
+          ci_workflows=""
+          for f in .github/workflows/*.yaml; do
+            name=$(yq -r '.name' "$f")
+            case "$name" in
+              "All Checks"|"badges") continue ;;
+            esac
+            ci_workflows=$(printf '%s\n%s' "$ci_workflows" "$name")
+          done
+          expected=$(echo "$ci_workflows" | sed '/^$/d' | sort)
+          missing=$(comm -23 <(echo "$expected") <(echo "$gate_workflows") || true)
+          if [ -n "$missing" ]; then
+            echo "::error::Workflows missing from all-checks.yaml workflow_run list:"
+            echo "$missing"
+            echo "Add them to .github/workflows/all-checks.yaml under on.workflow_run.workflows"
+            exit 1
+          fi
+          echo "OK: all $(echo "$expected" | wc -l | tr -d ' ') CI workflows covered"
+
+      - name: Check workflow conclusion
+        env:
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+        run: |
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "::error::Workflow '$WORKFLOW' did not pass (conclusion: $CONCLUSION)"
+            exit 1
+          fi
+          echo "Workflow '$WORKFLOW' passed"
