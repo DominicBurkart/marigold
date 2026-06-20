@@ -2,8 +2,10 @@
 ignore = [
     # proc-macro-error unmaintained — used only by internal macros
     "RUSTSEC-2024-0370",
-    # rand unsound with custom logger using thread_rng — not applicable (no custom logger)
-    "RUSTSEC-2026-0097",
+    # proc-macro-error2 (maintained fork) now also unmaintained — same scope
+    "RUSTSEC-2026-0173",
+    # bincode 1.x unmaintained — pulled in by iai-callgrind dev-dependency only
+    "RUSTSEC-2025-0141",
 ]
 
 [licenses]
