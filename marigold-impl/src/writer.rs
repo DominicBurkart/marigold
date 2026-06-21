@@ -59,3 +59,38 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn test_vector_writer_write_flush_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello world").await.expect("write_all failed");
+        w.flush().await.expect("flush failed");
+        w.shutdown().await.expect("shutdown failed");
+    }
+
+    #[tokio::test]
+    async fn test_file_writer_write_flush_shutdown() {
+        let path = std::env::temp_dir().join(format!(
+            "marigold_writer_test_{}.tmp",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let file = tokio::fs::File::create(&path).await.expect("create failed");
+        let mut w = Writer::file(file);
+        w.write_all(b"test content")
+            .await
+            .expect("write_all failed");
+        w.flush().await.expect("flush failed");
+        w.shutdown().await.expect("shutdown failed");
+        let content = tokio::fs::read(&path).await.expect("read failed");
+        assert_eq!(content, b"test content");
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+}
