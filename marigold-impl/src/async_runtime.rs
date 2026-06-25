@@ -15,3 +15,13 @@ where
 {
     async_std::task::spawn(future)
 }
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "tokio")]
+    #[tokio::test]
+    async fn spawn_tokio_task_runs_to_completion() {
+        let handle = super::spawn(async { 42u32 });
+        assert_eq!(handle.await.unwrap(), 42);
+    }
+}
