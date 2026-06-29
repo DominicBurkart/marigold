@@ -258,6 +258,9 @@ pub enum StreamFunctionKind {
     PermutationsWithReplacement(u64),
     Combinations(u64),
     KeepFirstN(u64),
+    /// `take(n)` - yield at most n items in stream order, then stop.
+    /// Mirrors `Iterator::take`. Does not panic when the input has fewer than n items.
+    Take(u64),
     Fold,
     Ok,
     OkOrPanic,

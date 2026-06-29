@@ -77,6 +77,60 @@ fn parse_keep_first_n() {
 }
 
 #[test]
+fn parse_take() {
+    let result = marigold_grammar::marigold_parse("range(0, 10).take(5).return");
+    assert!(result.is_ok(), "take(n) should parse: {:?}", result);
+    let code = result.unwrap();
+    // Generated code should call futures::StreamExt::take
+    assert!(
+        code.contains(".take(5usize)"),
+        "Generated code should call .take(5usize): {code}"
+    );
+}
+
+#[test]
+fn parse_take_chained_with_filter() {
+    let result = marigold_grammar::marigold_parse("range(0, 100).filter(is_even).take(3).return");
+    assert!(
+        result.is_ok(),
+        "filter.take chain should parse: {:?}",
+        result
+    );
+}
+
+#[test]
+fn parse_take_with_write_file() {
+    let result =
+        marigold_grammar::marigold_parse(r#"range(0, 10).take(2).write_file("/tmp/x.csv", csv)"#);
+    assert!(
+        result.is_ok(),
+        "take + write_file should parse: {:?}",
+        result
+    );
+}
+
+/// `take(n)` should parse alongside negative-start ranges (issue #85's
+/// "negative integer support" case). Range bounds accept a leading `-`.
+#[test]
+fn parse_take_with_negative_range() {
+    let result = marigold_grammar::marigold_parse("range(-10, 10).take(2).return");
+    assert!(
+        result.is_ok(),
+        "negative-start range with take should parse: {:?}",
+        result
+    );
+    let code = result.unwrap();
+    assert!(
+        code.contains("-10..10") || code.contains("- 10..10"),
+        "Generated code should contain the negative bound: {code}"
+    );
+    assert!(
+        code.contains(".take(2usize)"),
+        "Generated code should call .take(2usize): {code}"
+    );
+}
+
+#[test]
 fn parse_empty_input_succeeds() {
     // The parser intentionally returns Ok for empty programs (generates a trivial async wrapper).
     let result = marigold_grammar::marigold_parse("");

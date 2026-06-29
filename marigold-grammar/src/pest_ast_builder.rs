@@ -861,6 +861,10 @@ impl PestAstBuilder {
                     Self::build_keep_first_n_fn(inner)?,
                 )
             }
+            Rule::take_fn => {
+                let n = Self::peek_numeric_arg(&inner)?;
+                (StreamFunctionKind::Take(n), Self::build_take_fn(inner)?)
+            }
             Rule::fold_fn => (StreamFunctionKind::Fold, Self::build_fold_fn(inner)?),
             Rule::ok_fn => (
                 StreamFunctionKind::Ok,
@@ -962,6 +966,17 @@ impl PestAstBuilder {
         let n = next_pair(&mut inner, "Missing keep_first_n size")?.as_str();
         let value_fn = next_pair(&mut inner, "Missing keep_first_n value function")?.as_str();
         Ok(format!("keep_first_n({n}, {value_fn}).await"))
+    }
+
+    fn build_take_fn(pair: Pair<Rule>) -> Result<String, String> {
+        let n = pair
+            .into_inner()
+            .next()
+            .ok_or_else(|| "Missing take size".to_string())?
+            .as_str();
+        // `futures::StreamExt::take(n)` yields at most n items and does not panic when the
+        // underlying stream is exhausted before n items have been yielded.
+        Ok(format!("take({n}usize)"))
     }
 
     fn build_fold_fn(pair: Pair<Rule>) -> Result<String, String> {

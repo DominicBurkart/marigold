@@ -125,6 +125,61 @@ mod bounded {
             result.streams[0].cardinality
         );
     }
+
+    /// `take(n)` must only ever set an upper bound on cardinality; it must never
+    /// replace the input cardinality with `Exact(n)`, even when the input has a
+    /// statically-known size >= n. See issue #85.
+    #[test]
+    fn take_sets_upper_bound_not_exact() {
+        let result = analyze_file("tests/programs/card_take.marigold");
+        assert!(
+            matches!(result.streams[0].cardinality, Cardinality::Bounded(_)),
+            "take(n) on a known-exact input must yield Bounded (upper bound), \
+             not Exact, got {:?}",
+            result.streams[0].cardinality
+        );
+        // The bound must be no larger than n (5).
+        if let Cardinality::Bounded(ref sym) = result.streams[0].cardinality {
+            let upper = sym
+                .upper_bound()
+                .expect("take(5) on bounded input should have an upper bound");
+            assert!(
+                upper <= BigUint::from(5u64),
+                "take(5) upper bound should be <= 5, got {upper}"
+            );
+        }
+    }
+
+    /// `take(n)` where n > input cardinality must still yield Bounded; the upper
+    /// bound is the min of n and the input size, but the value remains an upper
+    /// bound rather than an exact value (the stream may end earlier).
+    #[test]
+    fn take_exceeding_input_is_bounded_by_input() {
+        let result = analyze_file("tests/programs/card_take_exceeds_input.marigold");
+        assert!(
+            matches!(result.streams[0].cardinality, Cardinality::Bounded(_)),
+            "take(n) with n > input must yield Bounded, got {:?}",
+            result.streams[0].cardinality
+        );
+        if let Cardinality::Bounded(ref sym) = result.streams[0].cardinality {
+            let upper = sym.upper_bound().expect("take should have an upper bound");
+            assert!(
+                upper <= BigUint::from(5u64),
+                "take(10) on range(0, 5) should be bounded by 5, got {upper}"
+            );
+        }
+    }
+
+    /// Filter then take should remain bounded; the bound is min(filter bound, n).
+    #[test]
+    fn filter_then_take_remains_bounded() {
+        let result = analyze_file("tests/programs/card_filter_take.marigold");
+        assert!(
+            matches!(result.streams[0].cardinality, Cardinality::Bounded(_)),
+            "filter+take should produce bounded cardinality, got {:?}",
+            result.streams[0].cardinality
+        );
+    }
 }
 
 mod unknown {
