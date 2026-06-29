@@ -59,3 +59,67 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn test_vector_writer_write_and_flush() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"hello world").await.unwrap();
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_shutdown() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"data").await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_empty_write() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_multiple_writes() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"first").await.unwrap();
+        writer.write_all(b"second").await.unwrap();
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_file_writer_write_and_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_write.txt");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut writer = Writer::file(file);
+        writer.write_all(b"hello file").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+
+        let content = tokio::fs::read_to_string(&path).await.unwrap();
+        assert_eq!(content, "hello file");
+    }
+
+    #[tokio::test]
+    async fn test_file_writer_multiple_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_multi.txt");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut writer = Writer::file(file);
+        writer.write_all(b"first").await.unwrap();
+        writer.write_all(b"second").await.unwrap();
+        writer.shutdown().await.unwrap();
+
+        let content = tokio::fs::read_to_string(&path).await.unwrap();
+        assert_eq!(content, "firstsecond");
+    }
+}
