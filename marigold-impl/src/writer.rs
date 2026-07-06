@@ -59,3 +59,45 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Writer;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_writer_write_flush_shutdown() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"hello world").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_empty_write() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"").await.unwrap();
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_writer_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("writer_test.bin");
+
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut writer = Writer::file(file);
+        writer.write_all(b"round-trip").await.unwrap();
+        writer.shutdown().await.unwrap();
+
+        let contents = tokio::fs::read(&path).await.unwrap();
+        assert_eq!(contents, b"round-trip");
+    }
+
+    #[tokio::test]
+    async fn writer_debug_format_contains_variant_name() {
+        let v = Writer::vector();
+        let s = format!("{v:?}");
+        assert!(s.contains("Vector"), "debug output was: {s}");
+    }
+}
