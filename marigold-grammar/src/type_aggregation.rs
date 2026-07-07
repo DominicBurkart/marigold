@@ -61,7 +61,10 @@ mod tests {
         let result = aggregate_input_count(std::iter::empty());
         match result {
             nodes::InputCount::Known(v) => assert_eq!(v, BigUint::from(0_u32)),
-            other => panic!("expected Known(0), got {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "expected Known(0), got {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 
@@ -73,7 +76,10 @@ mod tests {
         ]);
         match result {
             nodes::InputCount::Known(v) => assert_eq!(v, BigUint::from(30_u32)),
-            other => panic!("expected Known(30), got {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "expected Known(30), got {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 
