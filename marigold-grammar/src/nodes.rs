@@ -809,4 +809,250 @@ mod tests {
         assert_eq!(select_smallest_unsigned_type(65535), "u16");
         assert_eq!(select_smallest_unsigned_type(65536), "u32");
     }
+
+    /// Every primitive numeric/scalar variant maps to its lowercase Rust spelling.
+    /// This is the contract relied on by `StructDeclarationNode::code()` and the
+    /// codegen layer; a regression here would silently emit invalid Rust types.
+    #[test]
+    fn test_primitive_to_type_string_all_numerics_and_scalars() {
+        assert_eq!(Type::U8.primitive_to_type_string(), "u8");
+        assert_eq!(Type::U16.primitive_to_type_string(), "u16");
+        assert_eq!(Type::U32.primitive_to_type_string(), "u32");
+        assert_eq!(Type::U64.primitive_to_type_string(), "u64");
+        assert_eq!(Type::U128.primitive_to_type_string(), "u128");
+        assert_eq!(Type::USize.primitive_to_type_string(), "usize");
+        assert_eq!(Type::I8.primitive_to_type_string(), "i8");
+        assert_eq!(Type::I16.primitive_to_type_string(), "i16");
+        assert_eq!(Type::I32.primitive_to_type_string(), "i32");
+        assert_eq!(Type::I64.primitive_to_type_string(), "i64");
+        assert_eq!(Type::I128.primitive_to_type_string(), "i128");
+        assert_eq!(Type::ISize.primitive_to_type_string(), "isize");
+        assert_eq!(Type::F32.primitive_to_type_string(), "f32");
+        assert_eq!(Type::F64.primitive_to_type_string(), "f64");
+        assert_eq!(Type::Bool.primitive_to_type_string(), "bool");
+        assert_eq!(Type::Char.primitive_to_type_string(), "char");
+    }
+
+    /// `Str(N)` lowers to `ArrayString<N>`. The capacity must round-trip into the
+    /// generated path so e.g. `Str(64)` and `Str(128)` produce distinct types.
+    #[test]
+    fn test_primitive_to_type_string_str_capacity_roundtrips() {
+        assert_eq!(
+            Type::Str(0).primitive_to_type_string(),
+            "::marigold::marigold_impl::arrayvec::ArrayString<0>"
+        );
+        assert_eq!(
+            Type::Str(64).primitive_to_type_string(),
+            "::marigold::marigold_impl::arrayvec::ArrayString<64>"
+        );
+        assert_eq!(
+            Type::Str(9999).primitive_to_type_string(),
+            "::marigold::marigold_impl::arrayvec::ArrayString<9999>"
+        );
+    }
+
+    /// `Custom(name)` lowers verbatim to its identifier string.
+    #[test]
+    fn test_primitive_to_type_string_custom_uses_name_verbatim() {
+        let name = arrayvec::ArrayString::from("MyType").unwrap();
+        assert_eq!(Type::Custom(name).primitive_to_type_string(), "MyType");
+    }
+
+    /// Nested `Option`s wrap one layer per nesting level.
+    #[test]
+    fn test_primitive_to_type_string_option_nests() {
+        let opt_u32 = Type::Option(Box::new(Type::U32));
+        assert_eq!(opt_u32.primitive_to_type_string(), "Option<u32>");
+
+        let opt_opt_bool = Type::Option(Box::new(Type::Option(Box::new(Type::Bool))));
+        assert_eq!(
+            opt_opt_bool.primitive_to_type_string(),
+            "Option<Option<bool>>"
+        );
+
+        let opt_str = Type::Option(Box::new(Type::Str(8)));
+        assert_eq!(
+            opt_str.primitive_to_type_string(),
+            "Option<::marigold::marigold_impl::arrayvec::ArrayString<8>>"
+        );
+    }
+
+    /// Unbounded fallback: `BoundedInt` -> `i128`, `BoundedUint` -> `u128`.
+    #[test]
+    fn test_primitive_to_type_string_bounded_uint_default_u128() {
+        let t = Type::BoundedUint {
+            min: BoundExpr::Literal(0),
+            max: BoundExpr::Literal(1_000_000),
+        };
+        assert_eq!(t.primitive_to_type_string(), "u128");
+    }
+
+    /// When resolved bounds are missing, BoundedInt falls back to i128.
+    #[test]
+    fn test_primitive_to_type_string_with_resolved_bounds_no_bounds_falls_back() {
+        let int_t = Type::BoundedInt {
+            min: BoundExpr::Literal(0),
+            max: BoundExpr::Literal(100),
+        };
+        assert_eq!(
+            int_t.primitive_to_type_string_with_resolved_bounds(None, None),
+            "i128"
+        );
+        assert_eq!(
+            int_t.primitive_to_type_string_with_resolved_bounds(Some(0), None),
+            "i128"
+        );
+
+        let uint_t = Type::BoundedUint {
+            min: BoundExpr::Literal(0),
+            max: BoundExpr::Literal(100),
+        };
+        assert_eq!(
+            uint_t.primitive_to_type_string_with_resolved_bounds(None, None),
+            "u128"
+        );
+    }
+
+    /// `BoundedUint` with a negative resolved_min falls back to u128 rather than
+    /// silently picking a smaller-but-incorrect signed type.
+    #[test]
+    fn test_primitive_to_type_string_with_resolved_bounds_uint_negative_min_falls_back() {
+        let t = Type::BoundedUint {
+            min: BoundExpr::Literal(-5),
+            max: BoundExpr::Literal(100),
+        };
+        assert_eq!(
+            t.primitive_to_type_string_with_resolved_bounds(Some(-5), Some(100)),
+            "u128"
+        );
+    }
+
+    /// Non-bounded variants ignore resolved bounds and return their primitive spelling.
+    #[test]
+    fn test_primitive_to_type_string_with_resolved_bounds_passthrough_for_non_bounded() {
+        assert_eq!(
+            Type::U32.primitive_to_type_string_with_resolved_bounds(Some(0), Some(10)),
+            "u32"
+        );
+        assert_eq!(
+            Type::Bool.primitive_to_type_string_with_resolved_bounds(None, None),
+            "bool"
+        );
+    }
+
+    /// `select_smallest_signed_type` picks the tightest fitting signed integer at
+    /// each bit-width boundary, including the i32/i64/i128 transitions which the
+    /// existing tests do not cover.
+    #[test]
+    fn test_select_smallest_signed_type_extreme_boundaries() {
+        // i32 to i64 boundary
+        assert_eq!(
+            select_smallest_signed_type(i32::MIN as i128, i32::MAX as i128),
+            "i32"
+        );
+        assert_eq!(
+            select_smallest_signed_type(i32::MIN as i128 - 1, i32::MAX as i128),
+            "i64"
+        );
+        // i64 to i128 boundary
+        assert_eq!(
+            select_smallest_signed_type(i64::MIN as i128, i64::MAX as i128),
+            "i64"
+        );
+        assert_eq!(
+            select_smallest_signed_type(i64::MIN as i128 - 1, i64::MAX as i128),
+            "i128"
+        );
+        // Asymmetric ranges promote to the larger type.
+        assert_eq!(select_smallest_signed_type(0, i16::MAX as i128 + 1), "i32");
+        // Full i128 range is i128.
+        assert_eq!(select_smallest_signed_type(i128::MIN, i128::MAX), "i128");
+    }
+
+    /// `select_smallest_unsigned_type` picks the tightest fitting unsigned integer
+    /// at each bit-width boundary, including the u32/u64/u128 transitions.
+    #[test]
+    fn test_select_smallest_unsigned_type_extreme_boundaries() {
+        // u32 to u64 boundary
+        assert_eq!(select_smallest_unsigned_type(u32::MAX as u128), "u32");
+        assert_eq!(select_smallest_unsigned_type(u32::MAX as u128 + 1), "u64");
+        // u64 to u128 boundary
+        assert_eq!(select_smallest_unsigned_type(u64::MAX as u128), "u64");
+        assert_eq!(select_smallest_unsigned_type(u64::MAX as u128 + 1), "u128");
+        // Full u128 range
+        assert_eq!(select_smallest_unsigned_type(u128::MAX), "u128");
+        // Zero fits in u8.
+        assert_eq!(select_smallest_unsigned_type(0), "u8");
+    }
+
+    /// `BoundedInt` with min >= 0 prefers an unsigned type sized to `max`.
+    #[test]
+    fn test_primitive_to_type_string_with_resolved_bounds_int_nonneg_uses_unsigned_sized_to_max() {
+        let t = Type::BoundedInt {
+            min: BoundExpr::Literal(0),
+            max: BoundExpr::Literal(0),
+        };
+        // 0..=300 fits in u16
+        assert_eq!(
+            t.primitive_to_type_string_with_resolved_bounds(Some(0), Some(300)),
+            "u16"
+        );
+        // 0..=u32::MAX fits in u32
+        assert_eq!(
+            t.primitive_to_type_string_with_resolved_bounds(Some(0), Some(u32::MAX as i128)),
+            "u32"
+        );
+    }
+
+    /// `unit_variant_count` excludes `Sized` defaults (cannot be copy-constructed)
+    /// but includes `WithDefaultValue` defaults. This contract underpins the
+    /// generated `__marigold_variants()` array length.
+    #[test]
+    fn test_unit_variant_count_no_default() {
+        let node = EnumDeclarationNode {
+            name: "Color".to_string(),
+            variants: vec![
+                ("Red".to_string(), None),
+                ("Green".to_string(), None),
+                ("Blue".to_string(), None),
+            ],
+            default_variant: None,
+        };
+        assert_eq!(node.unit_variant_count(), 3);
+    }
+
+    #[test]
+    fn test_unit_variant_count_with_default_value_includes_default() {
+        let node = EnumDeclarationNode {
+            name: "Status".to_string(),
+            variants: vec![("Ok".to_string(), None), ("Err".to_string(), None)],
+            default_variant: Some(DefaultEnumVariant::WithDefaultValue(
+                "Other".to_string(),
+                "other".to_string(),
+            )),
+        };
+        // 2 declared + 1 default = 3
+        assert_eq!(node.unit_variant_count(), 3);
+    }
+
+    #[test]
+    fn test_unit_variant_count_with_sized_default_excludes_default() {
+        let node = EnumDeclarationNode {
+            name: "Tag".to_string(),
+            variants: vec![("A".to_string(), None), ("B".to_string(), None)],
+            default_variant: Some(DefaultEnumVariant::Sized("Catchall".to_string(), 32)),
+        };
+        // Sized default cannot be copy-constructed; only the 2 declared count.
+        assert_eq!(node.unit_variant_count(), 2);
+    }
+
+    #[test]
+    fn test_unit_variant_count_empty_no_default() {
+        let node = EnumDeclarationNode {
+            name: "Empty".to_string(),
+            variants: vec![],
+            default_variant: None,
+        };
+        assert_eq!(node.unit_variant_count(), 0);
+    }
 }
