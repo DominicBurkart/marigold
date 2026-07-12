@@ -48,4 +48,12 @@ mod tests {
             vec![0_u32, 1_u32, 2_u32]
         );
     }
+
+    #[tokio::test]
+    async fn empty_stream_produces_no_items() {
+        let result: Vec<u32> = run_stream(futures::stream::iter(std::iter::empty::<u32>()))
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
 }
