@@ -295,16 +295,13 @@ async fn folding_consumer_alongside_passthrough_consumer() {
     assert_eq!(result, expected);
 }
 
-/// KNOWN LATENT DEADLOCK (ignored): eager combinators that exhaust their input
-/// before yielding (`keep_first_n`, `combinations`, `permutations`) generate an
-/// inline `.await` in the consumer expression. When the input is a named stream,
-/// that await runs *before* the program's streams are merged into the
-/// `select_all`, so the fan-out runner is never polled and the program hangs.
-/// This violates the deadlock-freedom guarantee and needs a codegen fix (the
-/// eager combinator must be deferred until the select_all drives it). Remove the
-/// `#[ignore]` once fixed.
+/// Eager combinators exhaust their input before yielding (`keep_first_n`,
+/// `combinations`, `permutations`). Their generated code used to await inline
+/// while the consumer expressions were being evaluated — *before* the program's
+/// streams were merged into the `select_all` — so the fan-out runner was never
+/// polled and the program hung. The codegen now defers the draining combinator
+/// chain into a lazily flattened stream driven by the select_all.
 #[tokio::test]
-#[ignore = "known latent deadlock: eager combinators on named streams await before stream runners are polled"]
 async fn eager_keep_first_n_on_named_stream_terminates() {
     let cmp = |a: &i32, b: &i32| a.cmp(b);
     let mut result = assert_completes(async {
@@ -330,9 +327,8 @@ async fn eager_keep_first_n_on_named_stream_terminates() {
     assert_eq!(result, expected);
 }
 
-/// KNOWN LATENT DEADLOCK (ignored): see `eager_keep_first_n_on_named_stream_terminates`.
+/// See `eager_keep_first_n_on_named_stream_terminates`.
 #[tokio::test]
-#[ignore = "known latent deadlock: eager combinators on named streams await before stream runners are polled"]
 async fn eager_combinations_on_named_stream_terminates() {
     fn first(pair: [i32; 2]) -> i32 {
         pair[0]
@@ -354,4 +350,82 @@ async fn eager_combinations_on_named_stream_terminates() {
     .await;
     // C(10, 2) = 45 combinations.
     assert_eq!(result.len(), 45);
+}
+
+/// See `eager_keep_first_n_on_named_stream_terminates`. Permutations shares the
+/// eager `.await` codegen shape with combinations.
+#[tokio::test]
+async fn eager_permutations_on_named_stream_terminates() {
+    fn first(pair: [i32; 2]) -> i32 {
+        pair[0]
+    }
+
+    let mut result = assert_completes(async {
+        m!(
+            digits = range(0, 6)
+
+            digits
+                .permutations(2)
+                .map(first)
+                .return
+
+            digits
+                .filter(always_true)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await
+    })
+    .await;
+    // P(6, 2) = 30 permutations (each contributing its first element) plus the
+    // 6 pass-through items.
+    result.sort_unstable();
+    let mut expected = (0..6)
+        .flat_map(|a| (0..6).filter(move |b| *b != a).map(move |_| a))
+        .chain(0..6)
+        .collect::<Vec<_>>();
+    expected.sort_unstable();
+    assert_eq!(result, expected);
+}
+
+/// An eager combinator inside a *derived stream variable* (`pairs = digits
+/// .combinations(2)`) used to deadlock the same way: the variable declaration
+/// awaited the combinator before any runner was polled. The deferred codegen
+/// applies to derived stream variables too.
+#[tokio::test]
+async fn eager_combinator_in_derived_stream_variable_terminates() {
+    fn first(pair: [i32; 2]) -> i32 {
+        pair[0]
+    }
+    fn second(pair: [i32; 2]) -> i32 {
+        pair[1]
+    }
+
+    let result = assert_completes(async {
+        m!(
+            digits = range(0, 10)
+
+            digits
+                .filter(always_true)
+                .return
+
+            pairs = digits
+                .combinations(2)
+
+            pairs
+                .map(first)
+                .return
+
+            pairs
+                .map(second)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await
+    })
+    .await;
+    // 10 pass-through items + C(10, 2) = 45 pairs consumed by two consumers.
+    assert_eq!(result.len(), 10 + 45 + 45);
 }
