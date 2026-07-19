@@ -1,6 +1,17 @@
 name:                style
 
-on:                  [push]
+# push-only triggers left PRs whose branches were pushed by an app (no push
+# event ⇒ no run) blocked forever on required checks. pull_request covers every
+# PR regardless of how the head was pushed; push is kept for main so the
+# default branch still gets a full run after each merge.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group:             style-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR:  always
@@ -8,12 +19,19 @@ env:
 jobs:
   style:
     name:            style hooks
-    runs-on:         ubuntu-latest
+    # Self-hosted fleet: label with exactly [self-hosted, Linux] — no arch
+    # labels, the fleet spans arm64 and x86_64 hosts. rustfmt/clippy come from
+    # the toolchain baked into the runner image; cargo-installed tools land in
+    # the fleet's shared cargo cache, so the installs below are no-ops after
+    # the first run.
+    runs-on:         [self-hosted, Linux]
     steps:
     - uses:          actions/checkout@v4
-    - uses:          dtolnay/rust-toolchain@stable
-      with:
-        components:  rustfmt, clippy
+    - name:          Install node (markdownlint)
+      run:           |
+        if ! command -v npx >/dev/null 2>&1; then
+          sudo apt-get update -qq && sudo apt-get install -y -qq nodejs npm
+        fi
     - run:           cargo fmt --all -- --check
     - run:           cargo clippy --all-features -- -D warnings
     - run:           cargo install cargo-audit && cargo audit

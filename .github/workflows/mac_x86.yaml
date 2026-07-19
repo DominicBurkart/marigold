@@ -1,6 +1,17 @@
 name:                mac_x86
 
-on:                  [push]
+# push-only triggers left PRs whose branches were pushed by an app (no push
+# event => no run) blocked forever on required checks. pull_request covers
+# every PR regardless of how the head was pushed; push is kept for main so the
+# default branch still gets a full run after each merge.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group:             mac_x86-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR:  always

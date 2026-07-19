@@ -1,6 +1,17 @@
 name:                wasm
 
-on:                  [push]
+# push-only triggers left PRs whose branches were pushed by an app (no push
+# event ⇒ no run) blocked forever on required checks. pull_request covers every
+# PR regardless of how the head was pushed; push is kept for main so the
+# default branch still gets a full run after each merge.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group:             wasm-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR:  always
@@ -8,12 +19,10 @@ env:
 jobs:
   wasm:
     name:            WASM Build
-    runs-on:         ubuntu-latest
+    # Self-hosted fleet: label with exactly [self-hosted, Linux] — no arch
+    # labels, the fleet spans arm64 and x86_64 hosts. The baked toolchain
+    # already includes the wasm32-unknown-unknown target.
+    runs-on:         [self-hosted, Linux]
     steps:
-      - uses:        actions/checkout@v2
-      - uses:        actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target:    wasm32-unknown-unknown
-          override:  true
+      - uses:        actions/checkout@v4
       - run:         cargo build --target wasm32-unknown-unknown

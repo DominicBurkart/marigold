@@ -1,6 +1,17 @@
 name:                tests
 
-on:                  [push]
+# push-only triggers left PRs whose branches were pushed by an app (no push
+# event ⇒ no run) blocked forever on required checks. pull_request covers every
+# PR regardless of how the head was pushed; push is kept for main so the
+# default branch still gets a full run after each merge.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group:             tests-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR:  always
@@ -8,12 +19,14 @@ env:
 jobs:
   test:
     name:            Tests
-    runs-on:         ubuntu-latest
+    # Self-hosted fleet: label with exactly [self-hosted, Linux] — no arch
+    # labels, the fleet spans arm64 and x86_64 hosts. The runner image bakes a
+    # pinned stable toolchain (rustfmt + clippy + wasm32), so no toolchain
+    # action: resolving the "stable" channel over the network was observed to
+    # return a stale version from inside the runner VM.
+    runs-on:         [self-hosted, Linux]
     steps:
-    - uses:          actions/checkout@v2
-    - uses:          actions-rs/toolchain@v1
-      with:
-          toolchain: stable
+    - uses:          actions/checkout@v4
     - run:           cargo test
     - run:           cargo test --features tokio,io
     - run:           cargo test --features tokio
