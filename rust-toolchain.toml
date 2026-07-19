@@ -1,4 +1,8 @@
 [toolchain]
 channel = "stable"
 components = [ "rustfmt", "clippy" ]
+# wasm32 is declared here (not `rustup target add` in CI) so every environment
+# that honors the toolchain file — including self-hosted runners resolving the
+# pin for the first time — gets the target the WASM Build check needs.
+targets = [ "wasm32-unknown-unknown" ]
 profile = "minimal"

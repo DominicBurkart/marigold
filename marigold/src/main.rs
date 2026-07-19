@@ -273,7 +273,7 @@ mod tests {
     /// Build the marigold binary exactly once via `cargo build` and return its path.
     /// Unlike `cargo install`, this does not write to `~/.cargo/bin/`
     /// and works in sandboxed environments.
-    /// Note: assumes the default debug build profile (target/debug/).
+    /// Note: assumes the default debug build profile (<target-dir>/debug/).
     static BINARY: LazyLock<PathBuf> = LazyLock::new(|| {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -284,7 +284,13 @@ mod tests {
             .status()
             .expect("could not build marigold");
         assert!(status.success(), "failed to build marigold binary");
-        workspace_root.join("target/debug/marigold")
+        // Respect a redirected target dir (e.g. CI runners set CARGO_TARGET_DIR
+        // to a persistent cache volume); the binary is not under the workspace
+        // in that case.
+        let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| workspace_root.join("target"));
+        target_dir.join("debug/marigold")
     });
 
     /// Create an isolated temp directory for a test, avoiding any writes
