@@ -59,3 +59,50 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn test_vector_write() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_write_multiple() {
+        let mut w = Writer::vector();
+        w.write_all(b"foo").await.unwrap();
+        w.write_all(b"bar").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_file_write() {
+        let path = std::env::temp_dir().join("marigold-writer-test.bin");
+        let std_file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap();
+        let tokio_file = tokio::fs::File::from_std(std_file);
+        let mut w = Writer::file(tokio_file);
+        w.write_all(b"hello world").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_debug() {
+        let w = Writer::vector();
+        let s = format!("{:?}", w);
+        assert!(s.contains("Writer"));
+    }
+}
