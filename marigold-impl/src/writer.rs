@@ -59,3 +59,69 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Writer;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_write_succeeds() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_write_empty_succeeds() {
+        let mut w = Writer::vector();
+        w.write_all(b"").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_flush_succeeds() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_shutdown_succeeds() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_multiple_writes_succeed() {
+        let mut w = Writer::vector();
+        w.write_all(b"foo").await.unwrap();
+        w.write_all(b"bar").await.unwrap();
+        w.write_all(b"baz").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_write_and_verify() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.txt");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"marigold").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+        let contents = tokio::fs::read(&path).await.unwrap();
+        assert_eq!(contents, b"marigold");
+    }
+
+    #[tokio::test]
+    async fn file_write_empty_and_verify() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.txt");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"").await.unwrap();
+        w.shutdown().await.unwrap();
+        let contents = tokio::fs::read(&path).await.unwrap();
+        assert_eq!(contents, b"");
+    }
+}
