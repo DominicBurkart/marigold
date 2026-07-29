@@ -59,3 +59,49 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Writer;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_writer_write_and_flush() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello").await.expect("write_all");
+        w.flush().await.expect("flush");
+    }
+
+    #[tokio::test]
+    async fn vector_writer_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.expect("write_all");
+        w.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn vector_writer_empty_write() {
+        let mut w = Writer::vector();
+        w.write_all(b"").await.expect("empty write_all");
+        w.flush().await.expect("flush after empty write");
+    }
+
+    #[tokio::test]
+    async fn vector_writer_multiple_writes() {
+        let mut w = Writer::vector();
+        w.write_all(b"first").await.expect("first write");
+        w.write_all(b"second").await.expect("second write");
+        w.flush().await.expect("flush");
+        w.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn file_writer_write_and_flush() {
+        let tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        let f = tokio::fs::File::create(tmp.path()).await.expect("open file");
+        let mut w = Writer::file(f);
+        w.write_all(b"test data").await.expect("write_all");
+        w.flush().await.expect("flush");
+        w.shutdown().await.expect("shutdown");
+    }
+}
