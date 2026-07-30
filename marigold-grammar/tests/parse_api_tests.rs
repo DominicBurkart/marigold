@@ -183,9 +183,16 @@ fn analyze_streaming_does_not_collect() {
 fn parse_read_file_csv_plain_no_gzip() {
     let result =
         marigold_grammar::marigold_parse("read_file(\"data.csv\", csv, struct=Data).ok().return");
-    assert!(result.is_ok(), "read_file without .gz should parse: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "read_file without .gz should parse: {:?}",
+        result
+    );
     let code = result.unwrap();
-    assert!(!code.contains("GzipDecoder"), "non-.gz path must not use GzipDecoder");
+    assert!(
+        !code.contains("GzipDecoder"),
+        "non-.gz path must not use GzipDecoder"
+    );
 }
 
 #[test]
@@ -247,9 +254,16 @@ fn parse_write_file_csv_plain_no_gzip() {
     let result = marigold_grammar::marigold_parse(
         "read_file(\"data.csv\", csv, struct=Data).ok().write_file(\"out.csv\", csv)",
     );
-    assert!(result.is_ok(), "write_file without compression should parse: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "write_file without compression should parse: {:?}",
+        result
+    );
     let code = result.unwrap();
-    assert!(!code.contains("GzipEncoder"), "uncompressed write_file must not use GzipEncoder");
+    assert!(
+        !code.contains("GzipEncoder"),
+        "uncompressed write_file must not use GzipEncoder"
+    );
 }
 
 #[test]
@@ -297,14 +311,15 @@ fn parse_write_file_csv_explicit_none_compression() {
         result
     );
     let code = result.unwrap();
-    assert!(!code.contains("GzipEncoder"), "compression=none must not use GzipEncoder");
+    assert!(
+        !code.contains("GzipEncoder"),
+        "compression=none must not use GzipEncoder"
+    );
 }
 
 #[test]
 fn parse_write_file_unsupported_format_errors() {
-    let result = marigold_grammar::marigold_parse(
-        "range(0, 5).write_file(\"out.json\", json)",
-    );
+    let result = marigold_grammar::marigold_parse("range(0, 5).write_file(\"out.json\", json)");
     assert!(
         result.is_err(),
         "write_file with unsupported format should fail"
