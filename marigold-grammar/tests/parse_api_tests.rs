@@ -178,3 +178,135 @@ fn analyze_streaming_does_not_collect() {
         "map should not report collects_input"
     );
 }
+
+#[test]
+fn parse_read_file_csv_plain_no_gzip() {
+    let result =
+        marigold_grammar::marigold_parse("read_file(\"data.csv\", csv, struct=Data).ok().return");
+    assert!(result.is_ok(), "read_file without .gz should parse: {:?}", result);
+    let code = result.unwrap();
+    assert!(!code.contains("GzipDecoder"), "non-.gz path must not use GzipDecoder");
+}
+
+#[test]
+fn parse_read_file_csv_gz_extension_auto_detects_gzip() {
+    let result = marigold_grammar::marigold_parse(
+        "read_file(\"data.csv.gz\", csv, struct=Data).ok().return",
+    );
+    assert!(
+        result.is_ok(),
+        "read_file with .gz extension should parse: {:?}",
+        result
+    );
+    let code = result.unwrap();
+    assert!(
+        code.contains("GzipDecoder"),
+        "auto-detected gzip path must use GzipDecoder"
+    );
+}
+
+#[test]
+fn parse_read_file_csv_infer_compression_false_skips_gzip() {
+    let result = marigold_grammar::marigold_parse(
+        "read_file(\"data.csv.gz\", csv, struct=Data, infer_compression=false).ok().return",
+    );
+    assert!(
+        result.is_ok(),
+        "read_file with infer_compression=false should parse: {:?}",
+        result
+    );
+    let code = result.unwrap();
+    assert!(
+        !code.contains("GzipDecoder"),
+        "explicit infer_compression=false must skip GzipDecoder"
+    );
+}
+
+#[test]
+fn parse_read_file_csv_infer_compression_true_still_checks_extension() {
+    // infer_compression=true falls into the same branch as None (auto-detect from extension).
+    // Without a .gz extension the result is the same as the plain non-gz case.
+    let result = marigold_grammar::marigold_parse(
+        "read_file(\"data.csv\", csv, struct=Data, infer_compression=true).ok().return",
+    );
+    assert!(
+        result.is_ok(),
+        "read_file with infer_compression=true should parse: {:?}",
+        result
+    );
+    let code = result.unwrap();
+    // No .gz extension → no GzipDecoder despite infer_compression=true
+    assert!(
+        !code.contains("GzipDecoder"),
+        "infer_compression=true + non-.gz extension must not use GzipDecoder"
+    );
+}
+
+#[test]
+fn parse_write_file_csv_plain_no_gzip() {
+    let result = marigold_grammar::marigold_parse(
+        "read_file(\"data.csv\", csv, struct=Data).ok().write_file(\"out.csv\", csv)",
+    );
+    assert!(result.is_ok(), "write_file without compression should parse: {:?}", result);
+    let code = result.unwrap();
+    assert!(!code.contains("GzipEncoder"), "uncompressed write_file must not use GzipEncoder");
+}
+
+#[test]
+fn parse_write_file_csv_gz_extension_auto_detects_gzip() {
+    let result = marigold_grammar::marigold_parse(
+        "read_file(\"data.csv\", csv, struct=Data).ok().write_file(\"out.csv.gz\", csv)",
+    );
+    assert!(
+        result.is_ok(),
+        "write_file with .gz path should parse: {:?}",
+        result
+    );
+    let code = result.unwrap();
+    assert!(
+        code.contains("GzipEncoder"),
+        "auto-detected gzip write_file must use GzipEncoder"
+    );
+}
+
+#[test]
+fn parse_write_file_csv_explicit_gz_compression() {
+    let result = marigold_grammar::marigold_parse(
+        "read_file(\"data.csv\", csv, struct=Data).ok().write_file(\"out.csv\", csv, compression=gz)",
+    );
+    assert!(
+        result.is_ok(),
+        "write_file with compression=gz should parse: {:?}",
+        result
+    );
+    let code = result.unwrap();
+    assert!(
+        code.contains("GzipEncoder"),
+        "explicit compression=gz must use GzipEncoder"
+    );
+}
+
+#[test]
+fn parse_write_file_csv_explicit_none_compression() {
+    let result = marigold_grammar::marigold_parse(
+        "read_file(\"data.csv\", csv, struct=Data).ok().write_file(\"out.csv\", csv, compression=none)",
+    );
+    assert!(
+        result.is_ok(),
+        "write_file with compression=none should parse: {:?}",
+        result
+    );
+    let code = result.unwrap();
+    assert!(!code.contains("GzipEncoder"), "compression=none must not use GzipEncoder");
+}
+
+#[test]
+fn parse_write_file_unsupported_format_errors() {
+    let result = marigold_grammar::marigold_parse(
+        "range(0, 5).write_file(\"out.json\", json)",
+    );
+    assert!(
+        result.is_err(),
+        "write_file with unsupported format should fail"
+    );
+}
