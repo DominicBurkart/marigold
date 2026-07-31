@@ -677,4 +677,28 @@ mod tests {
         let result = parse_bound_expr("1_000_000");
         assert_eq!(result, Ok(BoundExpr::Literal(1_000_000)));
     }
+
+    #[test]
+    fn test_error_trailing_input() {
+        let e = parse_bound_expr("42 extra").unwrap_err();
+        assert!(matches!(e, BoundParseError::TrailingInput(_)));
+        assert!(e.to_string().contains("Trailing input"));
+    }
+
+    #[test]
+    fn test_error_unexpected_token_at_primary() {
+        // '+' at the start of a primary expression is invalid
+        let e = parse_bound_expr("+ 1").unwrap_err();
+        assert!(matches!(e, BoundParseError::UnexpectedToken(_)));
+        assert!(e.to_string().contains("Unexpected token"));
+    }
+
+    #[test]
+    fn test_display_dead_error_variants() {
+        let e = BoundParseError::InvalidLiteral("bad_val".to_string());
+        assert_eq!(e.to_string(), "Invalid literal: bad_val");
+
+        let e = BoundParseError::InvalidOperator("??".to_string());
+        assert_eq!(e.to_string(), "Invalid operator: ??");
+    }
 }
