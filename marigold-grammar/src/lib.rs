@@ -66,6 +66,7 @@ extern crate proc_macro;
 
 pub use itertools;
 
+pub mod bound_expr;
 pub mod bound_resolution;
 pub mod complexity;
 pub mod nodes;

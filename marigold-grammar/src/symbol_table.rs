@@ -298,4 +298,22 @@ mod tests {
         assert!(names.iter().any(|&n| n == "Alpha"));
         assert!(names.iter().any(|&n| n == "Beta"));
     }
+
+    #[test]
+    fn test_get_enum_info_returns_full_info() {
+        let exprs = vec![TypedExpression::EnumDeclaration(create_enum_node(
+            "Direction",
+            4,
+            false,
+        ))];
+        let table = SymbolTable::from_expressions(&exprs);
+
+        let info = table
+            .get_enum_info("Direction")
+            .expect("Direction should be in table");
+        assert_eq!(info.name, "Direction");
+        assert_eq!(info.variant_count, 4);
+
+        assert!(table.get_enum_info("Missing").is_none());
+    }
 }
