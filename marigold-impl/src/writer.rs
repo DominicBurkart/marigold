@@ -59,3 +59,85 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Writer;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_write_all() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello world").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_flush() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"shutdown test").await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_write_empty() {
+        let mut w = Writer::vector();
+        w.write_all(b"").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_write_large() {
+        let mut w = Writer::vector();
+        let data = vec![0xABu8; 1024 * 64];
+        w.write_all(&data).await.unwrap();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_write_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_write.bin");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"file writer test").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+        let contents = tokio::fs::read(&path).await.unwrap();
+        assert_eq!(contents, b"file writer test");
+    }
+
+    #[tokio::test]
+    async fn file_write_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_empty.bin");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        w.write_all(b"").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+        let contents = tokio::fs::read(&path).await.unwrap();
+        assert_eq!(contents, b"");
+    }
+
+    #[tokio::test]
+    async fn file_write_large() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_large.bin");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(file);
+        let data = vec![0x42u8; 1024 * 128];
+        w.write_all(&data).await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+        let contents = tokio::fs::read(&path).await.unwrap();
+        assert_eq!(contents, data);
+    }
+}
