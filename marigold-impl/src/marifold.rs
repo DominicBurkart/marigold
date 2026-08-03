@@ -50,4 +50,58 @@ mod tests {
             vec![10]
         );
     }
+
+    #[tokio::test]
+    async fn fold_empty_stream() {
+        let result: Vec<i32> = futures::stream::iter(std::iter::empty::<i32>())
+            .marifold(42i32, |acc, x| async move { acc + x })
+            .await
+            .collect()
+            .await;
+        assert_eq!(result, vec![42]);
+    }
+
+    #[tokio::test]
+    async fn fold_single_element() {
+        let result: Vec<i32> = futures::stream::iter(vec![7i32])
+            .marifold(0i32, |acc, x| async move { acc + x })
+            .await
+            .collect()
+            .await;
+        assert_eq!(result, vec![7]);
+    }
+
+    #[tokio::test]
+    async fn fold_string_concatenation() {
+        let words = vec!["hello", " ", "world"];
+        let result: Vec<String> = futures::stream::iter(words)
+            .marifold(String::new(), |mut acc, x| async move {
+                acc.push_str(x);
+                acc
+            })
+            .await
+            .collect()
+            .await;
+        assert_eq!(result, vec!["hello world"]);
+    }
+
+    #[tokio::test]
+    async fn fold_produces_single_value_stream() {
+        let stream = futures::stream::iter(0..100i64)
+            .marifold(0i64, |acc, x| async move { acc + x })
+            .await;
+        let results: Vec<i64> = stream.collect().await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], 4950);
+    }
+
+    #[tokio::test]
+    async fn fold_with_multiplication() {
+        let result: Vec<u64> = futures::stream::iter(1u64..=5u64)
+            .marifold(1u64, |acc, x| async move { acc * x })
+            .await
+            .collect()
+            .await;
+        assert_eq!(result, vec![120]);
+    }
 }
