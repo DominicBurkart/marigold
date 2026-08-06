@@ -59,3 +59,75 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    // ── vector backend ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn vector_write_all_and_flush() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello, vector!").await.expect("write_all");
+        w.flush().await.expect("flush");
+    }
+
+    #[tokio::test]
+    async fn vector_write_then_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"shutdown test").await.expect("write_all");
+        w.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn vector_multiple_writes() {
+        let mut w = Writer::vector();
+        w.write_all(b"part1").await.expect("first write");
+        w.write_all(b"part2").await.expect("second write");
+        w.flush().await.expect("flush");
+    }
+
+    #[tokio::test]
+    async fn vector_empty_write() {
+        // Writing zero bytes must not error.
+        let mut w = Writer::vector();
+        w.write_all(b"").await.expect("empty write");
+        w.flush().await.expect("flush");
+    }
+
+    // ── file backend ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn file_write_all_and_flush() {
+        let path = std::env::temp_dir().join("marigold_writer_test_write.tmp");
+        let file = tokio::fs::File::create(&path)
+            .await
+            .expect("create temp file");
+
+        let mut w = Writer::file(file);
+        w.write_all(b"hello, file!").await.expect("write_all");
+        w.flush().await.expect("flush");
+        w.shutdown().await.expect("shutdown");
+
+        // Verify round-trip: the bytes we wrote were actually persisted.
+        let contents = tokio::fs::read(&path).await.expect("read back file");
+        assert_eq!(contents, b"hello, file!");
+
+        tokio::fs::remove_file(&path).await.ok();
+    }
+
+    #[tokio::test]
+    async fn file_shutdown_without_write() {
+        let path = std::env::temp_dir().join("marigold_writer_test_shutdown.tmp");
+        let file = tokio::fs::File::create(&path)
+            .await
+            .expect("create temp file");
+
+        let mut w = Writer::file(file);
+        w.shutdown().await.expect("shutdown on empty file writer");
+
+        tokio::fs::remove_file(&path).await.ok();
+    }
+}
