@@ -107,10 +107,7 @@ mod tests {
             .flush()
             .await
             .expect("flush after multiple writes should succeed");
-        writer
-            .shutdown()
-            .await
-            .expect("shutdown should succeed");
+        writer.shutdown().await.expect("shutdown should succeed");
     }
 
     /// Writing to a file-backed writer and reading back should yield the same bytes.
@@ -141,7 +138,8 @@ mod tests {
             .expect("reading back written file should succeed");
         let _ = tokio::fs::remove_file(&path).await;
         assert_eq!(
-            content, expected,
+            content,
+            expected,
             "file content should exactly match what was written"
         );
     }
@@ -159,10 +157,7 @@ mod tests {
             .write_all(b"poll shutdown test")
             .await
             .expect("write should succeed");
-        writer
-            .shutdown()
-            .await
-            .expect("shutdown should succeed");
+        writer.shutdown().await.expect("shutdown should succeed");
 
         let _ = tokio::fs::remove_file(&path).await;
     }

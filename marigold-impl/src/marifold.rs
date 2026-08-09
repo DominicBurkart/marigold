@@ -75,11 +75,7 @@ mod tests {
             .await
             .collect::<Vec<u32>>()
             .await;
-        assert_eq!(
-            result,
-            vec![15_u32],
-            "single item: 10 (init) + 5 = 15"
-        );
+        assert_eq!(result, vec![15_u32], "single item: 10 (init) + 5 = 15");
     }
 
     /// Fold can accumulate into a String (non-numeric accumulator).
