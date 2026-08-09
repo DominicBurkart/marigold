@@ -138,8 +138,7 @@ mod tests {
             .expect("reading back written file should succeed");
         let _ = tokio::fs::remove_file(&path).await;
         assert_eq!(
-            content,
-            expected,
+            content, expected,
             "file content should exactly match what was written"
         );
     }
