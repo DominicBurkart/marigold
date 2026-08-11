@@ -77,7 +77,10 @@ mod tests {
     #[tokio::test]
     async fn test_vector_writer_write_all() {
         let mut writer = Writer::vector();
-        writer.write_all(b"test data for vector writer").await.unwrap();
+        writer
+            .write_all(b"test data for vector writer")
+            .await
+            .unwrap();
         writer.flush().await.unwrap();
     }
 
