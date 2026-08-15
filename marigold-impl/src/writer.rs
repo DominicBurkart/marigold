@@ -79,7 +79,9 @@ mod tests {
     #[tokio::test]
     async fn vector_writer_shutdown() {
         let mut w = Writer::vector();
-        w.write_all(b"data").await.expect("write_all should succeed");
+        w.write_all(b"data")
+            .await
+            .expect("write_all should succeed");
         w.shutdown().await.expect("shutdown should succeed");
     }
 
