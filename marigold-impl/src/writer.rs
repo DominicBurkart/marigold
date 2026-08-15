@@ -59,3 +59,47 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    /// `Writer::vector()` must accept writes and flush without errors.
+    #[tokio::test]
+    async fn vector_writer_write_and_flush() {
+        let mut w = Writer::vector();
+        let bytes = b"hello, marigold";
+        let n = w.write(bytes).await.expect("write should succeed");
+        assert_eq!(n, bytes.len());
+        w.flush().await.expect("flush should succeed");
+    }
+
+    /// Shutdown (EOF signal) on the vector writer must not error.
+    #[tokio::test]
+    async fn vector_writer_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"data")
+            .await
+            .expect("write_all should succeed");
+        w.shutdown().await.expect("shutdown should succeed");
+    }
+
+    /// Multiple sequential writes accumulate without error.
+    #[tokio::test]
+    async fn vector_writer_multiple_writes() {
+        let mut w = Writer::vector();
+        for chunk in &[b"foo" as &[u8], b"bar", b"baz"] {
+            w.write_all(chunk).await.expect("write_all should succeed");
+        }
+        w.flush().await.expect("flush should succeed");
+    }
+
+    /// Write of an empty slice succeeds and reports zero bytes.
+    #[tokio::test]
+    async fn vector_writer_empty_write() {
+        let mut w = Writer::vector();
+        let n = w.write(b"").await.expect("empty write should succeed");
+        assert_eq!(n, 0);
+    }
+}
