@@ -48,4 +48,41 @@ mod tests {
             vec![0_u32, 1_u32, 2_u32]
         );
     }
+
+    #[tokio::test]
+    async fn run_stream_empty() {
+        let result = run_stream(futures::stream::iter(std::iter::empty::<u32>()))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, Vec::<u32>::new());
+    }
+
+    #[tokio::test]
+    async fn run_stream_single_element() {
+        let result = run_stream(futures::stream::iter(std::iter::once(99u32)))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![99u32]);
+    }
+
+    #[tokio::test]
+    async fn run_stream_preserves_order() {
+        let n = 500u32;
+        let result = run_stream(futures::stream::iter(0..n))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, (0..n).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn run_stream_large() {
+        let n = 1000u32;
+        let result = run_stream(futures::stream::iter(0..n))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result.len(), n as usize);
+        for (i, &val) in result.iter().enumerate() {
+            assert_eq!(val, i as u32, "element at index {i} should be {i}");
+        }
+    }
 }

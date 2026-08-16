@@ -59,3 +59,135 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Writer;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn test_vector_writer_write_all() {
+        let mut writer = Writer::vector();
+        writer
+            .write_all(b"hello, world")
+            .await
+            .expect("write_all should succeed on vector writer");
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_flush() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"data").await.unwrap();
+        writer
+            .flush()
+            .await
+            .expect("flush should succeed on vector writer");
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_shutdown() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"data").await.unwrap();
+        writer
+            .shutdown()
+            .await
+            .expect("shutdown should succeed on vector writer");
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_multiple_sequential_writes() {
+        let mut writer = Writer::vector();
+        for i in 0..10u8 {
+            writer
+                .write_all(&[i])
+                .await
+                .unwrap_or_else(|e| panic!("write {i} failed: {e}"));
+        }
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_empty_write() {
+        let mut writer = Writer::vector();
+        writer
+            .write_all(b"")
+            .await
+            .expect("empty write_all should succeed");
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_large_write() {
+        let data = vec![0u8; 65536];
+        let mut writer = Writer::vector();
+        writer
+            .write_all(&data)
+            .await
+            .expect("large write_all should succeed");
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_debug_format() {
+        let writer = Writer::vector();
+        let debug_output = format!("{writer:?}");
+        assert!(
+            debug_output.contains("Writer"),
+            "Debug output should contain 'Writer', got: {debug_output}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_file_writer_write_and_flush() {
+        let tmp_path = std::env::temp_dir().join(format!(
+            "marigold_writer_test_write_{}.tmp",
+            std::process::id()
+        ));
+        let std_file = std::fs::File::create(&tmp_path)
+            .expect("failed to create temp file for test_file_writer_write_and_flush");
+        let tokio_file = tokio::fs::File::from_std(std_file);
+        let mut writer = Writer::file(tokio_file);
+        writer
+            .write_all(b"hello file")
+            .await
+            .expect("file write_all should succeed");
+        writer.flush().await.expect("file flush should succeed");
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+
+    #[tokio::test]
+    async fn test_file_writer_shutdown() {
+        let tmp_path = std::env::temp_dir().join(format!(
+            "marigold_writer_test_shutdown_{}.tmp",
+            std::process::id()
+        ));
+        let std_file = std::fs::File::create(&tmp_path)
+            .expect("failed to create temp file for test_file_writer_shutdown");
+        let tokio_file = tokio::fs::File::from_std(std_file);
+        let mut writer = Writer::file(tokio_file);
+        writer.write_all(b"shutdown data").await.unwrap();
+        writer
+            .shutdown()
+            .await
+            .expect("file shutdown should succeed");
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+
+    #[tokio::test]
+    async fn test_file_writer_debug_format() {
+        let tmp_path = std::env::temp_dir().join(format!(
+            "marigold_writer_test_debug_{}.tmp",
+            std::process::id()
+        ));
+        let std_file = std::fs::File::create(&tmp_path)
+            .expect("failed to create temp file for test_file_writer_debug_format");
+        let tokio_file = tokio::fs::File::from_std(std_file);
+        let writer = Writer::file(tokio_file);
+        let debug_output = format!("{writer:?}");
+        assert!(
+            debug_output.contains("Writer"),
+            "Debug output should contain 'Writer', got: {debug_output}"
+        );
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+}
