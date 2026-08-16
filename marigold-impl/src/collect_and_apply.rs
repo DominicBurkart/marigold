@@ -39,6 +39,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn collect_and_apply_empty_stream() {
+        let result: Vec<i32> = futures::stream::iter(std::iter::empty::<i32>())
+            .collect_and_apply(|v| v)
+            .await;
+        assert_eq!(result, Vec::<i32>::new());
+    }
+
+    #[tokio::test]
+    async fn collect_and_apply_sum() {
+        let sum: i32 = futures::stream::iter(1..=5)
+            .collect_and_apply(|v| v.iter().sum())
+            .await;
+        assert_eq!(sum, 15);
+    }
+
+    #[tokio::test]
+    async fn collect_and_apply_len() {
+        let len: usize = futures::stream::iter(0..10u32)
+            .collect_and_apply(|v| v.len())
+            .await;
+        assert_eq!(len, 10);
+    }
+
+    #[tokio::test]
+    async fn collect_and_apply_single_element() {
+        let result: Vec<&str> = futures::stream::iter(std::iter::once("only"))
+            .collect_and_apply(|v| v)
+            .await;
+        assert_eq!(result, vec!["only"]);
+    }
+
+    #[tokio::test]
     async fn permutations_with_replacement() {
         use futures::StreamExt;
         use genawaiter;
