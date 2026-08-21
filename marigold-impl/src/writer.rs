@@ -59,3 +59,39 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Writer;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_writer_write_and_flush() {
+        let mut w = Writer::vector();
+        w.write_all(b"hello").await.expect("write_all");
+        w.flush().await.expect("flush");
+        // No panic == success — the Writer accepts bytes and flushes without error.
+    }
+
+    #[tokio::test]
+    async fn vector_writer_write_empty_slice() {
+        let mut w = Writer::vector();
+        w.write_all(b"").await.expect("write empty slice");
+        w.flush().await.expect("flush after empty write");
+    }
+
+    #[tokio::test]
+    async fn vector_writer_multiple_writes() {
+        let mut w = Writer::vector();
+        w.write_all(b"foo").await.expect("first write");
+        w.write_all(b"bar").await.expect("second write");
+        w.flush().await.expect("flush");
+    }
+
+    #[tokio::test]
+    async fn vector_writer_shutdown() {
+        let mut w = Writer::vector();
+        w.write_all(b"data").await.expect("write");
+        w.shutdown().await.expect("shutdown");
+    }
+}
