@@ -59,3 +59,76 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Writer;
+    use tokio::io::AsyncWriteExt;
+
+    // --- Vector variant ---
+
+    #[tokio::test]
+    async fn vector_write_returns_byte_count() {
+        let mut w = Writer::vector();
+        let n = w.write(b"hello").await.unwrap();
+        assert_eq!(n, 5);
+    }
+
+    #[tokio::test]
+    async fn vector_write_all_accepts_multiple_chunks() {
+        let mut w = Writer::vector();
+        w.write_all(b"foo").await.unwrap();
+        w.write_all(b"bar").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_flush_succeeds() {
+        let mut w = Writer::vector();
+        w.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_shutdown_succeeds() {
+        let mut w = Writer::vector();
+        w.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_full_write_flush_shutdown_sequence() {
+        let mut w = Writer::vector();
+        w.write_all(b"payload").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+    }
+
+    // --- File variant ---
+
+    #[tokio::test]
+    async fn file_write_flush_shutdown() {
+        let path = std::env::temp_dir().join("marigold_writer_test_write.bin");
+        let f = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(f);
+        w.write_all(b"file content").await.unwrap();
+        w.flush().await.unwrap();
+        w.shutdown().await.unwrap();
+        tokio::fs::remove_file(&path).await.ok();
+    }
+
+    #[tokio::test]
+    async fn file_flush_empty() {
+        let path = std::env::temp_dir().join("marigold_writer_test_flush.bin");
+        let f = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(f);
+        w.flush().await.unwrap();
+        tokio::fs::remove_file(&path).await.ok();
+    }
+
+    #[tokio::test]
+    async fn file_shutdown_empty() {
+        let path = std::env::temp_dir().join("marigold_writer_test_shutdown.bin");
+        let f = tokio::fs::File::create(&path).await.unwrap();
+        let mut w = Writer::file(f);
+        w.shutdown().await.unwrap();
+        tokio::fs::remove_file(&path).await.ok();
+    }
+}
