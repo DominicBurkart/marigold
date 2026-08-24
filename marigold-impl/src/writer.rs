@@ -59,3 +59,62 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn test_vector_writer_write_and_flush() {
+        let mut writer = Writer::vector();
+        let data = b"hello, world";
+        writer.write_all(data).await.expect("write_all failed");
+        writer.flush().await.expect("flush failed");
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_shutdown() {
+        let mut writer = Writer::vector();
+        writer
+            .write_all(b"test data")
+            .await
+            .expect("write_all failed");
+        writer.shutdown().await.expect("shutdown failed");
+    }
+
+    #[tokio::test]
+    async fn test_vector_writer_empty_write() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"").await.expect("empty write_all failed");
+        writer.flush().await.expect("flush after empty write failed");
+    }
+
+    #[tokio::test]
+    async fn test_file_writer_write_and_flush() {
+        let tmp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = tokio::fs::File::create(tmp.path())
+            .await
+            .expect("failed to open file");
+        let mut writer = Writer::file(file);
+        writer
+            .write_all(b"file content")
+            .await
+            .expect("write_all failed");
+        writer.flush().await.expect("flush failed");
+    }
+
+    #[tokio::test]
+    async fn test_file_writer_shutdown() {
+        let tmp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+        let file = tokio::fs::File::create(tmp.path())
+            .await
+            .expect("failed to open file");
+        let mut writer = Writer::file(file);
+        writer
+            .write_all(b"shutdown test")
+            .await
+            .expect("write_all failed");
+        writer.shutdown().await.expect("shutdown failed");
+    }
+}
