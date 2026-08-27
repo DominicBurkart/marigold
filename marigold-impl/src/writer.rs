@@ -59,3 +59,76 @@ impl tokio::io::AsyncWrite for Writer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_writer_write_all() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"hello world").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_flush() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"test data").await.unwrap();
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_shutdown() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"test data").await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_writer_write_all() {
+        let path = std::env::temp_dir().join("marigold_writer_test_write.tmp");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut writer = Writer::file(file);
+        writer.write_all(b"hello world").await.unwrap();
+        tokio::fs::remove_file(&path).await.ok();
+    }
+
+    #[tokio::test]
+    async fn file_writer_flush() {
+        let path = std::env::temp_dir().join("marigold_writer_test_flush.tmp");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut writer = Writer::file(file);
+        writer.write_all(b"data").await.unwrap();
+        writer.flush().await.unwrap();
+        tokio::fs::remove_file(&path).await.ok();
+    }
+
+    #[tokio::test]
+    async fn file_writer_shutdown() {
+        let path = std::env::temp_dir().join("marigold_writer_test_shutdown.tmp");
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let mut writer = Writer::file(file);
+        writer.write_all(b"data").await.unwrap();
+        writer.shutdown().await.unwrap();
+        tokio::fs::remove_file(&path).await.ok();
+    }
+
+    #[test]
+    fn writer_debug_vector() {
+        let w = Writer::vector();
+        let s = format!("{:?}", w);
+        assert!(s.contains("Vector"));
+    }
+
+    #[test]
+    fn writer_debug_file() {
+        let path = std::env::temp_dir().join("marigold_writer_debug_test.tmp");
+        let f = std::fs::File::create(&path).unwrap();
+        let tf = tokio::fs::File::from_std(f);
+        let w = Writer::file(tf);
+        let s = format!("{:?}", w);
+        assert!(s.contains("File"));
+        std::fs::remove_file(&path).ok();
+    }
+}
