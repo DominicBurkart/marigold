@@ -1,0 +1,5 @@
+[advisories]
+ignore = [
+    # h2 unbounded empty DATA frames — fix requires hyper 0.14→1.x + tonic 0.9→0.12 upgrade
+    "RUSTSEC-2026-0258",
+]
