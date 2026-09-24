@@ -2,6 +2,7 @@
 set -euo pipefail
 
 export MARIGOLD_WORKSPACE_PATH="$(git rev-parse --show-toplevel)/marigold"
+export CARGO_HUSKY_DONT_INSTALL_HOOKS=1
 
 cargo fmt --all -- --check
 cargo clippy --all-features -- -D warnings
@@ -11,4 +12,27 @@ cargo audit
 cargo deny check
 git diff --cached | claude "You are a security engineer. Review the code being committed to determine if it can be committed/pushed. Does this commit leak any secrets, tokens, sensitive internals, or PII? Your response MUST start with exactly 'VERDICT: SAFE' or 'VERDICT: UNSAFE'. If UNSAFE, follow with a list of problems to fix before the commit can be completed." | tee /tmp/claude_review; if grep -qi "^VERDICT: UNSAFE" /tmp/claude_review; then echo "Security issues found above. Please fix before committing." && exit 1; fi
 cmp -- README.md ./marigold/README.md
-NEW=$(cargo tarpaulin --skip-clean --ignore-tests --workspace --exclude color-palette-picker --exclude csv --exclude multi-consumer --exclude select-all --exclude stateful --exclude bounded-types -q | grep -oP '\d+\.\d+(?=% coverage)') && git stash -q 2>/dev/null || true && git checkout main -q && OLD=$(cargo tarpaulin --skip-clean --ignore-tests --workspace --exclude color-palette-picker --exclude csv --exclude multi-consumer --exclude select-all --exclude stateful --exclude bounded-types -q | grep -oP '\d+\.\d+(?=% coverage)') && git checkout - -q && git stash pop --index -q 2>/dev/null || true && (( $(echo "$NEW >= $OLD" | bc -l) )) && echo "Coverage: $NEW% >= $OLD%" || (echo "Coverage dropped: $NEW% < $OLD%" && exit 1)
+TARPAULIN_ARGS=(--skip-clean --ignore-tests --timeout 1800 --workspace --exclude color-palette-picker --exclude csv --exclude multi-consumer --exclude select-all --exclude stateful --exclude bounded-types)
+
+coverage() {
+  (cd "$1" && MARIGOLD_WORKSPACE_PATH="$1/marigold" cargo tarpaulin "${TARPAULIN_ARGS[@]}" "${@:2}") | tee >(cat >&2) | grep -oP '\d+\.\d+(?=% coverage)' | tail -n1
+}
+
+ROOT="$(git rev-parse --show-toplevel)"
+BASELINE="$(mktemp -d)"
+trap 'env -u GIT_INDEX_FILE git -C "$ROOT" worktree remove --force "$BASELINE" 2>/dev/null; rm -rf "$BASELINE"' EXIT
+env -u GIT_INDEX_FILE git -C "$ROOT" worktree add --detach -q "$BASELINE" main
+
+NEW=$(coverage "$ROOT")
+OLD=$(coverage "$BASELINE" --target-dir "$ROOT/target/tarpaulin-baseline")
+
+if [[ -z "$NEW" || -z "$OLD" ]]; then
+  echo "Could not measure coverage (this commit: '$NEW', main: '$OLD')"
+  exit 1
+fi
+if (( $(echo "$NEW >= $OLD" | bc -l) )); then
+  echo "Coverage: $NEW% >= $OLD%"
+else
+  echo "Coverage dropped: $NEW% < $OLD%"
+  exit 1
+fi
