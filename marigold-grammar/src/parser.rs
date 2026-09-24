@@ -66,6 +66,42 @@ impl PestParser {
         Ok(crate::complexity::analyze_program(&expressions))
     }
 
+    pub(crate) fn check(input: &str) -> Vec<crate::diagnostics::Diagnostic> {
+        use crate::diagnostics::Diagnostic;
+
+        let pairs = match MarigoldPestParser::parse(Rule::program, input) {
+            Ok(pairs) => pairs,
+            Err(e) => return vec![Diagnostic::from_pest(input, &e)],
+        };
+        let mut expressions = match crate::pest_ast_builder::PestAstBuilder::build_program(pairs) {
+            Ok(expressions) => expressions,
+            Err(msg) => return vec![Diagnostic::whole(input, "invalid-program", msg)],
+        };
+        if let Err(msg) = Self::resolve_enum_range_counts(&mut expressions) {
+            return vec![Diagnostic::whole(input, "undefined-enum", msg)];
+        }
+
+        let symbol_table = crate::symbol_table::SymbolTable::from_expressions(&expressions);
+        let resolved_bounds = if symbol_table.has_bounded_types() {
+            match crate::bound_resolution::BoundResolver::new(&symbol_table).resolve_all() {
+                Ok(bounds) => Some(bounds),
+                Err(errors) => {
+                    return errors
+                        .iter()
+                        .map(|e| Diagnostic::from_resolution(input, e))
+                        .collect()
+                }
+            }
+        } else {
+            None
+        };
+
+        match Self::generate_rust_code(expressions, resolved_bounds) {
+            Ok(_) => Vec::new(),
+            Err(msg) => vec![Diagnostic::whole(input, "codegen-error", msg)],
+        }
+    }
+
     /// Internal function: parse input and build AST
     fn parse_input(input: &str) -> Result<String, String> {
         // Stage 1: Parse with Pest grammar
