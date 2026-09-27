@@ -19,6 +19,7 @@
 //! ```
 
 use crate::bound_resolution::ResolutionError;
+use crate::span_index::SpanIndex;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -35,6 +36,7 @@ pub enum Severity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct Diagnostic {
     pub range: ByteRange,
     pub severity: Severity,
@@ -88,15 +90,47 @@ impl Diagnostic {
         )
     }
 
-    pub(crate) fn from_resolution(src: &str, e: &ResolutionError) -> Self {
-        let code = match e {
-            ResolutionError::CyclicDependency { .. } => "cyclic-bound",
-            ResolutionError::UndefinedType(_) => "undefined-type",
-            ResolutionError::InvalidOperation { .. } => "invalid-bound-operation",
-            ResolutionError::DivisionByZero => "bound-division-by-zero",
-            ResolutionError::BoundsViolation { .. } => "bounds-violation",
+    pub(crate) fn with_help(mut self, help: String) -> Self {
+        self.help = Some(help);
+        self
+    }
+
+    pub(crate) fn from_resolution(src: &str, index: &SpanIndex, e: &ResolutionError) -> Vec<Self> {
+        let refs_named = |names: &[&str]| -> Vec<ByteRange> {
+            index
+                .bound_type_refs
+                .iter()
+                .filter(|(n, _)| names.contains(&n.as_str()))
+                .map(|(_, r)| *r)
+                .collect()
         };
-        Self::whole(src, code, e.to_string())
+        let (code, ranges) = match e {
+            ResolutionError::CyclicDependency { cycle } => {
+                let names: Vec<&str> = cycle.iter().map(String::as_str).collect();
+                ("cyclic-bound", refs_named(&names))
+            }
+            ResolutionError::UndefinedType(name) => ("undefined-type", refs_named(&[name])),
+            ResolutionError::InvalidOperation { type_name, .. } => {
+                ("invalid-bound-operation", refs_named(&[type_name]))
+            }
+            ResolutionError::DivisionByZero => ("bound-division-by-zero", Vec::new()),
+            ResolutionError::BoundsViolation { field, .. } => (
+                "bounds-violation",
+                index
+                    .bounded_field_types
+                    .iter()
+                    .filter(|(f, _)| f == field)
+                    .map(|(_, r)| *r)
+                    .collect(),
+            ),
+        };
+        if ranges.is_empty() {
+            return vec![Self::whole(src, code, e.to_string())];
+        }
+        ranges
+            .into_iter()
+            .map(|r| Self::error(r, code, e.to_string()))
+            .collect()
     }
 }
 

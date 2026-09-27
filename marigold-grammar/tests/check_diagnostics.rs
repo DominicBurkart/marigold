@@ -49,49 +49,119 @@ fn syntax_error_at_end_of_input_is_in_bounds() {
     assert!(d.range.start <= d.range.end && d.range.end <= src.len());
 }
 
+fn slice<'a>(src: &'a str, d: &Diagnostic) -> &'a str {
+    &src[d.range.start..d.range.end]
+}
+
 #[test]
 fn undefined_enum_in_range() {
-    let d = only(marigold_check("range(Color).return"));
+    let src = "range(Color).return";
+    let d = only(marigold_check(src));
     assert_eq!(d.code, "undefined-enum");
     assert!(d.message.contains("Color"), "{}", d.message);
+    assert_eq!(slice(src, &d), "Color");
+    assert!(
+        d.help.as_deref().unwrap().contains("no enums"),
+        "{:?}",
+        d.help
+    );
+}
+
+#[test]
+fn undefined_enum_help_lists_declared_enums() {
+    let src = "enum Size { Small, Large }\nrange(Szie).return";
+    let d = only(marigold_check(src));
+    assert_eq!(slice(src, &d), "Szie");
+    assert!(d.help.as_deref().unwrap().contains("Size"), "{:?}", d.help);
+}
+
+#[test]
+fn every_undefined_enum_is_reported() {
+    let src = "range(Color).return\nrange(Shape).return";
+    let diags = marigold_check(src);
+    let slices: Vec<_> = diags.iter().map(|d| slice(src, d)).collect();
+    assert_eq!(slices, vec!["Color", "Shape"]);
+}
+
+#[test]
+fn undefined_enum_in_stream_variable() {
+    let src = "x = range(Color)\nx.return";
+    let d = only(marigold_check(src));
+    assert_eq!(d.code, "undefined-enum");
+    assert_eq!(slice(src, &d), "Color");
 }
 
 #[test]
 fn bounded_min_greater_than_max() {
-    let d = only(marigold_check(
-        "struct Test { field: int[10, 5] }\nrange(0, 1).return",
-    ));
+    let src = "struct Test { field: int[10, 5] }\nrange(0, 1).return";
+    let d = only(marigold_check(src));
     assert_eq!(d.code, "bounds-violation");
     assert!(d.message.contains("min") && d.message.contains("max"));
+    assert_eq!(slice(src, &d), "int[10, 5]");
 }
 
 #[test]
 fn bounded_uint_negative_min() {
-    let d = only(marigold_check(
-        "struct Test { field: uint[-1, 10] }\nrange(0, 1).return",
-    ));
+    let src = "struct Test { field: uint[-1, 10] }\nrange(0, 1).return";
+    let d = only(marigold_check(src));
     assert_eq!(d.code, "bounds-violation");
     assert!(d.message.contains("negative"), "{}", d.message);
+    assert_eq!(slice(src, &d), "uint[-1, 10]");
 }
 
 #[test]
 fn bounded_undefined_type() {
-    let d = only(marigold_check(
-        "struct Test { field: int[0, NonExistent.len()] }\nrange(0, 1).return",
-    ));
+    let src = "struct Test { field: int[0, NonExistent.len()] }\nrange(0, 1).return";
+    let d = only(marigold_check(src));
     assert_eq!(d.code, "undefined-type");
     assert!(d.message.contains("NonExistent"));
+    assert_eq!(slice(src, &d), "NonExistent");
 }
 
 #[test]
 fn bounded_errors_are_all_reported() {
-    let diags = marigold_check(
-        "struct Test { a: int[10, 5], b: int[0, Missing.len()] }\nrange(0, 1).return",
-    );
+    let src = "struct Test { a: int[10, 5], b: int[0, Missing.len()] }\nrange(0, 1).return";
+    let diags = marigold_check(src);
     assert_eq!(diags.len(), 2, "{diags:?}");
-    let codes: Vec<_> = diags.iter().map(|d| d.code).collect();
-    assert!(codes.contains(&"bounds-violation"));
-    assert!(codes.contains(&"undefined-type"));
+    let mut found: Vec<_> = diags.iter().map(|d| (d.code, slice(src, d))).collect();
+    found.sort();
+    assert_eq!(
+        found,
+        vec![
+            ("bounds-violation", "int[10, 5]"),
+            ("undefined-type", "Missing")
+        ]
+    );
+}
+
+#[test]
+fn cyclic_bounds_point_at_references() {
+    let src = "struct T { a: int[0, b.max()], b: int[0, a.max()] }\nrange(0, 1).return";
+    let diags = marigold_check(src);
+    assert!(!diags.is_empty());
+    for d in &diags {
+        assert_eq!(d.code, "cyclic-bound");
+        assert!(["a", "b"].contains(&slice(src, d)), "{d:?}");
+    }
+}
+
+#[test]
+fn unlocatable_errors_fall_back_to_whole_document() {
+    let src = "struct T { a: int[0, 10 / 0] }\nrange(0, 1).return";
+    let d = only(marigold_check(src));
+    assert_eq!(d.code, "bound-division-by-zero");
+    assert_eq!((d.range.start, d.range.end), (0, src.len()));
+}
+
+#[test]
+fn diagnostics_are_not_duplicated() {
+    let src = "struct T { a: int[0, Missing.len()], b: int[0, Missing.max()] }\nrange(0, 1).return";
+    let diags = marigold_check(src);
+    let slices: Vec<_> = diags.iter().map(|d| (d.range.start, d.range.end)).collect();
+    let mut deduped = slices.clone();
+    deduped.dedup();
+    assert_eq!(slices, deduped, "{diags:?}");
+    assert_eq!(diags.len(), 2, "{diags:?}");
 }
 
 #[test]
@@ -111,6 +181,8 @@ const VALID_PROGRAMS: &[&str] = &[
     "enum Color { Red, Green }\nrange(Color).return",
     "struct Test { value: int[0, 100] }\nrange(0, 1).return",
     "range(0, 4).permutations(2).return",
+    "struct T { a: int[0, b.max()], b: uint[1, 10] }\nrange(0, 1).return",
+    "enum Color { Red, Green }\nstruct P { c: int[0, Color.len()] }\nx = range(Color)\nx.return",
     "fn double(x: i32) -> i32 { x * 2 }\nrange(0, 3).map(double).return",
     "range(0, 1).write_file(\"ünïcødé.csv\", csv)",
 ];

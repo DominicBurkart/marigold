@@ -73,12 +73,13 @@ impl PestParser {
             Ok(pairs) => pairs,
             Err(e) => return vec![Diagnostic::from_pest(input, &e)],
         };
+        let index = crate::span_index::SpanIndex::build(pairs.clone());
         let mut expressions = match crate::pest_ast_builder::PestAstBuilder::build_program(pairs) {
             Ok(expressions) => expressions,
             Err(msg) => return vec![Diagnostic::whole(input, "invalid-program", msg)],
         };
         if let Err(msg) = Self::resolve_enum_range_counts(&mut expressions) {
-            return vec![Diagnostic::whole(input, "undefined-enum", msg)];
+            return Self::undefined_enum_diagnostics(input, &index, &expressions, msg);
         }
 
         let symbol_table = crate::symbol_table::SymbolTable::from_expressions(&expressions);
@@ -86,10 +87,13 @@ impl PestParser {
             match crate::bound_resolution::BoundResolver::new(&symbol_table).resolve_all() {
                 Ok(bounds) => Some(bounds),
                 Err(errors) => {
-                    return errors
+                    let mut diags: Vec<Diagnostic> = errors
                         .iter()
-                        .map(|e| Diagnostic::from_resolution(input, e))
-                        .collect()
+                        .flat_map(|e| Diagnostic::from_resolution(input, &index, e))
+                        .collect();
+                    diags.sort_by_key(|d| (d.range.start, d.range.end, d.code));
+                    diags.dedup();
+                    return diags;
                 }
             }
         } else {
@@ -99,6 +103,46 @@ impl PestParser {
         match Self::generate_rust_code(expressions, resolved_bounds) {
             Ok(_) => Vec::new(),
             Err(msg) => vec![Diagnostic::whole(input, "codegen-error", msg)],
+        }
+    }
+
+    fn undefined_enum_diagnostics(
+        input: &str,
+        index: &crate::span_index::SpanIndex,
+        expressions: &[crate::nodes::TypedExpression],
+        fallback: String,
+    ) -> Vec<crate::diagnostics::Diagnostic> {
+        use crate::diagnostics::Diagnostic;
+
+        let declared: Vec<&str> = expressions
+            .iter()
+            .filter_map(|e| match e {
+                crate::nodes::TypedExpression::EnumDeclaration(node) => Some(node.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        let help = if declared.is_empty() {
+            "no enums are declared in this program".to_string()
+        } else {
+            format!("declared enums: {}", declared.join(", "))
+        };
+        let diags: Vec<Diagnostic> = index
+            .enum_range_inputs
+            .iter()
+            .filter(|(name, _)| !declared.contains(&name.as_str()))
+            .map(|(name, range)| {
+                Diagnostic::error(
+                    *range,
+                    "undefined-enum",
+                    format!("range({name}): '{name}' is not a declared enum in this program"),
+                )
+                .with_help(help.clone())
+            })
+            .collect();
+        if diags.is_empty() {
+            vec![Diagnostic::whole(input, "undefined-enum", fallback).with_help(help)]
+        } else {
+            diags
         }
     }
 
