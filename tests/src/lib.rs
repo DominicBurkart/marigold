@@ -392,4 +392,87 @@ mod tests {
         sorted.sort();
         assert_eq!(sorted, vec![0, 1, 10, 11, 20, 21]);
     }
+
+    // --- `take(n)` integration tests (issue #85) ---
+
+    /// `range(0, 10).take(5)` yields exactly 0..5 in order.
+    #[tokio::test]
+    async fn test_take_basic() {
+        let result = m!(
+            range(0, 10).take(5).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0i32, 1, 2, 3, 4]);
+    }
+
+    /// `range(-10, 10).take(2)` yields the first two integers, including negatives.
+    #[tokio::test]
+    async fn test_take_negative_range() {
+        let result = m!(
+            range(-10, 10).take(2).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![-10i32, -9]);
+    }
+
+    /// `take(n)` where n exceeds the input cardinality must not panic and must
+    /// yield all available items.
+    #[tokio::test]
+    async fn test_take_exceeds_input_cardinality() {
+        let result = m!(
+            range(0, 5).take(10).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0i32, 1, 2, 3, 4]);
+    }
+
+    /// `take(0)` yields the empty stream.
+    #[tokio::test]
+    async fn test_take_zero() {
+        let result = m!(
+            range(0, 5).take(0).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert!(result.is_empty(), "take(0) should yield empty stream");
+    }
+
+    /// `take` chains with `map`: items are mapped first, then truncated.
+    #[tokio::test]
+    async fn test_take_after_map() {
+        fn double(v: i32) -> i32 {
+            v * 2
+        }
+
+        let result = m!(
+            range(0, 10).map(double).take(3).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0i32, 2, 4]);
+    }
+
+    /// `take` chains with `filter`: filter first, then truncate the filtered stream.
+    #[tokio::test]
+    async fn test_take_after_filter() {
+        fn is_even(v: i32) -> bool {
+            v % 2 == 0
+        }
+
+        let result = m!(
+            range(0, 100).filter(is_even).take(4).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0i32, 2, 4, 6]);
+    }
 }

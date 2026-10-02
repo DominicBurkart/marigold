@@ -821,6 +821,16 @@ fn propagate_cardinality(cardinality: Symbolic, kind: &StreamFunctionKind) -> Sy
             Box::new(cardinality),
             Box::new(Symbolic::Constant(BigUint::from(*k))),
         ),
+        // `take(n)` only sets an upper bound: even when the input has a known exact
+        // cardinality, the stream may yield fewer than n items if the input is later
+        // observed to be shorter (e.g. via fallible IO). We wrap `Min` in `Filtered`
+        // so the result classifies as `Cardinality::Bounded` rather than `Exact`,
+        // matching the documented contract that take(n) "only sets an upper bound,
+        // doesn't replace" the input cardinality.
+        StreamFunctionKind::Take(k) => Symbolic::Filtered(Box::new(Symbolic::Min(
+            Box::new(cardinality),
+            Box::new(Symbolic::Constant(BigUint::from(*k))),
+        ))),
         StreamFunctionKind::Fold => Symbolic::Constant(BigUint::one()),
     }
 }
@@ -832,6 +842,7 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
         | StreamFunctionKind::PermutationsWithReplacement(_)
         | StreamFunctionKind::Combinations(_) => ComplexityClass::ON,
         StreamFunctionKind::KeepFirstN(_) => ComplexityClass::O1,
+        StreamFunctionKind::Take(_) => ComplexityClass::O1,
         StreamFunctionKind::Map
         | StreamFunctionKind::Filter
         | StreamFunctionKind::FilterMap
@@ -935,6 +946,7 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
             }
             StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
             StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
+            StreamFunctionKind::Take(k) => format!("take({k})"),
             StreamFunctionKind::Fold => "fold(...)".to_string(),
             StreamFunctionKind::Ok => "ok()".to_string(),
             StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
@@ -1311,6 +1323,73 @@ mod tests {
         assert_eq!(result.try_evaluate(), Some(BigUint::from(5u64)));
     }
 
+    /// `take(n)` propagates as an upper-bound: the symbolic form is `Filtered(Min(card, n))`
+    /// so `try_evaluate()` returns None and `classify_as_cardinality()` returns Bounded,
+    /// never Exact. This protects against the input being shorter than n at runtime.
+    #[test]
+    fn test_take_cardinality_is_upper_bound() {
+        let card = Symbolic::Constant(BigUint::from(100u64));
+        let result = propagate_cardinality(card, &StreamFunctionKind::Take(5));
+        // Must wrap in Filtered so it never evaluates to Exact.
+        assert!(
+            matches!(result, Symbolic::Filtered(_)),
+            "take should wrap propagation in Filtered, got {result:?}"
+        );
+        assert_eq!(
+            result.try_evaluate(),
+            None,
+            "take cardinality must not evaluate to a single exact value"
+        );
+        assert_eq!(
+            result.classify_as_cardinality(),
+            Cardinality::Bounded(result.clone()),
+            "take must classify as Bounded, not Exact"
+        );
+        // The upper bound respects min(input, n).
+        assert_eq!(result.upper_bound(), Some(BigUint::from(5u64)));
+    }
+
+    /// `take(n)` where n > input cardinality must still produce a Bounded cardinality
+    /// with upper bound min(input, n) = input.
+    #[test]
+    fn test_take_exceeding_input_bounded_by_input() {
+        let card = Symbolic::Constant(BigUint::from(5u64));
+        let result = propagate_cardinality(card, &StreamFunctionKind::Take(10));
+        assert!(matches!(result, Symbolic::Filtered(_)));
+        assert_eq!(result.upper_bound(), Some(BigUint::from(5u64)));
+        assert!(matches!(
+            result.classify_as_cardinality(),
+            Cardinality::Bounded(_)
+        ));
+    }
+
+    /// `take(n)` after `filter` should still be Bounded with upper bound min(filter ub, n).
+    #[test]
+    fn test_filter_then_take_bounded() {
+        let card = Symbolic::Constant(BigUint::from(100u64));
+        let filtered = propagate_cardinality(card, &StreamFunctionKind::Filter);
+        let after_take = propagate_cardinality(filtered, &StreamFunctionKind::Take(5));
+        assert!(matches!(
+            after_take.classify_as_cardinality(),
+            Cardinality::Bounded(_)
+        ));
+        assert_eq!(after_take.upper_bound(), Some(BigUint::from(5u64)));
+    }
+
+    /// `take(n)` on a stream of unknown cardinality must remain Unknown-aware:
+    /// the cardinality is bounded above by n but the inner symbolic still contains Unknown.
+    /// classify_as_cardinality returns Unknown when any Unknown is reachable.
+    #[test]
+    fn test_take_on_unknown_input() {
+        let card = Symbolic::Unknown;
+        let result = propagate_cardinality(card, &StreamFunctionKind::Take(5));
+        // The propagated form contains Unknown deep inside.
+        assert!(result.contains_unknown());
+        assert_eq!(result.classify_as_cardinality(), Cardinality::Unknown);
+        // Despite Unknown input, take still provides an upper bound via Min.
+        assert_eq!(result.upper_bound(), Some(BigUint::from(5u64)));
+    }
+
     #[test]
     fn test_chained_filters() {
         let card = Symbolic::Constant(BigUint::from(100u64));
@@ -1364,6 +1443,14 @@ mod tests {
     fn test_keep_first_n_space_o1() {
         assert_eq!(
             space_for_kind(&StreamFunctionKind::KeepFirstN(5)),
+            ComplexityClass::O1
+        );
+    }
+
+    #[test]
+    fn test_take_space_o1() {
+        assert_eq!(
+            space_for_kind(&StreamFunctionKind::Take(5)),
             ComplexityClass::O1
         );
     }

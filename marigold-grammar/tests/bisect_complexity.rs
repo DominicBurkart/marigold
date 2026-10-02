@@ -26,10 +26,13 @@ fn commit_hash(dir: &std::path::Path) -> String {
     git(dir, &["rev-parse", "HEAD"])
 }
 
+/// See `bisect_cardinality.rs` for rationale: per-invocation `--no-gpg-sign`
+/// is the cleanest way to insulate the test from a contributor's global git
+/// signing configuration (issue #68).
 fn write_and_commit(dir: &std::path::Path, content: &str, message: &str) -> String {
     std::fs::write(dir.join("program.marigold"), content).unwrap();
     git(dir, &["add", "program.marigold"]);
-    git(dir, &["commit", "-m", message]);
+    git(dir, &["commit", "--no-gpg-sign", "-m", message]);
     commit_hash(dir)
 }
 
@@ -47,7 +50,7 @@ fn test_git_bisect_detects_memory_regression() {
     git(dir, &["init"]);
     git(dir, &["config", "user.email", "test@test.com"]);
     git(dir, &["config", "user.name", "Test"]);
-    git(dir, &["config", "commit.gpgsign", "false"]);
+    // No per-repo gpg config: `--no-gpg-sign` on each commit handles it (issue #68).
 
     let commit_a = write_and_commit(
         dir,
