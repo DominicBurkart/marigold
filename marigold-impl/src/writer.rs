@@ -1,6 +1,43 @@
 use std::io::Error;
 use std::pin::Pin;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn vector_writer_write_all_and_flush() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"hello").await.unwrap();
+        writer.flush().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_shutdown_after_write() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"world").await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_empty_write_and_flush() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn vector_writer_multiple_write_calls() {
+        let mut writer = Writer::vector();
+        writer.write_all(b"foo").await.unwrap();
+        writer.write_all(b"bar").await.unwrap();
+        writer.flush().await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+}
+
 #[derive(Debug)]
 enum WriteTarget {
     File(Pin<Box<tokio::fs::File>>),
