@@ -48,4 +48,30 @@ mod tests {
             vec![0_u32, 1_u32, 2_u32]
         );
     }
+
+    #[tokio::test]
+    async fn empty_stream() {
+        let result: Vec<u32> = run_stream(futures::stream::iter(Vec::<u32>::new()))
+            .collect::<Vec<_>>()
+            .await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn single_element() {
+        let result: Vec<u32> = run_stream(futures::stream::iter(vec![42u32]))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![42u32]);
+    }
+
+    #[tokio::test]
+    async fn large_stream_preserves_order() {
+        let items: Vec<u64> = (0..500).collect();
+        let expected = items.clone();
+        let result: Vec<u64> = run_stream(futures::stream::iter(items))
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, expected);
+    }
 }
