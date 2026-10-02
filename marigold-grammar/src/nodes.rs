@@ -171,7 +171,14 @@ impl NamedStreamNode {
         };
         let stream_prefix = &self.out.stream_prefix;
         let stream_postfix = &self.out.stream_postfix;
-        format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{stream_variable}.get(){intermediate}{stream_postfix}}}")
+        if self.funs.iter().any(|f| f.kind.is_eager()) {
+            let deferred = deferred_eager_consumer_code(stream_variable, &intermediate);
+            format!(
+                "{{use ::marigold::marigold_impl::*; {stream_prefix}{deferred}{stream_postfix}}}"
+            )
+        } else {
+            format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{stream_variable}.get(){intermediate}{stream_postfix}}}")
+        }
     }
 }
 
@@ -235,7 +242,12 @@ impl StreamVariableFromPriorStreamVariableNode {
                 )
             }
         };
-        format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({prior_stream_variable}.get(){intermediate})}};")
+        if self.funs.iter().any(|f| f.kind.is_eager()) {
+            let deferred = deferred_eager_consumer_code(prior_stream_variable, &intermediate);
+            format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({deferred})}};")
+        } else {
+            format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({prior_stream_variable}.get(){intermediate})}};")
+        }
     }
 
     pub fn runner_code(&self) -> String {
@@ -261,6 +273,52 @@ pub enum StreamFunctionKind {
     Fold,
     Ok,
     OkOrPanic,
+}
+
+impl StreamFunctionKind {
+    /// Whether the generated code for this function exhausts its input stream
+    /// before yielding anything (its code contains an inline `.await` that
+    /// drains the input, e.g. `combinations(n).await`).
+    ///
+    /// Eager functions consuming a fan-out channel must be deferred until the
+    /// program's `select_all` drives them (see [`deferred_eager_consumer_code`]):
+    /// stream expressions are evaluated before the fan-out runners are polled,
+    /// so awaiting one of these inline would deadlock against the not-yet-running
+    /// producer. `Fold` is not eager: `marifold(..).await` only constructs a
+    /// lazy `stream::once(fold_future)` without polling the input.
+    pub fn is_eager(&self) -> bool {
+        matches!(
+            self,
+            StreamFunctionKind::Permutations(_)
+                | StreamFunctionKind::PermutationsWithReplacement(_)
+                | StreamFunctionKind::Combinations(_)
+                | StreamFunctionKind::KeepFirstN(_)
+        )
+    }
+}
+
+/// Generate code for a consumer of the named stream `stream_variable` whose
+/// function chain (`intermediate`) contains an eager (input-exhausting)
+/// combinator.
+///
+/// The receiver is taken from the fan-out eagerly — the `MultiConsumerStream`
+/// is moved into its runner later, so `.get()` must happen now — but the
+/// draining combinator chain is deferred into a lazily flattened stream that
+/// is only driven once the program's `select_all` polls it, i.e. once the
+/// fan-out runner is also being polled. Awaiting the chain inline instead
+/// would deadlock: the producer feeding the receiver is not running yet.
+fn deferred_eager_consumer_code(stream_variable: &str, intermediate: &str) -> String {
+    format!(
+        "{{
+            let marigold_deferred_input = {stream_variable}.get();
+            Box::pin(
+                ::marigold::marigold_impl::futures::stream::once(
+                    async move {{ marigold_deferred_input{intermediate} }}
+                )
+                .flatten()
+            )
+        }}"
+    )
 }
 
 pub struct StreamFunctionNode {

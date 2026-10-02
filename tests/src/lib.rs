@@ -1,4 +1,7 @@
 #[cfg(test)]
+mod deadlock_prevention;
+
+#[cfg(test)]
 mod oracle;
 
 #[cfg(test)]
