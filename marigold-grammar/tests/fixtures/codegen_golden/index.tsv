@@ -1,0 +1,33 @@
+range_return	range(0, 10).return
+range_inclusive	range(0, =10).return
+enum_range	enum Color { Red, Green, Blue }\nrange(Color).return
+map	range(0, 5).map(double).return
+filter	range(0, 100).filter(is_even).return
+filter_map	range(0, 100).filter_map(maybe_double).return
+fold	range(0, 100).fold(0, add).return
+keep_first_n	range(0, 100).filter(is_even).keep_first_n(5, compare).return
+permutations	range(0, 10).permutations(2).return
+permutations_with_replacement	range(0, 10).permutations_with_replacement(2).return
+combinations	range(0, 10).combinations(3).return
+color_palette	range(0, 255).permutations_with_replacement(3).combinations(5).keep_first_n(20, compare_contrast).return
+chained_maps	range(0, 3).map(to_sensor).map(get_reading).return
+read_file_ok	read_file("data.csv", csv, struct=Data).ok().map(transform).return
+read_file_ok_or_panic	read_file("data.csv", csv, struct=Data).ok_or_panic().filter(keep).return
+read_file_gz	read_file("data.csv.gz", csv, struct=Data).ok_or_panic().return
+read_file_permutations	read_file("data.csv", csv, struct=Data).permutations(2).return
+select_all	select_all(range(0, 10), range(0, 20)).return
+select_all_with_functions	select_all(range(0, 10).map(double), range(0, 20).filter(is_even)).filter(is_odd).return
+write_file_csv	read_file("in.csv", csv, struct=Data).ok_or_panic().write_file("out/out.csv", csv)
+write_file_gz	read_file("in.csv", csv, struct=Data).ok_or_panic().write_file("out/out.csv.gz", csv)
+write_file_no_compression	range(0, 3).map(to_row).write_file("out.csv.gz", csv, compression=none)
+named_variable_multi_consumer	fn doubled_plus_ten(i: i32) -> i32 {\n    (i * 2) + 10\n}\n\ndigits = range(0, 10)\n\ndigits\n    .return\n\ndigits\n    .filter(is_even)\n    .map(doubled_plus_ten)\n    .return
+named_from_prior_variable	digits = range(0, 10)\n\nodd_digits = digits\n    .filter(is_odd)\n\nodd_digits\n    .map(double)\n    .return\n\ndigits.return
+named_variable_write_file	rows = range(0, 3).map(to_row)\nrows.write_file("rows.csv", csv)\nrows.return
+multiple_streams	range(0, 3).return\nrange(5, 8).map(double).return
+struct_decl	struct Ship { class: string_8, hull: u32, tag: Option<u8> }\nrange(0, 3).map(make_ship).return
+bounded_struct	struct Sensor { reading: int[-40, 85] }\nfn to_sensor(i: i32) -> Sensor { Sensor { reading: i as i8 } }\nrange(0, 3).map(to_sensor).return
+enum_decl_values	enum Hull { Spherical = "spherical", Split = "split" }\nrange(Hull).return
+enum_decl_default_sized	enum Hull { Spherical = "spherical", default Other(string_10) }\nrange(0, 2).return
+enum_decl_default_value	enum Hull { Spherical = "spherical", default Other = "other" }\nrange(Hull).return
+fn_decl	fn add_one(i: i32) -> i32 { i + 1 }\nrange(0, 3).map(add_one).return
+all_declarations	enum Hull { Spherical = "spherical", Split = "split" }\nstruct Vaisseau { class: string_8, hull: Hull }\nfn keep(v: Vaisseau) -> bool { true }\nread_file("ships.csv.gz", csv, struct=Vaisseau).ok_or_panic().filter(keep).return
