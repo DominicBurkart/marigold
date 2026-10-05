@@ -127,14 +127,26 @@ pub fn scan(roots: &[PathBuf]) -> Vec<(PathBuf, String)> {
         .collect()
 }
 
+const HASH_CHECK_MAX_BYTES: u64 = 64 * 1024;
+
+fn hash_of(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
 #[derive(Debug)]
 struct CacheEntry {
     len: u64,
     modified: Option<SystemTime>,
+    content_hash: Option<u64>,
     symbols: Arc<Vec<OutlineSymbol>>,
 }
 
-/// Declaration names of workspace files, cached by path, size and modification time.
+/// Declaration names of workspace files, cached by path, size and modification time; files of at
+/// most 64 KiB are also content-hashed so a same-size rewrite within timestamp granularity is
+/// noticed. Larger files rely on size and mtime alone, a documented residual.
 ///
 /// ```
 /// let mut index = marigold_lsp::workspace::SymbolIndex::default();
@@ -167,14 +179,35 @@ impl SymbolIndex {
         self.entries.retain(|p, _| live.contains(p));
         let mut out = Vec::with_capacity(found.len());
         for file in &found {
-            let fresh = self
+            let stat_matches = self
                 .entries
                 .get(&file.path)
                 .is_some_and(|e| e.len == file.len && e.modified == file.modified);
+            let needs_hash = file.len <= HASH_CHECK_MAX_BYTES;
+            let mut text = None;
+            let mut fresh = stat_matches && !needs_hash;
+            if stat_matches && needs_hash {
+                match std::fs::read_to_string(&file.path) {
+                    Ok(t) => {
+                        fresh = self.entries[&file.path].content_hash == Some(hash_of(&t));
+                        text = Some(t);
+                    }
+                    Err(_) => {
+                        self.entries.remove(&file.path);
+                        continue;
+                    }
+                }
+            }
             if !fresh {
-                let Ok(text) = std::fs::read_to_string(&file.path) else {
-                    self.entries.remove(&file.path);
-                    continue;
+                let text = match text {
+                    Some(t) => t,
+                    None => match std::fs::read_to_string(&file.path) {
+                        Ok(t) => t,
+                        Err(_) => {
+                            self.entries.remove(&file.path);
+                            continue;
+                        }
+                    },
                 };
                 self.parses += 1;
                 let symbols = Arc::new(crate::nav::declaration_names(&text));
@@ -183,6 +216,7 @@ impl SymbolIndex {
                     CacheEntry {
                         len: file.len,
                         modified: file.modified,
+                        content_hash: needs_hash.then(|| hash_of(&text)),
                         symbols,
                     },
                 );
@@ -456,6 +490,29 @@ mod tests {
     #[test]
     fn default_total_budget_is_64_mib() {
         assert_eq!(MAX_TOTAL_BYTES, 64 * 1024 * 1024);
+    }
+
+    #[test]
+    fn same_size_rewrite_with_restored_mtime_is_reparsed_for_small_files() {
+        let dir = scratch("samestat");
+        let file = dir.join("a.marigold");
+        std::fs::write(&file, "x = range(0, 1)").unwrap();
+        let original = std::fs::metadata(&file).unwrap().modified().unwrap();
+        let mut index = SymbolIndex::default();
+        let roots = [dir.clone()];
+        assert_eq!(index.symbols(&roots)[0].1[0].name, "x");
+        std::fs::write(&file, "y = range(0, 1)").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(original)
+            .unwrap();
+        assert_eq!(index.symbols(&roots)[0].1[0].name, "y");
+        assert_eq!(index.parse_count(), 2);
+        index.symbols(&roots);
+        assert_eq!(index.parse_count(), 2);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
