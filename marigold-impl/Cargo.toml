@@ -13,6 +13,7 @@ tokio = ["tokio/full", "tokio/tracing", "dep:num_cpus"]
 async-std = ["dep:async-std", "dep:num_cpus"]
 io = ["tokio/fs", "dep:csv-async", "dep:async-compression", "dep:tokio-util", "dep:flate2", "dep:serde", "arrayvec/serde"]
 bench-instrumentation = []
+otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:pin-project-lite"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -36,12 +37,17 @@ flate2 = {version="1", optional=true}
 serde = {version="1", features=["derive"], optional=true}
 once_cell = "1.13.0"
 pin-utils = "0.1.0"
+opentelemetry = { version = "=0.33.0", default-features = false, features = ["trace", "metrics"], optional = true }
+opentelemetry_sdk = { version = "=0.33.0", default-features = false, features = ["trace", "metrics"], optional = true }
+opentelemetry-otlp = { version = "=0.33.0", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace", "metrics"], optional = true }
+pin-project-lite = { version = "=0.2.17", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"]}
 criterion = { version = "0.5", features = ["html_reports"] }
 cpu-time = "1.0"
 tracing-subscriber = { version = "0.3", features = ["registry"] }
+opentelemetry_sdk = { version = "=0.33.0", default-features = false, features = ["trace", "metrics", "testing"] }
 
 [[bench]]
 name = "keep_first_n"
@@ -72,3 +78,8 @@ required-features = ["tokio"]
 name = "driver_worker_split"
 harness = false
 required-features = ["tokio", "bench-instrumentation"]
+
+[[bench]]
+name = "otel_overhead"
+harness = false
+required-features = ["tokio", "otel"]
