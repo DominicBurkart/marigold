@@ -157,7 +157,7 @@ export function createMarigoldExtension(options: MarigoldExtensionOptions = {}) 
       name: "marigold_check",
       label: "Marigold check",
       description:
-        "Check a .marigold file with the marigold language server and return its diagnostics (syntax errors, undefined enums, invalid bounded types) with 1-based line:column locations.",
+        "Check a .marigold file with the marigold language server and return its diagnostics (syntax errors, undefined enums, invalid bounded types) with 1-based line:column locations. Errors and warnings (undefined stream variables) should be fixed; undefined functions and structs are information and can be ignored if they are Rust items in scope inside m!().",
       parameters: Type.Object({
         path: Type.String({ description: "Path to the .marigold file (relative to the working directory or absolute)" }),
       }),

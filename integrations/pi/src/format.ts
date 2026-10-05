@@ -16,7 +16,7 @@ export interface LspDiagnostic {
   message: string;
 }
 
-const SEVERITY = ["", "error", "warning", "info", "hint"];
+const SEVERITY = ["", "error", "warning", "information", "hint"];
 
 function snippet(source: string[], range: Range): string[] {
   const { start, end } = range;

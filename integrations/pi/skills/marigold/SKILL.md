@@ -37,8 +37,9 @@ straight to another. Every tool says explicitly when nothing was found.
   before changing a signature or deleting a declaration.
 - `marigold_hover` (`path`, `line`, `column`): the declaration or stream
   at the position plus the analyzer's whole-chain complexity estimate
-  (cardinality, time, space, whether it collects input). Use it to compare stream shapes before choosing
-  between `permutations`, `combinations` and filters.
+  (cardinality, time, space, whether it collects input). Use it to compare
+  stream shapes before choosing between `permutations`, `combinations` and
+  filters.
 - `marigold_rename` (`path`, `line`, `column`, `new_name`, optional
   `apply`): rename a symbol everywhere in the file.
 
@@ -73,22 +74,30 @@ the real symbol.
 - `input-too-large`: the file is over the 10 MiB limit and was not
   checked.
 
-Warnings do not make a file invalid, but they usually point at a mistake.
-Do not treat a result with no errors as clean while warnings remain.
+Warnings and information do not make a file invalid, but they usually
+point at a mistake.
 
-Information diagnostics mean the name is not declared in this program:
+Warning:
 
-- `undefined-stream-variable` (information): a stream variable is used but
-  not declared in this program. It may be a Rust binding with a `get()`
-  method returning a stream.
+- `undefined-stream-variable`: a stream variable is read before the line
+  that declares it, or by its own declaration. Fix it by reading only
+  variables declared above.
+
+Information (the name is not declared in this program):
+
+- `undefined-stream-variable`: a stream variable is used but not declared.
+  It may be a Rust binding with a `get()` method returning a stream, in
+  which case it can be ignored.
 - `undefined-fn`: a function named in `map`, `filter`, `fold` and the like
-  is not declared with `fn` in this program.
-- `undefined-struct`: `struct=T` names a struct that is not declared.
+  is not declared with `fn` in this program. Fix it unless the name is a
+  Rust item in scope inside `m!()`, in which case it can be ignored.
+- `undefined-struct`: `struct=T` names a struct that is not declared. Fix
+  it unless the name is a Rust item in scope inside `m!()`.
 - `resolver-diagnostics-truncated`: more than 50 undefined-name
-  diagnostics were found; only the first 50 are reported.
+  diagnostics were found; only the first 50 are reported. Fix the listed
+  ones and check again.
 
-An information diagnostic can be a false alarm when the name is a Rust
-item in scope around the program. Otherwise fix it.
+Do not treat a result with no errors as clean while warnings remain.
 
 ## Complexity
 

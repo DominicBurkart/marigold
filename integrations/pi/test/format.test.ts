@@ -39,7 +39,7 @@ describe("formatDiagnostics", () => {
     const hint = { ...diag(0, 0, "h", "psst"), severity: 4 };
     const out = formatDiagnostics("a.marigold", [warn, info, hint]);
     expect(out).toContain("a.marigold:1:1: warning[w]: careful");
-    expect(out).toContain("a.marigold:1:1: info[i]: fyi");
+    expect(out).toContain("a.marigold:1:1: information[i]: fyi");
     expect(out).toContain("a.marigold:1:1: hint[h]: psst");
   });
 

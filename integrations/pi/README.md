@@ -13,6 +13,14 @@ Marigold language support for the [pi](https://pi.dev) coding agent.
 - A `marigold` skill explains the diagnostic codes, the feedback loop and
   when to use each tool.
 
+## Diagnostic severities
+
+- `error`: fix it.
+- `warning`: review and fix it; for example `undefined-stream-variable`.
+- `information`: `undefined-fn` and `undefined-struct`; fix them unless the
+  name is a Rust item in scope inside `m!()`. `resolver-diagnostics-truncated`
+  reports that more than 50 resolver diagnostics were omitted for a file.
+
 ## Navigation tools
 
 Tools that take a position use 1-based `line` and `column`; columns count

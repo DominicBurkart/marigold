@@ -59,6 +59,21 @@ describe("registration", () => {
     expect(pi.tools.get("marigold_check")).toBeDefined();
   });
 
+  it("documents the severities in the check tool and skill", () => {
+    const description = pi.tools.get("marigold_check").description;
+    expect(description).toMatch(/undefined stream variables/);
+    expect(description).toMatch(/information/);
+    expect(description).toMatch(/Rust items in scope/);
+    const skill = readFileSync(join(__dirname, "..", "skills", "marigold", "SKILL.md"), "utf8");
+    const warning = skill.slice(skill.indexOf("Warning:"), skill.indexOf("Information:"));
+    const information = skill.slice(skill.indexOf("Information:"), skill.indexOf("## Complexity"));
+    expect(warning).toContain("undefined-stream-variable");
+    expect(warning).not.toContain("undefined-fn");
+    for (const code of ["undefined-fn", "undefined-struct", "resolver-diagnostics-truncated"]) {
+      expect(information).toContain(code);
+    }
+  });
+
   it("documents 1-based UTF-16 columns", () => {
     expect(pi.tools.get("marigold_definition").description).toMatch(/1-based/);
     expect(pi.tools.get("marigold_definition").description).toMatch(/UTF-16/);
