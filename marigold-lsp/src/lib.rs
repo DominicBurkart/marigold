@@ -12,20 +12,26 @@
 //! assert_eq!(diags[0].range.start, lsp_types::Position::new(0, 6));
 //! ```
 
+pub mod nav;
 pub mod position;
 
-use lsp_server::{Connection, ErrorCode, Message, Notification, Response};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit, Notification as _,
     PublishDiagnostics,
 };
-use lsp_types::request::{Request as _, Shutdown};
+use lsp_types::request::{
+    DocumentSymbolRequest, GotoDefinition, References, Request as _, Shutdown,
+};
 use lsp_types::{
-    Diagnostic, DiagnosticSeverity, InitializeResult, NumberOrString, PublishDiagnosticsParams,
-    Range, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    Diagnostic, DiagnosticSeverity, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
+    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
+    NumberOrString, OneOf, PublishDiagnosticsParams, Range, ReferenceParams, ServerCapabilities,
+    ServerInfo, SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 use marigold_grammar::diagnostics::Severity;
 use position::LineIndex;
+use std::collections::HashMap;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -74,17 +80,24 @@ pub fn lsp_diagnostics(text: &str) -> Vec<Diagnostic> {
         .collect()
 }
 
-/// The `initialize` result: full-document sync and server info.
+/// The `initialize` result: full-document sync, navigation providers and server info.
 ///
 /// ```
+/// use lsp_types::OneOf;
 /// let caps = marigold_lsp::capabilities();
 /// assert_eq!(caps.server_info.unwrap().name, "marigold-lsp");
 /// assert!(caps.capabilities.text_document_sync.is_some());
+/// assert_eq!(caps.capabilities.definition_provider, Some(OneOf::Left(true)));
+/// assert_eq!(caps.capabilities.references_provider, Some(OneOf::Left(true)));
+/// assert_eq!(caps.capabilities.document_symbol_provider, Some(OneOf::Left(true)));
 /// ```
 pub fn capabilities() -> InitializeResult {
     InitializeResult {
         capabilities: ServerCapabilities {
             text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+            definition_provider: Some(OneOf::Left(true)),
+            references_provider: Some(OneOf::Left(true)),
+            document_symbol_provider: Some(OneOf::Left(true)),
             ..ServerCapabilities::default()
         },
         server_info: Some(ServerInfo {
@@ -115,12 +128,124 @@ pub fn capabilities() -> InitializeResult {
 /// assert!(handle.join().unwrap().is_ok());
 /// ```
 pub fn serve(connection: &Connection) -> Result<(), Error> {
-    let (id, _params) = connection.initialize_start()?;
+    let (id, params) = connection.initialize_start()?;
     connection.initialize_finish(id, serde_json::to_value(capabilities())?)?;
-    main_loop(connection)
+    let params: InitializeParams = serde_json::from_value(params).unwrap_or_default();
+    let mut server = Server::new(&params);
+    main_loop(connection, &mut server)
 }
 
-fn main_loop(connection: &Connection) -> Result<(), Error> {
+struct Server {
+    docs: HashMap<Uri, String>,
+    hierarchical_symbols: bool,
+}
+
+type Failure = (ErrorCode, String);
+
+impl Server {
+    fn new(params: &InitializeParams) -> Self {
+        let hierarchical_symbols = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|t| t.document_symbol.as_ref())
+            .and_then(|d| d.hierarchical_document_symbol_support)
+            .unwrap_or(false);
+        Self {
+            docs: HashMap::new(),
+            hierarchical_symbols,
+        }
+    }
+
+    fn handle(&self, req: Request) -> Result<serde_json::Value, Failure> {
+        match req.method.as_str() {
+            GotoDefinition::METHOD => {
+                self.definition(serde_json::from_value(req.params).map_err(invalid_params)?)
+            }
+            References::METHOD => {
+                self.references(serde_json::from_value(req.params).map_err(invalid_params)?)
+            }
+            DocumentSymbolRequest::METHOD => {
+                self.document_symbols(serde_json::from_value(req.params).map_err(invalid_params)?)
+            }
+            other => Err((
+                ErrorCode::MethodNotFound,
+                format!("unsupported request: {other}"),
+            )),
+        }
+    }
+
+    fn definition(&self, params: GotoDefinitionParams) -> Result<serde_json::Value, Failure> {
+        let at = params.text_document_position_params;
+        let uri = at.text_document.uri;
+        let found = self
+            .docs
+            .get(&uri)
+            .and_then(|text| nav::definition(&uri, text, at.position))
+            .map(GotoDefinitionResponse::Scalar);
+        serde_json::to_value(found).map_err(internal)
+    }
+
+    fn references(&self, params: ReferenceParams) -> Result<serde_json::Value, Failure> {
+        let at = params.text_document_position;
+        let uri = at.text_document.uri;
+        let found = self.docs.get(&uri).and_then(|text| {
+            nav::references(&uri, text, at.position, params.context.include_declaration)
+        });
+        serde_json::to_value(found).map_err(internal)
+    }
+
+    #[allow(deprecated)]
+    fn document_symbols(&self, params: DocumentSymbolParams) -> Result<serde_json::Value, Failure> {
+        let uri = params.text_document.uri;
+        let Some(text) = self.docs.get(&uri) else {
+            return Ok(serde_json::Value::Null);
+        };
+        let outline = nav::outline(text);
+        let response = if self.hierarchical_symbols {
+            DocumentSymbolResponse::Nested(
+                outline
+                    .into_iter()
+                    .map(|s| DocumentSymbol {
+                        name: s.name,
+                        detail: None,
+                        kind: s.kind,
+                        tags: None,
+                        deprecated: None,
+                        range: s.range,
+                        selection_range: s.selection_range,
+                        children: None,
+                    })
+                    .collect(),
+            )
+        } else {
+            DocumentSymbolResponse::Flat(
+                outline
+                    .into_iter()
+                    .map(|s| SymbolInformation {
+                        name: s.name,
+                        kind: s.kind,
+                        tags: None,
+                        deprecated: None,
+                        location: lsp_types::Location::new(uri.clone(), s.range),
+                        container_name: None,
+                    })
+                    .collect(),
+            )
+        };
+        serde_json::to_value(Some(response)).map_err(internal)
+    }
+}
+
+fn invalid_params(err: serde_json::Error) -> Failure {
+    (ErrorCode::InvalidParams, err.to_string())
+}
+
+fn internal(err: serde_json::Error) -> Failure {
+    (ErrorCode::InternalError, err.to_string())
+}
+
+fn main_loop(connection: &Connection, server: &mut Server) -> Result<(), Error> {
     let mut shutdown = false;
     for msg in &connection.receiver {
         match msg {
@@ -137,11 +262,12 @@ fn main_loop(connection: &Connection) -> Result<(), Error> {
                         "server is shutting down".to_string(),
                     )))?;
                 } else {
-                    connection.sender.send(Message::Response(Response::new_err(
-                        req.id,
-                        ErrorCode::MethodNotFound as i32,
-                        format!("unsupported request: {}", req.method),
-                    )))?;
+                    let id = req.id.clone();
+                    let response = match server.handle(req) {
+                        Ok(value) => Response::new_ok(id, value),
+                        Err((code, message)) => Response::new_err(id, code as i32, message),
+                    };
+                    connection.sender.send(Message::Response(response))?;
                 }
             }
             Message::Notification(note) => {
@@ -153,7 +279,7 @@ fn main_loop(connection: &Connection) -> Result<(), Error> {
                     };
                 }
                 if !shutdown {
-                    handle_notification(connection, note)?;
+                    handle_notification(connection, server, note)?;
                 }
             }
             Message::Response(_) => {}
@@ -162,13 +288,18 @@ fn main_loop(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-fn handle_notification(connection: &Connection, note: Notification) -> Result<(), Error> {
+fn handle_notification(
+    connection: &Connection,
+    server: &mut Server,
+    note: Notification,
+) -> Result<(), Error> {
     let method = note.method;
     match method.as_str() {
         DidOpenTextDocument::METHOD => {
             match serde_json::from_value::<lsp_types::DidOpenTextDocumentParams>(note.params) {
                 Ok(params) => {
                     let doc = params.text_document;
+                    server.docs.insert(doc.uri.clone(), doc.text.clone());
                     publish(
                         connection,
                         doc.uri,
@@ -182,12 +313,17 @@ fn handle_notification(connection: &Connection, note: Notification) -> Result<()
         DidChangeTextDocument::METHOD => {
             match serde_json::from_value::<lsp_types::DidChangeTextDocumentParams>(note.params) {
                 Ok(params) => match params.content_changes.into_iter().last() {
-                    Some(change) => publish(
-                        connection,
-                        params.text_document.uri,
-                        Some(params.text_document.version),
-                        lsp_diagnostics(&change.text),
-                    ),
+                    Some(change) => {
+                        server
+                            .docs
+                            .insert(params.text_document.uri.clone(), change.text.clone());
+                        publish(
+                            connection,
+                            params.text_document.uri,
+                            Some(params.text_document.version),
+                            lsp_diagnostics(&change.text),
+                        )
+                    }
                     None => Ok(()),
                 },
                 Err(err) => malformed(&method, &err),
@@ -195,7 +331,10 @@ fn handle_notification(connection: &Connection, note: Notification) -> Result<()
         }
         DidCloseTextDocument::METHOD => {
             match serde_json::from_value::<lsp_types::DidCloseTextDocumentParams>(note.params) {
-                Ok(params) => publish(connection, params.text_document.uri, None, Vec::new()),
+                Ok(params) => {
+                    server.docs.remove(&params.text_document.uri);
+                    publish(connection, params.text_document.uri, None, Vec::new())
+                }
                 Err(err) => malformed(&method, &err),
             }
         }
