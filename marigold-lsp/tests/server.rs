@@ -488,19 +488,31 @@ fn document_at_the_size_cap_is_still_checked_through_did_open() {
 }
 
 #[test]
-fn large_document_completes_within_bound() {
-    let (client, _) = Client::start();
+fn large_document_scales_linearly() {
     let line = "range(0, 1).return\n";
-    let text = line.repeat(1_000_000 / line.len());
-    let start = std::time::Instant::now();
-    open(&client, &text);
-    client.diagnostics();
+    let analyse = |bytes: usize| {
+        let text = line.repeat(bytes / line.len());
+        (0..3)
+            .map(|_| {
+                let (client, _) = Client::start();
+                let start = std::time::Instant::now();
+                open(&client, &text);
+                client.diagnostics();
+                let elapsed = start.elapsed();
+                client.shutdown();
+                elapsed
+            })
+            .min()
+            .unwrap()
+    };
+    let t_small = analyse(250_000);
+    let t_large = analyse(500_000);
+    let allowed = t_small.mul_f64(3.5) + Duration::from_millis(200);
     assert!(
-        start.elapsed() < Duration::from_secs(8),
-        "{:?}",
-        start.elapsed()
+        t_large < allowed,
+        "t(250k)={t_small:?} t(500k)={t_large:?} allowed={allowed:?}"
     );
-    client.shutdown();
+    assert!(t_large < Duration::from_secs(60), "{t_large:?}");
 }
 
 #[test]

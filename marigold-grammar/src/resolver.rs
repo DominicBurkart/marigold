@@ -2,7 +2,14 @@ use crate::diagnostics::{Diagnostic, Severity};
 use crate::span_index::{Reference, ReferenceSource, SpanIndex, SymbolKind};
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
+thread_local! {
+    static LEVENSHTEIN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
+    #[cfg(test)]
+    LEVENSHTEIN_CALLS.with(|c| c.set(c.get() + 1));
     let b: Vec<char> = b.chars().collect();
     let mut prev: Vec<usize> = (0..=b.len()).collect();
     for (i, ca) in a.chars().enumerate() {
@@ -227,5 +234,119 @@ mod tests {
         assert_eq!(closest("ab", &["ac"]), Some("ac"));
         assert_eq!(closest("a", &["b"]), None);
         assert_eq!(closest("x", &[]), None);
+    }
+
+    fn range() -> crate::diagnostics::ByteRange {
+        crate::diagnostics::ByteRange { start: 0, end: 1 }
+    }
+
+    fn fn_index(n: usize) -> SpanIndex {
+        let mut index = SpanIndex::default();
+        for i in 0..n {
+            index.declarations.push(crate::span_index::Declaration {
+                name: format!("f{i}"),
+                range: range(),
+                kind: SymbolKind::Function,
+                expr_index: i,
+            });
+            index.references.push(Reference {
+                name: format!("g{i}"),
+                range: range(),
+                source: ReferenceSource::MapFn,
+                expr_index: i,
+            });
+        }
+        index
+    }
+
+    fn variable_index(n: usize) -> SpanIndex {
+        let mut index = SpanIndex::default();
+        for i in 0..n {
+            index.declarations.push(crate::span_index::Declaration {
+                name: format!("v{i}"),
+                range: range(),
+                kind: SymbolKind::StreamVariable,
+                expr_index: i,
+            });
+            index.references.push(Reference {
+                name: format!("v{i}"),
+                range: range(),
+                source: ReferenceSource::VariableSource,
+                expr_index: i + 1,
+            });
+            index.references.push(Reference {
+                name: format!("w{i}"),
+                range: range(),
+                source: ReferenceSource::StreamStart,
+                expr_index: i,
+            });
+        }
+        index
+    }
+
+    fn levenshtein_calls_during(index: &SpanIndex) -> usize {
+        LEVENSHTEIN_CALLS.with(|c| c.set(0));
+        let _ = warnings(index);
+        LEVENSHTEIN_CALLS.with(|c| c.get())
+    }
+
+    fn best_of_three(index: &SpanIndex) -> std::time::Duration {
+        (0..3)
+            .map(|_| {
+                let start = std::time::Instant::now();
+                let out = warnings(index);
+                let elapsed = start.elapsed();
+                std::hint::black_box(out);
+                elapsed
+            })
+            .min()
+            .unwrap()
+    }
+
+    fn assert_scales_linearly(build: fn(usize) -> SpanIndex) {
+        let small = 5_000;
+        let factor = 4;
+        let (small_index, large_index) = (build(small), build(small * factor));
+        let t_small = best_of_three(&small_index);
+        let t_large = best_of_three(&large_index);
+        let allowed = t_small * (factor as u32 * 5 / 2) + std::time::Duration::from_millis(50);
+        assert!(
+            t_large < allowed,
+            "t({small})={t_small:?} t({})={t_large:?} allowed={allowed:?}",
+            small * factor
+        );
+        assert!(t_large < std::time::Duration::from_secs(60), "{t_large:?}");
+    }
+
+    #[test]
+    fn levenshtein_calls_are_bounded_independently_of_program_size() {
+        let bound = MAX_DIAGNOSTICS * MAX_SUGGESTION_CANDIDATES;
+        for n in [10, 150, 1_000, 20_000] {
+            let calls = levenshtein_calls_during(&fn_index(n));
+            assert!(calls <= bound, "n={n} calls={calls} bound={bound}");
+        }
+    }
+
+    #[test]
+    fn levenshtein_is_not_called_when_candidates_exceed_the_cap() {
+        let calls = levenshtein_calls_during(&fn_index(MAX_SUGGESTION_CANDIDATES + 1));
+        assert_eq!(calls, 0);
+    }
+
+    #[test]
+    fn levenshtein_is_called_per_diagnostic_when_candidates_fit_the_cap() {
+        let n = MAX_SUGGESTION_CANDIDATES;
+        let calls = levenshtein_calls_during(&fn_index(n));
+        assert!(calls > 0 && calls <= MAX_DIAGNOSTICS * n, "{calls}");
+    }
+
+    #[test]
+    fn function_resolution_scales_linearly() {
+        assert_scales_linearly(fn_index);
+    }
+
+    #[test]
+    fn stream_variable_resolution_scales_linearly() {
+        assert_scales_linearly(variable_index);
     }
 }

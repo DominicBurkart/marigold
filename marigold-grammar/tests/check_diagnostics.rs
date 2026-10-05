@@ -744,19 +744,57 @@ fn timed<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
     (out, start.elapsed())
 }
 
-const PERF_BOUND: std::time::Duration = std::time::Duration::from_secs(10);
+const BACKSTOP: std::time::Duration = std::time::Duration::from_secs(60);
 
-#[test]
-fn many_undefined_fns_against_many_declared_fns_complete_quickly_and_are_capped() {
+fn best_of_three(src: &str) -> std::time::Duration {
+    (0..3)
+        .map(|_| {
+            let (out, elapsed) = timed(|| marigold_check(src));
+            std::hint::black_box(out);
+            elapsed
+        })
+        .min()
+        .unwrap()
+}
+
+fn assert_scales_linearly(build: impl Fn(usize) -> String) {
+    let n = 5_000;
+    let (small, large) = (build(n), build(2 * n));
+    let t_small = best_of_three(&small);
+    let t_large = best_of_three(&large);
+    let allowed = t_small.mul_f64(3.5) + std::time::Duration::from_millis(100);
+    assert!(
+        t_large < allowed,
+        "t({n})={t_small:?} t({})={t_large:?} allowed={allowed:?}",
+        2 * n
+    );
+    assert!(t_large < BACKSTOP, "took {t_large:?}");
+}
+
+fn many_fns(n: usize) -> String {
     let mut src = String::new();
-    for i in 0..60_000 {
+    for i in 0..n {
         src.push_str(&format!("fn f{i}(x: i32) -> i32 {{ x }}\n"));
     }
-    for i in 0..60_000 {
+    for i in 0..n {
         src.push_str(&format!("range(0,3).map(g{i}).return\n"));
     }
-    let (diags, elapsed) = timed(|| marigold_check(&src));
-    assert!(elapsed < PERF_BOUND, "took {elapsed:?}");
+    src
+}
+
+fn chained_variables(n: usize) -> String {
+    let mut src = String::new();
+    for i in 0..n {
+        src.push_str(&format!("v{i} = range(0,3)\nv{} = v{i}.map(f{i})\n", i + 1));
+    }
+    src
+}
+
+#[test]
+fn many_undefined_fns_against_many_declared_fns_scale_linearly_and_are_capped() {
+    assert_scales_linearly(many_fns);
+    let (diags, elapsed) = timed(|| marigold_check(&many_fns(60_000)));
+    assert!(elapsed < BACKSTOP, "took {elapsed:?}");
     assert!(!has_error(&diags));
     assert!(diags.len() <= 51, "{}", diags.len());
     let summary = diags
@@ -773,13 +811,10 @@ fn many_undefined_fns_against_many_declared_fns_complete_quickly_and_are_capped(
 }
 
 #[test]
-fn many_chained_stream_variables_complete_quickly() {
-    let mut src = String::new();
-    for i in 0..50_000 {
-        src.push_str(&format!("v{i} = range(0,3)\nv{} = v{i}.map(f{i})\n", i + 1));
-    }
-    let (diags, elapsed) = timed(|| marigold_check(&src));
-    assert!(elapsed < PERF_BOUND, "took {elapsed:?}");
+fn many_chained_stream_variables_scale_linearly() {
+    assert_scales_linearly(chained_variables);
+    let (diags, elapsed) = timed(|| marigold_check(&chained_variables(50_000)));
+    assert!(elapsed < BACKSTOP, "took {elapsed:?}");
     assert!(!has_error(&diags));
     assert!(diags.len() <= 51, "{}", diags.len());
 }
