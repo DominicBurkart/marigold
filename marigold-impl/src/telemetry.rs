@@ -10,7 +10,9 @@
 //!
 //! All metrics are tagged with exactly two attributes, `marigold.program` and
 //! `marigold.node_id`, which keeps cardinality bounded by the number of nodes in the program.
-//! The source file and byte range of a node are attached to its span only.
+//! The source file and byte range of a node are attached to its span only. The range is
+//! approximate: it indexes the text the code generator saw, which for the `m!` macro is the
+//! stringified macro body rather than the Rust source file. Node ids are exact.
 //!
 //! | metric | kind | meaning |
 //! | --- | --- | --- |
@@ -59,6 +61,9 @@ pub const ABORT_ERRORS: &str = "marigold.node.errors.abort";
 pub const DURATION: &str = "marigold.node.duration";
 
 /// Source identity of one node of a Marigold program, embedded in generated code.
+///
+/// `start` and `end` are approximate byte offsets relative to the program text given to the code
+/// generator, which for the `m!` macro is the stringified macro body.
 ///
 /// ```
 /// use marigold_impl::telemetry::NodeMeta;

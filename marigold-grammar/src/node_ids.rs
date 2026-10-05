@@ -33,6 +33,19 @@
 //! function and the output count up by one. The declaration node itself has ordinal 0 and kind
 //! `variable_declaration`.
 //!
+//! # Equality with macro-generated code
+//!
+//! Ids and content hashes depend on the program text only through the normalised text: every
+//! ASCII whitespace character outside double-quoted string literals is dropped and everything
+//! else is kept verbatim. Tokenising a program, as the `m!` macro does before it hands the text to
+//! the code generator, can change which whitespace separates tokens but never the non-whitespace
+//! characters or the contents of string literals, so the normalised text, the occurrence indices
+//! and the ordinals are identical. The ids that `marigold_parse_instrumented` embeds in generated
+//! code therefore equal the ids [`crate::marigold_node_ids`] returns for the original `.marigold`
+//! text with the same program name. The `range` of a node is different: it indexes the exact text
+//! that was parsed, which for a macro is the stringified body, so ranges in generated code are
+//! approximate and must not be used to locate source.
+//!
 //! Consequently edits to other expressions, whitespace, or the arguments of a chain element never
 //! change the ids of the remaining nodes; inserting or removing a chain element renumbers the
 //! elements after it; and editing an unnamed expression gives all of its nodes new ids.
@@ -90,6 +103,13 @@ fn content_hash_value(src: &str) -> u64 {
     let mut h = Fnv::new();
     h.bytes(normalise(src).as_bytes());
     h.0
+}
+
+#[cfg(feature = "otel")]
+pub(crate) fn site_hash(site: &str) -> String {
+    let mut h = Fnv::new();
+    h.field(site);
+    hex(h.0)
 }
 
 fn hex(n: u64) -> String {

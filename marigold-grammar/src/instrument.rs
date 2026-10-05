@@ -5,14 +5,32 @@
 //! opt in explicitly through [`crate::marigold_parse_instrumented`], so enabling the feature on
 //! the grammar crate alone cannot change the code of other callers.
 //!
-//! Node ids come from [`crate::marigold_node_ids`] with [`CodegenOptions::program`] as the
-//! program name, and are embedded in the generated code as string literals.
+//! Node ids come from [`crate::marigold_node_ids`] with [`CodegenOptions::id_namespace`] as the
+//! program name, and are embedded in the generated code as string literals. Ids depend on the
+//! program text only through its content with whitespace outside string literals removed (see
+//! [`crate::node_ids`]), so code generated from the token-stringified body of a macro carries
+//! exactly the ids the language server computes from the same program in a `.marigold` file.
+//!
+//! The byte ranges embedded next to the ids are offsets into the text that was given to the code
+//! generator. For the `m!` macro that is the stringified macro body, so they are approximate:
+//! they do not point into the Rust source file. Ids are exact; ranges are not.
+//!
+//! # Call sites
+//!
+//! Ids are unique within one program text. Two `m!` invocations in one crate that declare the
+//! same variable name, or contain identical unnamed expressions, would therefore share ids and
+//! merge their metrics. [`SiteRegistry`] prevents that: the first invocation with a given set of
+//! ids keeps the plain ids, and every later invocation whose ids would collide is given a
+//! [`CodegenOptions::discriminator`] derived from its call site, which changes only its ids.
 
-use crate::node_ids::{node_infos, NodeKind};
+use crate::node_ids::{node_infos, site_hash, NodeKind};
 use crate::nodes::{
     NamedStreamNode, OutputFunctionNode, StreamFunctionKind, StreamFunctionNode,
     StreamVariableFromPriorStreamVariableNode, StreamVariableNode, UnnamedStreamNode,
 };
+
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 const TELEMETRY: &str = "::marigold::marigold_impl::telemetry";
 
@@ -33,6 +51,7 @@ const TELEMETRY: &str = "::marigold::marigold_impl::telemetry";
 pub struct CodegenOptions {
     program: String,
     file: Option<String>,
+    discriminator: Option<String>,
 }
 
 impl CodegenOptions {
@@ -40,6 +59,7 @@ impl CodegenOptions {
         Self {
             program: program.into(),
             file: None,
+            discriminator: None,
         }
     }
 
@@ -48,12 +68,124 @@ impl CodegenOptions {
         self
     }
 
+    /// Fold a call-site discriminator into the node ids, leaving `marigold.program` unchanged.
+    pub fn with_discriminator(mut self, discriminator: impl Into<String>) -> Self {
+        self.discriminator = Some(discriminator.into());
+        self
+    }
+
     pub fn program(&self) -> &str {
         &self.program
     }
 
+    pub fn discriminator(&self) -> Option<&str> {
+        self.discriminator.as_deref()
+    }
+
+    /// The program name that the node ids are hashed with: `program`, or `program#discriminator`.
+    ///
+    /// ```
+    /// use marigold_grammar::instrument::CodegenOptions;
+    ///
+    /// assert_eq!(CodegenOptions::new("demo").id_namespace(), "demo");
+    /// let tagged = CodegenOptions::new("demo").with_discriminator("ab12");
+    /// assert_eq!(tagged.id_namespace(), "demo#ab12");
+    /// ```
+    pub fn id_namespace(&self) -> String {
+        match &self.discriminator {
+            Some(d) => format!("{}#{d}", self.program),
+            None => self.program.clone(),
+        }
+    }
+
     pub fn file(&self) -> Option<&str> {
         self.file.as_deref()
+    }
+}
+
+#[derive(Default)]
+struct Sites {
+    programs: HashMap<String, (String, Option<String>)>,
+    owners: HashMap<String, String>,
+}
+
+/// Hands out [`CodegenOptions`] so that no two call sites of one process share node ids.
+///
+/// Sites are identified by an opaque string, such as the debug rendering of a macro call-site
+/// span. The first site to claim a set of ids gets the plain ids. A later site whose ids are
+/// already claimed gets a discriminator derived from the site string, so the result does not
+/// depend on how many other sites there are. Asking again for the same site and program is
+/// idempotent; asking with a changed program at a known site releases the site's old ids first,
+/// which keeps long-lived expanders such as editors stable.
+///
+/// ```
+/// use marigold_grammar::instrument::SiteRegistry;
+///
+/// let registry = SiteRegistry::new();
+/// let first = registry.options("x = range(0, 3)\nx.return", "demo", "site-a");
+/// let second = registry.options("x = range(0, 3)\nx.return", "demo", "site-b");
+/// assert_eq!(first.discriminator(), None);
+/// assert!(second.discriminator().is_some());
+/// ```
+pub struct SiteRegistry {
+    sites: Mutex<Option<Sites>>,
+}
+
+impl Default for SiteRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SiteRegistry {
+    pub const fn new() -> Self {
+        Self {
+            sites: Mutex::new(None),
+        }
+    }
+
+    pub fn options(&self, source: &str, program: &str, site: &str) -> CodegenOptions {
+        let mut guard = self.sites.lock().unwrap_or_else(|e| e.into_inner());
+        let sites = guard.get_or_insert_with(Sites::default);
+        let key = format!("{program}\u{0}{site}");
+        if let Some((known_source, discriminator)) = sites.programs.get(&key) {
+            if known_source == source {
+                return Self::build(program, discriminator.clone());
+            }
+        }
+        sites.owners.retain(|_, owner| *owner != key);
+        let ids_of = |options: &CodegenOptions| -> Vec<String> {
+            node_infos(source, &options.id_namespace())
+                .into_iter()
+                .map(|n| n.id.to_string())
+                .collect()
+        };
+        let mut options = CodegenOptions::new(program);
+        if ids_of(&options)
+            .iter()
+            .any(|id| sites.owners.contains_key(id))
+        {
+            options = options.with_discriminator(site_hash(site));
+        }
+        for id in ids_of(&options) {
+            sites.owners.insert(id, key.clone());
+        }
+        sites.programs.insert(
+            key,
+            (
+                source.to_string(),
+                options.discriminator().map(str::to_string),
+            ),
+        );
+        options
+    }
+
+    fn build(program: &str, discriminator: Option<String>) -> CodegenOptions {
+        let options = CodegenOptions::new(program);
+        match discriminator {
+            Some(d) => options.with_discriminator(d),
+            None => options,
+        }
     }
 }
 
@@ -75,7 +207,7 @@ impl Plan {
             Some(file) => format!("{file:?}"),
             None => "file!()".to_string(),
         };
-        let nodes = node_infos(src, options.program())
+        let nodes = node_infos(src, &options.id_namespace())
             .into_iter()
             .map(|info| {
                 let meta = format!(
