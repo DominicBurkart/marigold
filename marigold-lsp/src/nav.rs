@@ -517,11 +517,7 @@ pub fn rename_edits(
     if decl.name == new_name {
         return Ok(Vec::new());
     }
-    if symbols
-        .declarations
-        .iter()
-        .any(|d| d.kind == decl.kind && d.name == new_name)
-    {
+    if symbols.declarations.iter().any(|d| d.name == new_name) {
         return Err(RenameError::Clash(new_name.to_string()));
     }
     let mut ranges: Vec<ByteRange> = std::iter::once(decl.range)

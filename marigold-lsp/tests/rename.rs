@@ -161,16 +161,77 @@ fn rename_rejects_clash_with_existing_declaration_of_same_kind() {
 }
 
 #[test]
-fn rename_to_same_name_is_a_no_op_and_other_kind_is_not_a_clash() {
+fn rename_to_same_name_is_a_no_op() {
     let (mut client, _) = Client::start();
     let u = uri("rename_same");
     let text = "enum E { A }\nfn f(x: i32) -> i32 { x }\nrange(E).map(f).return\n";
     client.open_at(&u, text);
     let same = edits_of(rename(&mut client, &u, pos_of(text, "f)"), "f"), &u);
     assert!(same.is_empty());
-    let cross = rename(&mut client, &u, pos_of(text, "f)"), "E");
-    assert_eq!(edits_of(cross, &u).len(), 2);
     client.shutdown();
+}
+
+mod cross_kind {
+    use lsp_types::Position;
+    use marigold_lsp::nav::{rename, RenameError};
+
+    const PROGRAM: &str = "fn double(v: i32) -> i32 { v * 2 }\nstruct Row { a: i32 }\nenum Color { Red }\nx = range(0, 3).map(double)\nx.return\n";
+
+    fn at(needle: &str) -> Position {
+        let offset = PROGRAM.find(needle).unwrap();
+        let line = PROGRAM[..offset].matches('\n').count() as u32;
+        let start = PROGRAM[..offset].rfind('\n').map_or(0, |i| i + 1);
+        Position::new(line, (offset - start) as u32)
+    }
+
+    fn assert_clash(needle: &str, new_name: &str) {
+        let result = rename(PROGRAM, at(needle), new_name);
+        assert!(
+            matches!(result, Err(RenameError::Clash(ref n)) if n == new_name),
+            "{needle} -> {new_name}: {result:?}"
+        );
+    }
+
+    #[test]
+    fn stream_variable_to_fn_name_clashes() {
+        assert_clash("x = ", "double");
+    }
+
+    #[test]
+    fn fn_to_stream_variable_name_clashes() {
+        assert_clash("double(v", "x");
+    }
+
+    #[test]
+    fn enum_to_struct_name_clashes() {
+        assert_clash("Color", "Row");
+    }
+
+    #[test]
+    fn struct_to_enum_name_clashes() {
+        assert_clash("Row", "Color");
+    }
+
+    #[test]
+    fn same_kind_still_clashes() {
+        let text = "fn a(x: i32) -> i32 { x }\nfn b(x: i32) -> i32 { x }\nrange(0, 3).map(a).map(b).return\n";
+        let result = rename(text, Position::new(0, 3), "b");
+        assert!(matches!(result, Err(RenameError::Clash(_))), "{result:?}");
+    }
+
+    #[test]
+    fn fresh_name_still_renames() {
+        for (needle, fresh) in [
+            ("x = ", "y"),
+            ("double(v", "twice"),
+            ("Color", "Hue"),
+            ("Row", "Line"),
+        ] {
+            let result = rename(PROGRAM, at(needle), fresh);
+            assert!(result.is_ok(), "{needle} -> {fresh}: {result:?}");
+            assert!(!result.unwrap().is_empty());
+        }
+    }
 }
 
 #[test]
