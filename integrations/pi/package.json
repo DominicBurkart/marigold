@@ -1,7 +1,7 @@
 {
   "name": "pi-marigold",
   "version": "0.2.0",
-  "description": "Marigold language support for the pi coding agent: diagnostics after every edit, plus a marigold_check tool.",
+  "description": "Marigold language support for the pi coding agent: diagnostics after every edit, plus marigold_check and navigation tools (definition, references, hover, symbols, rename).",
   "license": "Apache-2.0 OR MIT",
   "repository": {
     "type": "git",
