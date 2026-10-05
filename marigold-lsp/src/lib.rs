@@ -14,6 +14,7 @@
 //! ```
 
 pub mod hover;
+pub mod mcp;
 pub mod nav;
 pub mod position;
 pub mod workspace;

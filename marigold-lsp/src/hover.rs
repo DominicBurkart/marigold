@@ -30,7 +30,7 @@ fn fenced(source: &str) -> String {
     format!("```marigold\n{shown}\n```")
 }
 
-fn complexity_line(node: &NodeComplexity) -> String {
+pub fn complexity_line(node: &NodeComplexity) -> String {
     let c = &node.complexity;
     format!(
         "cardinality: {} \u{b7} time: {} \u{b7} space: {} \u{b7} collects input: {}",

@@ -48,6 +48,77 @@ impl<'a> LineIndex<'a> {
     /// assert_eq!(crlf.position(4), Position::new(1, 0));
     /// ```
     pub fn position(&self, offset: usize) -> Position {
+        let (line, character) = self.line_and_prefix(offset);
+        let units = self.text[self.line_starts[line]..character]
+            .chars()
+            .map(char::len_utf16)
+            .sum::<usize>();
+        Position::new(line as u32, units as u32)
+    }
+
+    /// Converts a byte offset to a zero-based `(line, column)` pair counted in
+    /// Unicode scalar values, with the same clamping rules as [`Self::position`].
+    ///
+    /// ```
+    /// use marigold_lsp::position::LineIndex;
+    /// let idx = LineIndex::new("a😀b\nc");
+    /// assert_eq!(idx.char_position(5), (0, 2));
+    /// assert_eq!(idx.char_position(6), (0, 3));
+    /// assert_eq!(idx.char_position(8), (1, 1));
+    /// ```
+    pub fn char_position(&self, offset: usize) -> (u32, u32) {
+        let (line, offset) = self.line_and_prefix(offset);
+        let column = self.text[self.line_starts[line]..offset].chars().count();
+        (line as u32, column as u32)
+    }
+
+    /// Converts a zero-based `(line, column)` pair counted in Unicode scalar
+    /// values to a byte offset. Returns `None` when the line does not exist or
+    /// the column is past the end of its line (the end itself is valid).
+    ///
+    /// ```
+    /// use marigold_lsp::position::LineIndex;
+    /// let idx = LineIndex::new("a😀b\r\nc");
+    /// assert_eq!(idx.offset_of_char(0, 2), Some(5));
+    /// assert_eq!(idx.offset_of_char(0, 3), Some(6));
+    /// assert_eq!(idx.offset_of_char(0, 4), None);
+    /// assert_eq!(idx.offset_of_char(1, 1), Some(9));
+    /// assert_eq!(idx.offset_of_char(2, 0), None);
+    /// ```
+    pub fn offset_of_char(&self, line: u32, column: u32) -> Option<usize> {
+        let start = *self.line_starts.get(line as usize)?;
+        let end = self.line_content_end(line as usize);
+        let mut chars = self.text[start..end].char_indices();
+        match chars.nth(column as usize) {
+            Some((i, _)) => Some(start + i),
+            None if column as usize == self.text[start..end].chars().count() => Some(end),
+            None => None,
+        }
+    }
+
+    /// The number of lines, counting a trailing empty line after a final newline.
+    ///
+    /// ```
+    /// use marigold_lsp::position::LineIndex;
+    /// assert_eq!(LineIndex::new("a\nb\n").line_count(), 3);
+    /// ```
+    pub fn line_count(&self) -> usize {
+        self.line_starts.len()
+    }
+
+    fn line_content_end(&self, line: usize) -> usize {
+        self.line_starts
+            .get(line + 1)
+            .map_or(self.text.len(), |&next| {
+                if next >= 2 && self.text.as_bytes()[next - 2] == b'\r' {
+                    next - 2
+                } else {
+                    next - 1
+                }
+            })
+    }
+
+    fn line_and_prefix(&self, offset: usize) -> (usize, usize) {
         let mut offset = offset.min(self.text.len());
         while !self.text.is_char_boundary(offset) {
             offset -= 1;
@@ -59,12 +130,7 @@ impl<'a> LineIndex<'a> {
             offset -= 1;
         }
         let line = self.line_starts.partition_point(|&s| s <= offset) - 1;
-        let start = self.line_starts[line];
-        let character = self.text[start..offset]
-            .chars()
-            .map(char::len_utf16)
-            .sum::<usize>();
-        Position::new(line as u32, character as u32)
+        (line, offset)
     }
 
     /// Converts an LSP position to a byte offset, clamping out-of-range
