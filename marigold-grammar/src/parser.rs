@@ -67,19 +67,30 @@ impl PestParser {
     }
 
     pub(crate) fn check(input: &str) -> Vec<crate::diagnostics::Diagnostic> {
-        use crate::diagnostics::Diagnostic;
-
         let pairs = match MarigoldPestParser::parse(Rule::program, input) {
             Ok(pairs) => pairs,
             Err(e) => return Self::syntax_diagnostics(input, &e),
         };
         let index = crate::span_index::SpanIndex::build(pairs.clone());
+        let mut diags = Self::semantic_diagnostics(input, pairs, &index);
+        diags.extend(crate::resolver::warnings(&index));
+        diags.sort_by_key(|d| (d.range.start, d.range.end));
+        diags
+    }
+
+    fn semantic_diagnostics(
+        input: &str,
+        pairs: pest::iterators::Pairs<Rule>,
+        index: &crate::span_index::SpanIndex,
+    ) -> Vec<crate::diagnostics::Diagnostic> {
+        use crate::diagnostics::Diagnostic;
+
         let mut expressions = match crate::pest_ast_builder::PestAstBuilder::build_program(pairs) {
             Ok(expressions) => expressions,
             Err(msg) => return vec![Diagnostic::whole(input, "invalid-program", msg)],
         };
         if let Err(msg) = Self::resolve_enum_range_counts(&mut expressions) {
-            return Self::undefined_enum_diagnostics(input, &index, &expressions, msg);
+            return Self::undefined_enum_diagnostics(input, index, &expressions, msg);
         }
 
         let symbol_table = crate::symbol_table::SymbolTable::from_expressions(&expressions);
@@ -89,7 +100,7 @@ impl PestParser {
                 Err(errors) => {
                     let mut diags: Vec<Diagnostic> = errors
                         .iter()
-                        .flat_map(|e| Diagnostic::from_resolution(input, &index, e))
+                        .flat_map(|e| Diagnostic::from_resolution(input, index, e))
                         .collect();
                     diags.sort_by_key(|d| (d.range.start, d.range.end, d.code));
                     diags.dedup();

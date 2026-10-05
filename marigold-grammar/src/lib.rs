@@ -72,6 +72,7 @@ pub mod diagnostics;
 pub mod nodes;
 pub mod parser;
 mod recovery;
+mod resolver;
 mod span_index;
 pub mod symbol_table;
 mod type_aggregation;
@@ -97,17 +98,27 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
 
 /// Check Marigold source and return every diagnostic found, with byte ranges.
 ///
-/// Returns an empty vector exactly when [`marigold_parse`] succeeds, except
-/// that input larger than [`diagnostics::MAX_CHECK_INPUT_BYTES`] is rejected
-/// with a single `input-too-large` diagnostic without being parsed.
+/// No diagnostic has [`diagnostics::Severity::Error`] exactly when [`marigold_parse`]
+/// succeeds. Warnings, such as references to names that are not declared in the
+/// program, never affect [`marigold_parse`] because they may bind to Rust items
+/// inside `m!()`.
+///
+/// Input larger than [`diagnostics::MAX_CHECK_INPUT_BYTES`] is rejected with a
+/// single `input-too-large` error diagnostic without being parsed.
 ///
 /// ```
 /// use marigold_grammar::marigold_check;
+/// use marigold_grammar::diagnostics::Severity;
 ///
 /// assert!(marigold_check("range(0, 10).return").is_empty());
 ///
 /// let diags = marigold_check("range(0, 10).retur");
 /// assert_eq!(diags[0].code, "syntax-error");
+///
+/// let diags = marigold_check("range(0, 10).map(double).return");
+/// assert_eq!(diags[0].code, "undefined-fn");
+/// assert_eq!(diags[0].severity, Severity::Warning);
+/// assert!(marigold_grammar::marigold_parse("range(0, 10).map(double).return").is_ok());
 /// ```
 pub fn marigold_check(s: &str) -> Vec<diagnostics::Diagnostic> {
     if s.len() > diagnostics::MAX_CHECK_INPUT_BYTES {

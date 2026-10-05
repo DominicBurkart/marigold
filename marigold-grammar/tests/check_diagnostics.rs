@@ -237,12 +237,19 @@ proptest! {
 }
 
 #[test]
-fn valid_fixtures_have_no_diagnostics() {
+fn valid_fixtures_have_no_error_diagnostics() {
     for src in VALID_PROGRAMS {
         assert!(
             marigold_parse(src).is_ok(),
             "fixture should be valid: {src}"
         );
+        assert!(!has_error(&marigold_check(src)), "{src}");
+    }
+}
+
+#[test]
+fn fully_defined_fixtures_have_no_diagnostics_at_all() {
+    for src in VALID_PROGRAMS.iter().filter(|s| !s.contains("(f)")) {
         assert!(marigold_check(src).is_empty(), "{src}");
     }
 }
@@ -268,6 +275,174 @@ fn oversized_input_is_rejected_with_a_single_bounded_diagnostic() {
 fn input_at_the_size_limit_is_still_checked() {
     let src = " ".repeat(marigold_grammar::diagnostics::MAX_CHECK_INPUT_BYTES);
     assert!(marigold_check(&src).is_empty());
+}
+
+fn warnings(src: &str) -> Vec<Diagnostic> {
+    let diags = marigold_check(src);
+    assert!(!has_error(&diags), "{diags:?}");
+    assert!(diags.iter().all(|d| d.severity == Severity::Warning));
+    diags
+}
+
+fn warning(src: &str) -> Diagnostic {
+    only(warnings(src))
+}
+
+#[test]
+fn undefined_fn_in_map_is_a_warning_with_range() {
+    let src = "range(0, 5).map(doubel).return";
+    let d = warning(src);
+    assert_eq!(d.code, "undefined-fn");
+    assert_eq!(slice(src, &d), "doubel");
+    assert!(d.message.contains("doubel"), "{}", d.message);
+    assert!(
+        d.help.as_deref().unwrap().contains("no functions"),
+        "{:?}",
+        d.help
+    );
+    assert!(marigold_parse(src).is_ok());
+}
+
+#[test]
+fn undefined_fn_suggests_close_match_and_lists_declared() {
+    let src = "fn double(x: i32) -> i32 { x * 2 }\nfn triple(x: i32) -> i32 { x * 3 }\nrange(0, 5).map(doubel).return";
+    let d = warning(src);
+    assert_eq!(d.code, "undefined-fn");
+    let help = d.help.unwrap();
+    assert!(help.contains("did you mean 'double'?"), "{help}");
+    assert!(help.contains("double, triple"), "{help}");
+}
+
+#[test]
+fn undefined_fn_without_close_match_has_no_suggestion() {
+    let src = "fn double(x: i32) -> i32 { x * 2 }\nrange(0, 5).map(completely_different).return";
+    let help = warning(src).help.unwrap();
+    assert!(!help.contains("did you mean"), "{help}");
+    assert!(help.contains("double"), "{help}");
+}
+
+#[test]
+fn every_fn_position_is_checked() {
+    let src = "range(0, 5).filter(a).filter_map(b).fold(0, c).return\nrange(0, 5).keep_first_n(2, d).return";
+    let diags = warnings(src);
+    let names: Vec<_> = diags.iter().map(|d| slice(src, d)).collect();
+    assert_eq!(names, vec!["a", "b", "c", "d"]);
+    assert!(diags.iter().all(|d| d.code == "undefined-fn"));
+}
+
+#[test]
+fn declared_fn_is_not_flagged_even_when_declared_later() {
+    let src = "range(0, 3).map(double).return\nfn double(x: i32) -> i32 { x * 2 }";
+    assert!(marigold_check(src).is_empty());
+}
+
+#[test]
+fn undefined_stream_variable_in_stream_start() {
+    let src = "x = range(0, 3)\nxs.return";
+    let d = warning(src);
+    assert_eq!(d.code, "undefined-stream-variable");
+    assert_eq!(slice(src, &d), "xs");
+    let help = d.help.unwrap();
+    assert!(help.contains("did you mean 'x'?"), "{help}");
+    assert!(help.contains("defined stream variables: x"), "{help}");
+}
+
+#[test]
+fn undefined_stream_variable_in_variable_source() {
+    let src = "a = range(0, 3)\nb = aa.filter(p)\nb.return";
+    let diags = warnings(src);
+    let codes: Vec<_> = diags.iter().map(|d| (d.code, slice(src, d))).collect();
+    assert_eq!(
+        codes,
+        vec![("undefined-stream-variable", "aa"), ("undefined-fn", "p")]
+    );
+}
+
+#[test]
+fn stream_variable_with_no_declarations_says_so() {
+    let src = "nothing.return";
+    let d = warning(src);
+    assert_eq!(d.code, "undefined-stream-variable");
+    assert!(d.help.unwrap().contains("no stream variables"));
+}
+
+#[test]
+fn forward_reference_from_stream_to_later_variable_is_fine() {
+    let src = "x.return\nx = range(0, 3)";
+    assert!(marigold_check(src).is_empty());
+}
+
+#[test]
+fn forward_reference_from_variable_to_later_variable_warns() {
+    let src = "b = a.filter(p)\na = range(0, 3)\nb.return";
+    let diags = warnings(src);
+    let found: Vec<_> = diags.iter().map(|d| (d.code, slice(src, d))).collect();
+    assert_eq!(
+        found,
+        vec![("undefined-stream-variable", "a"), ("undefined-fn", "p")]
+    );
+    assert!(
+        diags[0].message.contains("declared"),
+        "{}",
+        diags[0].message
+    );
+}
+
+#[test]
+fn variable_referencing_itself_warns() {
+    let src = "a = a.map(f)\na.return";
+    let d = &warnings(src)[0];
+    assert_eq!(d.code, "undefined-stream-variable");
+    assert_eq!(slice(src, d), "a");
+}
+
+#[test]
+fn undefined_struct_in_read_file() {
+    let src = "struct Row { a: int[0, 5] }\nread_file(\"d.csv\", csv, struct=Rwo).return";
+    let d = warning(src);
+    assert_eq!(d.code, "undefined-struct");
+    assert_eq!(slice(src, &d), "Rwo");
+    let help = d.help.unwrap();
+    assert!(help.contains("did you mean 'Row'?"), "{help}");
+    assert!(help.contains("declared structs: Row"), "{help}");
+}
+
+#[test]
+fn undefined_struct_with_no_structs_declared() {
+    let src = "read_file(\"d.csv\", csv, struct=Row).return";
+    let d = warning(src);
+    assert_eq!(d.code, "undefined-struct");
+    assert!(d.help.unwrap().contains("no structs"));
+}
+
+#[test]
+fn declared_struct_is_not_flagged() {
+    let src = "struct Row { a: int[0, 5] }\nread_file(\"d.csv\", csv, struct=Row).return";
+    assert!(marigold_check(src).is_empty());
+}
+
+#[test]
+fn enum_name_does_not_satisfy_a_struct_reference() {
+    let src = "enum Row { A }\nread_file(\"d.csv\", csv, struct=Row).return";
+    assert_eq!(warning(src).code, "undefined-struct");
+}
+
+#[test]
+fn warnings_accompany_errors_in_source_order() {
+    let src = "range(0, 5).map(f).return\nrange(Color).return";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    assert_eq!(diags[0].severity, Severity::Warning);
+    assert_eq!(diags[1].severity, Severity::Error);
+    assert_ordered_disjoint(&diags);
+}
+
+#[test]
+fn warning_serializes_as_warning() {
+    let d = warning("range(0, 5).map(f).return");
+    let v = serde_json::to_value(&d).unwrap();
+    assert_eq!(v["severity"], "warning");
+    assert_eq!(v["code"], "undefined-fn");
 }
 
 fn line_ranges(src: &str) -> Vec<(usize, usize)> {

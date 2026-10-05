@@ -2,7 +2,7 @@
 //!
 //! Unlike [`crate::marigold_parse`], which stops at the first error and returns
 //! a flat message, [`crate::marigold_check`] returns every diagnostic it can
-//! find, each carrying a byte range into the original source. Ranges always lie
+//! find (errors and warnings), each carrying a byte range into the original source. Ranges always lie
 //! on `char` boundaries within the input, so they can be converted to any
 //! editor position encoding.
 //!
@@ -102,7 +102,6 @@ impl Diagnostic {
         )
     }
 
-    #[allow(dead_code)]
     pub(crate) fn warning(range: ByteRange, code: &'static str, message: String) -> Self {
         Self {
             severity: Severity::Warning,
