@@ -242,3 +242,26 @@ fn valid_fixtures_have_no_diagnostics() {
         assert!(marigold_check(src).is_empty(), "{src}");
     }
 }
+
+#[test]
+fn severity_has_stable_labels_and_error_predicate() {
+    assert_eq!(Severity::Error.as_str(), "error");
+    let d = only(marigold_check("range(Color).return"));
+    assert!(d.is_error());
+}
+
+#[test]
+fn oversized_input_is_rejected_with_a_single_bounded_diagnostic() {
+    let src = " ".repeat(marigold_grammar::diagnostics::MAX_CHECK_INPUT_BYTES + 1);
+    let d = only(marigold_check(&src));
+    assert_eq!(d.code, "input-too-large");
+    assert!(d.is_error());
+    assert_eq!((d.range.start, d.range.end), (0, src.len()));
+    assert!(d.message.contains("10"), "{}", d.message);
+}
+
+#[test]
+fn input_at_the_size_limit_is_still_checked() {
+    let src = " ".repeat(marigold_grammar::diagnostics::MAX_CHECK_INPUT_BYTES);
+    assert!(marigold_check(&src).is_empty());
+}

@@ -96,7 +96,9 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
 
 /// Check Marigold source and return every diagnostic found, with byte ranges.
 ///
-/// Returns an empty vector exactly when [`marigold_parse`] succeeds.
+/// Returns an empty vector exactly when [`marigold_parse`] succeeds, except
+/// that input larger than [`diagnostics::MAX_CHECK_INPUT_BYTES`] is rejected
+/// with a single `input-too-large` diagnostic without being parsed.
 ///
 /// ```
 /// use marigold_grammar::marigold_check;
@@ -107,6 +109,9 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
 /// assert_eq!(diags[0].code, "syntax-error");
 /// ```
 pub fn marigold_check(s: &str) -> Vec<diagnostics::Diagnostic> {
+    if s.len() > diagnostics::MAX_CHECK_INPUT_BYTES {
+        return vec![diagnostics::Diagnostic::input_too_large(s)];
+    }
     parser::PestParser::check(s)
 }
 

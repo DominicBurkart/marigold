@@ -35,6 +35,29 @@ pub enum Severity {
     Error,
 }
 
+impl Severity {
+    /// ```
+    /// use marigold_grammar::diagnostics::Severity;
+    ///
+    /// assert_eq!(Severity::Error.as_str(), "error");
+    /// ```
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Severity::Error => "error",
+        }
+    }
+}
+
+/// Largest input, in bytes, that `marigold_check` will parse.
+///
+/// ```
+/// use marigold_grammar::{diagnostics::MAX_CHECK_INPUT_BYTES, marigold_check};
+///
+/// let oversized = " ".repeat(MAX_CHECK_INPUT_BYTES + 1);
+/// assert_eq!(marigold_check(&oversized)[0].code, "input-too-large");
+/// ```
+pub const MAX_CHECK_INPUT_BYTES: usize = 10 * 1024 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct Diagnostic {
@@ -47,6 +70,14 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    /// ```
+    /// let diags = marigold_grammar::marigold_check("range(Color).return");
+    /// assert!(diags[0].is_error());
+    /// ```
+    pub fn is_error(&self) -> bool {
+        self.severity == Severity::Error
+    }
+
     pub(crate) fn error(range: ByteRange, code: &'static str, message: String) -> Self {
         Self {
             range,
@@ -55,6 +86,17 @@ impl Diagnostic {
             message,
             help: None,
         }
+    }
+
+    pub(crate) fn input_too_large(src: &str) -> Self {
+        Self::whole(
+            src,
+            "input-too-large",
+            format!(
+                "input exceeds the {} MiB limit for diagnostics",
+                MAX_CHECK_INPUT_BYTES / (1024 * 1024)
+            ),
+        )
     }
 
     pub(crate) fn whole(src: &str, code: &'static str, message: String) -> Self {
