@@ -143,6 +143,13 @@ impl Diagnostic {
         )
     }
 
+    pub(crate) fn rebased(mut self, offset: usize, limit: usize) -> Self {
+        let start = (self.range.start + offset).min(limit);
+        let end = (self.range.end + offset).clamp(start, limit);
+        self.range = ByteRange { start, end };
+        self
+    }
+
     pub(crate) fn with_help(mut self, help: String) -> Self {
         self.help = Some(help);
         self

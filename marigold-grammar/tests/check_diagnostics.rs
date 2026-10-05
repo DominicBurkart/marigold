@@ -269,3 +269,117 @@ fn input_at_the_size_limit_is_still_checked() {
     let src = " ".repeat(marigold_grammar::diagnostics::MAX_CHECK_INPUT_BYTES);
     assert!(marigold_check(&src).is_empty());
 }
+
+fn line_ranges(src: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for line in src.split_inclusive('\n') {
+        out.push((start, start + line.len()));
+        start += line.len();
+    }
+    out
+}
+
+fn assert_ordered_disjoint(diags: &[Diagnostic]) {
+    for pair in diags.windows(2) {
+        assert!(pair[0].range.end <= pair[1].range.start, "{pair:?}");
+    }
+}
+
+#[test]
+fn three_independent_syntax_errors_yield_three_ordered_ranges() {
+    let src = "range(0, 1).retur\nrange(0, 1).return\nrange(0, 2).bogus\nrange(0, 3).retur\n";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 3, "{diags:?}");
+    assert!(diags.iter().all(|d| d.code == "syntax-error"));
+    assert_ordered_disjoint(&diags);
+    let lines = line_ranges(src);
+    for (d, line) in diags.iter().zip([0usize, 2, 3]) {
+        let (s, e) = lines[line];
+        assert!(d.range.start >= s && d.range.end <= e, "{d:?} line {line}");
+    }
+}
+
+#[test]
+fn unicode_errors_across_lines_are_recovered_on_char_boundaries() {
+    let src = "range(0, 1).write_file(\"\u{fc}n\u{ef}.csv\", csv)\nrange(0, 1).ret\u{fc}r\nrange(0, 1).return\nrange(0, 1).\u{e9}\u{e9}\u{e9}\n";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    assert_ordered_disjoint(&diags);
+    assert_ranges_valid(src, &diags);
+    let lines = line_ranges(src);
+    assert!(diags[0].range.start >= lines[1].0 && diags[0].range.end <= lines[1].1);
+    assert!(diags[1].range.start >= lines[3].0 && diags[1].range.end <= lines[3].1);
+}
+
+#[test]
+fn multi_line_expression_is_not_split() {
+    let src = "range(0, 1)\n  .map(f)\n  .return\nrange(0, 1).bogus\nrange(0, 2).bogus\n";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    let lines = line_ranges(src);
+    assert!(diags[0].range.start >= lines[3].0);
+    assert!(diags[1].range.start >= lines[4].0);
+}
+
+#[test]
+fn braces_and_strings_in_fn_bodies_do_not_split_chunks() {
+    let src = "fn f(x: i32) -> i32 {\nlet s = \"}\n\";\nlet c = '\"';\nx\n}\nrange(0, 1).bogus\nrange(0, 2).bogus\n";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    let fn_end = src.find("range").unwrap();
+    assert!(diags.iter().all(|d| d.range.start >= fn_end), "{diags:?}");
+}
+
+#[test]
+fn recovery_does_not_flag_valid_neighbours() {
+    let src = "x = range(0, 5).map(f)\nrange(0, 1).retur\nx.filter(g).return\n";
+    let d = only(marigold_check(src));
+    assert_eq!(d.code, "syntax-error");
+    let lines = line_ranges(src);
+    assert!(d.range.start >= lines[1].0 && d.range.end <= lines[1].1);
+}
+
+#[test]
+fn error_at_end_of_a_chunk_stays_inside_that_chunk() {
+    let src = "range(0, 1)\nrange(0, 2)\nrange(0, 3).return\n";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    assert_ordered_disjoint(&diags);
+    let lines = line_ranges(src);
+    assert!(diags[0].range.end < lines[0].1);
+    assert!(diags[1].range.end < lines[1].1);
+}
+
+proptest! {
+    #[test]
+    fn multi_error_programs_have_ordered_disjoint_ranges(
+        picks in prop::collection::vec(0..VALID_PROGRAMS.len(), 2..5),
+        cuts in prop::collection::vec((any::<prop::sample::Index>(), prop::option::of("[\\PC]")), 1..4),
+    ) {
+        let mut parts: Vec<String> = picks.iter().map(|i| VALID_PROGRAMS[*i].to_string()).collect();
+        for (at, insert) in cuts {
+            let n = at.index(parts.len());
+            let part = &mut parts[n];
+            let boundaries: Vec<usize> = (0..=part.len()).filter(|i| part.is_char_boundary(*i)).collect();
+            let pos = boundaries[(n * 7 + part.len()) % boundaries.len()];
+            match insert {
+                Some(s) => part.insert_str(pos, &s),
+                None => {
+                    if pos < part.len() {
+                        part.remove(pos);
+                    }
+                }
+            }
+        }
+        let src = parts.join("\n");
+        let diags = marigold_check(&src);
+        assert_ranges_valid(&src, &diags);
+        prop_assert_eq!(has_error(&diags), marigold_parse(&src).is_err());
+        if diags.iter().all(|d| d.code == "syntax-error") {
+            for pair in diags.windows(2) {
+                prop_assert!(pair[0].range.end <= pair[1].range.start, "{:?}", diags);
+            }
+        }
+    }
+}

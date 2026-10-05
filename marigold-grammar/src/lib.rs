@@ -71,6 +71,7 @@ pub mod complexity;
 pub mod diagnostics;
 pub mod nodes;
 pub mod parser;
+mod recovery;
 mod span_index;
 pub mod symbol_table;
 mod type_aggregation;

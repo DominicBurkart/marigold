@@ -71,7 +71,7 @@ impl PestParser {
 
         let pairs = match MarigoldPestParser::parse(Rule::program, input) {
             Ok(pairs) => pairs,
-            Err(e) => return vec![Diagnostic::from_pest(input, &e)],
+            Err(e) => return Self::syntax_diagnostics(input, &e),
         };
         let index = crate::span_index::SpanIndex::build(pairs.clone());
         let mut expressions = match crate::pest_ast_builder::PestAstBuilder::build_program(pairs) {
@@ -104,6 +104,30 @@ impl PestParser {
             Ok(_) => Vec::new(),
             Err(msg) => vec![Diagnostic::whole(input, "codegen-error", msg)],
         }
+    }
+
+    fn syntax_diagnostics(
+        input: &str,
+        whole_error: &pest::error::Error<Rule>,
+    ) -> Vec<crate::diagnostics::Diagnostic> {
+        use crate::diagnostics::Diagnostic;
+
+        let chunks = crate::recovery::top_level_chunks(input);
+        let mut diags = Vec::new();
+        if chunks.len() > 1 {
+            for chunk in chunks {
+                let text = &input[chunk.clone()];
+                if let Err(e) = MarigoldPestParser::parse(Rule::program, text) {
+                    let limit = chunk.start + text.trim_end().len();
+                    diags.push(Diagnostic::from_pest(text, &e).rebased(chunk.start, limit));
+                }
+            }
+        }
+        if diags.is_empty() {
+            return vec![Diagnostic::from_pest(input, whole_error)];
+        }
+        diags.dedup();
+        diags
     }
 
     fn undefined_enum_diagnostics(
