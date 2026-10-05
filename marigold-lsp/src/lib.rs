@@ -194,7 +194,9 @@ fn serve_guarded(
     #[cfg(feature = "telemetry")] source: TelemetryBox,
 ) -> Result<(), Error> {
     let (id, params) = connection.initialize_start()?;
+    #[cfg_attr(not(feature = "telemetry"), allow(unused_mut))]
     let mut init = capabilities();
+    #[cfg(feature = "telemetry")]
     if source.is_some() {
         init.capabilities.inlay_hint_provider = Some(OneOf::Left(true));
     }
