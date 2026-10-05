@@ -17,6 +17,8 @@
 //! assert_eq!(diags[0].range.start, lsp_types::Position::new(0, 6));
 //! ```
 
+#[cfg(feature = "datadog")]
+pub mod datadog;
 pub mod hover;
 pub mod mcp;
 pub mod nav;
