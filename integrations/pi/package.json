@@ -9,6 +9,9 @@
     "directory": "integrations/pi"
   },
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "keywords": [
     "pi-package",
     "marigold",
@@ -33,8 +36,8 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "typebox": "^1.3.27"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.87.1",

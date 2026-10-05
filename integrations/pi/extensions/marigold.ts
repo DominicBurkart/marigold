@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -13,6 +14,16 @@ export interface MarigoldExtensionOptions {
 }
 
 const EDIT_TOOLS = new Set(["edit", "write"]);
+const MAX_RESTARTS = 3;
+
+export function normalizePath(cwd: string, path: string): string {
+  let p = path.startsWith("@") ? path.slice(1) : path;
+  if (p === "~") p = homedir();
+  else if (p.startsWith("~/")) p = join(homedir(), p.slice(2));
+  return isAbsolute(p) ? p : resolve(cwd, p);
+}
+
+class NotChecked extends Error {}
 
 export function createMarigoldExtension(options: MarigoldExtensionOptions = {}) {
   const command = options.command ?? process.env.MARIGOLD_LSP_COMMAND ?? "marigold-lsp";
@@ -20,17 +31,38 @@ export function createMarigoldExtension(options: MarigoldExtensionOptions = {}) 
 
   return function marigold(pi: ExtensionAPI) {
     let client: Promise<LspClient> | undefined;
+    let spawns = 0;
 
-    const getClient = (cwd: string) => {
-      client ??= LspClient.start(command, args, pathToFileURL(cwd).href, options.timeoutMs).catch((e) => {
-        client = undefined;
-        throw e;
-      });
-      return client;
+    const getClient = async (cwd: string): Promise<LspClient> => {
+      for (;;) {
+        const current = client;
+        if (current) {
+          try {
+            const c = await current;
+            if (!c.stopped) return c;
+          } catch {}
+          if (client === current) client = undefined;
+          continue;
+        }
+        if (spawns > MAX_RESTARTS) {
+          throw new NotChecked(
+            `marigold-lsp failed ${spawns} times this session, giving up; this file was NOT checked, do not assume it is valid`,
+          );
+        }
+        spawns++;
+        const started = LspClient.start(command, args, pathToFileURL(cwd).href, options.timeoutMs).catch((e) => {
+          throw new NotChecked(`${(e as Error).message}; this file was NOT checked, do not assume it is valid`);
+        });
+        client = started;
+        return started.catch((e) => {
+          if (client === started) client = undefined;
+          throw e;
+        });
+      }
     };
 
-    const check = async (cwd: string, path: string) => {
-      const absolute = isAbsolute(path) ? path : resolve(cwd, path);
+    const check = async (cwd: string, path: string, limit = 20) => {
+      const absolute = normalizePath(cwd, path);
       let text: string;
       try {
         text = await readFile(absolute, "utf8");
@@ -38,27 +70,43 @@ export function createMarigoldExtension(options: MarigoldExtensionOptions = {}) 
         throw new Error(`cannot read ${path}: ${(e as Error).message}`);
       }
       const lsp = await getClient(cwd);
-      const diagnostics = await lsp.check(pathToFileURL(absolute).href, text);
-      const shown = relative(cwd, absolute) || absolute;
-      return { diagnostics, text: formatDiagnostics(shown.startsWith("..") ? absolute : shown, diagnostics) };
+      let diagnostics: LspDiagnostic[];
+      try {
+        diagnostics = await lsp.check(pathToFileURL(absolute).href, text);
+      } catch (e) {
+        throw new NotChecked(`${(e as Error).message}; this file was NOT checked, do not assume it is valid`);
+      }
+      const relativePath = relative(cwd, absolute) || absolute;
+      const shown = relativePath.startsWith("..") ? absolute : relativePath;
+      return { diagnostics, text: formatDiagnostics(shown, diagnostics, limit, text) };
     };
 
     pi.on("tool_result", async (event, ctx) => {
       if (!EDIT_TOOLS.has(event.toolName) || event.isError) return;
       const path = (event.input as { path?: unknown }).path;
-      if (typeof path !== "string" || !path.endsWith(".marigold")) return;
+      if (typeof path !== "string") return;
+      if (!normalizePath(ctx.cwd, path).endsWith(".marigold")) return;
       let text: string;
+      let diagnostics: LspDiagnostic[] | undefined;
       try {
-        text = (await check(ctx.cwd, path)).text;
+        ({ text, diagnostics } = await check(ctx.cwd, path));
       } catch (e) {
-        text = `marigold: could not check ${path}: ${(e as Error).message}`;
+        const message = (e as Error).message;
+        text = `marigold: could not check ${path}: ${message}`;
+        if (!(e instanceof NotChecked)) text += "; this file was NOT checked, do not assume it is valid";
       }
-      return { content: [...event.content, { type: "text" as const, text }] };
+      const base =
+        event.details !== null && typeof event.details === "object" ? (event.details as Record<string, unknown>) : {};
+      return {
+        content: [...event.content, { type: "text" as const, text }],
+        ...(diagnostics ? { details: { ...base, diagnostics } } : {}),
+      };
     });
 
     pi.on("session_shutdown", async () => {
       const current = client;
       client = undefined;
+      spawns = 0;
       await current?.then((c) => c.shutdown()).catch(() => {});
     });
 
@@ -71,10 +119,10 @@ export function createMarigoldExtension(options: MarigoldExtensionOptions = {}) 
         path: Type.String({ description: "Path to the .marigold file (relative to the working directory or absolute)" }),
       }),
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-        const { diagnostics, text } = await check(ctx.cwd, params.path);
+        const { diagnostics, text } = await check(ctx.cwd, params.path, Infinity);
         return {
-          content: [{ type: "text", text: formatDiagnostics(params.path, diagnostics, Infinity) }],
-          details: { diagnostics: diagnostics as LspDiagnostic[], summary: text.split("\n")[0] },
+          content: [{ type: "text", text: text }],
+          details: { diagnostics, summary: text.split("\n")[0] },
         };
       },
     });
