@@ -99,9 +99,10 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
 /// Check Marigold source and return every diagnostic found, with byte ranges.
 ///
 /// No diagnostic has [`diagnostics::Severity::Error`] exactly when [`marigold_parse`]
-/// succeeds. Warnings, such as references to names that are not declared in the
-/// program, never affect [`marigold_parse`] because they may bind to Rust items
-/// inside `m!()`.
+/// succeeds. Warnings (undefined stream variables) and information (functions and
+/// structs not declared in the program, which may be Rust items in scope inside
+/// `m!()`) never affect [`marigold_parse`].
+/// At most 50 resolver diagnostics are reported per file.
 ///
 /// Input larger than [`diagnostics::MAX_CHECK_INPUT_BYTES`] is rejected with a
 /// single `input-too-large` error diagnostic without being parsed.
@@ -117,7 +118,7 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
 ///
 /// let diags = marigold_check("range(0, 10).map(double).return");
 /// assert_eq!(diags[0].code, "undefined-fn");
-/// assert_eq!(diags[0].severity, Severity::Warning);
+/// assert_eq!(diags[0].severity, Severity::Information);
 /// assert!(marigold_grammar::marigold_parse("range(0, 10).map(double).return").is_ok());
 /// ```
 pub fn marigold_check(s: &str) -> Vec<diagnostics::Diagnostic> {

@@ -280,7 +280,6 @@ fn input_at_the_size_limit_is_still_checked() {
 fn warnings(src: &str) -> Vec<Diagnostic> {
     let diags = marigold_check(src);
     assert!(!has_error(&diags), "{diags:?}");
-    assert!(diags.iter().all(|d| d.severity == Severity::Warning));
     diags
 }
 
@@ -289,10 +288,22 @@ fn warning(src: &str) -> Diagnostic {
 }
 
 #[test]
-fn undefined_fn_in_map_is_a_warning_with_range() {
+fn undefined_fn_in_map_is_information_with_range() {
     let src = "range(0, 5).map(doubel).return";
     let d = warning(src);
     assert_eq!(d.code, "undefined-fn");
+    assert_eq!(d.severity, Severity::Information);
+    assert!(!d.is_error());
+    assert!(
+        d.message.contains("Rust item in scope inside m!()"),
+        "{}",
+        d.message
+    );
+    assert!(d
+        .help
+        .as_deref()
+        .unwrap()
+        .contains("Rust item in scope inside m!()"));
     assert_eq!(slice(src, &d), "doubel");
     assert!(d.message.contains("doubel"), "{}", d.message);
     assert!(
@@ -341,6 +352,7 @@ fn undefined_stream_variable_in_stream_start() {
     let src = "x = range(0, 3)\nxs.return";
     let d = warning(src);
     assert_eq!(d.code, "undefined-stream-variable");
+    assert_eq!(d.severity, Severity::Warning);
     assert_eq!(slice(src, &d), "xs");
     let help = d.help.unwrap();
     assert!(help.contains("did you mean 'x'?"), "{help}");
@@ -370,6 +382,29 @@ fn stream_variable_with_no_declarations_says_so() {
 fn forward_reference_from_stream_to_later_variable_is_fine() {
     let src = "x.return\nx = range(0, 3)";
     assert!(marigold_check(src).is_empty());
+    assert!(marigold_parse(src).is_ok());
+    let code = marigold_parse(src).unwrap();
+    assert!(code.find("let mut x").unwrap() < code.find("x.get()").unwrap());
+}
+
+#[test]
+fn stream_use_before_and_after_declaration_agree() {
+    let before = "x.return\nx = range(0, 3)";
+    let after = "x = range(0, 3)\nx.return";
+    assert!(marigold_check(before).is_empty());
+    assert!(marigold_check(after).is_empty());
+}
+
+#[test]
+fn variable_reading_later_variable_matches_what_codegen_cannot_compile() {
+    let src = "b = a.filter(p)\na = range(0, 3)\nb.return";
+    assert!(marigold_parse(src).is_ok());
+    let code = marigold_parse(src).unwrap();
+    assert!(code.find("let mut b").unwrap() < code.find("let mut a").unwrap());
+    let d = &warnings(src)[0];
+    assert_eq!(d.code, "undefined-stream-variable");
+    assert_eq!(d.severity, Severity::Warning);
+    assert!(d.message.contains("above"), "{}", d.message);
 }
 
 #[test]
@@ -401,6 +436,17 @@ fn undefined_struct_in_read_file() {
     let src = "struct Row { a: int[0, 5] }\nread_file(\"d.csv\", csv, struct=Rwo).return";
     let d = warning(src);
     assert_eq!(d.code, "undefined-struct");
+    assert_eq!(d.severity, Severity::Information);
+    assert!(
+        d.message.contains("Rust item in scope inside m!()"),
+        "{}",
+        d.message
+    );
+    assert!(d
+        .help
+        .as_deref()
+        .unwrap()
+        .contains("Rust item in scope inside m!()"));
     assert_eq!(slice(src, &d), "Rwo");
     let help = d.help.unwrap();
     assert!(help.contains("did you mean 'Row'?"), "{help}");
@@ -432,16 +478,16 @@ fn warnings_accompany_errors_in_source_order() {
     let src = "range(0, 5).map(f).return\nrange(Color).return";
     let diags = marigold_check(src);
     assert_eq!(diags.len(), 2, "{diags:?}");
-    assert_eq!(diags[0].severity, Severity::Warning);
+    assert_eq!(diags[0].severity, Severity::Information);
     assert_eq!(diags[1].severity, Severity::Error);
     assert_ordered_disjoint(&diags);
 }
 
 #[test]
-fn warning_serializes_as_warning() {
+fn information_serializes_as_information() {
     let d = warning("range(0, 5).map(f).return");
     let v = serde_json::to_value(&d).unwrap();
-    assert_eq!(v["severity"], "warning");
+    assert_eq!(v["severity"], "information");
     assert_eq!(v["code"], "undefined-fn");
 }
 
@@ -557,4 +603,215 @@ proptest! {
             }
         }
     }
+}
+
+fn corpus() -> Vec<std::path::PathBuf> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for dir in [
+        root.join("tests/programs"),
+        root.join("../examples"),
+        root.join(".."),
+    ] {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let ext = path.extension().and_then(|e| e.to_str());
+            if path.is_file() && matches!(ext, Some("marigold") | Some("mg")) {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+#[test]
+fn corpus_is_not_empty() {
+    assert!(corpus().len() >= 30, "{:?}", corpus());
+}
+
+#[test]
+fn legitimate_programs_have_no_errors_or_warnings() {
+    for path in corpus() {
+        let src = std::fs::read_to_string(&path).unwrap();
+        for d in marigold_check(&src) {
+            assert!(
+                d.severity == Severity::Information,
+                "{} emitted {:?}[{}] at {:?}: {}",
+                path.display(),
+                d.severity,
+                d.code,
+                &src[d.range.start..d.range.end],
+                d.message
+            );
+        }
+    }
+}
+
+#[test]
+fn undefined_stream_variable_is_the_only_warning_source() {
+    let sources = [
+        "range(0, 5).map(f).filter(g).filter_map(h).fold(0, i).return\nrange(0, 5).keep_first_n(2, j).return",
+        "read_file(\"d.csv\", csv, struct=Nope).return",
+        "range(Nope).return",
+        "enum E { A }\nrange(E).return",
+        "b = a.map(f)\nb.return\nc.return",
+        "x = x.map(f)\nx.return",
+    ];
+    let mut warning_codes = std::collections::BTreeSet::new();
+    for src in sources {
+        for d in marigold_check(src) {
+            if d.severity == Severity::Warning {
+                warning_codes.insert(d.code);
+            }
+        }
+    }
+    assert_eq!(
+        warning_codes.into_iter().collect::<Vec<_>>(),
+        vec!["undefined-stream-variable"]
+    );
+}
+
+#[test]
+fn valid_fully_declared_program_has_zero_diagnostics() {
+    let src = "enum Color { Red, Green }\nstruct Row { a: int[0, 5] }\nfn double(x: i32) -> i32 { x * 2 }\nfn big(x: &i32) -> bool { *x > 2 }\nxs = range(0, 5).map(double)\nxs.filter(big).return\nrange(Color).return\nread_file(\"d.csv\", csv, struct=Row).return";
+    assert_eq!(marigold_check(src), Vec::<Diagnostic>::new());
+}
+
+#[test]
+fn range_over_declared_enum_has_no_resolver_diagnostic() {
+    assert!(marigold_check("enum Color { Red }\nrange(Color).return").is_empty());
+}
+
+#[test]
+fn keyword_on_its_own_line_does_not_split_a_declaration() {
+    let src = "fn\nf(x: i32) -> i32 { x }\nrange(0, 3).map(f).retur";
+    let d = only(marigold_check(src));
+    assert_eq!(d.code, "syntax-error");
+    assert!(d.range.start >= src.rfind("range").unwrap(), "{d:?}");
+}
+
+#[test]
+fn struct_and_enum_keywords_on_their_own_line_do_not_split() {
+    let src = "struct\nRow { a: int[0, 5] }\nenum\nColor { Red }\nrange(0, 1).retur";
+    let d = only(marigold_check(src));
+    assert!(d.range.start >= src.rfind("range").unwrap(), "{d:?}");
+}
+
+#[test]
+fn block_comments_in_fn_bodies_do_not_confuse_recovery() {
+    let src = "fn f(x: i32) -> i32 {\n/* } \" ( */\nx\n}\nrange(0, 1).bogus\nrange(0, 2).bogus\n";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    let fn_end = src.find("range").unwrap();
+    assert!(diags.iter().all(|d| d.range.start >= fn_end), "{diags:?}");
+}
+
+#[test]
+fn escaped_quote_char_literal_in_fn_body_does_not_confuse_recovery() {
+    let src = "fn f(c: char) -> bool {\nc == '\\''\n}\nrange(0, 1).bogus\nrange(0, 2).bogus\n";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    let fn_end = src.find("range").unwrap();
+    assert!(diags.iter().all(|d| d.range.start >= fn_end), "{diags:?}");
+}
+
+#[test]
+fn error_ranges_never_cover_trailing_whitespace() {
+    let src = "range(0, 1).retur   \n\n\nrange(0, 2).retur \t \n\n";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    for d in &diags {
+        let text = &src[d.range.start..d.range.end];
+        assert_eq!(text, text.trim_end(), "{d:?}");
+    }
+}
+
+#[test]
+fn unbalanced_open_paren_swallows_later_errors_into_one_diagnostic() {
+    let src = "range(0, 1.retur\nrange(0, 2).retur\nrange(0, 3).retur\n";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].code, "syntax-error");
+}
+
+fn timed<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
+    let start = std::time::Instant::now();
+    let out = f();
+    (out, start.elapsed())
+}
+
+const PERF_BOUND: std::time::Duration = std::time::Duration::from_secs(10);
+
+#[test]
+fn many_undefined_fns_against_many_declared_fns_complete_quickly_and_are_capped() {
+    let mut src = String::new();
+    for i in 0..12_000 {
+        src.push_str(&format!("fn f{i}(x: i32) -> i32 {{ x }}\n"));
+    }
+    for i in 0..12_000 {
+        src.push_str(&format!("range(0,3).map(g{i}).return\n"));
+    }
+    let (diags, elapsed) = timed(|| marigold_check(&src));
+    assert!(elapsed < PERF_BOUND, "took {elapsed:?}");
+    assert!(!has_error(&diags));
+    assert!(diags.len() <= 51, "{}", diags.len());
+    let summary = diags
+        .iter()
+        .filter(|d| d.code == "resolver-diagnostics-truncated");
+    assert_eq!(summary.count(), 1);
+    for d in &diags {
+        assert!(
+            d.help.as_deref().map_or(0, str::len) < 2_000,
+            "{}",
+            d.help.as_deref().unwrap().len()
+        );
+    }
+}
+
+#[test]
+fn many_chained_stream_variables_complete_quickly() {
+    let mut src = String::new();
+    for i in 0..25_000 {
+        src.push_str(&format!("v{i} = range(0,3)\nv{} = v{i}.map(f{i})\n", i + 1));
+    }
+    let (diags, elapsed) = timed(|| marigold_check(&src));
+    assert!(elapsed < PERF_BOUND, "took {elapsed:?}");
+    assert!(!has_error(&diags));
+    assert!(diags.len() <= 51, "{}", diags.len());
+}
+
+#[test]
+fn resolver_diagnostics_are_capped_with_one_summary_that_prefers_warnings() {
+    let mut src = String::new();
+    for i in 0..80 {
+        src.push_str(&format!("range(0,3).map(g{i}).return\n"));
+    }
+    src.push_str("nothing.return\n");
+    let diags = marigold_check(&src);
+    assert_eq!(diags.len(), 51, "{}", diags.len());
+    assert!(diags.iter().any(|d| d.code == "undefined-stream-variable"));
+    let summary: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == "resolver-diagnostics-truncated")
+        .collect();
+    assert_eq!(summary.len(), 1);
+    assert_eq!(summary[0].severity, Severity::Information);
+    assert!(summary[0].message.contains("31"), "{}", summary[0].message);
+}
+
+#[test]
+fn help_lists_at_most_a_bounded_number_of_defined_names() {
+    let mut src = String::new();
+    for i in 0..60 {
+        src.push_str(&format!("fn name{i}(x: i32) -> i32 {{ x }}\n"));
+    }
+    src.push_str("range(0,3).map(missing).return\n");
+    let help = only(marigold_check(&src)).help.unwrap();
+    assert!(help.contains("name0"), "{help}");
+    assert!(!help.contains("name59"), "{help}");
+    assert!(help.contains("more"), "{help}");
 }

@@ -2,7 +2,7 @@
 //!
 //! Unlike [`crate::marigold_parse`], which stops at the first error and returns
 //! a flat message, [`crate::marigold_check`] returns every diagnostic it can
-//! find (errors and warnings), each carrying a byte range into the original source. Ranges always lie
+//! find (errors, warnings and information), each carrying a byte range into the original source. Ranges always lie
 //! on `char` boundaries within the input, so they can be converted to any
 //! editor position encoding.
 //!
@@ -34,6 +34,7 @@ pub struct ByteRange {
 pub enum Severity {
     Error,
     Warning,
+    Information,
 }
 
 impl Severity {
@@ -42,11 +43,13 @@ impl Severity {
     ///
     /// assert_eq!(Severity::Error.as_str(), "error");
     /// assert_eq!(Severity::Warning.as_str(), "warning");
+    /// assert_eq!(Severity::Information.as_str(), "information");
     /// ```
     pub fn as_str(self) -> &'static str {
         match self {
             Severity::Error => "error",
             Severity::Warning => "warning",
+            Severity::Information => "information",
         }
     }
 }
@@ -102,9 +105,21 @@ impl Diagnostic {
         )
     }
 
-    pub(crate) fn warning(range: ByteRange, code: &'static str, message: String) -> Self {
+    pub(crate) fn new(
+        range: ByteRange,
+        severity: Severity,
+        code: &'static str,
+        message: String,
+    ) -> Self {
         Self {
-            severity: Severity::Warning,
+            severity,
+            ..Self::error(range, code, message)
+        }
+    }
+
+    pub(crate) fn information(range: ByteRange, code: &'static str, message: String) -> Self {
+        Self {
+            severity: Severity::Information,
             ..Self::error(range, code, message)
         }
     }
@@ -207,11 +222,23 @@ mod tests {
 
     #[test]
     fn warning_constructor_sets_severity() {
-        let d = Diagnostic::warning(ByteRange { start: 1, end: 3 }, "w", "m".into());
+        let d = Diagnostic::new(
+            ByteRange { start: 1, end: 3 },
+            Severity::Warning,
+            "w",
+            "m".into(),
+        );
         assert_eq!(d.severity, Severity::Warning);
         assert_eq!(d.code, "w");
         assert_eq!(d.range, ByteRange { start: 1, end: 3 });
         assert_eq!(d.help, None);
+    }
+
+    #[test]
+    fn information_constructor_sets_severity_and_is_not_an_error() {
+        let d = Diagnostic::information(ByteRange { start: 0, end: 1 }, "i", "m".into());
+        assert_eq!(d.severity, Severity::Information);
+        assert!(!d.is_error());
     }
 
     #[test]
@@ -229,6 +256,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Severity::Warning).unwrap(),
             "\"warning\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Severity::Information).unwrap(),
+            "\"information\""
         );
     }
 }
