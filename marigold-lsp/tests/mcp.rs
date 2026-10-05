@@ -173,11 +173,50 @@ fn check_source_reports_one_based_diagnostics() {
 }
 
 #[test]
+fn check_counts_each_severity_and_stays_ok_without_errors() {
+    let src = "range(0, 5).map(doubel).return\nnothing.return";
+    let result = call("marigold_check", json!({"source": src}));
+    let s = &result["structuredContent"];
+    assert_eq!(s["ok"], true);
+    assert_eq!(s["error_count"], 0);
+    assert_eq!(s["warning_count"], 1);
+    assert_eq!(s["info_count"], 1);
+    let severities: Vec<&str> = s["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["severity"].as_str().unwrap())
+        .collect();
+    assert!(severities.contains(&"warning"), "{severities:?}");
+    assert!(severities.contains(&"information"), "{severities:?}");
+    let text = text_of(&result);
+    assert!(
+        text.starts_with(
+            "marigold: 2 diagnostics in <source> (0 errors, 1 warning, 1 information)"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn check_undefined_fn_only_is_information_not_warning() {
+    let result = call(
+        "marigold_check",
+        json!({"source": "range(0, 5).map(doubel).return"}),
+    );
+    let s = &result["structuredContent"];
+    assert_eq!(s["ok"], true);
+    assert_eq!(s["warning_count"], 0);
+    assert_eq!(s["info_count"], 1);
+}
+
+#[test]
 fn check_clean_source_has_no_diagnostics() {
     let result = call("marigold_check", json!({"source": "range(0, 3).return"}));
     assert_eq!(result["isError"], false);
     assert_eq!(result["structuredContent"]["diagnostics"], json!([]));
     assert_eq!(result["structuredContent"]["ok"], true);
+    assert_eq!(result["structuredContent"]["info_count"], 0);
     assert_eq!(text_of(&result), "marigold: no diagnostics in <source>");
 }
 
@@ -787,8 +826,12 @@ fn instructions_and_check_description_require_reviewing_warnings() {
         .unwrap();
     for text in [instructions, description] {
         assert!(text.contains("warning"), "{text}");
+        assert!(text.contains("undefined stream variables"), "{text}");
+        assert!(text.contains("information"), "{text}");
+        assert!(text.contains("info_count"), "{text}");
+        assert!(text.contains("Rust items in scope in m!()"), "{text}");
         assert!(
-            text.contains("undefined stream variables, functions and structs"),
+            !text.contains("undefined stream variables, functions"),
             "{text}"
         );
         assert!(text.contains("ok: true"), "{text}");
