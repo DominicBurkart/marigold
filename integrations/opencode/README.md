@@ -40,7 +40,10 @@ Each entry under `lsp` accepts these keys, per the opencode docs:
 ## Verify
 
 Ask the agent to add `x.map(undefined_fn)` to a `.marigold` file and check that
-the resulting diagnostic is reported back to it.
+the resulting diagnostic is reported back to it. An undefined function, stream
+variable or struct is a warning, not an error, so tell the agent to act on
+warnings too. `opencode debug lsp diagnostics <file>` shows what the server
+reports.
 
 ## Version notes
 
@@ -48,4 +51,7 @@ the resulting diagnostic is reported back to it.
 - How and when diagnostics are surfaced to the agent after an edit: UNVERIFIED.
   The docs say diagnostics feed back to the agent but do not describe the
   mechanism.
+- The `lsp.marigold` snippet was checked with opencode 1.3.17 under isolated
+  XDG directories: the server starts and reports `undefined-fn` with warning
+  severity. An agent edit run end to end was not observed.
 - Minimum opencode version: UNVERIFIED.
