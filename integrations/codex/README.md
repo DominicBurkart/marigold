@@ -79,7 +79,11 @@ winning, and the combined size is capped at 32 KiB by default
 ## Verify
 
 Ask the agent to add `x.map(undefined_fn)` to a `.marigold` file and check
-that it calls `marigold_check` and reports the diagnostic.
+that it calls `marigold_check` and reports the diagnostic. That is an
+information diagnostic, `undefined-fn`, and `ok` stays true. Use a stream
+variable that is never declared to get a warning,
+`undefined-stream-variable`; `ok` is still true, with a nonzero
+`warning_count`. Information shows in `info_count`.
 
 ## Version notes
 

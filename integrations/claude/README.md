@@ -47,7 +47,10 @@ defaults apply.
 ## Verify
 
 Ask Claude to add `x.map(undefined_fn)` to a `.marigold` file and then to keep
-working, for example by reading the file back. Claude Code is documented to
+working, for example by reading the file back. That yields an information
+diagnostic, `undefined-fn`. To see a warning, use a stream variable that is
+never declared, which yields `undefined-stream-variable`. Claude Code is
+documented to
 show a line reading `Found N new diagnostic issues`, with Ctrl+O to expand it;
 both are UNVERIFIED here. To check the plugin without relying on that line,
 run `claude plugin details marigold-lsp`, open `/plugin` and read the Errors
@@ -59,11 +62,18 @@ on Claude Code 2.1.289). Whether a model that ends its turn immediately after
 the edit acts on them is UNVERIFIED. As a backstop, have the agent run
 `marigold check` before it finishes.
 
-An undefined function, stream variable or struct is reported as a warning,
-not an error, because the name may be defined in Rust code that surrounds the
-program. `marigold check` still exits 0 and `marigold_check` returns
-`ok: true` with a nonzero `warning_count`, so read the warnings as well as the
-errors. The plugin ships a `marigold` skill that tells Claude this.
+Diagnostics have three severities. Errors mean the program is invalid. The
+only warning is `undefined-stream-variable`, which is almost always a real
+mistake. `undefined-fn` and `undefined-struct` are information, because
+Marigold fns and structs normally live in Rust code surrounding the program
+inside `m!()`; the message says the name may be a Rust item in scope and can be
+ignored in that case. `resolver-diagnostics-truncated` is also information and
+appears when more than 50 resolver diagnostics were suppressed. `marigold check`
+exits 0 for warnings and information and 1 on any error, and `marigold_check`
+returns `ok: true` with `error_count`, `warning_count` and `info_count`. The
+Claude Code LSP client shows information diagnostics at information level; how
+Claude Code surfaces them to the model is UNVERIFIED. The plugin ships a
+`marigold` skill that tells Claude this.
 
 ## Checking from the command line and MCP
 

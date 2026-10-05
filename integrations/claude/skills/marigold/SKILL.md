@@ -12,21 +12,28 @@ sequence of declarations (`struct`, `enum`, `fn`) and streams such as
 ## Diagnostics
 
 After you edit a `.marigold` file, the language server reports diagnostics on
-your next turn. Fix every error and review every warning before finishing.
+your next turn. Fix every error, fix every warning, and read every information
+diagnostic before finishing.
 
-Warnings do not make a file invalid, but they usually point at a mistake:
+Warning: does not make a file invalid, but is almost always a real mistake.
 
 - `undefined-stream-variable`: a stream variable is used but not declared in
   this program.
+
+Information: the name may be a Rust item in scope inside `m!()`, because fns and
+structs normally live in the Rust code around the program.
+
 - `undefined-fn`: a function named in `map`, `filter`, `fold` and the like is
   not declared with `fn` in this program.
 - `undefined-struct`: `struct=T` names a struct that is not declared.
+- `resolver-diagnostics-truncated`: more than 50 resolver diagnostics were
+  suppressed.
 
-Read the warnings, not just the ok or error counts: `marigold check` exits 0
-and `marigold_check` returns `ok: true` even when warnings remain. A warning
-can be a false alarm when the name is defined in Rust code that surrounds the
-program. Otherwise fix it, and do not treat a result with no errors as clean
-while warnings remain.
+Ignore `undefined-fn` and `undefined-struct` only when the name is a Rust item
+in scope inside `m!()`; otherwise fix it. `marigold check` exits 0 for
+warnings and information and 1 on any error, and `marigold_check` returns
+`ok: true` with `error_count`, `warning_count` and `info_count`, so read the
+diagnostics, not just the ok or error counts.
 
 ## Complexity
 

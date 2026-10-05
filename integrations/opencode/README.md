@@ -28,8 +28,9 @@ opencode starts the server the first time it touches a file whose extension
 matches.
 
 Then copy the contents of `AGENTS.md` into your project's `AGENTS.md` (or
-your global opencode `AGENTS.md`). It tells the agent to act on warnings as
-well as errors. That `AGENTS.md` is read by opencode is UNVERIFIED here.
+your global opencode `AGENTS.md`). It tells the agent to act on warnings and
+to read information diagnostics as well as errors. That `AGENTS.md` is read by
+opencode is UNVERIFIED here.
 
 ## Binary not on the PATH
 
@@ -71,10 +72,12 @@ Each entry under `lsp` accepts these keys, per the opencode docs:
 ## Verify
 
 Ask the agent to add `x.map(undefined_fn)` to a `.marigold` file and check that
-the resulting diagnostic is reported back to it. An undefined function, stream
-variable or struct is a warning, not an error, so tell the agent to act on
-warnings too. `opencode debug lsp diagnostics <file>` shows what the server
-reports.
+the resulting diagnostic is reported back to it. That yields an information
+diagnostic, `undefined-fn`; an undeclared stream variable yields a warning,
+`undefined-stream-variable`. Neither is an error, so tell the agent to fix
+warnings and read information diagnostics too. How opencode surfaces
+information diagnostics to the model is UNVERIFIED. `opencode debug lsp
+diagnostics <file>` shows what the server reports.
 
 ## Version notes
 
@@ -83,6 +86,8 @@ reports.
   The docs say diagnostics feed back to the agent but do not describe the
   mechanism.
 - The `lsp.marigold` snippet was checked with opencode 1.3.17 under isolated
-  XDG directories: the server starts and reports `undefined-fn` with warning
-  severity. An agent edit run end to end was not observed.
+  XDG directories: the server starts and reported `undefined-fn` with
+  severity 2 (warning). That observation was made before the severity change;
+  `undefined-fn` is now severity 3 (information) and has not been re-run. An
+  agent edit run end to end was not observed.
 - Minimum opencode version: UNVERIFIED.
