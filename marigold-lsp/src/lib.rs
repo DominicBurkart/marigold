@@ -32,6 +32,7 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 fn lsp_severity(severity: Severity) -> DiagnosticSeverity {
     match severity {
         Severity::Warning => DiagnosticSeverity::WARNING,
+        Severity::Information => DiagnosticSeverity::INFORMATION,
         _ => DiagnosticSeverity::ERROR,
     }
 }
@@ -235,6 +236,10 @@ mod tests {
     fn maps_severity() {
         assert_eq!(lsp_severity(Severity::Error), DiagnosticSeverity::ERROR);
         assert_eq!(lsp_severity(Severity::Warning), DiagnosticSeverity::WARNING);
+        assert_eq!(
+            lsp_severity(Severity::Information),
+            DiagnosticSeverity::INFORMATION
+        );
     }
 
     #[test]

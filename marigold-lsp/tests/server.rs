@@ -163,6 +163,40 @@ fn publishes_diagnostics_on_open() {
 }
 
 #[test]
+fn undefined_stream_variable_is_published_as_warning() {
+    let (client, _) = Client::start();
+    open(&client, "x = range(0, 3)\nxs.return\n");
+    let published = client.diagnostics();
+    let [d] = published.diagnostics.as_slice() else {
+        panic!("{:?}", published.diagnostics)
+    };
+    assert_eq!(
+        d.code,
+        Some(NumberOrString::String("undefined-stream-variable".into()))
+    );
+    assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::WARNING));
+    client.shutdown();
+}
+
+#[test]
+fn undefined_fn_is_published_as_information() {
+    let (client, _) = Client::start();
+    open(&client, "range(0, 3).map(f).return\n");
+    let published = client.diagnostics();
+    let [d] = published.diagnostics.as_slice() else {
+        panic!("{:?}", published.diagnostics)
+    };
+    assert_eq!(d.code, Some(NumberOrString::String("undefined-fn".into())));
+    assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::INFORMATION));
+    assert!(
+        d.message.contains("Rust item in scope inside m!()"),
+        "{}",
+        d.message
+    );
+    client.shutdown();
+}
+
+#[test]
 fn republishes_on_change_and_clears_when_fixed() {
     let (client, _) = Client::start();
     open(&client, "range(0, 1).retur");
