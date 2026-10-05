@@ -7,6 +7,9 @@ description = "Language server for the marigold language."
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
 
+[features]
+telemetry = []
+
 [dependencies]
 lsp-server = "=0.10.0"
 lsp-types = "=0.97.0"

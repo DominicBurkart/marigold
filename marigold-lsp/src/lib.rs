@@ -21,6 +21,8 @@ pub mod hover;
 pub mod mcp;
 pub mod nav;
 pub mod position;
+#[cfg(feature = "telemetry")]
+pub mod telemetry;
 pub mod workspace;
 
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
