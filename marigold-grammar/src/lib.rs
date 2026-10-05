@@ -157,6 +157,25 @@ pub fn marigold_symbols(s: &str) -> symbols::SymbolIndex {
     symbols::SymbolIndex::from_source(s)
 }
 
+/// Complexity of every variable declaration and output stream, with its name and source range.
+///
+/// ```
+/// use marigold_grammar::marigold_stream_complexities;
+///
+/// let src = "x = range(0, 5).map(f)\nx.return";
+/// let nodes = marigold_stream_complexities(src).unwrap();
+/// assert_eq!(nodes.len(), 2);
+/// assert_eq!(nodes[0].name.as_deref(), Some("x"));
+/// assert_eq!(nodes[1].name, None);
+/// assert_eq!(&src[nodes[1].range.start..nodes[1].range.end], "x.return");
+/// assert!(marigold_stream_complexities("range(0,").is_err());
+/// ```
+pub fn marigold_stream_complexities(
+    s: &str,
+) -> Result<Vec<complexity::NodeComplexity>, parser::MarigoldParseError> {
+    parser::PestParser::stream_complexities(s)
+}
+
 pub fn marigold_analyze(
     s: &str,
 ) -> Result<complexity::ProgramComplexity, parser::MarigoldParseError> {
