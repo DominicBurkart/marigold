@@ -608,6 +608,38 @@ mod tests {
         }
 
         #[test]
+        fn editing_arguments_of_one_expression_keeps_all_other_ids(
+            picks in prop::sample::subsequence((0..POOL.len()).collect::<Vec<_>>(), 2..POOL.len()),
+            target in 0usize..8,
+        ) {
+            let k = target % picks.len();
+            let lines: Vec<String> = picks.iter().map(|i| POOL[*i].to_string()).collect();
+            let mut edited_lines = lines.clone();
+            let edits = [
+                ("range(0,", "range(1000,"),
+                ("fold(0, add)", "fold(0, adder)"),
+                ("filter(p)", "filter(pp)"),
+                ("\"d\u{fc}\u{1f600}.csv\"", "\"x.csv\""),
+            ];
+            let (from, to) = edits
+                .iter()
+                .find(|(from, _)| lines[k].contains(from))
+                .unwrap();
+            edited_lines[k] = lines[k].replacen(from, to, 1);
+            prop_assert_ne!(&lines[k], &edited_lines[k]);
+            let before = ids(&lines.join("\n"));
+            let after = ids(&edited_lines.join("\n"));
+            prop_assert_eq!(before.len(), after.len());
+            for (b, a) in before.iter().zip(&after) {
+                prop_assert_eq!(b.expr_index, a.expr_index);
+                if b.expr_index != k {
+                    prop_assert_eq!(&b.id, &a.id);
+                    prop_assert_eq!(&b.content_hash, &a.content_hash);
+                }
+            }
+        }
+
+        #[test]
         fn ids_are_unique_and_ranges_valid(
             picks in prop::collection::vec(0..POOL.len(), 1..6),
         ) {
