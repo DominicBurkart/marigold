@@ -67,10 +67,12 @@ only warning is `undefined-stream-variable`, which is almost always a real
 mistake. `undefined-fn` and `undefined-struct` are information, because
 Marigold fns and structs normally live in Rust code surrounding the program
 inside `m!()`; the message says the name may be a Rust item in scope and can be
-ignored in that case. `resolver-diagnostics-truncated` is also information and
-appears when more than 50 resolver diagnostics were suppressed. `marigold check`
-exits 0 for warnings and information and 1 on any error, and `marigold_check`
-returns `ok: true` with `error_count`, `warning_count` and `info_count`. The
+ignored in that case. `resolver-diagnostics-truncated` is also information: more
+than 50 undefined-name diagnostics were found; only the first 50 are reported.
+Fix those and check again. `marigold check` exits 0 for warnings and
+information and 1 on any error, and, if the MCP server is registered,
+`marigold_check` returns `ok: true` with `error_count`, `warning_count` and
+`info_count`. The
 Claude Code LSP client shows information diagnostics at information level; how
 Claude Code surfaces them to the model is UNVERIFIED. The plugin ships a
 `marigold` skill that tells Claude this.
@@ -128,7 +130,7 @@ claude plugin marketplace remove marigold
 ```
 
 If you registered the MCP server, also run `claude mcp remove marigold`
-(UNVERIFIED: the subcommand was not checked against the docs).
+(documented at <https://code.claude.com/docs/en/mcp>).
 
 ## Version notes
 
@@ -146,4 +148,5 @@ If you registered the MCP server, also run `claude mcp remove marigold`
   version. Because `version` is set, installed users stay pinned to it until it
   changes (per the plugin manifest reference). Bump it by hand in every
   change that alters the plugin, then users run `claude plugin update`
-  (UNVERIFIED: the update command was not checked).
+  (documented in the plugin CLI reference,
+  <https://code.claude.com/docs/en/plugins/cli-reference>).
