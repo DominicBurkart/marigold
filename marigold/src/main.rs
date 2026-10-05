@@ -1,7 +1,15 @@
 #[cfg(feature = "cli")]
 use anyhow::Result;
 #[cfg(feature = "cli")]
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[cfg(feature = "cli")]
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum CheckFormat {
+    #[default]
+    Human,
+    Json,
+}
 
 #[cfg(feature = "cli")]
 #[derive(Subcommand, Debug)]
@@ -37,6 +45,17 @@ enum MarigoldCommand {
         /// Path of the Marigold file to read
         file: Option<String>,
     },
+    /// Check a program for diagnostics without running it. Exits 1 if any
+    /// error is found and 2 if the input cannot be read. JSON ranges are byte
+    /// offsets into the unmodified input.
+    Check {
+        /// Output format
+        #[arg(long, value_enum, default_value_t = CheckFormat::Human)]
+        format: CheckFormat,
+
+        /// Path of the Marigold file to read
+        file: Option<String>,
+    },
 }
 
 #[cfg(feature = "cli")]
@@ -66,9 +85,75 @@ fn get_file_name_argument(args: &Args) -> Option<String> {
         Some(Uninstall { file }) => file.clone(),
         Some(Clean { file }) => file.clone(),
         Some(Analyze { file }) => file.clone(),
+        Some(Check { format: _, file }) => file.clone(),
         Some(CleanAll) => None,
         None => None,
     }
+}
+
+#[cfg(feature = "cli")]
+fn line_col(src: &str, offset: usize) -> (usize, usize) {
+    let mut end = offset.min(src.len());
+    while !src.is_char_boundary(end) {
+        end -= 1;
+    }
+    let before = &src[..end];
+    let line = before.matches('\n').count() + 1;
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    let col = before[line_start..].chars().count() + 1;
+    (line, col)
+}
+
+#[cfg(feature = "cli")]
+fn run_check(format: CheckFormat, file: Option<&str>) -> i32 {
+    use std::io::Read;
+
+    let source = match file {
+        Some(path) => std::fs::read_to_string(path),
+        None => {
+            let mut buf = String::new();
+            std::io::stdin()
+                .lock()
+                .read_to_string(&mut buf)
+                .map(|_| buf)
+        }
+    };
+    let source = match source {
+        Ok(source) => source,
+        Err(e) => {
+            eprintln!("error: could not read {}: {e}", file.unwrap_or("<stdin>"));
+            return 2;
+        }
+    };
+
+    let diagnostics = marigold_grammar::marigold_check(&source);
+
+    match format {
+        CheckFormat::Json => match serde_json::to_string_pretty(&diagnostics) {
+            Ok(json) => println!("{json}"),
+            Err(e) => {
+                eprintln!("error: could not serialize diagnostics: {e}");
+                return 2;
+            }
+        },
+        CheckFormat::Human => {
+            let path = file.unwrap_or("<stdin>");
+            for d in &diagnostics {
+                let (line, col) = line_col(&source, d.range.start);
+                println!(
+                    "{path}:{line}:{col}: {}[{}]: {}",
+                    d.severity.as_str(),
+                    d.code,
+                    d.message
+                );
+                if let Some(help) = &d.help {
+                    println!("  help: {help}");
+                }
+            }
+        }
+    }
+
+    i32::from(diagnostics.iter().any(|d| d.is_error()))
 }
 
 #[cfg(feature = "cli")]
@@ -83,6 +168,10 @@ fn main() -> Result<()> {
     const RUST_EDITION: &str = "2021";
 
     let args = Args::parse();
+
+    if let Some(Check { format, file }) = &args.command {
+        std::process::exit(run_check(*format, file.as_deref()));
+    }
 
     let marigold_cache_directory = home::home_dir()
         .expect("could not locate user's home directory for marigold cache")
@@ -145,6 +234,7 @@ fn main() -> Result<()> {
                 }
                 std::process::exit(0);
             }
+            Check { .. } => unreachable!("check is handled before cache setup"),
             Analyze { file: _ } => {
                 let program_contents = match &file_name_argument {
                     Some(path) => std::fs::read_to_string(path)?.trim().to_string(),
@@ -261,6 +351,33 @@ tokio = {{ version = "1", features = ["full"]}}
     };
 
     std::process::exit(exit_status.code().unwrap_or(0));
+}
+
+#[cfg(all(test, feature = "cli"))]
+mod line_col_tests {
+    use super::line_col;
+
+    #[test]
+    fn start_of_input() {
+        assert_eq!(line_col("abc", 0), (1, 1));
+    }
+
+    #[test]
+    fn second_line() {
+        assert_eq!(line_col("ab\ncd", 4), (2, 2));
+    }
+
+    #[test]
+    fn counts_chars_not_bytes() {
+        let src = "\"ünï\" x";
+        assert_eq!(line_col(src, src.find('x').unwrap()), (1, 7));
+    }
+
+    #[test]
+    fn clamps_past_end_and_mid_char() {
+        assert_eq!(line_col("a\nb", 99), (2, 2));
+        assert_eq!(line_col("ü", 1), (1, 1));
+    }
 }
 
 #[cfg(test)]
