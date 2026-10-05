@@ -9,6 +9,7 @@ license = "Apache-2.0 OR MIT"
 
 [features]
 otel = ["marigold/otel"]
+otel-otlp = ["otel", "marigold/otel-otlp"]
 
 [dependencies.marigold]
 path = "../marigold"

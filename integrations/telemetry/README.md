@@ -23,22 +23,37 @@ A latency histogram, `marigold.node.duration`, is recorded as well. The
 language server does not read it yet.
 
 Spans additionally carry `marigold.file` and the byte range of the node.
+The range is approximate: for the `m!` macro it is an offset into the
+stringified macro body, not into your Rust source file, so do not use it to
+locate code. Node ids are exact.
 
 ## Instrumenting a program
 
-Enable the `otel` feature of the `marigold` crate:
+Two features of the `marigold` crate control telemetry:
+
+- `otel`: instrumentation only. The generated code records to the global
+  OpenTelemetry providers, and the crate depends on the OpenTelemetry API
+  and SDK but on no exporter, HTTP client or async runtime. It works with
+  tokio, async-std or no runtime at all. Use it when you install your own
+  provider or exporter with `opentelemetry_sdk`, or when you only want the
+  instrumentation compiled in.
+- `otel-otlp`: implies `otel` and adds `marigold::telemetry::init`, an OTLP
+  exporter over HTTP with protobuf bodies and a TLS-capable client
+  (rustls), so `https` endpoints work. It also adds a TLS stack to the
+  build, which includes `aws-lc-sys` and therefore needs a C compiler and
+  CMake at build time.
 
 ```toml
 [dependencies]
-marigold = { version = "0.2", features = ["otel"] }
+marigold = { version = "0.2", features = ["otel-otlp"] }
 ```
 
-Without the feature the generated code is byte-identical to a build that
-never heard of telemetry, so there is no overhead. With the feature on but
-no provider installed, the instrumentation records nothing.
+Without either feature the generated code is byte-identical to a build that
+never heard of telemetry, so there is no overhead. With a feature on but no
+provider installed, the instrumentation records nothing.
 
-Install an exporter once, early in `main`, and keep the guard alive until
-the program should stop exporting:
+With `otel-otlp`, install the exporter once, early in `main`, and keep the
+guard alive until the program should stop exporting:
 
 ```rust
 let _telemetry = marigold::telemetry::init().expect("telemetry");
@@ -49,8 +64,9 @@ shuts the exporters down.
 
 ## Exporter configuration
 
-The exporter speaks OTLP over HTTP with protobuf bodies and is configured
-by the standard OpenTelemetry variables:
+With `otel-otlp`, the exporter speaks OTLP over HTTP with protobuf bodies
+and the OpenTelemetry SDK reads its configuration from the standard
+variables:
 
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: where to send, for example
   `http://localhost:4318`.
@@ -61,9 +77,9 @@ by the standard OpenTelemetry variables:
   `deployment.environment=prod`.
 - `OTEL_METRIC_EXPORT_INTERVAL`: export period in milliseconds.
 
-The HTTP client inside the exporter is built without TLS. Send to a local
-Datadog Agent or an OpenTelemetry Collector over plain HTTP on the same
-host or network, and let that component talk to Datadog over HTTPS.
+`https` endpoints work. Sending straight to a vendor endpoint is possible,
+but a local Datadog Agent or OpenTelemetry Collector keeps API keys out of
+your program and is what the Datadog section below assumes.
 
 ## Sending to Datadog through the Agent
 
@@ -80,6 +96,36 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
 
 The metrics then appear in Datadog under their dotted names, with
 `marigold.program` and `marigold.node_id` as tags.
+
+## Node ids and call sites
+
+Ids are hashed from the program name (the crate name at code generation;
+`OTEL_SERVICE_NAME` changes only the `marigold.program` tag), the variable
+name or the normalised expression text, and the position in the chain. The
+normalisation drops whitespace outside string literals, so the ids in
+generated code equal the ids the language server computes from the same
+program in a `.marigold` file.
+
+Two `m!` invocations in one crate can contain the same variable name or an
+identical unnamed expression, which would give them the same ids. The macro
+detects this: the first invocation keeps the plain ids and each later one is
+given a discriminator derived from its call-site span, so their metrics stay
+separate. The consequences:
+
+- A discriminated invocation has ids the language server cannot compute,
+  because the discriminator depends on the Rust call site. Its metrics are
+  correct but are not annotated in the editor. Give such programs distinct
+  variable names, or move them into separate `.marigold` files, to keep
+  them annotated.
+- Which invocation counts as "first" follows compiler expansion order, and
+  the discriminator follows the byte offsets of the call site. Both are
+  stable for a given source file, but editing earlier code can shift the
+  offsets and with them the ids of the discriminated invocations.
+- The call-site span is read from the compiler's debug rendering, since
+  its structured form is unstable. If a compiler does not provide offsets,
+  invocations in the same crate that share ids would merge again. The same
+  is true for one macro-generated invocation expanded twice from the same
+  `macro_rules!` body, which has a single call site.
 
 ## Reading telemetry in the language server
 

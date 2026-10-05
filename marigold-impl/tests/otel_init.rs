@@ -1,4 +1,4 @@
-#![cfg(feature = "otel")]
+#![cfg(feature = "otel-otlp")]
 
 use futures::StreamExt;
 use marigold_impl::telemetry::{init, instrument, NodeMeta};
