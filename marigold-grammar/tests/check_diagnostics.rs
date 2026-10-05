@@ -749,10 +749,10 @@ const PERF_BOUND: std::time::Duration = std::time::Duration::from_secs(10);
 #[test]
 fn many_undefined_fns_against_many_declared_fns_complete_quickly_and_are_capped() {
     let mut src = String::new();
-    for i in 0..12_000 {
+    for i in 0..60_000 {
         src.push_str(&format!("fn f{i}(x: i32) -> i32 {{ x }}\n"));
     }
-    for i in 0..12_000 {
+    for i in 0..60_000 {
         src.push_str(&format!("range(0,3).map(g{i}).return\n"));
     }
     let (diags, elapsed) = timed(|| marigold_check(&src));
@@ -775,7 +775,7 @@ fn many_undefined_fns_against_many_declared_fns_complete_quickly_and_are_capped(
 #[test]
 fn many_chained_stream_variables_complete_quickly() {
     let mut src = String::new();
-    for i in 0..25_000 {
+    for i in 0..50_000 {
         src.push_str(&format!("v{i} = range(0,3)\nv{} = v{i}.map(f{i})\n", i + 1));
     }
     let (diags, elapsed) = timed(|| marigold_check(&src));
