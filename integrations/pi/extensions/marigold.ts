@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -15,6 +15,7 @@ export interface MarigoldExtensionOptions {
 
 const EDIT_TOOLS = new Set(["edit", "write"]);
 const MAX_RESTARTS = 3;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 export function normalizePath(cwd: string, path: string): string {
   let p = path.startsWith("@") ? path.slice(1) : path;
@@ -63,8 +64,15 @@ export function createMarigoldExtension(options: MarigoldExtensionOptions = {}) 
 
     const check = async (cwd: string, path: string, limit = 20) => {
       const absolute = normalizePath(cwd, path);
+      if (!absolute.endsWith(".marigold")) {
+        throw new Error(`refusing to check ${path}: only .marigold files can be checked`);
+      }
       let text: string;
       try {
+        const { size } = await stat(absolute);
+        if (size > MAX_FILE_BYTES) {
+          throw new Error(`file is too large to check (${size} bytes, limit ${MAX_FILE_BYTES})`);
+        }
         text = await readFile(absolute, "utf8");
       } catch (e) {
         throw new Error(`cannot read ${path}: ${(e as Error).message}`);

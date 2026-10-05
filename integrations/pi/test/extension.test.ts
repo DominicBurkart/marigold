@@ -114,6 +114,25 @@ describe("marigold_check tool", () => {
     expect(result.details.diagnostics).toHaveLength(1);
   });
 
+  it("refuses paths that are not .marigold files without reading them", async () => {
+    writeFileSync(join(dir, "secret.txt"), "range(0, 1).return");
+    const tool = pi.tools.get("marigold_check");
+    await expect(tool.execute("id", { path: "secret.txt" }, undefined, undefined, ctx)).rejects.toThrow(
+      /only .*\.marigold/,
+    );
+    await expect(tool.execute("id", { path: "~/.ssh/id_rsa" }, undefined, undefined, ctx)).rejects.toThrow(
+      /only .*\.marigold/,
+    );
+  });
+
+  it("refuses files above the size limit before reading them", async () => {
+    writeFileSync(join(dir, "huge.marigold"), " ".repeat(10 * 1024 * 1024 + 1));
+    const tool = pi.tools.get("marigold_check");
+    await expect(tool.execute("id", { path: "huge.marigold" }, undefined, undefined, ctx)).rejects.toThrow(
+      /too large/,
+    );
+  });
+
   it("fails with a clear error for a missing file", async () => {
     const tool = pi.tools.get("marigold_check");
     await expect(tool.execute("id", { path: "missing.marigold" }, undefined, undefined, ctx)).rejects.toThrow(
