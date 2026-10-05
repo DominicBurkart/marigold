@@ -470,7 +470,9 @@ fn complexity_per_stream() {
     assert_eq!(streams[0]["collects_input"], false);
     assert_eq!(streams[0]["line"], 1);
     assert_eq!(streams[1]["name"], Value::Null);
-    assert!(text_of(&result).contains("cardinality: 5"));
+    assert!(text_of(&result).contains(
+        "analyzer estimate for the whole chain \u{b7} cardinality: 5 \u{b7} time: O(1) per whole stream \u{b7} space: O(1) \u{b7} collects input: no"
+    ));
 }
 
 #[test]

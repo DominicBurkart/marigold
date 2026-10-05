@@ -36,8 +36,8 @@ straight to another. Every tool says explicitly when nothing was found.
   `include_declaration`, default true): every use of a symbol. Run it
   before changing a signature or deleting a declaration.
 - `marigold_hover` (`path`, `line`, `column`): the declaration or stream
-  at the position plus its complexity (cardinality, time, space, whether
-  it collects input). Use it to compare stream shapes before choosing
+  at the position plus the analyzer's whole-chain complexity estimate
+  (cardinality, time, space, whether it collects input). Use it to compare stream shapes before choosing
   between `permutations`, `combinations` and filters.
 - `marigold_rename` (`path`, `line`, `column`, `new_name`, optional
   `apply`): rename a symbol everywhere in the file.

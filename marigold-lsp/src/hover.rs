@@ -8,14 +8,14 @@
 //! let lsp_types::HoverContents::Markup(markup) = hover.contents else { panic!() };
 //! assert_eq!(
 //!     markup.value,
-//!     "```marigold\nx = range(0, 5)\n```\ncardinality: 5 \u{b7} time: O(1) \u{b7} space: O(n) \u{b7} collects input: no"
+//!     "```marigold\nx = range(0, 5)\n```\nanalyzer estimate for the whole chain \u{b7} cardinality: 5 \u{b7} time: O(1) per whole stream \u{b7} space: O(1) \u{b7} collects input: no"
 //! );
 //! assert!(marigold_lsp::hover::hover(text, Position::new(0, 1)).is_none());
 //! ```
 
 use crate::position::LineIndex;
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
-use marigold_grammar::complexity::NodeComplexity;
+use marigold_grammar::complexity::{Cardinality, NodeComplexity};
 use marigold_grammar::diagnostics::ByteRange;
 use marigold_grammar::symbols::SymbolKind;
 use marigold_grammar::{marigold_stream_complexities, marigold_symbols};
@@ -30,13 +30,35 @@ fn fenced(source: &str) -> String {
     format!("```marigold\n{shown}\n```")
 }
 
+const MAX_PLAIN_DIGITS: usize = 15;
+
+/// Renders a cardinality, abbreviating exact values over 15 digits as `~d.de<exp>`.
+pub fn format_cardinality(cardinality: &Cardinality) -> String {
+    let Cardinality::Exact(n) = cardinality else {
+        return cardinality.to_string();
+    };
+    let digits = n.to_string();
+    if digits.len() <= MAX_PLAIN_DIGITS {
+        return digits;
+    }
+    let lead: u32 = digits[..3].parse().unwrap_or(0);
+    let mut mantissa = (lead + 5) / 10;
+    let mut exponent = digits.len() - 1;
+    if mantissa >= 100 {
+        mantissa = 10;
+        exponent += 1;
+    }
+    format!("~{}.{}e{exponent}", mantissa / 10, mantissa % 10)
+}
+
 pub fn complexity_line(node: &NodeComplexity) -> String {
     let c = &node.complexity;
+    let space = c.exact_space.to_string();
     format!(
-        "cardinality: {} \u{b7} time: {} \u{b7} space: {} \u{b7} collects input: {}",
-        c.cardinality,
+        "analyzer estimate for the whole chain \u{b7} cardinality: {} \u{b7} time: {} per whole stream \u{b7} space: {} \u{b7} collects input: {}",
+        format_cardinality(&c.cardinality),
         c.time_class,
-        c.space_class,
+        space,
         if c.collects_input { "yes" } else { "no" }
     )
 }
