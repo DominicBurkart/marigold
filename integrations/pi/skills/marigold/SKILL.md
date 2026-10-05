@@ -12,8 +12,8 @@ sequence of declarations (`struct`, `enum`, `fn`) and streams such as
 ## Feedback loop
 
 - After every `edit` or `write` to a `.marigold` file, diagnostics are
-  appended to the tool result as `path:line:col: error[code]: message`.
-  Fix every error before moving on.
+  appended to the tool result as `path:line:col: severity[code]: message`.
+  Fix every error and review every warning before moving on.
 - Call the `marigold_check` tool to re-check a file without editing it.
 - `help:` lines under a diagnostic list valid alternatives (for example
   the enums declared in the program).
@@ -32,11 +32,25 @@ sequence of declarations (`struct`, `enum`, `fn`) and streams such as
 - `undefined-stream-variable` (warning): a stream variable is read before
   the line that declares it, or by its own declaration; read only variables
   declared above.
-- `undefined-stream-variable` (information), `undefined-fn`, and
-  `undefined-struct` (information): the name is not declared in the
-  program. It may be a Rust item in scope inside `m!()` (a stream variable
-  may be a Rust binding with a `get()` method returning a stream), so it can
-  be ignored in that case.
+- `input-too-large`: the file is over the 10 MiB limit and was not
+  checked.
+
+Warnings do not make a file invalid, but they usually point at a mistake.
+Do not treat a result with no errors as clean while warnings remain.
+
+Information diagnostics mean the name is not declared in this program:
+
+- `undefined-stream-variable` (information): a stream variable is used but
+  not declared in this program. It may be a Rust binding with a `get()`
+  method returning a stream.
+- `undefined-fn`: a function named in `map`, `filter`, `fold` and the like
+  is not declared with `fn` in this program.
+- `undefined-struct`: `struct=T` names a struct that is not declared.
+- `resolver-diagnostics-truncated`: more than 50 undefined-name
+  diagnostics were found; only the first 50 are reported.
+
+An information diagnostic can be a false alarm when the name is a Rust
+item in scope around the program. Otherwise fix it.
 
 ## Complexity
 
