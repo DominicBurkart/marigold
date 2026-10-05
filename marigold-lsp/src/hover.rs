@@ -51,13 +51,54 @@ pub fn format_cardinality(cardinality: &Cardinality) -> String {
     format!("~{}.{}e{exponent}", mantissa / 10, mantissa % 10)
 }
 
-pub fn complexity_line(node: &NodeComplexity) -> String {
+const MAX_TRUSTED_CARDINALITY: u64 = 1_000_000;
+
+pub fn function_use_ranges(text: &str) -> Vec<ByteRange> {
+    marigold_symbols(text)
+        .references
+        .iter()
+        .filter(|r| r.kind == SymbolKind::Function)
+        .map(|r| r.range)
+        .collect()
+}
+
+pub fn time_estimate(
+    node: &NodeComplexity,
+    function_uses: &[ByteRange],
+) -> Result<String, &'static str> {
+    if function_uses
+        .iter()
+        .any(|r| node.range.start <= r.start && r.end <= node.range.end)
+    {
+        return Err("calls user functions");
+    }
+    match &node.complexity.cardinality {
+        Cardinality::Exact(n)
+            if n.to_string()
+                .parse::<u64>()
+                .is_ok_and(|v| v <= MAX_TRUSTED_CARDINALITY) =>
+        {
+            Ok(node.complexity.time_class.to_string())
+        }
+        Cardinality::Exact(_) => Err("cardinality too large"),
+        _ => Err("cardinality unknown"),
+    }
+}
+
+fn time_claim(node: &NodeComplexity, function_uses: &[ByteRange]) -> String {
+    match time_estimate(node, function_uses) {
+        Ok(class) => format!("{class} per whole stream"),
+        Err(reason) => format!("not estimated ({reason})"),
+    }
+}
+
+pub fn complexity_line(node: &NodeComplexity, function_uses: &[ByteRange]) -> String {
     let c = &node.complexity;
     let space = c.exact_space.to_string();
     format!(
-        "analyzer estimate for the whole chain \u{b7} cardinality: {} \u{b7} time: {} per whole stream \u{b7} space: {} \u{b7} collects input: {}",
+        "analyzer estimate for the whole chain \u{b7} cardinality: {} \u{b7} time: {} \u{b7} space: {} \u{b7} collects input: {}",
         format_cardinality(&c.cardinality),
-        c.time_class,
+        time_claim(node, function_uses),
         space,
         if c.collects_input { "yes" } else { "no" }
     )
@@ -106,6 +147,7 @@ pub fn hover(text: &str, position: Position) -> Option<Hover> {
     }
     let symbols = marigold_symbols(text);
     let nodes = marigold_stream_complexities(text).unwrap_or_default();
+    let function_uses = function_use_ranges(text);
     let span = |r: ByteRange| Range::new(lines.position(r.start), lines.position(r.end));
     let node_containing = |inner: ByteRange| {
         nodes
@@ -121,7 +163,7 @@ pub fn hover(text: &str, position: Position) -> Option<Hover> {
                 Some(node) => format!(
                     "{}\n{}",
                     fenced(&text[node.range.start..node.range.end]),
-                    complexity_line(node)
+                    complexity_line(node, &function_uses)
                 ),
                 None => format!(
                     "**stream variable** `{}`\n{}",
@@ -152,7 +194,7 @@ pub fn hover(text: &str, position: Position) -> Option<Hover> {
         format!(
             "{}\n{}",
             fenced(&text[node.range.start..node.range.end]),
-            complexity_line(node)
+            complexity_line(node, &function_uses)
         ),
         span(node.range),
     ))

@@ -24,7 +24,7 @@
 //! assert_eq!(response["result"]["structuredContent"]["error_count"], 1);
 //! ```
 
-use crate::hover::complexity_line;
+use crate::hover::{complexity_line, function_use_ranges, time_estimate};
 use crate::nav;
 use crate::position::LineIndex;
 use lsp_types::{Position, Uri};
@@ -328,7 +328,7 @@ fn tool_definitions() -> Value {
         {
             "name": "marigold_complexity",
             "title": "Marigold stream complexity",
-            "description": format!("Report cardinality, time and space complexity and whether input is collected for every stream in a .marigold file. The file must parse. {POSITION_NOTE}"),
+            "description": format!("Report cardinality, time and space complexity and whether input is collected for every stream in a .marigold file. The file must parse. Time is the analyzer's class per whole stream and is reported as 'not estimated' when cardinality is unknown or above 1000000, or the chain calls user functions, since their cost is not modelled. {POSITION_NOTE}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {"path": path},
@@ -694,6 +694,7 @@ fn complexity_tool(args: &Map<String, Value>) -> ToolResult {
         format!("{path} does not parse, so complexity is unavailable; run marigold_check first")
     })?;
     let index = LineIndex::new(&text);
+    let function_uses = function_use_ranges(&text);
     let mut lines = vec![format!("marigold: {} streams in {path}", nodes.len())];
     let streams: Vec<Value> = nodes
         .iter()
@@ -708,12 +709,16 @@ fn complexity_tool(args: &Map<String, Value>) -> ToolResult {
                     .as_deref()
                     .map(|name| format!("{name}: "))
                     .unwrap_or_default(),
-                complexity_line(n)
+                complexity_line(n, &function_uses)
             ));
             m.insert("name".into(), json!(n.name));
             m.insert("description".into(), json!(c.description));
             m.insert("cardinality".into(), json!(c.cardinality.to_string()));
-            m.insert("time".into(), json!(c.time_class.to_string()));
+            m.insert(
+                "time".into(),
+                json!(time_estimate(n, &function_uses)
+                    .unwrap_or_else(|_| "not estimated".to_string())),
+            );
             m.insert("space".into(), json!(c.space_class.to_string()));
             m.insert("collects_input".into(), json!(c.collects_input));
             Value::Object(m)

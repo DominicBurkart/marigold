@@ -47,7 +47,7 @@ fn hover_on_stream_variable_declaration_shows_expression_and_complexity() {
     let text = markdown(hover(&mut client, &u, pos_of(PROGRAM, "x = range")));
     assert_eq!(
         text,
-        "```marigold\nx = range(0, 5).map(double)\n```\nanalyzer estimate for the whole chain \u{b7} cardinality: 5 \u{b7} time: O(1) per whole stream \u{b7} space: O(1) \u{b7} collects input: no"
+        "```marigold\nx = range(0, 5).map(double)\n```\nanalyzer estimate for the whole chain \u{b7} cardinality: 5 \u{b7} time: not estimated (calls user functions) \u{b7} space: O(1) \u{b7} collects input: no"
     );
     client.shutdown();
 }

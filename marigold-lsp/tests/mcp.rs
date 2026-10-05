@@ -515,6 +515,21 @@ fn complexity_per_stream() {
 }
 
 #[test]
+fn complexity_does_not_claim_time_for_huge_or_user_function_streams() {
+    let dir = Dir::new();
+    let path = dir.write(
+        "p.marigold",
+        "range(0, 1000000).permutations(3).return\nrange(0, 5).map(f).return",
+    );
+    let result = call("marigold_complexity", json!({"path": path}));
+    let streams = result["structuredContent"]["streams"].as_array().unwrap();
+    assert_eq!(streams[0]["time"], "not estimated");
+    assert_eq!(streams[1]["time"], "not estimated");
+    let text = text_of(&result);
+    assert!(!text.contains("time: O(1)"), "{text}");
+}
+
+#[test]
 fn complexity_of_unparseable_program_is_tool_error() {
     let dir = Dir::new();
     let path = dir.write("p.marigold", "range(0,");
