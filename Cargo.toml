@@ -3,6 +3,7 @@ members = [
   "marigold",
   "marigold-macros",
   "marigold-grammar",
+  "marigold-lsp",
   "marigold-impl",
   "examples/color-palette-picker",
   "examples/csv",
