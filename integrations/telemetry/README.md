@@ -167,6 +167,10 @@ When telemetry is on you get:
 - The read-only MCP tool `marigold_telemetry` with a `path` argument,
   returning the same counts per node as JSON.
 
+Telemetry does not change diagnostics. Undefined stream variables are
+reported as warnings, and undefined functions and structs as information,
+because they can be Rust items in scope inside `m!()`.
+
 A failing or unreachable backend never affects diagnostics or hover: the
 annotations are simply absent. The MCP tool reports the failure instead.
 Results are cached for 30 seconds per open document, and a lookup blocks
