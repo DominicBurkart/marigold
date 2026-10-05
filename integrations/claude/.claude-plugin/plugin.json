@@ -1,0 +1,10 @@
+{
+  "name": "marigold-lsp",
+  "version": "0.1.0",
+  "description": "Marigold language server: diagnostics, hover, and go-to-definition for .marigold files",
+  "author": { "name": "Marigold contributors" },
+  "repository": "https://github.com/DominicBurkart/marigold",
+  "license": "Apache-2.0 OR MIT",
+  "keywords": ["marigold", "lsp", "stream-processing"],
+  "lspServers": "./.lsp.json"
+}
