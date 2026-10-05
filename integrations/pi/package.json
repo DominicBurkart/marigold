@@ -1,0 +1,47 @@
+{
+  "name": "pi-marigold",
+  "version": "0.2.0",
+  "description": "Marigold language support for the pi coding agent: diagnostics after every edit, plus a marigold_check tool.",
+  "license": "Apache-2.0 OR MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DominicBurkart/marigold.git",
+    "directory": "integrations/pi"
+  },
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "marigold",
+    "lsp"
+  ],
+  "files": [
+    "extensions",
+    "src",
+    "skills",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/marigold.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.87.1",
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@types/node": "^22.0.0",
+    "typebox": "^1.3.27",
+    "typescript": "^6.0.2",
+    "vitest": "^5.0.2"
+  }
+}
