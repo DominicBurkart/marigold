@@ -41,6 +41,11 @@ impl<'a> LineIndex<'a> {
     /// let idx = LineIndex::new("a😀b");
     /// assert_eq!(idx.position(3), Position::new(0, 1));
     /// assert_eq!(idx.position(99), Position::new(0, 4));
+    ///
+    /// let crlf = LineIndex::new("ab\r\ncd");
+    /// assert_eq!(crlf.position(2), Position::new(0, 2));
+    /// assert_eq!(crlf.position(3), Position::new(0, 2));
+    /// assert_eq!(crlf.position(4), Position::new(1, 0));
     /// ```
     pub fn position(&self, offset: usize) -> Position {
         let mut offset = offset.min(self.text.len());

@@ -398,6 +398,32 @@ fn rapid_changes_publish_in_order() {
 }
 
 #[test]
+fn document_over_the_size_cap_is_rejected_through_did_open() {
+    let (client, _) = Client::start();
+    let text = " ".repeat(marigold_grammar::diagnostics::MAX_CHECK_INPUT_BYTES + 1);
+    open(&client, &text);
+    let published = client.diagnostics();
+    assert_eq!(published.diagnostics.len(), 1);
+    let d = &published.diagnostics[0];
+    assert_eq!(
+        d.code,
+        Some(lsp_types::NumberOrString::String("input-too-large".into()))
+    );
+    assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::ERROR));
+    assert_eq!(d.range.start, lsp_types::Position::new(0, 0));
+    client.shutdown();
+}
+
+#[test]
+fn document_at_the_size_cap_is_still_checked_through_did_open() {
+    let (client, _) = Client::start();
+    let text = " ".repeat(marigold_grammar::diagnostics::MAX_CHECK_INPUT_BYTES);
+    open(&client, &text);
+    assert!(client.diagnostics().diagnostics.is_empty());
+    client.shutdown();
+}
+
+#[test]
 fn large_document_completes_within_bound() {
     let (client, _) = Client::start();
     let line = "range(0, 1).return\n";
