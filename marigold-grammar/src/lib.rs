@@ -69,6 +69,7 @@ pub use itertools;
 pub mod bound_resolution;
 pub mod complexity;
 pub mod diagnostics;
+pub mod node_ids;
 pub mod nodes;
 pub mod parser;
 mod recovery;
@@ -155,6 +156,31 @@ pub fn marigold_check(s: &str) -> Vec<diagnostics::Diagnostic> {
 /// ```
 pub fn marigold_symbols(s: &str) -> symbols::SymbolIndex {
     symbols::SymbolIndex::from_source(s)
+}
+
+pub use node_ids::{NodeId, NodeInfo, NodeKind};
+
+/// Stable ids and content hashes for every input, stream function and output of every stream
+/// expression, and for every stream variable declaration, in source order.
+///
+/// `program` namespaces the ids, so the same source in two programs yields different ids. Broken
+/// files are recovered chunk by chunk, so intact expressions still get ids. See [`node_ids`] for
+/// the hash algorithm and the identity rules.
+///
+/// ```
+/// use marigold_grammar::marigold_node_ids;
+///
+/// let src = "x = range(0, 5).map(f)\nx.return";
+/// let nodes = marigold_node_ids(src, "demo");
+/// assert_eq!(nodes.len(), 5);
+///
+/// let spaced = "x = range(0, 5)\n  .map(f)\nx.return";
+/// let again = marigold_node_ids(spaced, "demo");
+/// let ids = |n: &[marigold_grammar::NodeInfo]| n.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+/// assert_eq!(ids(&nodes), ids(&again));
+/// ```
+pub fn marigold_node_ids(s: &str, program: &str) -> Vec<NodeInfo> {
+    node_ids::node_infos(s, program)
 }
 
 /// Complexity of every variable declaration and output stream, with its name and source range.
