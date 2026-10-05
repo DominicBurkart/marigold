@@ -4,7 +4,8 @@
 //!
 //! The server speaks LSP over any [`lsp_server::Connection`] and publishes
 //! [`marigold_grammar::marigold_check`] diagnostics whenever a document is
-//! opened or changed.
+//! opened or changed. It also answers definition, references, document and
+//! workspace symbols, rename and hover (signature plus complexity) requests.
 //!
 //! ```
 //! let diags = marigold_lsp::lsp_diagnostics("range(Colour).return");
@@ -12,6 +13,7 @@
 //! assert_eq!(diags[0].range.start, lsp_types::Position::new(0, 6));
 //! ```
 
+pub mod hover;
 pub mod nav;
 pub mod position;
 pub mod workspace;
@@ -22,16 +24,17 @@ use lsp_types::notification::{
     PublishDiagnostics,
 };
 use lsp_types::request::{
-    DocumentSymbolRequest, GotoDefinition, PrepareRenameRequest, References, Rename, Request as _,
-    Shutdown, WorkspaceSymbolRequest,
+    DocumentSymbolRequest, GotoDefinition, HoverRequest, PrepareRenameRequest, References, Rename,
+    Request as _, Shutdown, WorkspaceSymbolRequest,
 };
 use lsp_types::{
     Diagnostic, DiagnosticSeverity, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
-    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
-    NumberOrString, OneOf, PrepareRenameResponse, PublishDiagnosticsParams, Range, ReferenceParams,
-    RenameOptions, RenameParams, ServerCapabilities, ServerInfo, SymbolInformation,
-    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
-    WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    GotoDefinitionParams, GotoDefinitionResponse, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, NumberOrString, OneOf, PrepareRenameResponse,
+    PublishDiagnosticsParams, Range, ReferenceParams, RenameOptions, RenameParams,
+    ServerCapabilities, ServerInfo, SymbolInformation, TextDocumentPositionParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkspaceEdit, WorkspaceSymbolParams,
+    WorkspaceSymbolResponse,
 };
 use marigold_grammar::diagnostics::Severity;
 use position::LineIndex;
@@ -96,6 +99,10 @@ pub fn lsp_diagnostics(text: &str) -> Vec<Diagnostic> {
 /// assert_eq!(caps.capabilities.references_provider, Some(OneOf::Left(true)));
 /// assert_eq!(caps.capabilities.document_symbol_provider, Some(OneOf::Left(true)));
 /// assert_eq!(caps.capabilities.workspace_symbol_provider, Some(OneOf::Left(true)));
+/// assert_eq!(
+///     caps.capabilities.hover_provider,
+///     Some(lsp_types::HoverProviderCapability::Simple(true))
+/// );
 /// let Some(OneOf::Right(rename)) = caps.capabilities.rename_provider else { panic!() };
 /// assert_eq!(rename.prepare_provider, Some(true));
 /// ```
@@ -107,6 +114,7 @@ pub fn capabilities() -> InitializeResult {
             references_provider: Some(OneOf::Left(true)),
             document_symbol_provider: Some(OneOf::Left(true)),
             workspace_symbol_provider: Some(OneOf::Left(true)),
+            hover_provider: Some(HoverProviderCapability::Simple(true)),
             rename_provider: Some(OneOf::Right(RenameOptions {
                 prepare_provider: Some(true),
                 work_done_progress_options: Default::default(),
@@ -199,6 +207,9 @@ impl Server {
             PrepareRenameRequest::METHOD => {
                 self.prepare_rename(serde_json::from_value(req.params).map_err(invalid_params)?)
             }
+            HoverRequest::METHOD => {
+                self.hover(serde_json::from_value(req.params).map_err(invalid_params)?)
+            }
             Rename::METHOD => {
                 self.rename(serde_json::from_value(req.params).map_err(invalid_params)?)
             }
@@ -278,6 +289,15 @@ impl Server {
         hits.truncate(MAX_WORKSPACE_SYMBOLS);
         let items: Vec<SymbolInformation> = hits.into_iter().map(|(_, s)| s).collect();
         serde_json::to_value(Some(WorkspaceSymbolResponse::Flat(items))).map_err(internal)
+    }
+
+    fn hover(&self, params: HoverParams) -> Result<serde_json::Value, Failure> {
+        let at = params.text_document_position_params;
+        let found = self
+            .docs
+            .get(&at.text_document.uri)
+            .and_then(|text| hover::hover(text, at.position));
+        serde_json::to_value(found).map_err(internal)
     }
 
     fn prepare_rename(
