@@ -13,7 +13,7 @@
 //! ```
 
 use crate::position::LineIndex;
-use lsp_types::{Location, Position, Range, SymbolKind, Uri};
+use lsp_types::{Location, Position, Range, SymbolKind, TextEdit, Uri};
 use marigold_grammar::diagnostics::ByteRange;
 use marigold_grammar::symbols::{SymbolDeclaration, SymbolKind as Kind};
 use marigold_grammar::{marigold_stream_complexities, marigold_symbols};
@@ -186,4 +186,196 @@ pub fn outline(text: &str) -> Vec<OutlineSymbol> {
             selection_range: range_of(&lines, d.range),
         })
         .collect()
+}
+
+/// Declaration names with their name ranges, without computing full extents.
+///
+/// ```
+/// let names = marigold_lsp::nav::declaration_names("enum E { A }");
+/// assert_eq!(names[0].name, "E");
+/// assert_eq!(names[0].range, names[0].selection_range);
+/// ```
+pub fn declaration_names(text: &str) -> Vec<OutlineSymbol> {
+    let lines = LineIndex::new(text);
+    let symbols = marigold_symbols(text);
+    let mut decls: Vec<&SymbolDeclaration> = symbols.declarations.iter().collect();
+    decls.sort_by_key(|d| d.range.start);
+    decls
+        .into_iter()
+        .map(|d| {
+            let range = range_of(&lines, d.range);
+            OutlineSymbol {
+                name: d.name.clone(),
+                kind: lsp_kind(d.kind),
+                range,
+                selection_range: range,
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RenameError {
+    NoSymbol,
+    NoDeclaration,
+    InvalidName(String),
+    Clash(String),
+    Breaks(String),
+}
+
+impl std::fmt::Display for RenameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RenameError::NoSymbol => write!(f, "no symbol at this position"),
+            RenameError::NoDeclaration => {
+                write!(f, "cannot rename: the symbol has no declaration in this document")
+            }
+            RenameError::InvalidName(name) => write!(
+                f,
+                "invalid identifier {name:?}: use ASCII letters, digits and underscores, not starting with a digit"
+            ),
+            RenameError::Clash(name) => {
+                write!(f, "{name:?} is already declared with the same kind")
+            }
+            RenameError::Breaks(why) => write!(f, "rename would introduce errors: {why}"),
+        }
+    }
+}
+
+impl std::error::Error for RenameError {}
+
+/// Whether `name` is an ASCII identifier: a letter or underscore, then letters, digits or underscores.
+///
+/// ```
+/// assert!(marigold_lsp::nav::is_valid_identifier("_row2"));
+/// assert!(!marigold_lsp::nav::is_valid_identifier("2row"));
+/// assert!(!marigold_lsp::nav::is_valid_identifier("caf\u{e9}"));
+/// ```
+pub fn is_valid_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// The name range and current name of the symbol under `position`, if it can be renamed.
+///
+/// ```
+/// use lsp_types::Position;
+/// let (range, name) = marigold_lsp::nav::prepare_rename("x = range(0, 1)", Position::new(0, 0)).unwrap();
+/// assert_eq!(name, "x");
+/// assert_eq!(range.end, Position::new(0, 1));
+/// ```
+pub fn prepare_rename(text: &str, position: Position) -> Option<(Range, String)> {
+    let lines = LineIndex::new(text);
+    let symbols = marigold_symbols(text);
+    let symbol = symbols.symbol_at(lines.offset(position))?;
+    Some((range_of(&lines, symbol.range()), symbol.name().to_string()))
+}
+
+/// Edits renaming the declaration under `position` and every reference that resolves to it.
+///
+/// ```
+/// use lsp_types::Position;
+/// let edits = marigold_lsp::nav::rename_edits("x = range(0, 1)\nx.return", Position::new(0, 0), "y").unwrap();
+/// assert_eq!(edits.len(), 2);
+/// assert!(marigold_lsp::nav::rename_edits("x = range(0, 1)", Position::new(0, 0), "1y").is_err());
+/// ```
+pub fn rename_edits(
+    text: &str,
+    position: Position,
+    new_name: &str,
+) -> Result<Vec<TextEdit>, RenameError> {
+    if !is_valid_identifier(new_name) {
+        return Err(RenameError::InvalidName(new_name.to_string()));
+    }
+    let lines = LineIndex::new(text);
+    let symbols = marigold_symbols(text);
+    let offset = lines.offset(position);
+    if symbols.symbol_at(offset).is_none() {
+        return Err(RenameError::NoSymbol);
+    }
+    let decl = symbols
+        .definition_of(offset)
+        .ok_or(RenameError::NoDeclaration)?;
+    if decl.name == new_name {
+        return Ok(Vec::new());
+    }
+    if symbols
+        .declarations
+        .iter()
+        .any(|d| d.kind == decl.kind && d.name == new_name)
+    {
+        return Err(RenameError::Clash(new_name.to_string()));
+    }
+    let mut ranges: Vec<ByteRange> = std::iter::once(decl.range)
+        .chain(symbols.references_of(decl).into_iter().map(|r| r.range))
+        .collect();
+    ranges.sort_by_key(|r| r.start);
+    ranges.dedup();
+    Ok(ranges
+        .into_iter()
+        .map(|r| TextEdit::new(range_of(&lines, r), new_name.to_string()))
+        .collect())
+}
+
+/// Applies non-overlapping `edits` to `text`.
+///
+/// ```
+/// use lsp_types::{Position, Range, TextEdit};
+/// let edit = TextEdit::new(Range::new(Position::new(0, 0), Position::new(0, 1)), "y".into());
+/// assert_eq!(marigold_lsp::nav::apply_edits("x = 1", &[edit]), "y = 1");
+/// ```
+pub fn apply_edits(text: &str, edits: &[TextEdit]) -> String {
+    let lines = LineIndex::new(text);
+    let mut spans: Vec<(usize, usize, &str)> = edits
+        .iter()
+        .map(|e| {
+            (
+                lines.offset(e.range.start),
+                lines.offset(e.range.end),
+                e.new_text.as_str(),
+            )
+        })
+        .collect();
+    spans.sort_by_key(|s| std::cmp::Reverse(s.0));
+    let mut out = text.to_string();
+    for (start, end, new) in spans {
+        out.replace_range(start..end.max(start), new);
+    }
+    out
+}
+
+fn error_count(text: &str) -> usize {
+    marigold_grammar::marigold_check(text)
+        .iter()
+        .filter(|d| d.severity == marigold_grammar::diagnostics::Severity::Error)
+        .count()
+}
+
+/// Like [`rename_edits`], but refuses a rename whose result has more errors than the original.
+///
+/// ```
+/// use lsp_types::Position;
+/// let ok = marigold_lsp::nav::rename("x = range(0, 1)\nx.return", Position::new(0, 0), "y");
+/// assert_eq!(ok.unwrap().len(), 2);
+/// ```
+pub fn rename(
+    text: &str,
+    position: Position,
+    new_name: &str,
+) -> Result<Vec<TextEdit>, RenameError> {
+    let edits = rename_edits(text, position, new_name)?;
+    if edits.is_empty() {
+        return Ok(edits);
+    }
+    let renamed = apply_edits(text, &edits);
+    let (before, after) = (error_count(text), error_count(&renamed));
+    if after > before {
+        return Err(RenameError::Breaks(format!(
+            "{after} errors after rename, {before} before"
+        )));
+    }
+    Ok(edits)
 }

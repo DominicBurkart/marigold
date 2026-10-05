@@ -14,6 +14,7 @@
 
 pub mod nav;
 pub mod position;
+pub mod workspace;
 
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::notification::{
@@ -21,17 +22,21 @@ use lsp_types::notification::{
     PublishDiagnostics,
 };
 use lsp_types::request::{
-    DocumentSymbolRequest, GotoDefinition, References, Request as _, Shutdown,
+    DocumentSymbolRequest, GotoDefinition, PrepareRenameRequest, References, Rename, Request as _,
+    Shutdown, WorkspaceSymbolRequest,
 };
 use lsp_types::{
     Diagnostic, DiagnosticSeverity, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
     GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
-    NumberOrString, OneOf, PublishDiagnosticsParams, Range, ReferenceParams, ServerCapabilities,
-    ServerInfo, SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    NumberOrString, OneOf, PrepareRenameResponse, PublishDiagnosticsParams, Range, ReferenceParams,
+    RenameOptions, RenameParams, ServerCapabilities, ServerInfo, SymbolInformation,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use marigold_grammar::diagnostics::Severity;
 use position::LineIndex;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -90,6 +95,9 @@ pub fn lsp_diagnostics(text: &str) -> Vec<Diagnostic> {
 /// assert_eq!(caps.capabilities.definition_provider, Some(OneOf::Left(true)));
 /// assert_eq!(caps.capabilities.references_provider, Some(OneOf::Left(true)));
 /// assert_eq!(caps.capabilities.document_symbol_provider, Some(OneOf::Left(true)));
+/// assert_eq!(caps.capabilities.workspace_symbol_provider, Some(OneOf::Left(true)));
+/// let Some(OneOf::Right(rename)) = caps.capabilities.rename_provider else { panic!() };
+/// assert_eq!(rename.prepare_provider, Some(true));
 /// ```
 pub fn capabilities() -> InitializeResult {
     InitializeResult {
@@ -98,6 +106,11 @@ pub fn capabilities() -> InitializeResult {
             definition_provider: Some(OneOf::Left(true)),
             references_provider: Some(OneOf::Left(true)),
             document_symbol_provider: Some(OneOf::Left(true)),
+            workspace_symbol_provider: Some(OneOf::Left(true)),
+            rename_provider: Some(OneOf::Right(RenameOptions {
+                prepare_provider: Some(true),
+                work_done_progress_options: Default::default(),
+            })),
             ..ServerCapabilities::default()
         },
         server_info: Some(ServerInfo {
@@ -138,6 +151,7 @@ pub fn serve(connection: &Connection) -> Result<(), Error> {
 struct Server {
     docs: HashMap<Uri, String>,
     hierarchical_symbols: bool,
+    roots: Vec<PathBuf>,
 }
 
 type Failure = (ErrorCode, String);
@@ -151,9 +165,20 @@ impl Server {
             .and_then(|t| t.document_symbol.as_ref())
             .and_then(|d| d.hierarchical_document_symbol_support)
             .unwrap_or(false);
+        #[allow(deprecated)]
+        let legacy_root = params.root_uri.iter();
+        let roots = params
+            .workspace_folders
+            .iter()
+            .flatten()
+            .map(|f| &f.uri)
+            .chain(legacy_root)
+            .filter_map(workspace::uri_to_path)
+            .collect();
         Self {
             docs: HashMap::new(),
             hierarchical_symbols,
+            roots,
         }
     }
 
@@ -167,6 +192,15 @@ impl Server {
             }
             DocumentSymbolRequest::METHOD => {
                 self.document_symbols(serde_json::from_value(req.params).map_err(invalid_params)?)
+            }
+            WorkspaceSymbolRequest::METHOD => {
+                self.workspace_symbols(serde_json::from_value(req.params).map_err(invalid_params)?)
+            }
+            PrepareRenameRequest::METHOD => {
+                self.prepare_rename(serde_json::from_value(req.params).map_err(invalid_params)?)
+            }
+            Rename::METHOD => {
+                self.rename(serde_json::from_value(req.params).map_err(invalid_params)?)
             }
             other => Err((
                 ErrorCode::MethodNotFound,
@@ -193,6 +227,98 @@ impl Server {
             nav::references(&uri, text, at.position, params.context.include_declaration)
         });
         serde_json::to_value(found).map_err(internal)
+    }
+
+    #[allow(clippy::mutable_key_type)]
+    fn workspace_symbols(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<serde_json::Value, Failure> {
+        let mut sources: Vec<(Uri, String)> = self
+            .docs
+            .iter()
+            .map(|(u, t)| (u.clone(), t.clone()))
+            .collect();
+        let open: std::collections::HashSet<String> = self
+            .docs
+            .keys()
+            .map(|u| {
+                workspace::uri_to_path(u)
+                    .and_then(|p| workspace::path_to_uri(&p))
+                    .map_or_else(|| u.as_str().to_string(), |c| c.as_str().to_string())
+            })
+            .collect();
+        for (path, text) in workspace::scan(&self.roots) {
+            if let Some(uri) = workspace::path_to_uri(&path) {
+                if !open.contains(uri.as_str()) {
+                    sources.push((uri, text));
+                }
+            }
+        }
+        let mut hits: Vec<(u8, SymbolInformation)> = Vec::new();
+        for (uri, text) in &sources {
+            for s in nav::declaration_names(text) {
+                if let Some(score) = workspace::match_score(&params.query, &s.name) {
+                    hits.push((score, symbol_information(s, uri)));
+                }
+            }
+        }
+        hits.sort_by(|a, b| {
+            let key = |h: &(u8, SymbolInformation)| {
+                (
+                    h.0,
+                    h.1.name.clone(),
+                    h.1.location.uri.as_str().to_string(),
+                    h.1.location.range.start.line,
+                    h.1.location.range.start.character,
+                )
+            };
+            key(a).cmp(&key(b))
+        });
+        hits.truncate(MAX_WORKSPACE_SYMBOLS);
+        let items: Vec<SymbolInformation> = hits.into_iter().map(|(_, s)| s).collect();
+        serde_json::to_value(Some(WorkspaceSymbolResponse::Flat(items))).map_err(internal)
+    }
+
+    fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<serde_json::Value, Failure> {
+        let found = self
+            .docs
+            .get(&params.text_document.uri)
+            .and_then(|text| nav::prepare_rename(text, params.position))
+            .map(
+                |(range, placeholder)| PrepareRenameResponse::RangeWithPlaceholder {
+                    range,
+                    placeholder,
+                },
+            );
+        serde_json::to_value(found).map_err(internal)
+    }
+
+    #[allow(clippy::mutable_key_type)]
+    fn rename(&self, params: RenameParams) -> Result<serde_json::Value, Failure> {
+        let at = params.text_document_position;
+        let uri = at.text_document.uri;
+        let Some(text) = self.docs.get(&uri) else {
+            return Ok(serde_json::Value::Null);
+        };
+        match nav::rename(text, at.position, &params.new_name) {
+            Ok(edits) => {
+                let changes = HashMap::from([(uri, edits)]);
+                serde_json::to_value(WorkspaceEdit {
+                    changes: Some(changes),
+                    ..Default::default()
+                })
+                .map_err(internal)
+            }
+            Err(nav::RenameError::NoSymbol) => Ok(serde_json::Value::Null),
+            Err(err @ nav::RenameError::NoDeclaration) => {
+                Err((ErrorCode::RequestFailed, err.to_string()))
+            }
+            Err(err) => Err((ErrorCode::InvalidParams, err.to_string())),
+        }
     }
 
     #[allow(deprecated)]
@@ -222,18 +348,25 @@ impl Server {
             DocumentSymbolResponse::Flat(
                 outline
                     .into_iter()
-                    .map(|s| SymbolInformation {
-                        name: s.name,
-                        kind: s.kind,
-                        tags: None,
-                        deprecated: None,
-                        location: lsp_types::Location::new(uri.clone(), s.range),
-                        container_name: None,
-                    })
+                    .map(|s| symbol_information(s, &uri))
                     .collect(),
             )
         };
         serde_json::to_value(Some(response)).map_err(internal)
+    }
+}
+
+const MAX_WORKSPACE_SYMBOLS: usize = 200;
+
+#[allow(deprecated)]
+fn symbol_information(s: nav::OutlineSymbol, uri: &Uri) -> SymbolInformation {
+    SymbolInformation {
+        name: s.name,
+        kind: s.kind,
+        tags: None,
+        deprecated: None,
+        location: lsp_types::Location::new(uri.clone(), s.range),
+        container_name: None,
     }
 }
 
