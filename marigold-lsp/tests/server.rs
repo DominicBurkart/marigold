@@ -187,3 +187,251 @@ fn unknown_requests_get_method_not_found() {
     }
     client.shutdown();
 }
+
+fn raw_notify(client: &Client, method: &str, params: serde_json::Value) {
+    client
+        .conn
+        .sender
+        .send(Message::Notification(Notification::new(
+            method.to_string(),
+            params,
+        )))
+        .unwrap();
+}
+
+fn change(client: &Client, version: i32, texts: &[&str]) {
+    client.notify::<DidChangeTextDocument>(DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier::new(uri(), version),
+        content_changes: texts
+            .iter()
+            .map(|t| TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: (*t).into(),
+            })
+            .collect(),
+    });
+}
+
+fn start_raw() -> (
+    Connection,
+    thread::JoinHandle<Result<(), marigold_lsp::Error>>,
+) {
+    let (server_conn, conn) = Connection::memory();
+    let server = thread::spawn(move || marigold_lsp::serve(&server_conn));
+    (conn, server)
+}
+
+#[test]
+fn malformed_did_open_params_do_not_kill_server() {
+    let (client, _) = Client::start();
+    raw_notify(
+        &client,
+        "textDocument/didOpen",
+        serde_json::json!({"bogus": 1}),
+    );
+    raw_notify(&client, "textDocument/didOpen", serde_json::Value::Null);
+    raw_notify(&client, "textDocument/didClose", serde_json::json!(42));
+    open(&client, "range(0, 1).retur");
+    assert_eq!(client.diagnostics().diagnostics.len(), 1);
+    client.shutdown();
+}
+
+#[test]
+fn bad_did_change_does_not_kill_server() {
+    let (client, _) = Client::start();
+    raw_notify(
+        &client,
+        "textDocument/didChange",
+        serde_json::json!({"textDocument": {"uri": 5}, "contentChanges": "x"}),
+    );
+    open(&client, "range(0, 1).retur");
+    let published = client.diagnostics();
+    assert_eq!(published.diagnostics.len(), 1);
+    client.shutdown();
+}
+
+#[test]
+fn exit_without_shutdown_returns_error() {
+    let (conn, server) = start_raw();
+    conn.sender
+        .send(Message::Request(Request::new(
+            RequestId::from(1),
+            "initialize".into(),
+            InitializeParams::default(),
+        )))
+        .unwrap();
+    conn.receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+    conn.sender
+        .send(Message::Notification(Notification::new(
+            "initialized".into(),
+            serde_json::json!({}),
+        )))
+        .unwrap();
+    conn.sender
+        .send(Message::Notification(Notification::new(
+            "exit".into(),
+            serde_json::Value::Null,
+        )))
+        .unwrap();
+    assert!(server.join().unwrap().is_err());
+}
+
+#[test]
+fn exit_after_shutdown_returns_ok() {
+    let (mut client, _) = Client::start();
+    client.request::<Shutdown>(());
+    client.notify::<Exit>(());
+    assert!(client.server.take().unwrap().join().is_ok());
+}
+
+#[test]
+fn shutdown_then_channel_close_returns_ok() {
+    let (conn, server) = start_raw();
+    let mut client = Client {
+        conn,
+        server: None,
+        next_id: 0,
+    };
+    client.request::<Initialize>(InitializeParams::default());
+    client.notify::<Initialized>(lsp_types::InitializedParams {});
+    client.request::<Shutdown>(());
+    drop(client);
+    assert!(server.join().unwrap().is_ok());
+}
+
+#[test]
+fn request_before_initialize_does_not_panic() {
+    let (conn, server) = start_raw();
+    conn.sender
+        .send(Message::Request(Request::new(
+            RequestId::from(1),
+            "textDocument/hover".into(),
+            serde_json::Value::Null,
+        )))
+        .unwrap();
+    match conn.receiver.recv_timeout(Duration::from_secs(10)).unwrap() {
+        Message::Response(r) => assert_eq!(r.id, RequestId::from(1)),
+        other => panic!("{other:?}"),
+    }
+    drop(conn);
+    assert!(server.join().unwrap().is_err());
+}
+
+#[test]
+fn requests_after_shutdown_are_rejected() {
+    let (mut client, _) = Client::start();
+    client.request::<Shutdown>(());
+    client
+        .conn
+        .sender
+        .send(Message::Request(Request::new(
+            RequestId::from(77),
+            "marigold/unknown".into(),
+            serde_json::Value::Null,
+        )))
+        .unwrap();
+    match client.recv() {
+        Message::Response(r) => {
+            assert_eq!(r.id, RequestId::from(77));
+            assert_eq!(
+                r.response_result.unwrap_err().code,
+                lsp_server::ErrorCode::InvalidRequest as i32
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    client.notify::<Exit>(());
+    client.server.take().unwrap().join().unwrap();
+}
+
+#[test]
+fn did_change_with_no_content_changes_publishes_nothing() {
+    let (client, _) = Client::start();
+    change(&client, 2, &[]);
+    open(&client, "range(0, 1).retur");
+    let published = client.diagnostics();
+    assert_eq!(published.version, Some(1));
+    client.shutdown();
+}
+
+#[test]
+fn last_of_multiple_changes_wins_and_version_propagates() {
+    let (client, _) = Client::start();
+    change(&client, 7, &["range(0, 1).retur", "range(0, 1).return"]);
+    let published = client.diagnostics();
+    assert_eq!(published.version, Some(7));
+    assert!(published.diagnostics.is_empty());
+    change(&client, 8, &["range(0, 1).return", "range(0, 1).retur"]);
+    let published = client.diagnostics();
+    assert_eq!(published.version, Some(8));
+    assert_eq!(published.diagnostics.len(), 1);
+    client.shutdown();
+}
+
+#[test]
+fn response_messages_are_ignored() {
+    let (client, _) = Client::start();
+    client
+        .conn
+        .sender
+        .send(Message::Response(lsp_server::Response::new_ok(
+            RequestId::from(1234),
+            (),
+        )))
+        .unwrap();
+    open(&client, "range(0, 1).retur");
+    assert_eq!(client.diagnostics().diagnostics.len(), 1);
+    client.shutdown();
+}
+
+#[test]
+fn rapid_changes_publish_in_order() {
+    let (client, _) = Client::start();
+    for v in 1..=1000 {
+        change(&client, v, &["range(0, 1).retur"]);
+    }
+    for v in 1..=1000 {
+        assert_eq!(client.diagnostics().version, Some(v));
+    }
+    client.shutdown();
+}
+
+#[test]
+fn large_document_completes_within_bound() {
+    let (client, _) = Client::start();
+    let line = "range(0, 1).return\n";
+    let text = line.repeat(1_000_000 / line.len());
+    let start = std::time::Instant::now();
+    open(&client, &text);
+    client.diagnostics();
+    assert!(
+        start.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        start.elapsed()
+    );
+    client.shutdown();
+}
+
+#[test]
+fn help_text_is_formatted_into_message() {
+    let (client, _) = Client::start();
+    let mut found = None;
+    for src in [
+        "range(Colour).return",
+        "range(0, 1).retur",
+        "range(0, 1).frobnicate().return",
+        "enum A { X }\nrange(B).return",
+    ] {
+        open(&client, src);
+        for d in client.diagnostics().diagnostics {
+            if d.message.contains("\nhelp: ") {
+                found = Some(d.message);
+            }
+        }
+    }
+    let message = found.expect("no diagnostic carried help text");
+    let (head, help) = message.split_once("\nhelp: ").unwrap();
+    assert!(!head.is_empty() && !help.is_empty());
+    client.shutdown();
+}

@@ -1,9 +1,44 @@
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
+use std::time::Duration;
 
 fn frame(body: &str) -> String {
     format!("Content-Length: {}\r\n\r\n{body}", body.len())
 }
+
+static LIVE: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+fn spawn() -> Child {
+    let child = Command::new(env!("CARGO_BIN_EXE_marigold-lsp"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    LIVE.lock().unwrap().push(pid);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(10));
+        if LIVE.lock().unwrap().contains(&pid) {
+            let _ = Command::new("kill").arg("-9").arg(pid.to_string()).status();
+        }
+    });
+    child
+}
+
+fn stderr_of(child: Child) -> (std::process::ExitStatus, String) {
+    let pid = child.id();
+    let out = child.wait_with_output().unwrap();
+    LIVE.lock().unwrap().retain(|p| *p != pid);
+    (
+        out.status,
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#;
+const INITIALIZED: &str = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
 
 fn read_message(reader: &mut impl BufRead) -> serde_json::Value {
     let mut len = None;
@@ -25,12 +60,7 @@ fn read_message(reader: &mut impl BufRead) -> serde_json::Value {
 
 #[test]
 fn binary_speaks_only_lsp_on_stdout() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_marigold-lsp"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = spawn();
     let mut stdin = child.stdin.take().unwrap();
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
 
@@ -63,5 +93,56 @@ fn binary_speaks_only_lsp_on_stdout() {
     stdin.flush().unwrap();
     assert_eq!(read_message(&mut stdout)["id"], 2);
     drop(stdin);
-    assert!(child.wait().unwrap().success());
+    drop(stdout);
+    let (status, stderr) = stderr_of(child);
+    assert!(status.success());
+    assert_eq!(stderr, "");
+}
+
+#[test]
+fn eof_without_shutdown_exits_cleanly() {
+    let mut child = spawn();
+    let mut stdin = child.stdin.take().unwrap();
+    for body in [INIT, INITIALIZED] {
+        stdin.write_all(frame(body).as_bytes()).unwrap();
+    }
+    drop(stdin);
+    let (status, _) = stderr_of(child);
+    assert!(status.success());
+}
+
+#[test]
+fn exit_without_shutdown_exits_nonzero() {
+    let mut child = spawn();
+    let mut stdin = child.stdin.take().unwrap();
+    for body in [INIT, INITIALIZED, r#"{"jsonrpc":"2.0","method":"exit"}"#] {
+        stdin.write_all(frame(body).as_bytes()).unwrap();
+    }
+    drop(stdin);
+    let (status, stderr) = stderr_of(child);
+    assert_eq!(status.code(), Some(1));
+    assert!(stderr.contains("shutdown"), "{stderr}");
+}
+
+#[test]
+fn bad_content_length_exits_nonzero_without_hanging() {
+    let mut child = spawn();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"Content-Length: abc\r\n\r\n{}").unwrap();
+    drop(stdin);
+    let (status, _) = stderr_of(child);
+    assert_eq!(status.code(), Some(1));
+}
+
+#[test]
+fn bad_content_length_after_initialize_exits_nonzero() {
+    let mut child = spawn();
+    let mut stdin = child.stdin.take().unwrap();
+    for body in [INIT, INITIALIZED] {
+        stdin.write_all(frame(body).as_bytes()).unwrap();
+    }
+    stdin.write_all(b"Content-Length: -5\r\n\r\n").unwrap();
+    drop(stdin);
+    let (status, _) = stderr_of(child);
+    assert_eq!(status.code(), Some(1));
 }
