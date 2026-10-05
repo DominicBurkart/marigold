@@ -27,6 +27,37 @@ project's `opencode.json` (or your global opencode config):
 opencode starts the server the first time it touches a file whose extension
 matches.
 
+Then copy the contents of `AGENTS.md` into your project's `AGENTS.md` (or
+your global opencode `AGENTS.md`). It tells the agent to act on warnings as
+well as errors. That `AGENTS.md` is read by opencode is UNVERIFIED here.
+
+## Binary not on the PATH
+
+Use an absolute path as the first element of `command`:
+
+```json
+{
+  "lsp": {
+    "marigold": {
+      "command": ["/home/you/.cargo/bin/marigold-lsp"],
+      "extensions": [".marigold"]
+    }
+  }
+}
+```
+
+## Windows
+
+UNVERIFIED: this integration was not tested on Windows. Build with
+`cargo install --path marigold-lsp` and, if the bare command is not found, use
+the full path to `marigold-lsp.exe` in `command`, with escaped backslashes or
+forward slashes.
+
+## Uninstall
+
+Delete the `lsp.marigold` block from your `opencode.json` and remove the text
+you copied from `AGENTS.md`.
+
 ## Schema
 
 Each entry under `lsp` accepts these keys, per the opencode docs:

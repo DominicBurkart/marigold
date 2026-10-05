@@ -35,12 +35,35 @@ Then copy the contents of `AGENTS.md` into your project's `AGENTS.md` (or into
 `~/.codex/AGENTS.md` to apply it everywhere). It tells the agent to call
 `marigold_check` after editing `.marigold` files.
 
+## Binary not on the PATH
+
+Use an absolute path in `command`:
+
+```toml
+[mcp_servers.marigold]
+command = "/home/you/.cargo/bin/marigold-lsp"
+args = ["mcp"]
+```
+
+## Windows
+
+UNVERIFIED: this integration was not tested on Windows. Build with
+`cargo install --path marigold-lsp` and, if the bare command is not found, use
+the full path to `marigold-lsp.exe` in `command`, with single-quoted TOML
+literal strings or escaped backslashes.
+
+## Uninstall
+
+Delete the `[mcp_servers.marigold]` table from `~/.codex/config.toml` and the
+text you copied from `AGENTS.md`.
+
 ## Schema
 
 Per the Codex docs, `[mcp_servers.<name>]` requires `command` and accepts
 `args`, `env`, `env_vars`, `cwd`, `startup_timeout_sec`, `tool_timeout_sec`,
 `enabled`, `required`, `enabled_tools`, and `disabled_tools`. Codex reads
-`~/.codex/config.toml`, and the docs also mention a project-scoped
+`~/.codex/config.toml` (UNVERIFIED: the path was taken from the docs and
+not tested against a running Codex CLI), and the docs also mention a project-scoped
 `.codex/config.toml`.
 
 ## AGENTS.md convention
