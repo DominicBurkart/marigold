@@ -63,8 +63,8 @@ Per the Codex docs, `[mcp_servers.<name>]` requires `command` and accepts
 `args`, `env`, `env_vars`, `cwd`, `startup_timeout_sec`, `tool_timeout_sec`,
 `enabled`, `required`, `enabled_tools`, and `disabled_tools`. Codex reads
 `~/.codex/config.toml` (UNVERIFIED: the path was taken from the docs and
-not tested against a running Codex CLI), and the docs also mention a project-scoped
-`.codex/config.toml`.
+not tested against a running Codex CLI), and the docs also mention a
+project-scoped `.codex/config.toml`.
 
 ## AGENTS.md convention
 
