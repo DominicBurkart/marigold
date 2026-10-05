@@ -221,3 +221,57 @@ fn missing_workspace_root_is_harmless() {
     assert!(query(&mut client, "").is_empty());
     client.shutdown();
 }
+
+#[test]
+fn filesystem_root_and_relative_roots_are_ignored() {
+    let cwd_file = std::env::current_dir()
+        .unwrap()
+        .join("zz_cwd_probe.marigold");
+    fs::write(&cwd_file, "fn zz_cwd_probe(x: i32) -> i32 { x }\n").unwrap();
+    let params = InitializeParams {
+        workspace_folders: Some(vec![
+            WorkspaceFolder {
+                uri: lsp_types::Uri::from_str(if cfg!(windows) {
+                    "file:///C:/"
+                } else {
+                    "file:///"
+                })
+                .unwrap(),
+                name: "root".into(),
+            },
+            WorkspaceFolder {
+                uri: lsp_types::Uri::from_str("file:.").unwrap(),
+                name: "rel".into(),
+            },
+        ]),
+        ..Default::default()
+    };
+    let (mut client, _) = Client::start_with(params);
+    assert!(query(&mut client, "zz_cwd_probe").is_empty());
+    client.shutdown();
+    fs::remove_file(cwd_file).unwrap();
+}
+
+#[test]
+fn workspace_symbols_see_changed_and_removed_files_across_queries() {
+    let dir = scratch();
+    let file = dir.join("a.marigold");
+    fs::write(&file, "fn first_name(x: i32) -> i32 { x }\n").unwrap();
+    let (mut client, _) = Client::start_with(init_with_folder(&dir));
+    assert_eq!(names(&query(&mut client, "first_name")), ["first_name"]);
+    assert_eq!(names(&query(&mut client, "first_name")), ["first_name"]);
+    fs::write(&file, "fn other_name_here(x: i32) -> i32 { x }\n").unwrap();
+    let handle = fs::OpenOptions::new().write(true).open(&file).unwrap();
+    handle
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(10))
+        .unwrap();
+    assert!(query(&mut client, "first_name").is_empty());
+    assert_eq!(
+        names(&query(&mut client, "other_name")),
+        ["other_name_here"]
+    );
+    fs::remove_file(&file).unwrap();
+    assert!(query(&mut client, "other_name").is_empty());
+    client.shutdown();
+    fs::remove_dir_all(&dir).unwrap();
+}

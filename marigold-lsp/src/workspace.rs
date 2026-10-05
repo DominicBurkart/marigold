@@ -9,27 +9,62 @@
 //! assert_eq!(match_score("zz", "total"), None);
 //! ```
 
+use crate::nav::OutlineSymbol;
 use lsp_types::Uri;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
+use std::time::SystemTime;
 
 pub const MAX_FILES: usize = 1000;
 pub const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
+pub const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_ENTRIES: usize = 100_000;
 const SKIPPED_DIRS: &[&str] = &["target", "node_modules", ".git"];
 
-/// Reads up to [`MAX_FILES`] `*.marigold` files under `roots`, skipping symlinks,
-/// `target/`, `node_modules/` and files over [`MAX_FILE_BYTES`].
+/// Whether `root` may be scanned: an absolute path that is not a filesystem or drive root.
 ///
 /// ```
-/// assert!(marigold_lsp::workspace::scan(&[std::path::PathBuf::from("/definitely/not/here")]).is_empty());
+/// use marigold_lsp::workspace::is_usable_root;
+/// assert!(!is_usable_root(std::path::Path::new("/")));
+/// assert!(!is_usable_root(std::path::Path::new("relative/dir")));
 /// ```
-pub fn scan(roots: &[PathBuf]) -> Vec<(PathBuf, String)> {
+pub fn is_usable_root(root: &Path) -> bool {
+    root.is_absolute() && root.parent().is_some()
+}
+
+/// A `*.marigold` file found by [`discover`], with the metadata that keys the symbol cache.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Discovered {
+    pub path: PathBuf,
+    pub len: u64,
+    pub modified: Option<SystemTime>,
+}
+
+/// Finds up to [`MAX_FILES`] `*.marigold` files under `roots` whose sizes sum to at most
+/// [`MAX_TOTAL_BYTES`], skipping unusable roots, symlinks, `target/`, `node_modules/` and
+/// files over [`MAX_FILE_BYTES`].
+///
+/// ```
+/// assert!(marigold_lsp::workspace::discover(&[std::path::PathBuf::from("/definitely/not/here")]).is_empty());
+/// assert!(marigold_lsp::workspace::discover(&[std::path::PathBuf::from("/")]).is_empty());
+/// ```
+pub fn discover(roots: &[PathBuf]) -> Vec<Discovered> {
+    discover_with(roots, MAX_FILES, MAX_TOTAL_BYTES)
+}
+
+fn discover_with(roots: &[PathBuf], max_files: usize, max_total: u64) -> Vec<Discovered> {
     let mut files = Vec::new();
     let mut seen = HashSet::new();
     let mut visited = 0usize;
-    let mut stack: Vec<PathBuf> = roots.iter().rev().cloned().collect();
+    let mut total = 0u64;
+    let mut stack: Vec<PathBuf> = roots
+        .iter()
+        .filter(|r| is_usable_root(r))
+        .rev()
+        .cloned()
+        .collect();
     while let Some(dir) = stack.pop() {
         let Ok(read) = std::fs::read_dir(&dir) else {
             continue;
@@ -39,7 +74,7 @@ pub fn scan(roots: &[PathBuf]) -> Vec<(PathBuf, String)> {
         let mut subdirs = Vec::new();
         for entry in entries {
             visited += 1;
-            if visited > MAX_ENTRIES || files.len() >= MAX_FILES {
+            if visited > MAX_ENTRIES || files.len() >= max_files {
                 return files;
             }
             let Ok(kind) = entry.file_type() else {
@@ -57,19 +92,108 @@ pub fn scan(roots: &[PathBuf]) -> Vec<(PathBuf, String)> {
                 if !skipped {
                     subdirs.push(path);
                 }
-            } else if kind.is_file()
-                && path.extension().is_some_and(|e| e == "marigold")
-                && entry.metadata().is_ok_and(|m| m.len() <= MAX_FILE_BYTES)
-                && seen.insert(path.clone())
-            {
-                if let Ok(text) = std::fs::read_to_string(&path) {
-                    files.push((path, text));
+            } else if kind.is_file() && path.extension().is_some_and(|e| e == "marigold") {
+                let Ok(meta) = entry.metadata() else {
+                    continue;
+                };
+                if meta.len() > MAX_FILE_BYTES || !seen.insert(path.clone()) {
+                    continue;
                 }
+                if total + meta.len() > max_total {
+                    return files;
+                }
+                total += meta.len();
+                files.push(Discovered {
+                    path,
+                    len: meta.len(),
+                    modified: meta.modified().ok(),
+                });
             }
         }
         stack.extend(subdirs.into_iter().rev());
     }
     files
+}
+
+/// Reads the files [`discover`] finds under `roots`.
+///
+/// ```
+/// assert!(marigold_lsp::workspace::scan(&[std::path::PathBuf::from("/definitely/not/here")]).is_empty());
+/// ```
+pub fn scan(roots: &[PathBuf]) -> Vec<(PathBuf, String)> {
+    discover(roots)
+        .into_iter()
+        .filter_map(|f| std::fs::read_to_string(&f.path).ok().map(|t| (f.path, t)))
+        .collect()
+}
+
+#[derive(Debug)]
+struct CacheEntry {
+    len: u64,
+    modified: Option<SystemTime>,
+    symbols: Arc<Vec<OutlineSymbol>>,
+}
+
+/// Declaration names of workspace files, cached by path, size and modification time.
+///
+/// ```
+/// let mut index = marigold_lsp::workspace::SymbolIndex::default();
+/// assert!(index.symbols(&[std::path::PathBuf::from("/definitely/not/here")]).is_empty());
+/// assert_eq!(index.parse_count(), 0);
+/// ```
+#[derive(Debug, Default)]
+pub struct SymbolIndex {
+    entries: HashMap<PathBuf, CacheEntry>,
+    parses: usize,
+}
+
+impl SymbolIndex {
+    pub fn parse_count(&self) -> usize {
+        self.parses
+    }
+
+    pub fn symbols(&mut self, roots: &[PathBuf]) -> Vec<(PathBuf, Arc<Vec<OutlineSymbol>>)> {
+        self.symbols_with(roots, MAX_FILES, MAX_TOTAL_BYTES)
+    }
+
+    fn symbols_with(
+        &mut self,
+        roots: &[PathBuf],
+        max_files: usize,
+        max_total: u64,
+    ) -> Vec<(PathBuf, Arc<Vec<OutlineSymbol>>)> {
+        let found = discover_with(roots, max_files, max_total);
+        let live: HashSet<&PathBuf> = found.iter().map(|f| &f.path).collect();
+        self.entries.retain(|p, _| live.contains(p));
+        let mut out = Vec::with_capacity(found.len());
+        for file in &found {
+            let fresh = self
+                .entries
+                .get(&file.path)
+                .is_some_and(|e| e.len == file.len && e.modified == file.modified);
+            if !fresh {
+                let Ok(text) = std::fs::read_to_string(&file.path) else {
+                    self.entries.remove(&file.path);
+                    continue;
+                };
+                self.parses += 1;
+                let symbols = Arc::new(crate::nav::declaration_names(&text));
+                self.entries.insert(
+                    file.path.clone(),
+                    CacheEntry {
+                        len: file.len,
+                        modified: file.modified,
+                        symbols,
+                    },
+                );
+            }
+            out.push((
+                file.path.clone(),
+                Arc::clone(&self.entries[&file.path].symbols),
+            ));
+        }
+        out
+    }
 }
 
 fn percent_decode(s: &str) -> Option<String> {
@@ -274,5 +398,89 @@ mod tests {
         }
         assert!(uri_to_path(&Uri::from_str("https://h/p").unwrap()).is_none());
         assert!(uri_to_path(&Uri::from_str("file://remote/p").unwrap()).is_none() || cfg!(windows));
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("marigold-wsu-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn roots_must_be_absolute_and_not_filesystem_roots() {
+        assert!(!is_usable_root(Path::new("/")));
+        assert!(!is_usable_root(Path::new("")));
+        assert!(!is_usable_root(Path::new("rel/dir")));
+        assert!(!is_usable_root(Path::new(".")));
+        assert!(is_usable_root(&std::env::temp_dir()));
+        if cfg!(windows) {
+            assert!(!is_usable_root(Path::new("C:\\")));
+            assert!(!is_usable_root(Path::new("C:")));
+        }
+    }
+
+    #[test]
+    fn discover_ignores_unusable_roots() {
+        let dir = scratch("roots");
+        std::fs::write(dir.join("a.marigold"), "x = range(0, 1)").unwrap();
+        assert!(discover(&[PathBuf::from("/")]).is_empty());
+        let rel = PathBuf::from(dir.file_name().unwrap());
+        assert!(discover(&[rel]).is_empty());
+        assert_eq!(discover(std::slice::from_ref(&dir)).len(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn total_byte_budget_stops_discovery() {
+        let dir = scratch("budget");
+        for name in ["a", "b", "c", "d"] {
+            std::fs::write(dir.join(format!("{name}.marigold")), "x".repeat(100)).unwrap();
+        }
+        assert_eq!(
+            discover_with(std::slice::from_ref(&dir), 1000, 250).len(),
+            2
+        );
+        assert_eq!(
+            discover_with(std::slice::from_ref(&dir), 1000, 400).len(),
+            4
+        );
+        assert_eq!(discover_with(std::slice::from_ref(&dir), 1000, 99).len(), 0);
+        assert_eq!(
+            discover_with(std::slice::from_ref(&dir), 3, 10_000).len(),
+            3
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn default_total_budget_is_64_mib() {
+        assert_eq!(MAX_TOTAL_BYTES, 64 * 1024 * 1024);
+    }
+
+    #[test]
+    fn index_reuses_unchanged_files_and_reparses_changed_ones() {
+        let dir = scratch("cache");
+        let file = dir.join("a.marigold");
+        std::fs::write(&file, "x = range(0, 1)").unwrap();
+        let mut index = SymbolIndex::default();
+        let roots = [dir.clone()];
+        let first = index.symbols(&roots);
+        assert_eq!(first[0].1[0].name, "x");
+        assert_eq!(index.parse_count(), 1);
+        index.symbols(&roots);
+        index.symbols(&roots);
+        assert_eq!(index.parse_count(), 1);
+        std::fs::write(&file, "y = range(0, 1)").unwrap();
+        let handle = std::fs::OpenOptions::new().write(true).open(&file).unwrap();
+        handle
+            .set_modified(SystemTime::now() + std::time::Duration::from_secs(5))
+            .unwrap();
+        let changed = index.symbols(&roots);
+        assert_eq!(changed[0].1[0].name, "y");
+        assert_eq!(index.parse_count(), 2);
+        std::fs::remove_file(&file).unwrap();
+        assert!(index.symbols(&roots).is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

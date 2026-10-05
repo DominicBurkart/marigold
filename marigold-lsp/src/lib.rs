@@ -7,6 +7,10 @@
 //! opened or changed. It also answers definition, references, document and
 //! workspace symbols, rename and hover (signature plus complexity) requests.
 //!
+//! The [`mcp`] server is separate and exposes only check, symbols, definition,
+//! references and complexity tools: it has no rename, hover or workspace-symbol
+//! tools. Those are available over LSP only.
+//!
 //! ```
 //! let diags = marigold_lsp::lsp_diagnostics("range(Colour).return");
 //! assert_eq!(diags.len(), 1);
@@ -173,6 +177,7 @@ struct Server {
     hierarchical_symbols: bool,
     roots: Vec<PathBuf>,
     probe: Option<fn(&str)>,
+    index: std::sync::Mutex<workspace::SymbolIndex>,
 }
 
 type Failure = (ErrorCode, String);
@@ -195,12 +200,14 @@ impl Server {
             .map(|f| &f.uri)
             .chain(legacy_root)
             .filter_map(workspace::uri_to_path)
+            .filter(|p| workspace::is_usable_root(p))
             .collect();
         Self {
             docs: HashMap::new(),
             hierarchical_symbols,
             roots,
             probe: None,
+            index: Default::default(),
         }
     }
 
@@ -259,7 +266,7 @@ impl Server {
         &self,
         params: WorkspaceSymbolParams,
     ) -> Result<serde_json::Value, Failure> {
-        let mut sources: Vec<(Uri, String)> = self
+        let sources: Vec<(Uri, String)> = self
             .docs
             .iter()
             .map(|(u, t)| (u.clone(), t.clone()))
@@ -273,18 +280,29 @@ impl Server {
                     .map_or_else(|| u.as_str().to_string(), |c| c.as_str().to_string())
             })
             .collect();
-        for (path, text) in workspace::scan(&self.roots) {
-            if let Some(uri) = workspace::path_to_uri(&path) {
-                if !open.contains(uri.as_str()) {
-                    sources.push((uri, text));
-                }
-            }
-        }
+        let indexed = self
+            .index
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .symbols(&self.roots);
         let mut hits: Vec<(u8, SymbolInformation)> = Vec::new();
         for (uri, text) in &sources {
             for s in nav::declaration_names(text) {
                 if let Some(score) = workspace::match_score(&params.query, &s.name) {
                     hits.push((score, symbol_information(s, uri)));
+                }
+            }
+        }
+        for (path, symbols) in indexed {
+            let Some(uri) = workspace::path_to_uri(&path) else {
+                continue;
+            };
+            if open.contains(uri.as_str()) {
+                continue;
+            }
+            for s in symbols.iter() {
+                if let Some(score) = workspace::match_score(&params.query, &s.name) {
+                    hits.push((score, symbol_information(s.clone(), &uri)));
                 }
             }
         }
