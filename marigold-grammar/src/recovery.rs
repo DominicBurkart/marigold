@@ -4,9 +4,21 @@ fn starts_expression(c: char) -> bool {
     c.is_alphabetic() || c == '_'
 }
 
+fn ends_with_declaration_keyword(trimmed: &str) -> bool {
+    let word_start = trimmed
+        .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .map_or(0, |i| {
+            i + trimmed[i..].chars().next().map_or(1, char::len_utf8)
+        });
+    let preceded_by_dot = trimmed[..word_start].ends_with('.');
+    !preceded_by_dot && matches!(&trimmed[word_start..], "fn" | "struct" | "enum")
+}
+
 fn continues_previous_line(before: &str) -> bool {
     let trimmed = before.trim_end();
-    trimmed.ends_with("->") || trimmed.ends_with(['=', '.', ',', '('])
+    trimmed.ends_with("->")
+        || trimmed.ends_with(['=', '.', ',', '('])
+        || ends_with_declaration_keyword(trimmed)
 }
 
 pub(crate) fn top_level_chunks(src: &str) -> Vec<Range<usize>> {
@@ -34,6 +46,14 @@ pub(crate) fn top_level_chunks(src: &str) -> Vec<Range<usize>> {
                 while i < bytes.len() && bytes[i] != b'\n' {
                     i += 1;
                 }
+                continue;
+            }
+            b'/' if depth > 0 && bytes.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i < bytes.len() && !(bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/')) {
+                    i += 1;
+                }
+                i += 2;
                 continue;
             }
             b'\'' if depth > 0 => {
@@ -102,6 +122,23 @@ mod tests {
             vec!["a\n  .map(f)\n  .return"]
         );
         assert_eq!(pieces("x =\nrange(0, 1)"), vec!["x =\nrange(0, 1)"]);
+    }
+
+    #[test]
+    fn does_not_split_after_a_lone_declaration_keyword() {
+        assert_eq!(pieces("fn\nf()"), vec!["fn\nf()"]);
+        assert_eq!(pieces("struct\nRow"), vec!["struct\nRow"]);
+        assert_eq!(pieces("enum\nE"), vec!["enum\nE"]);
+        assert_eq!(pieces("a.fn\nb"), vec!["a.fn\n", "b"]);
+        assert_eq!(pieces("fnx\nb"), vec!["fnx\n", "b"]);
+    }
+
+    #[test]
+    fn does_not_split_inside_block_comments_in_bodies() {
+        assert_eq!(
+            pieces("fn f() { /* }\nx */ }\nb"),
+            vec!["fn f() { /* }\nx */ }\n", "b"]
+        );
     }
 
     #[test]
