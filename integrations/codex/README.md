@@ -1,7 +1,8 @@
 # Marigold config for OpenAI Codex CLI
 
-Codex has no LSP client, so this optional integration exposes Marigold's
-checks as an MCP tool instead. Marigold itself never needs it.
+Codex has no LSP client as of v0.125.0 (a third-party report; re-check before
+relying on it), so this optional integration exposes Marigold's checks as an
+MCP tool instead. Marigold itself never needs it.
 
 ## Tools
 
@@ -44,10 +45,13 @@ Per the Codex docs, `[mcp_servers.<name>]` requires `command` and accepts
 
 ## AGENTS.md convention
 
-Codex reads `~/.codex/AGENTS.md` (or `AGENTS.override.md`) first, then each
-`AGENTS.md` from the Git root down to the working directory, concatenated so
-that closer files take precedence. The combined size is capped at 32 KiB by
-default (`project_doc_max_bytes`).
+Per the Codex docs (not tested here), the global file is
+`~/.codex/AGENTS.override.md` if present, otherwise `~/.codex/AGENTS.md`. Each
+directory from the Git root down to the working directory is then checked for
+`AGENTS.override.md`, then `AGENTS.md`, then any
+`project_doc_fallback_filenames`. The files are concatenated, closer ones
+winning, and the combined size is capped at 32 KiB by default
+(`project_doc_max_bytes`).
 
 ## Verify
 
@@ -59,8 +63,10 @@ that it calls `marigold_check` and reports the diagnostic.
 - Sources: Codex MCP and AGENTS.md docs, read 2026-10-05 via
   learn.chatgpt.com (redirected from developers.openai.com/codex).
 - Minimum Codex CLI version: UNVERIFIED.
-- Whether project-scoped `.codex/config.toml` requires a trusted project:
-  UNVERIFIED.
+- Project-scoped `.codex/config.toml` is honored only for trusted projects,
+  per learn.chatgpt.com/docs/extend/mcp.
+- The `AGENTS.md` lookup order above comes from a search snippet of the Codex
+  AGENTS.md guide and was not read in full or tested.
 - The server implements MCP revision 2025-11-25 and answers older
   handshake-based revisions. It has been tested against its own test suite,
   not against a running Codex CLI: UNVERIFIED with Codex itself.
