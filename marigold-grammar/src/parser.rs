@@ -20,6 +20,12 @@
 use pest::Parser;
 use std::fmt;
 
+#[cfg(feature = "otel")]
+use crate::instrument::Plan;
+#[cfg(not(feature = "otel"))]
+#[allow(dead_code)]
+enum Plan {}
+
 /// Error type for parser
 #[derive(Debug, Clone)]
 pub struct MarigoldParseError(pub String);
@@ -142,7 +148,7 @@ impl PestParser {
             None
         };
 
-        match Self::generate_rust_code(expressions, resolved_bounds) {
+        match Self::generate_rust_code(expressions, resolved_bounds, None) {
             Ok(_) => Vec::new(),
             Err(msg) => vec![Diagnostic::whole(input, "codegen-error", msg)],
         }
@@ -214,6 +220,19 @@ impl PestParser {
 
     /// Internal function: parse input and build AST
     fn parse_input(input: &str) -> Result<String, String> {
+        Self::parse_input_with(input, None)
+    }
+
+    #[cfg(feature = "otel")]
+    pub(crate) fn parse_instrumented(
+        input: &str,
+        options: &crate::instrument::CodegenOptions,
+    ) -> Result<String, String> {
+        let plan = Plan::new(input, options);
+        Self::parse_input_with(input, Some(&plan))
+    }
+
+    fn parse_input_with(input: &str, plan: Option<&Plan>) -> Result<String, String> {
         // Stage 1: Parse with Pest grammar
         let pairs = MarigoldPestParser::parse(Rule::program, input)
             .map_err(|e| format!("Parse error: {}", e))?;
@@ -228,7 +247,7 @@ impl PestParser {
         let resolved_bounds = Self::validate_bounded_types(&expressions)?;
 
         // Stage 4: Generate Rust code (replicating LALRPOP logic)
-        Self::generate_rust_code(expressions, resolved_bounds)
+        Self::generate_rust_code(expressions, resolved_bounds, plan)
     }
 
     /// Resolve `InputCount::Enum(name)` placeholders produced by `range(EnumName)`.
@@ -304,6 +323,7 @@ impl PestParser {
     fn generate_rust_code(
         expressions: Vec<crate::nodes::TypedExpression>,
         resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
+        plan: Option<&Plan>,
     ) -> Result<String, String> {
         let struct_bounds = Self::build_struct_bounds_map(&resolved_bounds);
         let mut output = "async {\n    use ::marigold::marigold_impl::*;\n    ".to_string();
@@ -341,15 +361,18 @@ impl PestParser {
         // 3. Generate stream variable declarations
         let stream_variable_declarations = expressions
             .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::StreamVariable(v) => Some(v.declaration_code()),
+            .enumerate()
+            .filter_map(|(i, expr)| match expr {
+                crate::nodes::TypedExpression::StreamVariable(v) => {
+                    Some(Self::variable_declaration_code(plan, i, v))
+                }
                 crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                    Some(v.declaration_code())
+                    Some(Self::variable_from_prior_declaration_code(plan, i, v))
                 }
                 _ => None,
             })
-            .map(|s| format!("{s}\n\n"))
-            .collect::<Vec<_>>()
+            .map(|s| s.map(|s| format!("{s}\n\n")))
+            .collect::<Result<Vec<_>, String>>()?
             .join("");
 
         output.push_str(&stream_variable_declarations);
@@ -357,12 +380,17 @@ impl PestParser {
         // 4. Collect returning streams
         let returning_stream_vec = expressions
             .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::UnnamedReturningStream(s) => Some(s.code()),
-                crate::nodes::TypedExpression::NamedReturningStream(s) => Some(s.code()),
+            .enumerate()
+            .filter_map(|(i, expr)| match expr {
+                crate::nodes::TypedExpression::UnnamedReturningStream(s) => {
+                    Some(Self::unnamed_stream_code(plan, i, s))
+                }
+                crate::nodes::TypedExpression::NamedReturningStream(s) => {
+                    Some(Self::named_stream_code(plan, i, s))
+                }
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, String>>()?;
 
         let n_returning_streams = returning_stream_vec.len();
 
@@ -381,12 +409,17 @@ impl PestParser {
         // 5. Collect non-returning streams
         let non_returning_streams = expressions
             .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::UnnamedNonReturningStream(s) => Some(s.code()),
-                crate::nodes::TypedExpression::NamedNonReturningStream(s) => Some(s.code()),
+            .enumerate()
+            .filter_map(|(i, expr)| match expr {
+                crate::nodes::TypedExpression::UnnamedNonReturningStream(s) => {
+                    Some(Self::unnamed_stream_code(plan, i, s))
+                }
+                crate::nodes::TypedExpression::NamedNonReturningStream(s) => {
+                    Some(Self::named_stream_code(plan, i, s))
+                }
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, String>>()?;
 
         output.push_str(
             &non_returning_streams
@@ -481,6 +514,58 @@ impl PestParser {
         output.push_str("}\n");
 
         Ok(output)
+    }
+
+    fn unnamed_stream_code(
+        plan: Option<&Plan>,
+        expr_index: usize,
+        node: &crate::nodes::UnnamedStreamNode,
+    ) -> Result<String, String> {
+        #[cfg(feature = "otel")]
+        if let Some(plan) = plan {
+            return plan.unnamed(expr_index, node);
+        }
+        let _ = (plan, expr_index);
+        Ok(node.code())
+    }
+
+    fn named_stream_code(
+        plan: Option<&Plan>,
+        expr_index: usize,
+        node: &crate::nodes::NamedStreamNode,
+    ) -> Result<String, String> {
+        #[cfg(feature = "otel")]
+        if let Some(plan) = plan {
+            return plan.named(expr_index, node);
+        }
+        let _ = (plan, expr_index);
+        Ok(node.code())
+    }
+
+    fn variable_declaration_code(
+        plan: Option<&Plan>,
+        expr_index: usize,
+        node: &crate::nodes::StreamVariableNode,
+    ) -> Result<String, String> {
+        #[cfg(feature = "otel")]
+        if let Some(plan) = plan {
+            return plan.variable(expr_index, node);
+        }
+        let _ = (plan, expr_index);
+        Ok(node.declaration_code())
+    }
+
+    fn variable_from_prior_declaration_code(
+        plan: Option<&Plan>,
+        expr_index: usize,
+        node: &crate::nodes::StreamVariableFromPriorStreamVariableNode,
+    ) -> Result<String, String> {
+        #[cfg(feature = "otel")]
+        if let Some(plan) = plan {
+            return plan.variable_from_prior(expr_index, node);
+        }
+        let _ = (plan, expr_index);
+        Ok(node.declaration_code())
     }
 
     fn build_struct_bounds_map(

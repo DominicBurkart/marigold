@@ -16,6 +16,8 @@ jobs:
           toolchain: stable
     - run:           cargo test
     - run:           cargo test --features tokio,io
+    - run:           cargo test --features otel
+    - run:           cargo test --features tokio,io,otel
     - run:           cargo test --features tokio
     - run:           cargo test --features async-std
     - run:           cargo test --all-features

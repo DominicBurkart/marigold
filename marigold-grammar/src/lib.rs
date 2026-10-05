@@ -55,6 +55,7 @@
 //! - `io`: I/O features (available in other crates)
 //! - `tokio`: Tokio runtime integration (available in other crates)
 //! - `async-std`: async-std runtime integration (available in other crates)
+//! - `otel`: [`marigold_parse_instrumented`] generates OpenTelemetry-instrumented code
 //!
 //! ## Performance Characteristics
 //!
@@ -69,6 +70,8 @@ pub use itertools;
 pub mod bound_resolution;
 pub mod complexity;
 pub mod diagnostics;
+#[cfg(feature = "otel")]
+pub mod instrument;
 pub mod node_ids;
 pub mod nodes;
 pub mod parser;
@@ -96,6 +99,32 @@ pub mod pest_ast_builder;
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
+}
+
+/// Generate Rust code in which every input, stream function and output is wrapped with the
+/// OpenTelemetry adapters of `marigold_impl::telemetry`.
+///
+/// Available with the `otel` feature. [`marigold_parse`] is unaffected by the feature. The node
+/// ids embedded in the code are the ones [`marigold_node_ids`] returns for
+/// [`instrument::CodegenOptions::program`].
+///
+/// ```
+/// use marigold_grammar::instrument::CodegenOptions;
+/// use marigold_grammar::{marigold_node_ids, marigold_parse_instrumented};
+///
+/// let src = "range(0, 5).map(double).return";
+/// let code = marigold_parse_instrumented(src, &CodegenOptions::new("demo")).unwrap();
+/// for node in marigold_node_ids(src, "demo") {
+///     assert!(code.contains(node.id.as_str()));
+/// }
+/// assert!(code.contains("telemetry::instrument("));
+/// ```
+#[cfg(feature = "otel")]
+pub fn marigold_parse_instrumented(
+    s: &str,
+    options: &instrument::CodegenOptions,
+) -> Result<String, parser::MarigoldParseError> {
+    parser::PestParser::parse_instrumented(s, options).map_err(parser::MarigoldParseError)
 }
 
 /// Check Marigold source and return every diagnostic found, with byte ranges.
