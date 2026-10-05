@@ -39,6 +39,27 @@ impl Client {
         (client, serde_json::from_value(result).unwrap())
     }
 
+    #[cfg(feature = "telemetry")]
+    pub fn start_telemetry(
+        source: Option<Box<dyn marigold_lsp::telemetry::TelemetrySource + Send>>,
+    ) -> (Self, InitializeResult) {
+        let (server_conn, conn) = Connection::memory();
+        let server = thread::spawn(move || {
+            marigold_lsp::serve_with_telemetry(&server_conn, source).unwrap()
+        });
+        let mut client = Client {
+            conn,
+            server: Some(server),
+            next_id: 0,
+        };
+        let result = client
+            .call::<Initialize>(InitializeParams::default())
+            .response_result
+            .expect("initialize failed");
+        client.notify::<Initialized>(lsp_types::InitializedParams {});
+        (client, serde_json::from_value(result).unwrap())
+    }
+
     pub fn call<R: lsp_types::request::Request>(&mut self, params: R::Params) -> Response {
         self.call_raw(R::METHOD, serde_json::to_value(params).unwrap())
     }

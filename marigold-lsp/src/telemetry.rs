@@ -196,6 +196,198 @@ pub fn annotate(
     try_annotate(program, source_text, source).unwrap_or_default()
 }
 
+/// The default observation window.
+pub const DEFAULT_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Parses a window such as `24h`, `30m`, `90s` or `7d`; zero and malformed values are rejected.
+///
+/// ```
+/// use marigold_lsp::telemetry::parse_window;
+/// use std::time::Duration;
+///
+/// assert_eq!(parse_window("24h"), Some(Duration::from_secs(86_400)));
+/// assert_eq!(parse_window("30m"), Some(Duration::from_secs(1_800)));
+/// assert_eq!(parse_window("0h"), None);
+/// assert_eq!(parse_window("soon"), None);
+/// ```
+pub fn parse_window(value: &str) -> Option<Duration> {
+    let value = value.trim();
+    let unit = value.chars().last()?;
+    let multiplier = match unit {
+        's' => 1,
+        'm' => 60,
+        'h' => 3_600,
+        'd' => 86_400,
+        _ => return None,
+    };
+    let count: u64 = value[..value.len() - 1].parse().ok()?;
+    let secs = count.checked_mul(multiplier).filter(|s| *s > 0)?;
+    Some(Duration::from_secs(secs))
+}
+
+/// Renders a window the way hover shows it: whole hours, else whole minutes, else seconds.
+///
+/// ```
+/// use marigold_lsp::telemetry::format_window;
+/// use std::time::Duration;
+///
+/// assert_eq!(format_window(Duration::from_secs(86_400)), "24h");
+/// assert_eq!(format_window(Duration::from_secs(5_400)), "90m");
+/// assert_eq!(format_window(Duration::from_secs(45)), "45s");
+/// ```
+pub fn format_window(window: Duration) -> String {
+    let secs = window.as_secs();
+    if secs >= 3_600 && secs.is_multiple_of(3_600) {
+        format!("{}h", secs / 3_600)
+    } else if secs >= 60 && secs.is_multiple_of(60) {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
+/// The hover line for an annotation.
+///
+/// ```
+/// use marigold_grammar::marigold_node_ids;
+/// use marigold_lsp::telemetry::{annotate, observed_line, NodeStats, StaticSource};
+/// use std::time::Duration;
+///
+/// let src = "range(0, 3).return";
+/// let id = marigold_node_ids(src, "demo")[0].id.clone();
+/// let source = StaticSource::new(vec![NodeStats {
+///     node_id: id,
+///     observed_inputs: 7,
+///     observed_runs: 2,
+///     errors: 0,
+///     last_seen: None,
+///     window: Duration::from_secs(86_400),
+///     content_hash: None,
+/// }]);
+/// let found = annotate("demo", src, &source);
+/// assert_eq!(
+///     observed_line(&found[0]),
+///     "observed: 7 inputs \u{b7} 2 runs \u{b7} 0 errors (last 24h)"
+/// );
+/// ```
+pub fn observed_line(annotation: &NodeAnnotation) -> String {
+    let s = &annotation.stats;
+    format!(
+        "observed: {} inputs \u{b7} {} runs \u{b7} {} errors (last {}){}",
+        s.observed_inputs,
+        s.observed_runs,
+        s.errors,
+        format_window(s.window),
+        stale_suffix(annotation)
+    )
+}
+
+/// The short inlay hint label for an annotation.
+pub fn hint_label(annotation: &NodeAnnotation) -> String {
+    let s = &annotation.stats;
+    format!(
+        "{} in \u{b7} {} runs \u{b7} {} err{}",
+        s.observed_inputs,
+        s.observed_runs,
+        s.errors,
+        stale_suffix(annotation)
+    )
+}
+
+fn stale_suffix(annotation: &NodeAnnotation) -> &'static str {
+    if annotation.stale {
+        " (stale)"
+    } else {
+        ""
+    }
+}
+
+/// The smallest annotated node whose range contains `offset`.
+pub fn narrowest_at(annotations: &[NodeAnnotation], offset: usize) -> Option<&NodeAnnotation> {
+    annotations
+        .iter()
+        .filter(|a| a.range.start <= offset && offset < a.range.end)
+        .min_by_key(|a| a.range.end - a.range.start)
+}
+
+/// The program identity: `OTEL_SERVICE_NAME` when set, else the file stem, else `marigold`.
+///
+/// This mirrors how `marigold-impl` resolves `marigold.program`.
+///
+/// ```
+/// use marigold_lsp::telemetry::program_name_from;
+///
+/// assert_eq!(program_name_from(Some("svc"), Some("/a/b/main.marigold")), "svc");
+/// assert_eq!(program_name_from(None, Some("/a/b/main.marigold")), "main");
+/// assert_eq!(program_name_from(Some(""), None), "marigold");
+/// ```
+pub fn program_name_from(service_name: Option<&str>, path: Option<&str>) -> String {
+    service_name
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            path.and_then(|p| std::path::Path::new(p).file_stem())
+                .map(|s| s.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "marigold".to_string())
+}
+
+/// [`program_name_from`] reading `OTEL_SERVICE_NAME` from the environment.
+pub fn program_name(path: Option<&str>) -> String {
+    program_name_from(std::env::var("OTEL_SERVICE_NAME").ok().as_deref(), path)
+}
+
+/// Builds the configured source from `MARIGOLD_TELEMETRY` and friends, or `None` when telemetry
+/// is not configured or cannot be set up.
+///
+/// `MARIGOLD_TELEMETRY=datadog` selects Datadog when the `datadog` feature is built in, and
+/// `MARIGOLD_TELEMETRY_WINDOW` (for example `24h`) sets the window. Setup problems are reported
+/// on standard error without credentials.
+pub fn source_from_env() -> Option<Box<dyn TelemetrySource + Send>> {
+    source_from_vars(|name| std::env::var(name).ok())
+}
+
+/// [`source_from_env`] over an arbitrary variable lookup.
+///
+/// ```
+/// use marigold_lsp::telemetry::source_from_vars;
+///
+/// assert!(source_from_vars(|_| None).is_none());
+/// assert!(source_from_vars(|n| (n == "MARIGOLD_TELEMETRY").then(|| "nonsense".to_string())).is_none());
+/// ```
+pub fn source_from_vars(
+    get: impl Fn(&str) -> Option<String>,
+) -> Option<Box<dyn TelemetrySource + Send>> {
+    let backend = get("MARIGOLD_TELEMETRY")?;
+    let window = match get("MARIGOLD_TELEMETRY_WINDOW") {
+        None => DEFAULT_WINDOW,
+        Some(raw) => match parse_window(&raw) {
+            Some(window) => window,
+            None => {
+                eprintln!("marigold-lsp: ignoring invalid MARIGOLD_TELEMETRY_WINDOW");
+                DEFAULT_WINDOW
+            }
+        },
+    };
+    match backend.trim() {
+        #[cfg(feature = "datadog")]
+        "datadog" => match crate::datadog::DatadogSource::from_vars(&get, window) {
+            Ok(source) => Some(Box::new(source)),
+            Err(err) => {
+                eprintln!("marigold-lsp: telemetry disabled: {err}");
+                None
+            }
+        },
+        other => {
+            let _ = window;
+            eprintln!(
+                "marigold-lsp: telemetry disabled: unsupported MARIGOLD_TELEMETRY value {other:?}"
+            );
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,5 +522,74 @@ mod tests {
         let got = source.node_stats("demo", &[nodes[1].id.clone()]).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].node_id, nodes[1].id);
+    }
+
+    #[test]
+    fn window_parsing_and_formatting_round_trip() {
+        for raw in ["24h", "90m", "45s", "7d"] {
+            let window = parse_window(raw).unwrap();
+            assert_eq!(parse_window(&format_window(window)), Some(window), "{raw}");
+        }
+        assert_eq!(format_window(parse_window("7d").unwrap()), "168h");
+        for bad in ["", "h", "-1h", "1.5h", "1w", "99999999999999999999h", "0s"] {
+            assert_eq!(parse_window(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn narrowest_annotation_wins() {
+        let src = "x = range(0, 3).map(f)\nx.return";
+        let nodes = marigold_node_ids(src, "demo");
+        let source = StaticSource::new(nodes.iter().map(|n| stats(&n.id, 1, None)).collect());
+        let got = annotate("demo", src, &source);
+        let at = src.find("map").unwrap();
+        let hit = narrowest_at(&got, at).unwrap();
+        assert_eq!(hit.kind, NodeKind::StreamFunction);
+        assert!(narrowest_at(&got, src.len() + 5).is_none());
+    }
+
+    #[test]
+    fn labels_flag_stale_nodes() {
+        let src = "range(0, 3).return";
+        let nodes = marigold_node_ids(src, "demo");
+        let source = StaticSource::new(vec![stats(&nodes[0].id, 9, Some("0000000000000000"))]);
+        let got = annotate("demo", src, &source);
+        assert_eq!(
+            observed_line(&got[0]),
+            "observed: 9 inputs \u{b7} 1 runs \u{b7} 0 errors (last 24h) (stale)"
+        );
+        assert_eq!(
+            hint_label(&got[0]),
+            "9 in \u{b7} 1 runs \u{b7} 0 err (stale)"
+        );
+    }
+
+    #[test]
+    fn program_name_prefers_the_service_name() {
+        assert_eq!(program_name_from(Some("svc"), Some("a/b.marigold")), "svc");
+        assert_eq!(program_name_from(None, Some("a/b.marigold")), "b");
+        assert_eq!(program_name_from(None, None), "marigold");
+    }
+
+    #[test]
+    fn unconfigured_or_unknown_backends_yield_no_source() {
+        assert!(source_from_vars(|_| None).is_none());
+        let unknown = |n: &str| (n == "MARIGOLD_TELEMETRY").then(|| "prometheus".to_string());
+        assert!(source_from_vars(unknown).is_none());
+        let bare = |n: &str| (n == "MARIGOLD_TELEMETRY").then(|| "datadog".to_string());
+        assert!(source_from_vars(bare).is_none());
+    }
+
+    #[cfg(feature = "datadog")]
+    #[test]
+    fn datadog_is_selected_by_environment() {
+        let vars = |n: &str| match n {
+            "MARIGOLD_TELEMETRY" => Some("datadog".to_string()),
+            "DD_API_KEY" => Some("k".to_string()),
+            "DD_APP_KEY" => Some("a".to_string()),
+            "MARIGOLD_TELEMETRY_WINDOW" => Some("6h".to_string()),
+            _ => None,
+        };
+        assert!(source_from_vars(vars).is_some());
     }
 }

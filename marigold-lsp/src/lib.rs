@@ -159,21 +159,69 @@ pub fn capabilities() -> InitializeResult {
 /// assert!(handle.join().unwrap().is_ok());
 /// ```
 pub fn serve(connection: &Connection) -> Result<(), Error> {
+    #[cfg(feature = "telemetry")]
+    return serve_with_telemetry(connection, telemetry::source_from_env());
+    #[cfg(not(feature = "telemetry"))]
     serve_guarded(connection, None)
+}
+
+/// Like [`serve`], with an explicit telemetry source instead of one read from the environment.
+///
+/// With a source, hover gains an `observed:` line and `textDocument/inlayHint` is advertised
+/// and answered. With `None` the server behaves exactly like a build without telemetry.
+#[cfg(feature = "telemetry")]
+pub fn serve_with_telemetry(
+    connection: &Connection,
+    source: Option<Box<dyn telemetry::TelemetrySource + Send>>,
+) -> Result<(), Error> {
+    serve_guarded(connection, None, source)
 }
 
 #[doc(hidden)]
 pub fn serve_with_probe(connection: &Connection, probe: fn(&str)) -> Result<(), Error> {
+    #[cfg(feature = "telemetry")]
+    return serve_guarded(connection, Some(probe), None);
+    #[cfg(not(feature = "telemetry"))]
     serve_guarded(connection, Some(probe))
 }
 
-fn serve_guarded(connection: &Connection, probe: Option<fn(&str)>) -> Result<(), Error> {
+#[cfg(feature = "telemetry")]
+type TelemetryBox = Option<Box<dyn telemetry::TelemetrySource + Send>>;
+
+fn serve_guarded(
+    connection: &Connection,
+    probe: Option<fn(&str)>,
+    #[cfg(feature = "telemetry")] source: TelemetryBox,
+) -> Result<(), Error> {
     let (id, params) = connection.initialize_start()?;
-    connection.initialize_finish(id, serde_json::to_value(capabilities())?)?;
+    let mut init = capabilities();
+    if source.is_some() {
+        init.capabilities.inlay_hint_provider = Some(OneOf::Left(true));
+    }
+    connection.initialize_finish(id, serde_json::to_value(init)?)?;
     let params: InitializeParams = serde_json::from_value(params).unwrap_or_default();
     let mut server = Server::new(&params);
     server.probe = probe;
+    #[cfg(feature = "telemetry")]
+    {
+        server.telemetry = source.map(|source| TelemetryState {
+            source,
+            cache: std::cell::RefCell::new(HashMap::new()),
+        });
+    }
     main_loop(connection, &mut server)
+}
+
+#[cfg(feature = "telemetry")]
+const TELEMETRY_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+#[cfg(feature = "telemetry")]
+type CachedAnnotations = (std::time::Instant, String, Vec<telemetry::NodeAnnotation>);
+
+#[cfg(feature = "telemetry")]
+struct TelemetryState {
+    source: Box<dyn telemetry::TelemetrySource + Send>,
+    cache: std::cell::RefCell<HashMap<Uri, CachedAnnotations>>,
 }
 
 struct Server {
@@ -182,6 +230,8 @@ struct Server {
     roots: Vec<PathBuf>,
     probe: Option<fn(&str)>,
     index: std::sync::Mutex<workspace::SymbolIndex>,
+    #[cfg(feature = "telemetry")]
+    telemetry: Option<TelemetryState>,
 }
 
 type Failure = (ErrorCode, String);
@@ -212,6 +262,8 @@ impl Server {
             roots,
             probe: None,
             index: Default::default(),
+            #[cfg(feature = "telemetry")]
+            telemetry: None,
         }
     }
 
@@ -237,6 +289,10 @@ impl Server {
             }
             Rename::METHOD => {
                 self.rename(serde_json::from_value(req.params).map_err(invalid_params)?)
+            }
+            #[cfg(feature = "telemetry")]
+            lsp_types::request::InlayHintRequest::METHOD if self.telemetry.is_some() => {
+                self.inlay_hints(serde_json::from_value(req.params).map_err(invalid_params)?)
             }
             other => Err((
                 ErrorCode::MethodNotFound,
@@ -329,11 +385,78 @@ impl Server {
 
     fn hover(&self, params: HoverParams) -> Result<serde_json::Value, Failure> {
         let at = params.text_document_position_params;
-        let found = self
+        #[allow(unused_mut)]
+        let mut found = self
             .docs
             .get(&at.text_document.uri)
             .and_then(|text| hover::hover(text, at.position));
+        #[cfg(feature = "telemetry")]
+        if let (Some(hover), Some(text)) = (found.as_mut(), self.docs.get(&at.text_document.uri)) {
+            let offset = LineIndex::new(text).offset(at.position);
+            let annotations = self.annotations(&at.text_document.uri, text);
+            if let (Some(node), lsp_types::HoverContents::Markup(markup)) = (
+                telemetry::narrowest_at(&annotations, offset),
+                &mut hover.contents,
+            ) {
+                markup.value.push('\n');
+                markup.value.push_str(&telemetry::observed_line(node));
+            }
+        }
         serde_json::to_value(found).map_err(internal)
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn annotations(&self, uri: &Uri, text: &str) -> Vec<telemetry::NodeAnnotation> {
+        let Some(state) = &self.telemetry else {
+            return Vec::new();
+        };
+        if let Some((at, cached_text, found)) = state.cache.borrow().get(uri) {
+            if at.elapsed() < TELEMETRY_CACHE_TTL && cached_text == text {
+                return found.clone();
+            }
+        }
+        let path = workspace::uri_to_path(uri);
+        let program = telemetry::program_name(path.as_deref().and_then(|p| p.to_str()));
+        let found = telemetry::annotate(&program, text, state.source.as_ref());
+        state.cache.borrow_mut().insert(
+            uri.clone(),
+            (std::time::Instant::now(), text.to_string(), found.clone()),
+        );
+        found
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn inlay_hints(
+        &self,
+        params: lsp_types::InlayHintParams,
+    ) -> Result<serde_json::Value, Failure> {
+        let uri = params.text_document.uri;
+        let Some(text) = self.docs.get(&uri) else {
+            return Ok(serde_json::Value::Null);
+        };
+        let lines = LineIndex::new(text);
+        let wanted = (
+            lines.offset(params.range.start),
+            lines.offset(params.range.end),
+        );
+        let hints: Vec<lsp_types::InlayHint> = self
+            .annotations(&uri, text)
+            .iter()
+            .filter(|a| a.range.end >= wanted.0 && a.range.end <= wanted.1)
+            .map(|a| lsp_types::InlayHint {
+                position: lines.position(a.range.end),
+                label: lsp_types::InlayHintLabel::String(telemetry::hint_label(a)),
+                kind: None,
+                text_edits: None,
+                tooltip: Some(lsp_types::InlayHintTooltip::String(
+                    telemetry::observed_line(a),
+                )),
+                padding_left: Some(true),
+                padding_right: None,
+                data: None,
+            })
+            .collect();
+        serde_json::to_value(Some(hints)).map_err(internal)
     }
 
     fn prepare_rename(

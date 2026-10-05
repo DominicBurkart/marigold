@@ -267,7 +267,8 @@ impl DatadogSource {
         Self::from_vars(|name| std::env::var(name).ok(), window)
     }
 
-    fn from_vars(
+    /// Builds a source from an arbitrary variable lookup, with the same names as [`Self::from_env`].
+    pub fn from_vars(
         get: impl Fn(&str) -> Option<String>,
         window: Duration,
     ) -> Result<Self, TelemetryError> {
