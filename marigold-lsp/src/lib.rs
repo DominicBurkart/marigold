@@ -40,6 +40,7 @@ use lsp_types::{
 use marigold_grammar::diagnostics::Severity;
 use position::LineIndex;
 use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -150,10 +151,20 @@ pub fn capabilities() -> InitializeResult {
 /// assert!(handle.join().unwrap().is_ok());
 /// ```
 pub fn serve(connection: &Connection) -> Result<(), Error> {
+    serve_guarded(connection, None)
+}
+
+#[doc(hidden)]
+pub fn serve_with_probe(connection: &Connection, probe: fn(&str)) -> Result<(), Error> {
+    serve_guarded(connection, Some(probe))
+}
+
+fn serve_guarded(connection: &Connection, probe: Option<fn(&str)>) -> Result<(), Error> {
     let (id, params) = connection.initialize_start()?;
     connection.initialize_finish(id, serde_json::to_value(capabilities())?)?;
     let params: InitializeParams = serde_json::from_value(params).unwrap_or_default();
     let mut server = Server::new(&params);
+    server.probe = probe;
     main_loop(connection, &mut server)
 }
 
@@ -161,6 +172,7 @@ struct Server {
     docs: HashMap<Uri, String>,
     hierarchical_symbols: bool,
     roots: Vec<PathBuf>,
+    probe: Option<fn(&str)>,
 }
 
 type Failure = (ErrorCode, String);
@@ -188,6 +200,7 @@ impl Server {
             docs: HashMap::new(),
             hierarchical_symbols,
             roots,
+            probe: None,
         }
     }
 
@@ -417,7 +430,21 @@ fn main_loop(connection: &Connection, server: &mut Server) -> Result<(), Error> 
                     )))?;
                 } else {
                     let id = req.id.clone();
-                    let response = match server.handle(req) {
+                    let method = req.method.clone();
+                    let outcome = catch_unwind(AssertUnwindSafe(|| {
+                        if let Some(probe) = server.probe {
+                            probe(&method);
+                        }
+                        server.handle(req)
+                    }))
+                    .unwrap_or_else(|_| {
+                        eprintln!("marigold-lsp: internal error while handling {method}");
+                        Err((
+                            ErrorCode::InternalError,
+                            format!("internal error while handling {method}"),
+                        ))
+                    });
+                    let response = match outcome {
                         Ok(value) => Response::new_ok(id, value),
                         Err((code, message)) => Response::new_err(id, code as i32, message),
                     };
@@ -433,7 +460,20 @@ fn main_loop(connection: &Connection, server: &mut Server) -> Result<(), Error> 
                     };
                 }
                 if !shutdown {
-                    handle_notification(connection, server, note)?;
+                    let method = note.method.clone();
+                    let probe = server.probe;
+                    let outcome = catch_unwind(AssertUnwindSafe(|| {
+                        if let Some(probe) = probe {
+                            probe(&method);
+                        }
+                        handle_notification(connection, server, note)
+                    }));
+                    match outcome {
+                        Ok(result) => result?,
+                        Err(_) => {
+                            eprintln!("marigold-lsp: internal error while handling {method}")
+                        }
+                    }
                 }
             }
             Message::Response(_) => {}
