@@ -335,7 +335,7 @@ impl Server {
                 .map_err(internal)
             }
             Err(nav::RenameError::NoSymbol) => Ok(serde_json::Value::Null),
-            Err(err @ nav::RenameError::NoDeclaration) => {
+            Err(err @ (nav::RenameError::NoDeclaration | nav::RenameError::RustBody { .. })) => {
                 Err((ErrorCode::RequestFailed, err.to_string()))
             }
             Err(err) => Err((ErrorCode::InvalidParams, err.to_string())),

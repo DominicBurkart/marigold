@@ -287,3 +287,161 @@ proptest! {
         }
     }
 }
+
+mod hardening {
+    use lsp_types::Position;
+    use marigold_lsp::nav::{rename, RenameError};
+
+    const PROG: &str = "x = range(0, 3)\nx.return";
+
+    fn at_x() -> Position {
+        Position::new(0, 0)
+    }
+
+    fn assert_invalid(new_name: &str) {
+        match rename(PROG, at_x(), new_name) {
+            Err(RenameError::InvalidName(n)) => assert_eq!(n, new_name),
+            other => panic!("{new_name}: expected InvalidName, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_rust_strict_keywords() {
+        for name in [
+            "match", "fn", "self", "Self", "super", "crate", "return", "let", "as", "async",
+            "await", "dyn", "loop", "type", "impl", "mod", "pub", "use", "where", "while", "move",
+            "mut", "ref", "static", "trait", "true", "false", "if", "else", "for", "in", "break",
+            "continue", "const", "extern", "unsafe", "struct", "enum",
+        ] {
+            assert_invalid(name);
+        }
+    }
+
+    #[test]
+    fn rejects_rust_reserved_keywords() {
+        for name in [
+            "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof",
+            "unsized", "virtual", "yield", "try", "gen",
+        ] {
+            assert_invalid(name);
+        }
+    }
+
+    #[test]
+    fn rejects_bare_underscore() {
+        assert_invalid("_");
+        assert!(rename(PROG, at_x(), "_x").is_ok());
+        assert!(rename(PROG, at_x(), "__").is_ok());
+    }
+
+    #[test]
+    fn rejects_marigold_names() {
+        for name in [
+            "range",
+            "read_file",
+            "select_all",
+            "map",
+            "filter",
+            "filter_map",
+            "permutations",
+            "permutations_with_replacement",
+            "combinations",
+            "keep_first_n",
+            "fold",
+            "ok",
+            "ok_or_panic",
+            "write_file",
+            "csv",
+        ] {
+            assert_invalid(name);
+        }
+    }
+
+    #[test]
+    fn rejects_prelude_names() {
+        for name in [
+            "Vec", "Option", "Result", "String", "Box", "Some", "None", "Ok", "Err", "main",
+        ] {
+            assert_invalid(name);
+        }
+    }
+
+    #[test]
+    fn keyword_prefixes_are_fine() {
+        for name in ["matches", "fn_", "selfie", "Vector", "mains"] {
+            assert!(rename(PROG, at_x(), name).is_ok(), "{name}");
+        }
+    }
+
+    #[test]
+    fn refuses_function_rename_when_rust_body_uses_the_name() {
+        let text = "fn double(x: i32) -> i32 {\n    if x > 100 { x } else { double(x * 2) }\n}\ny = range(0, 3).map(double)\ny.return";
+        match rename(text, Position::new(0, 4), "triple") {
+            Err(RenameError::RustBody { line, .. }) => assert_eq!(line, 2),
+            other => panic!("expected RustBody, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn refuses_struct_rename_when_rust_body_uses_the_name() {
+        let text = "struct Row { a: int[0, 5] }\nfn make() -> i32 {\n    let r = Row { a: 1 };\n    1\n}\nread_file(\"d.csv\", csv, struct=Row).return";
+        match rename(text, Position::new(0, 7), "Line") {
+            Err(RenameError::RustBody { line, .. }) => assert_eq!(line, 3),
+            other => panic!("expected RustBody, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn refuses_rename_when_rust_signature_uses_the_name() {
+        let text = "struct Row { a: int[0, 5] }\nfn make(r: Row) -> i32 { 1 }\nread_file(\"d.csv\", csv, struct=Row).return";
+        match rename(text, Position::new(0, 7), "Line") {
+            Err(RenameError::RustBody { line, .. }) => assert_eq!(line, 2),
+            other => panic!("expected RustBody, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn allows_function_rename_when_body_does_not_use_the_name() {
+        let text = "fn double(x: i32) -> i32 { x * 2 }\ny = range(0, 3).map(double)\ny.return";
+        let edits = rename(text, Position::new(0, 4), "triple").unwrap();
+        assert_eq!(edits.len(), 2);
+    }
+
+    #[test]
+    fn name_inside_rust_string_or_comment_is_not_a_use() {
+        let text = "fn double(x: i32) -> i32 {\n    let s = \"double\"; // double\n    x * 2\n}\ny = range(0, 3).map(double)\ny.return";
+        assert!(rename(text, Position::new(0, 4), "triple").is_ok());
+    }
+
+    #[test]
+    fn substring_of_longer_identifier_is_not_a_use() {
+        let text = "fn double(x: i32) -> i32 { let doubled = x * 2; doubled }\ny = range(0, 3).map(double)\ny.return";
+        assert!(rename(text, Position::new(0, 4), "triple").is_ok());
+    }
+
+    #[test]
+    fn stream_variable_rename_ignores_same_named_rust_locals() {
+        let text = "fn double(x: i32) -> i32 { x * 2 }\nx = range(0, 3).map(double)\nx.return";
+        assert!(rename(text, Position::new(1, 0), "y").is_ok());
+    }
+}
+
+#[test]
+fn server_maps_keyword_to_invalid_params_and_rust_use_to_request_failed() {
+    let (mut client, _) = Client::start();
+    let u = uri("hardening_codes");
+    let text =
+        "fn double(x: i32) -> i32 {\n    double(x)\n}\ny = range(0, 3).map(double)\ny.return\n";
+    client.open_at(&u, text);
+    let keyword = rename(&mut client, &u, pos_of(text, "y = "), "match");
+    assert_eq!(
+        error_code(keyword),
+        lsp_server::ErrorCode::InvalidParams as i32
+    );
+    let rust = rename(&mut client, &u, pos_of(text, "double("), "triple");
+    assert_eq!(
+        error_code(rust),
+        lsp_server::ErrorCode::RequestFailed as i32
+    );
+    client.shutdown();
+}

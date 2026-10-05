@@ -315,3 +315,30 @@ fn malformed_params_get_invalid_params() {
     );
     client.shutdown();
 }
+
+mod block_ranges {
+    use lsp_types::Position;
+
+    #[test]
+    fn char_literal_double_quote_does_not_toggle_string_state() {
+        let text = "fn f(x: i32) -> i32 {\n    let q = '\"';\n    x\n}\ny = range(0, 1)\ny.return";
+        let outline = marigold_lsp::nav::outline(text);
+        assert_eq!(outline[0].name, "f");
+        assert_eq!(outline[0].range.end, Position::new(3, 1));
+        assert_eq!(outline[1].name, "y");
+    }
+
+    #[test]
+    fn raw_string_with_braces_and_quotes_is_skipped() {
+        let text = "fn f() -> String {\n    r#\"} {\"#.to_string()\n}\ny = range(0, 1)\ny.return";
+        let outline = marigold_lsp::nav::outline(text);
+        assert_eq!(outline[0].range.end, Position::new(2, 1));
+    }
+
+    #[test]
+    fn escaped_quote_char_and_lifetimes_are_handled() {
+        let text = "fn f(s: i32) -> char {\n    let l: &'static str = \"x\";\n    let c = '\\'';\n    let d = '{';\n    '}'\n}\ny = range(0, 1)\ny.return";
+        let outline = marigold_lsp::nav::outline(text);
+        assert_eq!(outline[0].range.end, Position::new(5, 1));
+    }
+}

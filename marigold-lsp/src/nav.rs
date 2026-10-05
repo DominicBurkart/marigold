@@ -19,6 +19,7 @@ use marigold_grammar::symbols::{SymbolDeclaration, SymbolKind as Kind};
 use marigold_grammar::{marigold_stream_complexities, marigold_symbols};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct OutlineSymbol {
     pub name: String,
     pub kind: SymbolKind,
@@ -103,31 +104,128 @@ pub fn references(
     )
 }
 
-fn block_end(text: &str, from: usize) -> usize {
-    let line_end = text[from..].find('\n').map_or(text.len(), |i| from + i);
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+fn skip_literal_or_comment(bytes: &[u8], i: usize) -> Option<usize> {
+    let n = bytes.len();
+    match bytes[i] {
+        b'/' if bytes.get(i + 1) == Some(&b'/') => Some(
+            bytes[i..]
+                .iter()
+                .position(|&b| b == b'\n')
+                .map_or(n, |p| i + p),
+        ),
+        b'/' if bytes.get(i + 1) == Some(&b'*') => {
+            let mut j = i + 2;
+            while j < n && !(bytes[j] == b'*' && bytes.get(j + 1) == Some(&b'/')) {
+                j += 1;
+            }
+            Some((j + 2).min(n))
+        }
+        b'"' => {
+            let mut j = i + 1;
+            while j < n {
+                match bytes[j] {
+                    b'\\' => j += 2,
+                    b'"' => return Some(j + 1),
+                    _ => j += 1,
+                }
+            }
+            Some(n)
+        }
+        b'r' if i == 0
+            || !is_ident_byte(bytes[i - 1])
+            || (bytes[i - 1] == b'b' && (i < 2 || !is_ident_byte(bytes[i - 2]))) =>
+        {
+            let mut j = i + 1;
+            while bytes.get(j) == Some(&b'#') {
+                j += 1;
+            }
+            if bytes.get(j) != Some(&b'"') {
+                return None;
+            }
+            let hashes = j - i - 1;
+            j += 1;
+            while j < n {
+                if bytes[j] == b'"'
+                    && bytes[j + 1..]
+                        .iter()
+                        .take(hashes)
+                        .filter(|&&b| b == b'#')
+                        .count()
+                        == hashes
+                {
+                    return Some(j + 1 + hashes);
+                }
+                j += 1;
+            }
+            Some(n)
+        }
+        b'\'' => {
+            if bytes.get(i + 1) == Some(&b'\\') {
+                let mut j = i + 2;
+                while j < n && bytes[j] != b'\'' && bytes[j] != b'\n' {
+                    j += 1;
+                }
+                return Some((j + 1).min(n));
+            }
+            let rest = std::str::from_utf8(&bytes[i + 1..]).ok().or_else(|| {
+                let end = (i + 1..=n.min(i + 5))
+                    .rev()
+                    .find(|&e| std::str::from_utf8(&bytes[i + 1..e]).is_ok())?;
+                std::str::from_utf8(&bytes[i + 1..end]).ok()
+            })?;
+            let c = rest.chars().next()?;
+            let close = i + 1 + c.len_utf8();
+            (bytes.get(close) == Some(&b'\'')).then_some(close + 1)
+        }
+        _ => None,
+    }
+}
+
+fn brace_regions(text: &str) -> Vec<(usize, usize)> {
     let bytes = text.as_bytes();
-    let Some(open) = text[from..].find('{').map(|i| from + i) else {
-        return text[..line_end].trim_end_matches('\r').len();
-    };
+    let mut regions = Vec::new();
     let mut depth = 0usize;
-    let mut in_string = false;
-    let mut i = open;
+    let mut start = 0usize;
+    let mut i = 0usize;
     while i < bytes.len() {
+        if let Some(next) = skip_literal_or_comment(bytes, i) {
+            i = next.max(i + 1);
+            continue;
+        }
         match bytes[i] {
-            b'\\' if in_string => i += 1,
-            b'"' => in_string = !in_string,
-            b'{' if !in_string => depth += 1,
-            b'}' if !in_string => {
+            b'{' => {
+                if depth == 0 {
+                    start = i;
+                }
+                depth += 1;
+            }
+            b'}' if depth > 0 => {
                 depth -= 1;
                 if depth == 0 {
-                    return i + 1;
+                    regions.push((start, i + 1));
                 }
             }
             _ => {}
         }
         i += 1;
     }
-    text.len()
+    if depth > 0 {
+        regions.push((start, text.len()));
+    }
+    regions
+}
+
+fn block_end(text: &str, from: usize) -> usize {
+    let line_end = text[from..].find('\n').map_or(text.len(), |i| from + i);
+    let open = brace_regions(text).into_iter().find(|&(_, end)| end > from);
+    match open {
+        Some((_, end)) => end,
+        None => text[..line_end].trim_end_matches('\r').len(),
+    }
 }
 
 fn full_range(
@@ -215,12 +313,14 @@ pub fn declaration_names(text: &str) -> Vec<OutlineSymbol> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RenameError {
     NoSymbol,
     NoDeclaration,
     InvalidName(String),
     Clash(String),
     Breaks(String),
+    RustBody { name: String, line: usize },
 }
 
 impl std::fmt::Display for RenameError {
@@ -237,6 +337,10 @@ impl std::fmt::Display for RenameError {
             RenameError::Clash(name) => {
                 write!(f, "{name:?} is already declared with the same kind")
             }
+            RenameError::RustBody { name, line } => write!(
+                f,
+                "cannot rename {name:?}: it is also used in Rust code on line {line} (a {{ }} body or signature), which the server cannot rewrite; rename it there by hand first"
+            ),
             RenameError::Breaks(why) => write!(f, "rename would introduce errors: {why}"),
         }
     }
@@ -244,14 +348,101 @@ impl std::fmt::Display for RenameError {
 
 impl std::error::Error for RenameError {}
 
-/// Whether `name` is an ASCII identifier: a letter or underscore, then letters, digits or underscores.
+const RESERVED_NAMES: &[&str] = &[
+    "as",
+    "break",
+    "const",
+    "continue",
+    "crate",
+    "else",
+    "enum",
+    "extern",
+    "false",
+    "fn",
+    "for",
+    "if",
+    "impl",
+    "in",
+    "let",
+    "loop",
+    "match",
+    "mod",
+    "move",
+    "mut",
+    "pub",
+    "ref",
+    "return",
+    "self",
+    "Self",
+    "static",
+    "struct",
+    "super",
+    "trait",
+    "true",
+    "type",
+    "unsafe",
+    "use",
+    "where",
+    "while",
+    "async",
+    "await",
+    "dyn",
+    "abstract",
+    "become",
+    "box",
+    "do",
+    "final",
+    "macro",
+    "override",
+    "priv",
+    "typeof",
+    "unsized",
+    "virtual",
+    "yield",
+    "try",
+    "gen",
+    "union",
+    "range",
+    "read_file",
+    "select_all",
+    "map",
+    "filter",
+    "filter_map",
+    "permutations",
+    "permutations_with_replacement",
+    "combinations",
+    "keep_first_n",
+    "fold",
+    "ok",
+    "ok_or_panic",
+    "write_file",
+    "csv",
+    "Vec",
+    "Option",
+    "Result",
+    "String",
+    "Box",
+    "Some",
+    "None",
+    "Ok",
+    "Err",
+    "main",
+];
+
+/// Whether `name` is an ASCII identifier that is not a Rust keyword, a bare `_`, a Marigold
+/// builtin or a std prelude name: a letter or underscore, then letters, digits or underscores.
 ///
 /// ```
 /// assert!(marigold_lsp::nav::is_valid_identifier("_row2"));
+/// assert!(!marigold_lsp::nav::is_valid_identifier("match"));
+/// assert!(!marigold_lsp::nav::is_valid_identifier("_"));
 /// assert!(!marigold_lsp::nav::is_valid_identifier("2row"));
 /// assert!(!marigold_lsp::nav::is_valid_identifier("caf\u{e9}"));
 /// ```
 pub fn is_valid_identifier(name: &str) -> bool {
+    if name == "_" || RESERVED_NAMES.contains(&name) {
+        return false;
+    }
     let mut chars = name.chars();
     chars
         .next()
@@ -272,6 +463,30 @@ pub fn prepare_rename(text: &str, position: Position) -> Option<(Range, String)>
     let symbols = marigold_symbols(text);
     let symbol = symbols.symbol_at(lines.offset(position))?;
     Some((range_of(&lines, symbol.range()), symbol.name().to_string()))
+}
+
+fn untracked_use(text: &str, name: &str, covered: &[ByteRange]) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if let Some(next) = skip_literal_or_comment(bytes, i) {
+            i = next.max(i + 1);
+            continue;
+        }
+        if is_ident_byte(bytes[i]) {
+            let mut j = i;
+            while j < bytes.len() && is_ident_byte(bytes[j]) {
+                j += 1;
+            }
+            if &text[i..j] == name && !covered.iter().any(|r| r.start == i) {
+                return Some(text[..i].matches('\n').count() + 1);
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    None
 }
 
 /// Edits renaming the declaration under `position` and every reference that resolves to it.
@@ -314,6 +529,14 @@ pub fn rename_edits(
         .collect();
     ranges.sort_by_key(|r| r.start);
     ranges.dedup();
+    if decl.kind != Kind::StreamVariable {
+        if let Some(line) = untracked_use(text, &decl.name, &ranges) {
+            return Err(RenameError::RustBody {
+                name: decl.name.clone(),
+                line,
+            });
+        }
+    }
     Ok(ranges
         .into_iter()
         .map(|r| TextEdit::new(range_of(&lines, r), new_name.to_string()))
