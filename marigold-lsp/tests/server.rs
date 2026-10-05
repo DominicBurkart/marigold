@@ -14,6 +14,36 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
+const JOIN_LIMIT: Duration = Duration::from_secs(10);
+
+fn join_within<T>(handle: thread::JoinHandle<T>, limit: Duration) -> thread::Result<T> {
+    let start = std::time::Instant::now();
+    while !handle.is_finished() {
+        assert!(
+            start.elapsed() < limit,
+            "thread did not finish within {limit:?}"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    handle.join()
+}
+
+#[test]
+#[should_panic(expected = "did not finish within")]
+fn bounded_join_fails_instead_of_hanging_on_a_stuck_thread() {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let handle = thread::spawn(move || {
+        let _ = rx.recv();
+    });
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        join_within(handle, Duration::from_millis(100))
+    }));
+    drop(tx);
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+}
+
 struct Client {
     conn: Connection,
     server: Option<thread::JoinHandle<()>>,
@@ -85,7 +115,7 @@ impl Client {
     fn shutdown(mut self) {
         self.request::<Shutdown>(());
         self.notify::<Exit>(());
-        self.server.take().unwrap().join().unwrap();
+        join_within(self.server.take().unwrap(), JOIN_LIMIT).unwrap();
     }
 }
 
@@ -274,7 +304,7 @@ fn exit_without_shutdown_returns_error() {
             serde_json::Value::Null,
         )))
         .unwrap();
-    assert!(server.join().unwrap().is_err());
+    assert!(join_within(server, JOIN_LIMIT).unwrap().is_err());
 }
 
 #[test]
@@ -282,7 +312,7 @@ fn exit_after_shutdown_returns_ok() {
     let (mut client, _) = Client::start();
     client.request::<Shutdown>(());
     client.notify::<Exit>(());
-    assert!(client.server.take().unwrap().join().is_ok());
+    assert!(join_within(client.server.take().unwrap(), JOIN_LIMIT).is_ok());
 }
 
 #[test]
@@ -297,7 +327,7 @@ fn shutdown_then_channel_close_returns_ok() {
     client.notify::<Initialized>(lsp_types::InitializedParams {});
     client.request::<Shutdown>(());
     drop(client);
-    assert!(server.join().unwrap().is_ok());
+    assert!(join_within(server, JOIN_LIMIT).unwrap().is_ok());
 }
 
 #[test]
@@ -315,7 +345,7 @@ fn request_before_initialize_does_not_panic() {
         other => panic!("{other:?}"),
     }
     drop(conn);
-    assert!(server.join().unwrap().is_err());
+    assert!(join_within(server, JOIN_LIMIT).unwrap().is_err());
 }
 
 #[test]
@@ -342,7 +372,7 @@ fn requests_after_shutdown_are_rejected() {
         other => panic!("{other:?}"),
     }
     client.notify::<Exit>(());
-    client.server.take().unwrap().join().unwrap();
+    join_within(client.server.take().unwrap(), JOIN_LIMIT).unwrap();
 }
 
 #[test]
