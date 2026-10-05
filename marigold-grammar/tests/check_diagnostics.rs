@@ -187,6 +187,10 @@ const VALID_PROGRAMS: &[&str] = &[
     "range(0, 1).write_file(\"ünïcødé.csv\", csv)",
 ];
 
+fn has_error(diags: &[Diagnostic]) -> bool {
+    diags.iter().any(|d| d.severity == Severity::Error)
+}
+
 fn assert_ranges_valid(src: &str, diags: &[Diagnostic]) {
     for d in diags {
         assert!(d.range.start <= d.range.end, "{d:?}");
@@ -205,7 +209,7 @@ proptest! {
 
     #[test]
     fn check_agrees_with_parse(src in "\\PC{0,80}") {
-        prop_assert_eq!(marigold_check(&src).is_empty(), marigold_parse(&src).is_ok());
+        prop_assert_eq!(has_error(&marigold_check(&src)), marigold_parse(&src).is_err());
     }
 
     #[test]
@@ -228,7 +232,7 @@ proptest! {
         }
         let diags = marigold_check(&src);
         assert_ranges_valid(&src, &diags);
-        prop_assert_eq!(diags.is_empty(), marigold_parse(&src).is_ok());
+        prop_assert_eq!(has_error(&diags), marigold_parse(&src).is_err());
     }
 }
 

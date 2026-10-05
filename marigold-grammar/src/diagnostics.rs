@@ -33,6 +33,7 @@ pub struct ByteRange {
 #[non_exhaustive]
 pub enum Severity {
     Error,
+    Warning,
 }
 
 impl Severity {
@@ -40,10 +41,12 @@ impl Severity {
     /// use marigold_grammar::diagnostics::Severity;
     ///
     /// assert_eq!(Severity::Error.as_str(), "error");
+    /// assert_eq!(Severity::Warning.as_str(), "warning");
     /// ```
     pub fn as_str(self) -> &'static str {
         match self {
             Severity::Error => "error",
+            Severity::Warning => "warning",
         }
     }
 }
@@ -97,6 +100,14 @@ impl Diagnostic {
                 MAX_CHECK_INPUT_BYTES / (1024 * 1024)
             ),
         )
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn warning(range: ByteRange, code: &'static str, message: String) -> Self {
+        Self {
+            severity: Severity::Warning,
+            ..Self::error(range, code, message)
+        }
     }
 
     pub(crate) fn whole(src: &str, code: &'static str, message: String) -> Self {
@@ -182,4 +193,36 @@ fn floor_char_boundary(src: &str, i: usize) -> usize {
         i -= 1;
     }
     i
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warning_constructor_sets_severity() {
+        let d = Diagnostic::warning(ByteRange { start: 1, end: 3 }, "w", "m".into());
+        assert_eq!(d.severity, Severity::Warning);
+        assert_eq!(d.code, "w");
+        assert_eq!(d.range, ByteRange { start: 1, end: 3 });
+        assert_eq!(d.help, None);
+    }
+
+    #[test]
+    fn error_constructor_sets_severity() {
+        let d = Diagnostic::error(ByteRange { start: 0, end: 0 }, "e", "m".into());
+        assert_eq!(d.severity, Severity::Error);
+    }
+
+    #[test]
+    fn severity_serializes_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&Severity::Error).unwrap(),
+            "\"error\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Severity::Warning).unwrap(),
+            "\"warning\""
+        );
+    }
 }
