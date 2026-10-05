@@ -3,11 +3,17 @@
 Codex has no LSP client, so this optional integration exposes Marigold's
 checks as an MCP tool instead. Marigold itself never needs it.
 
-## Status
+## Tools
 
-The config below runs `marigold-lsp mcp`. The `mcp` subcommand and the
-`marigold_check` tool land in a later pull request; until then the server will
-not start. Do not install this integration before that release.
+The config below runs `marigold-lsp mcp`, a read-only MCP server over stdio
+that exposes these tools. Lines and columns are 1-based and counted in
+characters. Only `.marigold` files up to 10 MiB can be read.
+
+- `marigold_check`: diagnostics for a file or a source string.
+- `marigold_symbols`: declarations and references in a file.
+- `marigold_definition`: the declaration for the symbol at a position.
+- `marigold_references`: every reference to the symbol at a position.
+- `marigold_complexity`: cardinality, time and space for each stream.
 
 ## Prerequisites
 
@@ -55,5 +61,6 @@ that it calls `marigold_check` and reports the diagnostic.
 - Minimum Codex CLI version: UNVERIFIED.
 - Whether project-scoped `.codex/config.toml` requires a trusted project:
   UNVERIFIED.
-- The `marigold_check` tool name and `mcp` subcommand are planned, not yet
-  shipped, and cannot be verified against a running server.
+- The server implements MCP revision 2025-11-25 and answers older
+  handshake-based revisions. It has been tested against its own test suite,
+  not against a running Codex CLI: UNVERIFIED with Codex itself.
