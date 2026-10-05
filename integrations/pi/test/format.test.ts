@@ -35,9 +35,11 @@ describe("formatDiagnostics", () => {
 
   it("uses the lowercase severity of each diagnostic", () => {
     const warn = { ...diag(0, 0, "w", "careful"), severity: 2 };
+    const info = { ...diag(0, 0, "i", "fyi"), severity: 3 };
     const hint = { ...diag(0, 0, "h", "psst"), severity: 4 };
-    const out = formatDiagnostics("a.marigold", [warn, hint]);
+    const out = formatDiagnostics("a.marigold", [warn, info, hint]);
     expect(out).toContain("a.marigold:1:1: warning[w]: careful");
+    expect(out).toContain("a.marigold:1:1: info[i]: fyi");
     expect(out).toContain("a.marigold:1:1: hint[h]: psst");
   });
 
