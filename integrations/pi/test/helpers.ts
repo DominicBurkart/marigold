@@ -18,3 +18,27 @@ export const fakeServer = fileURLToPath(new URL("./fixtures/fake-server.mjs", im
 export function tempDir(prefix = "pi-marigold-"): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
+
+type Handler = (event: any, ctx: any) => any;
+
+export function fakePi() {
+  const handlers = new Map<string, Handler[]>();
+  const tools = new Map<string, any>();
+  return {
+    api: {
+      on(event: string, handler: Handler) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+        return () => {};
+      },
+      registerTool(tool: any) {
+        tools.set(tool.name, tool);
+      },
+    },
+    async emit(event: string, payload: any, ctx: any) {
+      let result: any;
+      for (const h of handlers.get(event) ?? []) result = (await h(payload, ctx)) ?? result;
+      return result;
+    },
+    tools,
+  };
+}

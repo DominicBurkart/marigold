@@ -1,4 +1,5 @@
 import { existsSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const [mode, marker] = process.argv.slice(2);
 let buffer = Buffer.alloc(0);
@@ -15,6 +16,33 @@ const handle = (message) => {
     send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
   } else if (message.method === "shutdown") {
     send({ jsonrpc: "2.0", id: message.id, result: null });
+  } else if (message.id !== undefined && message.method !== undefined) {
+    if (mode === "nav-error") {
+      send({ jsonrpc: "2.0", id: message.id, error: { code: -32803, message: "fake nav failure" } });
+    } else if (mode === "nav-hang-once") {
+      if (!existsSync(marker)) writeFileSync(marker, "x");
+      else send({ jsonrpc: "2.0", id: message.id, result: null });
+    } else if (mode === "rename-edit" && message.method === "textDocument/rename") {
+      writeFileSync(marker, "x");
+      const release = join(dirname(marker), "release");
+      const timer = setInterval(() => {
+        if (!existsSync(release)) return;
+        clearInterval(timer);
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            changes: {
+              [message.params.textDocument.uri]: [
+                { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, newText: message.params.newName },
+              ],
+            },
+          },
+        });
+      }, 10);
+    } else {
+      send({ jsonrpc: "2.0", id: message.id, result: null });
+    }
   } else if (message.method === "exit") {
     process.exit(0);
   } else if (message.method === "textDocument/didOpen" || message.method === "textDocument/didChange") {

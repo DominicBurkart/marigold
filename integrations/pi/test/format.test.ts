@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDiagnostics } from "../src/format.ts";
+import { applyEdits, formatDiagnostics, hoverText, symbolsOf } from "../src/format.ts";
 
 const diag = (line: number, character: number, code: string, message: string) => ({
   range: { start: { line, character }, end: { line, character: character + 1 } },
@@ -79,5 +79,45 @@ describe("formatDiagnostics", () => {
     const out = formatDiagnostics("a.marigold", [diag(0, 1, "x", "m"), diag(9, 0, "x", "n")], 20, "\tab\n");
     expect(out).toContain("1 | \tab\n      | \t^");
     expect(out).toContain("a.marigold:10:1: error[x]: n");
+  });
+});
+
+const edit = (l1: number, c1: number, l2: number, c2: number, newText: string) => ({
+  range: { start: { line: l1, character: c1 }, end: { line: l2, character: c2 } },
+  newText,
+});
+
+describe("applyEdits", () => {
+  it("applies several edits regardless of their order", () => {
+    expect(applyEdits("aa bb\naa", [edit(0, 0, 0, 2, "x"), edit(1, 0, 1, 2, "yy"), edit(0, 3, 0, 5, "z")])).toBe(
+      "x z\nyy",
+    );
+  });
+
+  it("counts columns in UTF-16 units", () => {
+    expect(applyEdits("\u{1F600}ab", [edit(0, 2, 0, 3, "X")])).toBe("\u{1F600}Xb");
+  });
+
+  it("keeps CRLF intact and clamps past the line end", () => {
+    expect(applyEdits("ab\r\ncd\r\n", [edit(0, 0, 0, 99, "x")])).toBe("x\r\ncd\r\n");
+  });
+
+  it("rejects overlapping edits and lines out of range", () => {
+    expect(() => applyEdits("abcd", [edit(0, 0, 0, 3, "x"), edit(0, 2, 0, 4, "y")])).toThrow(/overlap/);
+    expect(() => applyEdits("abcd", [edit(5, 0, 5, 1, "x")])).toThrow(/outside/);
+  });
+});
+
+describe("result decoding", () => {
+  it("flattens nested document symbols and flat symbol information", () => {
+    const nested = [{ name: "a", kind: 12, range: edit(0, 0, 1, 0, "").range, selectionRange: edit(0, 3, 0, 4, "").range, children: [{ name: "b", kind: 13, range: edit(1, 0, 1, 1, "").range }] }];
+    expect(symbolsOf(nested, "file:///x").map((x) => [x.name, x.position.character])).toEqual([["a", 3], ["b", 0]]);
+    expect(symbolsOf(null)).toEqual([]);
+  });
+
+  it("extracts hover text from markup, strings and arrays", () => {
+    expect(hoverText({ contents: { kind: "markdown", value: "m" } })).toBe("m");
+    expect(hoverText({ contents: ["a", { language: "x", value: "b" }] })).toBe("a\n\n```x\nb\n```");
+    expect(hoverText(null)).toBe("");
   });
 });

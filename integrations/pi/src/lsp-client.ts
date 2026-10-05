@@ -22,6 +22,7 @@ export class LspClient {
   private pending = new Map<number, Pending>();
   private waiters = new Map<string, Waiter>();
   private versions = new Map<string, number>();
+  private texts = new Map<string, string>();
   private queues = new Map<string, Promise<unknown>>();
   private closed: Promise<void>;
   private exited = false;
@@ -84,6 +85,18 @@ export class LspClient {
     return run;
   }
 
+  query(uri: string | undefined, text: string | undefined, method: string, params: unknown): Promise<unknown> {
+    const key = uri ?? "";
+    const previous = this.queues.get(key) ?? Promise.resolve();
+    const run = previous.then(() => this.queryNow(uri, text, method, params));
+    const tail = run.catch(() => {});
+    this.queues.set(key, tail);
+    void tail.then(() => {
+      if (this.queues.get(key) === tail) this.queues.delete(key);
+    });
+    return run;
+  }
+
   async shutdown(): Promise<void> {
     if (this.exited) return;
     if (this.stopping) {
@@ -100,11 +113,30 @@ export class LspClient {
     await this.closed;
   }
 
+  private async queryNow(uri: string | undefined, text: string | undefined, method: string, params: unknown): Promise<unknown> {
+    if (this.stopped) throw this.error("marigold-lsp exited");
+    if (uri !== undefined && text !== undefined && this.texts.get(uri) !== text) this.sync(uri, text);
+    return this.request(method, params, this.timeoutMs, true);
+  }
+
+  private sync(uri: string, text: string): void {
+    const previous = this.versions.get(uri);
+    const version = (previous ?? 0) + 1;
+    this.versions.set(uri, version);
+    this.texts.set(uri, text);
+    if (previous === undefined) {
+      this.notify("textDocument/didOpen", { textDocument: { uri, languageId: "marigold", version, text } });
+    } else {
+      this.notify("textDocument/didChange", { textDocument: { uri, version }, contentChanges: [{ text }] });
+    }
+  }
+
   private async checkNow(uri: string, text: string): Promise<LspDiagnostic[]> {
     if (this.stopped) throw this.error("marigold-lsp exited");
     const previous = this.versions.get(uri);
     const version = (previous ?? 0) + 1;
     this.versions.set(uri, version);
+    this.texts.set(uri, text);
     const published = new Promise<LspDiagnostic[]>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiters.delete(uri);
@@ -162,7 +194,7 @@ export class LspClient {
     for (const w of waiters) w.reject(error);
   }
 
-  private request(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
+  private request(method: string, params: unknown, timeoutMs?: number, killOnTimeout = false): Promise<unknown> {
     const id = ++this.nextId;
     const result = new Promise((resolve, reject) => {
       const timer =
@@ -170,7 +202,9 @@ export class LspClient {
           ? undefined
           : setTimeout(() => {
               this.pending.delete(id);
-              reject(this.error(`marigold-lsp did not answer ${method} within ${timeoutMs}ms`));
+              const error = this.error(`marigold-lsp did not answer ${method} within ${timeoutMs}ms`);
+              if (killOnTimeout) this.kill();
+              reject(error);
             }, timeoutMs);
       this.pending.set(id, {
         resolve: (value) => {
