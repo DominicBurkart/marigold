@@ -144,7 +144,14 @@ process that launches `marigold-lsp`:
   without telemetry.
 - `DD_API_KEY` and `DD_APP_KEY`: an API key and an application key allowed
   to read metrics.
-- `DD_SITE`: optional, defaults to `datadoghq.com`.
+- `DD_SITE`: optional, defaults to `datadoghq.com`. It must be one of
+  `datadoghq.com`, `datadoghq.eu`, `us3.datadoghq.com`, `us5.datadoghq.com`,
+  `ap1.datadoghq.com`, `ap2.datadoghq.com` or `ddog-gov.com` (this list was
+  not checked against the current Datadog documentation). The keys are sent
+  to `api.<DD_SITE>`, so any other value is refused at startup. Setting
+  `MARIGOLD_TELEMETRY_ALLOW_CUSTOM_SITE=1` additionally accepts another
+  lowercase https host name, but never an IP literal, port, path, user info
+  or whitespace.
 - `MARIGOLD_TELEMETRY_WINDOW`: optional lookback such as `24h`, `30m` or
   `7d`. The default is `24h`.
 - `OTEL_SERVICE_NAME`: optional. It must match the program's value so the

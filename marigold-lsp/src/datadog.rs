@@ -2,7 +2,9 @@
 //!
 //! The source reads the counters that `marigold-impl`'s `otel` feature exports and that Datadog
 //! ingests over OTLP. Credentials come only from the environment: `DD_API_KEY`, `DD_APP_KEY` and
-//! optionally `DD_SITE` (default `datadoghq.com`). They are sent as the `DD-API-KEY` and
+//! optionally `DD_SITE` (default `datadoghq.com`). `DD_SITE` must be one of [`KNOWN_SITES`] (list not
+//! verified against Datadog's current documentation), because the keys are sent to `api.<site>`;
+//! any other https host name needs `MARIGOLD_TELEMETRY_ALLOW_CUSTOM_SITE=1`. They are sent as the `DD-API-KEY` and
 //! `DD-APPLICATION-KEY` headers over HTTPS, are never logged, and never appear in error messages
 //! or in the `Debug` output of [`DatadogSource`].
 //!
@@ -52,6 +54,16 @@ use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_SITE: &str = "datadoghq.com";
+pub const ALLOW_CUSTOM_SITE_VAR: &str = "MARIGOLD_TELEMETRY_ALLOW_CUSTOM_SITE";
+pub const KNOWN_SITES: [&str; 7] = [
+    "datadoghq.com",
+    "datadoghq.eu",
+    "us3.datadoghq.com",
+    "us5.datadoghq.com",
+    "ap1.datadoghq.com",
+    "ap2.datadoghq.com",
+    "ddog-gov.com",
+];
 pub const DEFAULT_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 
 pub const METRIC_ITEMS_IN: &str = "marigold.node.items_in";
@@ -204,6 +216,14 @@ fn valid_site(site: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-')
 }
 
+fn valid_custom_site(site: &str) -> bool {
+    valid_site(site)
+        && site
+            .rsplit('.')
+            .next()
+            .is_some_and(|tld| !tld.chars().all(|c| c.is_ascii_digit()))
+}
+
 fn valid_key(key: &str) -> bool {
     !key.is_empty() && key.len() <= 256 && key.bytes().all(|b| b.is_ascii_graphic())
 }
@@ -237,15 +257,41 @@ impl DatadogSource {
         site: &str,
         window: Duration,
     ) -> Result<Self, TelemetryError> {
+        Self::build(api_key, app_key, site, window, false)
+    }
+
+    /// Like [`Self::new`], but also accepts any other lowercase https host name that is not an
+    /// IP literal. Only call this on an explicit opt-in by the user.
+    pub fn new_allowing_custom_site(
+        api_key: &str,
+        app_key: &str,
+        site: &str,
+        window: Duration,
+    ) -> Result<Self, TelemetryError> {
+        Self::build(api_key, app_key, site, window, true)
+    }
+
+    fn build(
+        api_key: &str,
+        app_key: &str,
+        site: &str,
+        window: Duration,
+        allow_custom: bool,
+    ) -> Result<Self, TelemetryError> {
         if !valid_key(api_key) || !valid_key(app_key) {
             return Err(TelemetryError::Config(
                 "DD_API_KEY and DD_APP_KEY must be non-empty printable ASCII".to_string(),
             ));
         }
-        if !valid_site(site) {
-            return Err(TelemetryError::Config(
-                "DD_SITE must be a bare lowercase host name such as datadoghq.com".to_string(),
-            ));
+        let site_ok = if allow_custom {
+            valid_custom_site(site)
+        } else {
+            KNOWN_SITES.contains(&site)
+        };
+        if !site_ok {
+            return Err(TelemetryError::Config(format!(
+                "DD_SITE must be a known Datadog site such as datadoghq.com; to use another https host set {ALLOW_CUSTOM_SITE_VAR}=1"
+            )));
         }
         if window.is_zero() {
             return Err(TelemetryError::Config(
@@ -282,7 +328,8 @@ impl DatadogSource {
         let site = get("DD_SITE")
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| DEFAULT_SITE.to_string());
-        Self::new(&api_key, &app_key, &site, window)
+        let allow_custom = get(ALLOW_CUSTOM_SITE_VAR).as_deref() == Some("1");
+        Self::build(&api_key, &app_key, &site, window, allow_custom)
     }
 
     pub fn window(&self) -> Duration {
@@ -609,6 +656,119 @@ mod tests {
             "sum:marigold.node.runs{marigold.program:demo} by {marigold.node_id}.as_count()"
         );
         assert!(!metric_query(METRIC_RUNS, "a} or {b").contains("} or"));
+    }
+
+    const KNOWN: [&str; 7] = [
+        "datadoghq.com",
+        "datadoghq.eu",
+        "us3.datadoghq.com",
+        "us5.datadoghq.com",
+        "ap1.datadoghq.com",
+        "ap2.datadoghq.com",
+        "ddog-gov.com",
+    ];
+
+    const ATTACKS: [&str; 22] = [
+        "evil.com",
+        "datadoghq.com.evil.com",
+        "evil.com/#.datadoghq.com",
+        "evil.com#.datadoghq.com",
+        "evil.com?.datadoghq.com",
+        "datadoghq.com@evil.com",
+        "evil.com@datadoghq.com",
+        "datadoghq.com:443",
+        "datadoghq.com:443@evil.com",
+        "datadoghq.com/",
+        "datadoghq.com ",
+        " datadoghq.com",
+        "datadoghq.com\n",
+        "datadoghq.com\t.evil.com",
+        "DATADOGHQ.COM",
+        "Datadoghq.com",
+        "xdatadoghq.com",
+        "evildatadoghq.com",
+        "127.0.0.1",
+        "1.2.3.4",
+        "[::1]",
+        "datadoghq.com\\@evil.com",
+    ];
+
+    #[test]
+    fn every_known_site_is_accepted_with_an_exact_base_url() {
+        for site in KNOWN {
+            let source = DatadogSource::new("k", "a", site, WINDOW).unwrap();
+            assert_eq!(source.base_url, format!("https://api.{site}"), "{site}");
+        }
+    }
+
+    #[test]
+    fn attack_sites_are_refused_without_leaking_keys() {
+        for site in ATTACKS {
+            let err = DatadogSource::new("SECRETAPI", "SECRETAPP", site, WINDOW).unwrap_err();
+            assert!(matches!(err, TelemetryError::Config(_)), "{site:?}");
+            let shown = format!("{err} {err:?}");
+            assert!(!shown.contains("SECRET"), "{site:?}");
+            assert!(shown.contains(ALLOW_CUSTOM_SITE_VAR), "{site:?}");
+        }
+    }
+
+    #[test]
+    fn attack_sites_are_refused_from_the_environment() {
+        for site in ATTACKS {
+            let vars = HashMap::from([
+                ("DD_API_KEY", "SECRETAPI"),
+                ("DD_APP_KEY", "SECRETAPP"),
+                ("DD_SITE", site),
+            ]);
+            let result = DatadogSource::from_vars(|n| vars.get(n).map(|v| v.to_string()), WINDOW);
+            assert!(result.is_err(), "{site:?}");
+        }
+    }
+
+    #[test]
+    fn opt_in_allows_other_https_hosts_only() {
+        let vars = |site: &'static str, flag: Option<&'static str>| {
+            let mut map =
+                HashMap::from([("DD_API_KEY", "k"), ("DD_APP_KEY", "a"), ("DD_SITE", site)]);
+            if let Some(flag) = flag {
+                map.insert(ALLOW_CUSTOM_SITE_VAR, flag);
+            }
+            DatadogSource::from_vars(|n| map.get(n).map(|v| v.to_string()), WINDOW)
+        };
+        assert_eq!(
+            vars("dd.example.org", Some("1")).unwrap().base_url,
+            "https://api.dd.example.org"
+        );
+        for flag in [None, Some(""), Some("0"), Some("true"), Some("yes")] {
+            assert!(vars("dd.example.org", flag).is_err(), "{flag:?}");
+        }
+        for site in ATTACKS {
+            let site: &'static str = Box::leak(site.to_string().into_boxed_str());
+            let attempt = vars(site, Some("1"));
+            assert!(
+                attempt.is_err() || !site.contains(['/', '@', ':', '#', '?', ' ', '\n', '[']),
+                "{site:?}"
+            );
+            if let Ok(source) = attempt {
+                assert_eq!(source.base_url, format!("https://api.{site}"));
+                assert!(site
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-'));
+                assert!(!site.chars().last().unwrap().is_ascii_digit());
+            }
+        }
+        for site in [
+            "127.0.0.1",
+            "1.2.3.4",
+            "[::1]",
+            "DD.example.org",
+            "x.org/",
+            "x.org:1",
+            "u@x.org",
+        ] {
+            let site: &'static str = Box::leak(site.to_string().into_boxed_str());
+            assert!(vars(site, Some("1")).is_err(), "{site:?}");
+        }
     }
 
     #[test]
