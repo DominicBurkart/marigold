@@ -31,7 +31,8 @@
 //!
 //! # Limits
 //!
-//! Each request has a 5 second timeout and a 4 MiB response cap, redirects are not followed and
+//! Each request has a 5 second timeout, one `node_stats` call has a 10 second deadline across
+//! its four requests, and responses are capped at 4 MiB; redirects are not followed and
 //! plain HTTP is refused.
 //!
 //! ```
@@ -51,7 +52,7 @@ use marigold_grammar::NodeId;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_SITE: &str = "datadoghq.com";
 pub const ALLOW_CUSTOM_SITE_VAR: &str = "MARIGOLD_TELEMETRY_ALLOW_CUSTOM_SITE";
@@ -75,6 +76,7 @@ const NODE_ID_TAG: &str = "marigold.node_id";
 const PROGRAM_TAG: &str = "marigold.program";
 const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const TOTAL_DEADLINE: Duration = Duration::from_secs(10);
 
 /// One node's totals for one metric over the queried window.
 #[derive(Debug, Clone, PartialEq)]
@@ -236,6 +238,7 @@ pub struct DatadogSource {
     base_url: String,
     window: Duration,
     timeout: Duration,
+    total_deadline: Duration,
     allow_plain_http: bool,
 }
 
@@ -304,6 +307,7 @@ impl DatadogSource {
             base_url: format!("https://api.{site}"),
             window,
             timeout: REQUEST_TIMEOUT,
+            total_deadline: TOTAL_DEADLINE,
             allow_plain_http: false,
         })
     }
@@ -336,9 +340,9 @@ impl DatadogSource {
         self.window
     }
 
-    fn agent(&self) -> ureq::Agent {
+    fn agent(&self, timeout: Duration) -> ureq::Agent {
         let mut builder = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
+            .timeout_global(Some(timeout))
             .max_redirects(0)
             .http_status_as_error(false)
             .https_only(!self.allow_plain_http);
@@ -350,12 +354,19 @@ impl DatadogSource {
 
     fn query_totals(
         &self,
-        agent: &ureq::Agent,
+        deadline: Instant,
         metric: &str,
         program: &str,
         from: u64,
         to: u64,
     ) -> Result<Vec<SeriesTotal>, TelemetryError> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(TelemetryError::Unavailable(
+                "lookup deadline exceeded".to_string(),
+            ));
+        }
+        let agent = self.agent(self.timeout.min(remaining));
         let mut response = agent
             .get(format!("{}/api/v1/query", self.base_url))
             .header("DD-API-KEY", &self.api_key)
@@ -430,7 +441,7 @@ impl TelemetrySource for DatadogSource {
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
         let from = to.saturating_sub(self.window.as_secs());
-        let agent = self.agent();
+        let deadline = Instant::now() + self.total_deadline;
         let wanted: HashMap<&str, &NodeId> = node_ids.iter().map(|id| (id.as_str(), id)).collect();
         let mut acc: HashMap<&str, Accumulated> = HashMap::new();
         let metrics: [(&str, Adder); 4] = [
@@ -440,7 +451,7 @@ impl TelemetrySource for DatadogSource {
             (METRIC_ERRORS_ABORT, |a, v| a.errors += v),
         ];
         for (metric, add) in metrics {
-            for series in self.query_totals(&agent, metric, program, from, to)? {
+            for series in self.query_totals(deadline, metric, program, from, to)? {
                 let Some((key, _)) = wanted.get_key_value(series.node_id.as_str()) else {
                     continue;
                 };
@@ -948,6 +959,39 @@ mod tests {
         assert!(fake.requests.lock().unwrap().is_empty());
         let _ = std::net::TcpStream::connect(("127.0.0.1", fake.port));
         fake.handle.join().unwrap();
+    }
+
+    #[test]
+    fn an_exhausted_deadline_fails_without_contacting_the_server() {
+        let nodes = marigold_node_ids("range(0, 3).return", "demo");
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id.clone()).collect();
+        let fake = fake_server(1, |_| (200, "{}".into()));
+        let mut source = local_source(fake.port);
+        source.total_deadline = Duration::ZERO;
+        assert_eq!(
+            source.node_stats("demo", &ids),
+            Err(TelemetryError::Unavailable(
+                "lookup deadline exceeded".into()
+            ))
+        );
+        assert!(fake.requests.lock().unwrap().is_empty());
+        let _ = std::net::TcpStream::connect(("127.0.0.1", fake.port));
+        fake.handle.join().unwrap();
+    }
+
+    #[test]
+    fn the_request_timeout_is_capped_by_the_remaining_deadline() {
+        let nodes = marigold_node_ids("range(0, 3).return", "demo");
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id.clone()).collect();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut source = local_source(listener.local_addr().unwrap().port());
+        source.timeout = Duration::from_secs(60);
+        source.total_deadline = Duration::from_millis(200);
+        assert_eq!(
+            source.node_stats("demo", &ids),
+            Err(TelemetryError::Unavailable("request timed out".into()))
+        );
+        drop(listener);
     }
 
     #[test]

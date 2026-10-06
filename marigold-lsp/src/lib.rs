@@ -20,6 +20,8 @@
 #[cfg(feature = "datadog")]
 pub mod datadog;
 pub mod hover;
+#[cfg(feature = "telemetry")]
+pub mod lookup;
 pub mod mcp;
 pub mod nav;
 pub mod position;
@@ -206,24 +208,48 @@ fn serve_guarded(
     server.probe = probe;
     #[cfg(feature = "telemetry")]
     {
+        let refresh_supported = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|w| w.inlay_hint.as_ref())
+            .and_then(|h| h.refresh_support)
+            .unwrap_or(false);
         server.telemetry = source.map(|source| TelemetryState {
-            source,
-            cache: std::cell::RefCell::new(HashMap::new()),
+            lookups: lookup::Lookups::spawn(
+                source,
+                std::sync::Arc::new(std::time::Instant::now),
+                {
+                    let sender = connection.sender.clone();
+                    refresh_hook(refresh_supported, move |m| {
+                        let _ = sender.send(m);
+                    })
+                },
+            ),
         });
     }
     main_loop(connection, &mut server)
 }
 
 #[cfg(feature = "telemetry")]
-const TELEMETRY_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
-
-#[cfg(feature = "telemetry")]
-type CachedAnnotations = (std::time::Instant, String, Vec<telemetry::NodeAnnotation>);
-
-#[cfg(feature = "telemetry")]
 struct TelemetryState {
-    source: Box<dyn telemetry::TelemetrySource + Send>,
-    cache: std::cell::RefCell<HashMap<Uri, CachedAnnotations>>,
+    lookups: lookup::Lookups,
+}
+
+#[cfg(feature = "telemetry")]
+fn refresh_hook(supported: bool, send: impl Fn(Message) + Send + 'static) -> lookup::Completion {
+    let counter = std::sync::atomic::AtomicU64::new(0);
+    Box::new(move |changed| {
+        if !(supported && changed) {
+            return;
+        }
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        send(Message::Request(Request::new(
+            lsp_server::RequestId::from(format!("marigold-inlay-refresh-{n}")),
+            "workspace/inlayHint/refresh".to_string(),
+            serde_json::Value::Null,
+        )));
+    })
 }
 
 struct Server {
@@ -412,19 +438,14 @@ impl Server {
         let Some(state) = &self.telemetry else {
             return Vec::new();
         };
-        if let Some((at, cached_text, found)) = state.cache.borrow().get(uri) {
-            if at.elapsed() < TELEMETRY_CACHE_TTL && cached_text == text {
-                return found.clone();
-            }
-        }
         let path = workspace::uri_to_path(uri);
         let program = telemetry::program_name(path.as_deref().and_then(|p| p.to_str()));
-        let found = telemetry::annotate(&program, text, state.source.as_ref());
-        state.cache.borrow_mut().insert(
-            uri.clone(),
-            (std::time::Instant::now(), text.to_string(), found.clone()),
-        );
-        found
+        let nodes = marigold_grammar::marigold_node_ids(text, &program);
+        if nodes.is_empty() {
+            return Vec::new();
+        }
+        let key = lookup::Key::new(uri.as_str(), &program, nodes.iter().map(|n| n.id.clone()));
+        telemetry::join_stats(nodes, state.lookups.request(key))
     }
 
     #[cfg(feature = "telemetry")]
@@ -726,5 +747,41 @@ mod tests {
     fn error_diagnostics_keep_error_severity() {
         let diags = lsp_diagnostics("range(Colour).return");
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+}
+
+#[cfg(all(test, feature = "telemetry"))]
+mod refresh_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn collected(supported: bool, completions: &[bool]) -> Vec<Message> {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&sent);
+        let hook = refresh_hook(supported, move |m| sink.lock().unwrap().push(m));
+        for changed in completions {
+            hook(*changed);
+        }
+        let out = std::mem::take(&mut *sent.lock().unwrap());
+        out
+    }
+
+    #[test]
+    fn refresh_is_sent_only_when_supported_and_changed() {
+        assert!(collected(false, &[true, true]).is_empty());
+        assert!(collected(true, &[false, false]).is_empty());
+        let sent = collected(true, &[true, false, true]);
+        assert_eq!(sent.len(), 2);
+        let ids: Vec<String> = sent
+            .iter()
+            .map(|m| match m {
+                Message::Request(r) => {
+                    assert_eq!(r.method, "workspace/inlayHint/refresh");
+                    r.id.to_string()
+                }
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_ne!(ids[0], ids[1]);
     }
 }

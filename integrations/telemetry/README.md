@@ -179,10 +179,27 @@ declared is reported as a warning, and undefined stream variables, functions
 and structs as information, because they can be Rust items in scope inside
 `m!()`.
 
-A failing or unreachable backend never affects diagnostics or hover: the
-annotations are simply absent. The MCP tool reports the failure instead.
-Results are cached for 30 seconds per open document, and a lookup blocks
-the request that triggered it for at most a few seconds.
+Lookups never run on the request loop. `marigold-lsp` has one background
+worker thread that queries Datadog. Hover and inlay hints answer
+immediately with the last stats known for that document, or with nothing
+when none have arrived yet, and later requests pick up fresh data. If the
+client declared `workspace.inlayHint.refreshSupport`, the server sends
+`workspace/inlayHint/refresh` when new data arrives that differs from what it
+had; other clients see the new numbers on their next hover or hint request.
+The MCP tool queries synchronously, because the call itself waits for the
+answer.
+
+Answers are cached per document, program name and set of node ids, not per
+text, so edits that keep the node ids do not query again. A cached answer
+is reused for 30 seconds and then refreshed in the background while the old
+one is still served. Edits that change the node ids trigger one new lookup,
+and only the newest queued lookup per document runs. Concurrent requests for
+the same lookup are coalesced. A lookup makes four queries with one total
+deadline of 10 seconds (and 5 seconds per query). After a failure the same
+lookup is not retried for 5 seconds, then 10, 20 and so on up to 5 minutes,
+and a success resets that. A failing or unreachable backend never affects
+diagnostics or hover: the annotations are simply absent, or the last good
+ones stay. The MCP tool reports the failure instead.
 
 ## Cardinality
 

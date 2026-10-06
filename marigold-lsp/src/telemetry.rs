@@ -161,12 +161,21 @@ pub fn try_annotate(
         return Ok(Vec::new());
     }
     let ids: Vec<NodeId> = nodes.iter().map(|n| n.id.clone()).collect();
-    let mut by_id: HashMap<NodeId, NodeStats> = source
-        .node_stats(program, &ids)?
-        .into_iter()
-        .map(|s| (s.node_id.clone(), s))
-        .collect();
-    Ok(nodes
+    let stats = source.node_stats(program, &ids)?;
+    Ok(join_stats(nodes, stats))
+}
+
+/// Joins already fetched stats to `nodes` by id, in source order.
+///
+/// Stats for ids that are not in `nodes` are ignored, and nodes without stats get no
+/// annotation.
+pub fn join_stats(
+    nodes: Vec<marigold_grammar::NodeInfo>,
+    stats: Vec<NodeStats>,
+) -> Vec<NodeAnnotation> {
+    let mut by_id: HashMap<NodeId, NodeStats> =
+        stats.into_iter().map(|s| (s.node_id.clone(), s)).collect();
+    nodes
         .into_iter()
         .filter_map(|node| {
             let stats = by_id.remove(&node.id)?;
@@ -182,7 +191,7 @@ pub fn try_annotate(
                 stale,
             })
         })
-        .collect())
+        .collect()
 }
 
 /// Joins the source's stats to the node ranges of `source_text`, in source order.
