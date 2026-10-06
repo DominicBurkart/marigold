@@ -328,7 +328,7 @@ fn tool_definitions() -> Value {
         {
             "name": "marigold_complexity",
             "title": "Marigold stream complexity",
-            "description": format!("Report cardinality, time and space complexity and whether input is collected for every stream in a .marigold file. The file must parse. Time is the analyzer's class per whole stream and is reported as 'not estimated' when cardinality is unknown or above 1000000, or the chain calls user functions, since their cost is not modelled. {POSITION_NOTE}"),
+            "description": format!("Report cardinality, time and space complexity and whether input is collected for every stream in a .marigold file. The file must parse. Time is the analyzer's class per whole stream and is reported as 'not estimated' when cardinality is unknown or above 1000000, or the chain calls user functions, since their cost is not modelled. Space is reported as 'not estimated (collects input)' when the chain collects its input, because the analyzer's constant space figure does not account for the collected items. {POSITION_NOTE}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {"path": path},
@@ -719,7 +719,14 @@ fn complexity_tool(args: &Map<String, Value>) -> ToolResult {
                 json!(time_estimate(n, &function_uses)
                     .unwrap_or_else(|_| "not estimated".to_string())),
             );
-            m.insert("space".into(), json!(c.space_class.to_string()));
+            m.insert(
+                "space".into(),
+                json!(if c.collects_input {
+                    "not estimated".to_string()
+                } else {
+                    c.space_class.to_string()
+                }),
+            );
             m.insert("collects_input".into(), json!(c.collects_input));
             Value::Object(m)
         })

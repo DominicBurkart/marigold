@@ -22,7 +22,7 @@ fn golden_huge_permutations_cardinality_is_readable() {
     let text = "range(0, 1000000).permutations(3).return";
     assert_eq!(
         hover_text(text, Position::new(0, 2)),
-        "```marigold\nrange(0, 1000000).permutations(3).return\n```\nanalyzer estimate for the whole chain \u{b7} cardinality: ~1.0e18 \u{b7} time: not estimated (cardinality too large) \u{b7} space: O(1) \u{b7} collects input: yes"
+        "```marigold\nrange(0, 1000000).permutations(3).return\n```\nanalyzer estimate for the whole chain \u{b7} cardinality: ~1.0e18 \u{b7} time: not estimated (cardinality too large) \u{b7} space: not estimated (collects input) \u{b7} collects input: yes"
     );
 }
 
@@ -31,7 +31,7 @@ fn golden_collects_input_case() {
     let text = "x = range(0, 3).permutations(2)\nx.return";
     assert_eq!(
         hover_text(text, Position::new(0, 0)),
-        "```marigold\nx = range(0, 3).permutations(2)\n```\nanalyzer estimate for the whole chain \u{b7} cardinality: 6 \u{b7} time: O(1) per whole stream \u{b7} space: O(1) \u{b7} collects input: yes"
+        "```marigold\nx = range(0, 3).permutations(2)\n```\nanalyzer estimate for the whole chain \u{b7} cardinality: 6 \u{b7} time: O(1) per whole stream \u{b7} space: not estimated (collects input) \u{b7} collects input: yes"
     );
 }
 

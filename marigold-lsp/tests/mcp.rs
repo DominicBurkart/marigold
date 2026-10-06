@@ -526,6 +526,19 @@ fn complexity_per_stream() {
 }
 
 #[test]
+fn complexity_does_not_claim_space_when_input_is_collected() {
+    let dir = Dir::new();
+    let path = dir.write("p.marigold", "range(0, 1000000).permutations(3).return");
+    let result = call("marigold_complexity", json!({"path": path}));
+    assert_eq!(result["isError"], false);
+    let stream = &result["structuredContent"]["streams"][0];
+    assert_eq!(stream["collects_input"], true);
+    assert_eq!(stream["space"], "not estimated");
+    assert!(text_of(&result)
+        .contains("space: not estimated (collects input) \u{b7} collects input: yes"));
+}
+
+#[test]
 fn complexity_does_not_claim_time_for_huge_or_user_function_streams() {
     let dir = Dir::new();
     let path = dir.write(

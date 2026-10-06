@@ -94,7 +94,11 @@ fn time_claim(node: &NodeComplexity, function_uses: &[ByteRange]) -> String {
 
 pub fn complexity_line(node: &NodeComplexity, function_uses: &[ByteRange]) -> String {
     let c = &node.complexity;
-    let space = c.exact_space.to_string();
+    let space = if c.collects_input {
+        "not estimated (collects input)".to_string()
+    } else {
+        c.exact_space.to_string()
+    };
     format!(
         "analyzer estimate for the whole chain \u{b7} cardinality: {} \u{b7} time: {} \u{b7} space: {} \u{b7} collects input: {}",
         format_cardinality(&c.cardinality),

@@ -260,7 +260,7 @@ export function createMarigoldExtension(options: MarigoldExtensionOptions = {}) 
     pi.registerTool({
       name: "marigold_hover",
       label: "Marigold hover",
-      description: `Show the signature of the symbol or stream under the cursor in a .marigold file, with its complexity (cardinality, time, space, whether it collects input). ${columns}`,
+      description: `Show the signature of the symbol or stream under the cursor in a .marigold file, with its complexity (cardinality, time, space, whether it collects input; space is not estimated when it does). ${columns}`,
       parameters: Type.Object(positionSchema),
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
         const r = await withPosition(ctx.cwd, params, "query");

@@ -74,7 +74,7 @@ fn hover_on_output_stream_expression() {
     let text = markdown(hover(&mut client, &u, pos_of(PROGRAM, "permutations")));
     assert_eq!(
         text,
-        "```marigold\nrange(0, 3).permutations(2).return\n```\nanalyzer estimate for the whole chain \u{b7} cardinality: 6 \u{b7} time: O(1) per whole stream \u{b7} space: O(1) \u{b7} collects input: yes"
+        "```marigold\nrange(0, 3).permutations(2).return\n```\nanalyzer estimate for the whole chain \u{b7} cardinality: 6 \u{b7} time: O(1) per whole stream \u{b7} space: not estimated (collects input) \u{b7} collects input: yes"
     );
     client.shutdown();
 }
