@@ -154,8 +154,9 @@ process that launches `marigold-lsp`:
   or whitespace.
 - `MARIGOLD_TELEMETRY_WINDOW`: optional lookback such as `24h`, `30m` or
   `7d`. The default is `24h`.
-- `OTEL_SERVICE_NAME`: optional. It must match the program's value so the
-  right series are queried. Without it, the file name without extension
+- `OTEL_SERVICE_NAME`: optional. `marigold-lsp` (feature `telemetry`) reads
+  it itself, not the `otel` feature of the `marigold` crate. It must match
+  the program's value so the right series are queried. Without it, the file name without extension
   is used, for example `main` for `main.marigold`.
 
 The keys are read only from the environment. They are sent only to
@@ -174,7 +175,9 @@ When telemetry is on you get:
 - The read-only MCP tool `marigold_telemetry` with a `path` argument,
   returning the same counts per node as JSON.
 
-Telemetry does not change diagnostics. A stream variable read before it is
+Telemetry adds no diagnostics and has no thresholds or alerts: it only
+appears in hover, inlay hints and the MCP tool. It does not change
+diagnostics. A stream variable read before it is
 declared is reported as a warning, and undefined stream variables, functions
 and structs as information, because they can be Rust items in scope inside
 `m!()`.
@@ -223,7 +226,8 @@ Node ids survive whitespace edits and edits to other expressions, so a
 count can outlive the code it was recorded against. An annotation whose
 recorded content hash differs from the current node text is marked
 `(stale)`. The Datadog source cannot do this yet: the exported metrics do
-not carry a content hash, so Datadog annotations are never marked stale.
+not carry a content hash, so `DatadogSource` leaves `content_hash` as `None`, so Datadog annotations are
+never marked stale.
 The check is implemented and tested for sources that do report a hash.
 
 ## Unverified
