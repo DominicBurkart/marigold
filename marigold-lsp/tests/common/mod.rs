@@ -10,6 +10,8 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
+pub const HANG_GUARD: Duration = Duration::from_secs(60);
+
 pub struct Client {
     conn: Connection,
     server: Option<thread::JoinHandle<()>>,
@@ -83,7 +85,7 @@ impl Client {
     pub fn recv(&self) -> Message {
         self.conn
             .receiver
-            .recv_timeout(Duration::from_secs(10))
+            .recv_timeout(HANG_GUARD)
             .expect("server did not respond")
     }
 

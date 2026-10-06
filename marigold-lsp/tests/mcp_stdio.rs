@@ -4,6 +4,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
+const HANG_GUARD: Duration = Duration::from_secs(60);
+
 static LIVE: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 
 fn spawn(args: &[&str]) -> Child {
@@ -17,7 +19,7 @@ fn spawn(args: &[&str]) -> Child {
     let pid = child.id();
     LIVE.lock().unwrap().push(pid);
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(20));
+        std::thread::sleep(HANG_GUARD);
         if LIVE.lock().unwrap().contains(&pid) {
             let _ = Command::new("kill").arg("-9").arg(pid.to_string()).status();
         }
