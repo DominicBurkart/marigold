@@ -83,7 +83,7 @@ Warning:
   that declares it, or by its own declaration. Fix it by reading only
   variables declared above.
 
-Information (the name is not declared in this program):
+Information:
 
 - `undefined-stream-variable`: a stream variable is used but not declared.
   It may be a Rust binding with a `get()` method returning a stream, in

@@ -16,9 +16,13 @@ Marigold language support for the [pi](https://pi.dev) coding agent.
 ## Diagnostic severities
 
 - `error`: fix it.
-- `warning`: review and fix it; for example `undefined-stream-variable`.
-- `information`: `undefined-fn` and `undefined-struct`; fix them unless the
-  name is a Rust item in scope inside `m!()`. `resolver-diagnostics-truncated`
+- `warning`: review and fix it; the only warning is
+  `undefined-stream-variable` for a variable read before the line that
+  declares it, such as `a = a`.
+- `information`: `undefined-stream-variable` for a name that is not
+  declared, `undefined-fn` and `undefined-struct`; fix them unless the name
+  is a Rust item in scope inside `m!()` (a stream variable may be a Rust
+  binding with a `get()` method). `resolver-diagnostics-truncated`
   reports that more than 50 resolver diagnostics were omitted for a file.
 
 ## Navigation tools

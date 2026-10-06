@@ -46,7 +46,7 @@ const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
-const REVIEW_RULE_INSTRUCTIONS: &str = "Call marigold_check on every .marigold file after creating or editing it: fix all errors AND review every warning (for example undefined stream variables). Undefined functions and structs are reported as information and can be ignored if they are Rust items in scope in m!(). ok: true does not mean there are no warnings; check warning_count and info_count. All tools are read-only.";
+const REVIEW_RULE_INSTRUCTIONS: &str = "Call marigold_check on every .marigold file after creating or editing it: fix all errors AND review every warning (a stream variable read before it is declared). Undefined stream variables, functions and structs are reported as information and can be ignored if they are Rust items in scope in m!() (a stream variable may be a Rust binding with a get() method returning a stream). ok: true does not mean there are no warnings; check warning_count and info_count. All tools are read-only.";
 
 const MAX_LISTED_DIAGNOSTICS: usize = 50;
 
@@ -273,7 +273,7 @@ fn tool_definitions() -> Value {
         {
             "name": "marigold_check",
             "title": "Check Marigold source",
-            "description": format!("Check a .marigold file (path) or a source string (source) and return every diagnostic with severity, code, message, optional help and a range. Provide exactly one of path or source. Call it after every edit: fix all errors AND review every warning (for example undefined stream variables). Undefined functions and structs are reported as information and can be ignored if they are Rust items in scope in m!(). ok: true does not mean there are no warnings; check warning_count and info_count. {POSITION_NOTE}"),
+            "description": format!("Check a .marigold file (path) or a source string (source) and return every diagnostic with severity, code, message, optional help and a range. Provide exactly one of path or source. Call it after every edit: fix all errors AND review every warning (a stream variable read before it is declared). Undefined stream variables, functions and structs are reported as information and can be ignored if they are Rust items in scope in m!() (a stream variable may be a Rust binding with a get() method returning a stream). ok: true does not mean there are no warnings; check warning_count and info_count. {POSITION_NOTE}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
