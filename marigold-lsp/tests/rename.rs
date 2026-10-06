@@ -184,39 +184,50 @@ mod cross_kind {
         Position::new(line, (offset - start) as u32)
     }
 
-    fn assert_clash(needle: &str, new_name: &str) {
+    fn assert_clash(needle: &str, new_name: &str, message: &str) {
         let result = rename(PROGRAM, at(needle), new_name);
-        assert!(
-            matches!(result, Err(RenameError::Clash(ref n)) if n == new_name),
-            "{needle} -> {new_name}: {result:?}"
-        );
+        match result {
+            Err(err @ RenameError::Clash { .. }) => assert_eq!(err.to_string(), message),
+            other => panic!("{needle} -> {new_name}: {other:?}"),
+        }
     }
 
     #[test]
     fn stream_variable_to_fn_name_clashes() {
-        assert_clash("x = ", "double");
+        assert_clash(
+            "x = ",
+            "double",
+            "\"double\" is already declared as a function",
+        );
     }
 
     #[test]
     fn fn_to_stream_variable_name_clashes() {
-        assert_clash("double(v", "x");
+        assert_clash(
+            "double(v",
+            "x",
+            "\"x\" is already declared as a stream variable",
+        );
     }
 
     #[test]
     fn enum_to_struct_name_clashes() {
-        assert_clash("Color", "Row");
+        assert_clash("Color", "Row", "\"Row\" is already declared as a struct");
     }
 
     #[test]
     fn struct_to_enum_name_clashes() {
-        assert_clash("Row", "Color");
+        assert_clash("Row", "Color", "\"Color\" is already declared as an enum");
     }
 
     #[test]
     fn same_kind_still_clashes() {
         let text = "fn a(x: i32) -> i32 { x }\nfn b(x: i32) -> i32 { x }\nrange(0, 3).map(a).map(b).return\n";
         let result = rename(text, Position::new(0, 3), "b");
-        assert!(matches!(result, Err(RenameError::Clash(_))), "{result:?}");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "\"b\" is already declared as a function"
+        );
     }
 
     #[test]

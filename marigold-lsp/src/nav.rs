@@ -312,15 +312,30 @@ pub fn declaration_names(text: &str) -> Vec<OutlineSymbol> {
         .collect()
 }
 
+fn kind_noun(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Function => "function",
+        Kind::Struct => "struct",
+        Kind::Enum => "enum",
+        _ => "stream variable",
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RenameError {
     NoSymbol,
     NoDeclaration,
     InvalidName(String),
-    Clash(String),
+    Clash {
+        name: String,
+        existing: &'static str,
+    },
     Breaks(String),
-    RustBody { name: String, line: usize },
+    RustBody {
+        name: String,
+        line: usize,
+    },
 }
 
 impl std::fmt::Display for RenameError {
@@ -334,8 +349,13 @@ impl std::fmt::Display for RenameError {
                 f,
                 "invalid identifier {name:?}: use ASCII letters, digits and underscores, not starting with a digit"
             ),
-            RenameError::Clash(name) => {
-                write!(f, "{name:?} is already declared with the same kind")
+            RenameError::Clash { name, existing } => {
+                let article = if existing.starts_with(['a', 'e', 'i', 'o', 'u']) {
+                    "an"
+                } else {
+                    "a"
+                };
+                write!(f, "{name:?} is already declared as {article} {existing}")
             }
             RenameError::RustBody { name, line } => write!(
                 f,
@@ -517,8 +537,11 @@ pub fn rename_edits(
     if decl.name == new_name {
         return Ok(Vec::new());
     }
-    if symbols.declarations.iter().any(|d| d.name == new_name) {
-        return Err(RenameError::Clash(new_name.to_string()));
+    if let Some(existing) = symbols.declarations.iter().find(|d| d.name == new_name) {
+        return Err(RenameError::Clash {
+            name: new_name.to_string(),
+            existing: kind_noun(existing.kind),
+        });
     }
     let mut ranges: Vec<ByteRange> = std::iter::once(decl.range)
         .chain(symbols.references_of(decl).into_iter().map(|r| r.range))
