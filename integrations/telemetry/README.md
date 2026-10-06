@@ -156,8 +156,9 @@ process that launches `marigold-lsp`:
   `7d`. The default is `24h`.
 - `OTEL_SERVICE_NAME`: optional. `marigold-lsp` (feature `telemetry`) reads
   it itself, not the `otel` feature of the `marigold` crate. It must match
-  the program's value so the right series are queried. Without it, the file name without extension
-  is used, for example `main` for `main.marigold`.
+  the program's value so the right series are queried. Without it, the
+  file name without extension is used, for example `main` for
+  `main.marigold`.
 
 The keys are read only from the environment. They are sent only to
 `https://api.<DD_SITE>` as request headers, and never appear in logs,
@@ -226,9 +227,8 @@ Node ids survive whitespace edits and edits to other expressions, so a
 count can outlive the code it was recorded against. An annotation whose
 recorded content hash differs from the current node text is marked
 `(stale)`. The Datadog source cannot do this yet: the exported metrics do
-not carry a content hash, so `DatadogSource` leaves `content_hash` as `None`, so Datadog annotations are
-never marked stale.
-The check is implemented and tested for sources that do report a hash.
+not carry a content hash, so `DatadogSource` leaves `content_hash` as
+`None` and Datadog annotations are never marked stale. The check is implemented and tested for sources that do report a hash.
 
 ## Unverified
 
