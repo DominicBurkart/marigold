@@ -5,6 +5,38 @@ use std::collections::{HashMap, HashSet};
 #[cfg(test)]
 thread_local! {
     static LEVENSHTEIN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static NAME_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DECLARATIONS_VISITED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[derive(Clone, Copy)]
+struct Name<'a>(&'a str);
+
+impl PartialEq for Name<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        #[cfg(test)]
+        NAME_COMPARISONS.with(|c| c.set(c.get() + 1));
+        self.0 == other.0
+    }
+}
+
+impl Eq for Name<'_> {}
+
+impl std::hash::Hash for Name<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+fn declarations_of(
+    index: &SpanIndex,
+    kind: SymbolKind,
+) -> impl Iterator<Item = &crate::span_index::Declaration> {
+    index.declarations.iter().filter(move |d| {
+        #[cfg(test)]
+        DECLARATIONS_VISITED.with(|c| c.set(c.get() + 1));
+        d.kind == kind
+    })
 }
 
 pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
@@ -43,24 +75,25 @@ pub(crate) fn closest<'a>(name: &str, candidates: &[&'a str]) -> Option<&'a str>
 }
 
 struct Names<'a> {
-    ordered: Vec<&'a str>,
-    set: HashSet<&'a str>,
+    ordered: Vec<Name<'a>>,
+    set: HashSet<Name<'a>>,
 }
 
 impl<'a> Names<'a> {
     fn of(index: &'a SpanIndex, kind: SymbolKind) -> Self {
         let mut ordered = Vec::new();
         let mut set = HashSet::new();
-        for d in index.declarations.iter().filter(|d| d.kind == kind) {
-            if set.insert(d.name.as_str()) {
-                ordered.push(d.name.as_str());
+        for d in declarations_of(index, kind) {
+            let name = Name(d.name.as_str());
+            if set.insert(name) {
+                ordered.push(name);
             }
         }
         Self { ordered, set }
     }
 
     fn contains(&self, name: &str) -> bool {
-        self.set.contains(name)
+        self.set.contains(&Name(name))
     }
 }
 
@@ -115,7 +148,8 @@ fn explain(r: &Reference, noun: &Noun, names: &Names, problem: &Problem) -> Diag
     };
     let mut help = String::new();
     if names.ordered.len() <= MAX_SUGGESTION_CANDIDATES {
-        if let Some(close) = closest(name, &names.ordered) {
+        let candidates: Vec<&str> = names.ordered.iter().map(|n| n.0).collect();
+        if let Some(close) = closest(name, &candidates) {
             help.push_str(&format!("did you mean '{close}'? "));
         }
     }
@@ -125,7 +159,12 @@ fn explain(r: &Reference, noun: &Noun, names: &Names, problem: &Problem) -> Diag
             noun.plural, noun.listed
         ));
     } else {
-        let shown = &names.ordered[..names.ordered.len().min(MAX_LISTED_NAMES)];
+        let shown: Vec<&str> = names
+            .ordered
+            .iter()
+            .take(MAX_LISTED_NAMES)
+            .map(|n| n.0)
+            .collect();
         help.push_str(&format!(
             "{} {}: {}",
             noun.listed,
@@ -157,14 +196,10 @@ pub(crate) fn warnings(index: &SpanIndex) -> Vec<Diagnostic> {
     let variables = Names::of(index, SymbolKind::StreamVariable);
     let functions = Names::of(index, SymbolKind::Function);
     let structs = Names::of(index, SymbolKind::Struct);
-    let mut first_declared: HashMap<&str, usize> = HashMap::new();
-    for d in index
-        .declarations
-        .iter()
-        .filter(|d| d.kind == SymbolKind::StreamVariable)
-    {
+    let mut first_declared: HashMap<Name, usize> = HashMap::new();
+    for d in declarations_of(index, SymbolKind::StreamVariable) {
         let entry = first_declared
-            .entry(d.name.as_str())
+            .entry(Name(d.name.as_str()))
             .or_insert(d.expr_index);
         *entry = (*entry).min(d.expr_index);
     }
@@ -177,7 +212,7 @@ pub(crate) fn warnings(index: &SpanIndex) -> Vec<Diagnostic> {
                     found.push((r, &VARIABLE, &variables, Problem::Undefined));
                 }
             }
-            ReferenceSource::VariableSource => match first_declared.get(name) {
+            ReferenceSource::VariableSource => match first_declared.get(&Name(name)) {
                 None => found.push((r, &VARIABLE, &variables, Problem::Undefined)),
                 Some(&at) if at >= r.expr_index => {
                     found.push((r, &VARIABLE, &variables, Problem::ReadBeforeDeclared))
@@ -300,32 +335,41 @@ mod tests {
         LEVENSHTEIN_CALLS.with(|c| c.get())
     }
 
-    fn best_of_three(index: &SpanIndex) -> std::time::Duration {
-        (0..3)
-            .map(|_| {
-                let start = std::time::Instant::now();
-                let out = warnings(index);
-                let elapsed = start.elapsed();
-                std::hint::black_box(out);
-                elapsed
-            })
-            .min()
-            .unwrap()
+    struct Work {
+        comparisons: usize,
+        declarations_visited: usize,
+        diagnostics: usize,
     }
 
-    fn assert_scales_linearly(build: fn(usize) -> SpanIndex) {
-        let small = 5_000;
-        let factor = 4;
-        let (small_index, large_index) = (build(small), build(small * factor));
-        let t_small = best_of_three(&small_index);
-        let t_large = best_of_three(&large_index);
-        let allowed = t_small * (factor as u32 * 5 / 2) + std::time::Duration::from_millis(50);
-        assert!(
-            t_large < allowed,
-            "t({small})={t_small:?} t({})={t_large:?} allowed={allowed:?}",
-            small * factor
-        );
-        assert!(t_large < std::time::Duration::from_secs(60), "{t_large:?}");
+    fn work_during(index: &SpanIndex) -> Work {
+        NAME_COMPARISONS.with(|c| c.set(0));
+        DECLARATIONS_VISITED.with(|c| c.set(0));
+        let diagnostics = warnings(index).len();
+        Work {
+            comparisons: NAME_COMPARISONS.with(|c| c.get()),
+            declarations_visited: DECLARATIONS_VISITED.with(|c| c.get()),
+            diagnostics,
+        }
+    }
+
+    fn assert_work_is_linear(build: fn(usize) -> SpanIndex) {
+        for n in [1_000, 4_000, 16_000] {
+            let index = build(n);
+            let total = index.declarations.len() + index.references.len();
+            let work = work_during(&index);
+            assert!(
+                work.comparisons <= 4 * total,
+                "n={n} comparisons={} total={total}",
+                work.comparisons
+            );
+            assert!(
+                work.declarations_visited <= 4 * index.declarations.len(),
+                "n={n} visited={} declarations={}",
+                work.declarations_visited,
+                index.declarations.len()
+            );
+            assert_eq!(work.diagnostics, MAX_DIAGNOSTICS + 1, "n={n}");
+        }
     }
 
     #[test]
@@ -400,12 +444,12 @@ mod tests {
     }
 
     #[test]
-    fn function_resolution_scales_linearly() {
-        assert_scales_linearly(fn_index);
+    fn function_resolution_work_is_linear() {
+        assert_work_is_linear(fn_index);
     }
 
     #[test]
-    fn stream_variable_resolution_scales_linearly() {
-        assert_scales_linearly(variable_index);
+    fn stream_variable_resolution_work_is_linear() {
+        assert_work_is_linear(variable_index);
     }
 }

@@ -790,31 +790,26 @@ fn timed<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
     (out, start.elapsed())
 }
 
-const BACKSTOP: std::time::Duration = std::time::Duration::from_secs(60);
+const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(60);
 
-fn best_of_three(src: &str) -> std::time::Duration {
-    (0..3)
-        .map(|_| {
-            let (out, elapsed) = timed(|| marigold_check(src));
-            std::hint::black_box(out);
-            elapsed
-        })
-        .min()
-        .unwrap()
-}
-
-fn assert_scales_linearly(build: impl Fn(usize) -> String) {
-    let n = 5_000;
-    let (small, large) = (build(n), build(2 * n));
-    let t_small = best_of_three(&small);
-    let t_large = best_of_three(&large);
-    let allowed = t_small.mul_f64(3.5) + std::time::Duration::from_millis(100);
-    assert!(
-        t_large < allowed,
-        "t({n})={t_small:?} t({})={t_large:?} allowed={allowed:?}",
-        2 * n
-    );
-    assert!(t_large < BACKSTOP, "took {t_large:?}");
+fn assert_output_is_capped_at_every_size(build: impl Fn(usize) -> String) {
+    for n in [5_000, 10_000] {
+        let (diags, elapsed) = timed(|| marigold_check(&build(n)));
+        assert!(elapsed < HANG_GUARD, "took {elapsed:?}");
+        assert!(!has_error(&diags));
+        assert_eq!(diags.len(), 51, "n={n}");
+        assert_eq!(
+            diags
+                .iter()
+                .filter(|d| d.code == "resolver-diagnostics-truncated")
+                .count(),
+            1,
+            "n={n}"
+        );
+        for d in &diags {
+            assert!(d.help.as_deref().map_or(0, str::len) < 2_000, "n={n}");
+        }
+    }
 }
 
 fn many_fns(n: usize) -> String {
@@ -837,10 +832,10 @@ fn chained_variables(n: usize) -> String {
 }
 
 #[test]
-fn many_undefined_fns_against_many_declared_fns_scale_linearly_and_are_capped() {
-    assert_scales_linearly(many_fns);
+fn many_undefined_fns_against_many_declared_fns_are_capped_at_every_size() {
+    assert_output_is_capped_at_every_size(many_fns);
     let (diags, elapsed) = timed(|| marigold_check(&many_fns(60_000)));
-    assert!(elapsed < BACKSTOP, "took {elapsed:?}");
+    assert!(elapsed < HANG_GUARD, "took {elapsed:?}");
     assert!(!has_error(&diags));
     assert!(diags.len() <= 51, "{}", diags.len());
     let summary = diags
@@ -857,10 +852,10 @@ fn many_undefined_fns_against_many_declared_fns_scale_linearly_and_are_capped() 
 }
 
 #[test]
-fn many_chained_stream_variables_scale_linearly() {
-    assert_scales_linearly(chained_variables);
+fn many_chained_stream_variables_are_capped_at_every_size() {
+    assert_output_is_capped_at_every_size(chained_variables);
     let (diags, elapsed) = timed(|| marigold_check(&chained_variables(50_000)));
-    assert!(elapsed < BACKSTOP, "took {elapsed:?}");
+    assert!(elapsed < HANG_GUARD, "took {elapsed:?}");
     assert!(!has_error(&diags));
     assert!(diags.len() <= 51, "{}", diags.len());
 }
