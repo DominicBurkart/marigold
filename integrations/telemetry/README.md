@@ -243,6 +243,8 @@ Nothing here has been run against a live Datadog account.
   checked against the current Agent documentation.
 - Counter temporality handling in the Agent, and the `.as_count()` sums
   the language server asks for, are assumed to give totals over the window.
+- `Cargo.lock` is not tracked (it is gitignored), so `cargo audit` and
+  `cargo deny` ran against a freshly resolved lockfile, not a committed one.
 - The live test, `live_datadog_query_succeeds`, is ignored by default. Run
   it with `DD_API_KEY` and `DD_APP_KEY` set:
 

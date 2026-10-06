@@ -210,7 +210,7 @@ mod tests {
     struct Fake {
         calls: Arc<AtomicUsize>,
         gate: Option<Mutex<Receiver<()>>>,
-        entered: Mutex<Sender<()>>,
+        entered: Mutex<Sender<String>>,
         fail: Arc<std::sync::atomic::AtomicBool>,
         panic: bool,
     }
@@ -218,11 +218,11 @@ mod tests {
     impl TelemetrySource for Fake {
         fn node_stats(
             &self,
-            _program: &str,
+            program: &str,
             node_ids: &[NodeId],
         ) -> Result<Vec<NodeStats>, TelemetryError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            let _ = self.entered.lock().unwrap().send(());
+            let _ = self.entered.lock().unwrap().send(program.to_string());
             if let Some(gate) = &self.gate {
                 let _ = gate.lock().unwrap().recv();
             }
@@ -277,8 +277,9 @@ mod tests {
         clock: TestClock,
         fail: Arc<std::sync::atomic::AtomicBool>,
         gate: Sender<()>,
-        entered: Receiver<()>,
+        entered: Receiver<String>,
         syncs: AtomicUsize,
+        completed: AtomicUsize,
     }
 
     fn harness(gated: bool, panic: bool) -> Harness {
@@ -312,6 +313,7 @@ mod tests {
             gate: gate_tx,
             entered,
             syncs: AtomicUsize::new(0),
+            completed: AtomicUsize::new(0),
         }
     }
 
@@ -325,16 +327,32 @@ mod tests {
 
     impl Harness {
         fn wait(&self) -> bool {
-            self.done
+            let changed = self
+                .done
                 .recv_timeout(Duration::from_secs(30))
-                .expect("lookup did not complete")
+                .expect("lookup did not complete");
+            self.completed.fetch_add(1, Ordering::SeqCst);
+            changed
         }
 
         fn sync(&self) {
             let n = self.syncs.fetch_add(1, Ordering::SeqCst);
+            let marker = format!("sync{n}");
+            let ids = marigold_node_ids("range(0, 1).return", &marker)
+                .into_iter()
+                .map(|n| n.id);
             self.lookups
-                .request(key(&format!("file:///sync{n}"), "range(0, 1).return"));
-            self.wait();
+                .request(Key::new(&format!("file:///{marker}"), &marker, ids));
+            while self
+                .entered
+                .recv_timeout(Duration::from_secs(30))
+                .expect("sync did not start")
+                != marker
+            {}
+            let started = self.calls.load(Ordering::SeqCst);
+            while self.completed.load(Ordering::SeqCst) < started {
+                self.wait();
+            }
         }
     }
 
@@ -357,12 +375,14 @@ mod tests {
     #[test]
     fn concurrent_requests_for_one_key_coalesce() {
         let h = harness(true, false);
+        h.lookups.request(key("file:///a", SRC));
+        h.entered.recv().unwrap();
         for _ in 0..10 {
             h.lookups.request(key("file:///a", SRC));
         }
-        h.gate.send(()).unwrap();
-        h.wait();
-        h.gate.send(()).unwrap();
+        for _ in 0..12 {
+            h.gate.send(()).unwrap();
+        }
         h.sync();
         assert_eq!(h.calls.load(Ordering::SeqCst), 2);
     }
@@ -454,7 +474,27 @@ mod tests {
         h.clock.advance(SUCCESS_TTL - Duration::from_secs(1));
         h.lookups.request(k());
         h.sync();
-        assert_eq!(h.calls.load(Ordering::SeqCst), expected + 2);
+        expected += 2;
+        assert_eq!(h.calls.load(Ordering::SeqCst), expected);
+        h.fail.store(true, Ordering::SeqCst);
+        h.clock.advance(Duration::from_secs(1));
+        h.lookups.request(k());
+        assert!(!h.wait());
+        expected += 1;
+        h.clock.advance(BACKOFF_BASE - Duration::from_secs(1));
+        h.lookups.request(k());
+        h.sync();
+        expected += 1;
+        assert_eq!(
+            h.calls.load(Ordering::SeqCst),
+            expected,
+            "early after reset"
+        );
+        h.clock.advance(Duration::from_secs(1));
+        h.lookups.request(k());
+        h.sync();
+        expected += 2;
+        assert_eq!(h.calls.load(Ordering::SeqCst), expected, "due after reset");
     }
 
     #[test]
