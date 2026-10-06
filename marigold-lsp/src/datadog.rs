@@ -484,6 +484,7 @@ mod tests {
     use marigold_grammar::marigold_node_ids;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::{Arc, Mutex};
     use std::thread::JoinHandle;
 
@@ -992,6 +993,127 @@ mod tests {
             Err(TelemetryError::Unavailable("request timed out".into()))
         );
         drop(listener);
+    }
+
+    fn assert_no_secrets(label: &str, shown: &str) {
+        for secret in ["SECRETAPI", "SECRETAPP", "BODYSECRET"] {
+            assert!(!shown.contains(secret), "{label}: {shown}");
+        }
+    }
+
+    #[test]
+    fn config_errors_never_contain_the_keys() {
+        let cases: [(&str, &str, &str, Duration); 6] = [
+            ("SECRETAPI\n", "SECRETAPP", "datadoghq.com", WINDOW),
+            ("SECRETAPI", "SECRETAPP\n", "datadoghq.com", WINDOW),
+            ("SECRETAPI\n", "SECRETAPP\n", "datadoghq.com", WINDOW),
+            ("SECRETAPI", "SECRETAPP", "evil.com", WINDOW),
+            ("SECRETAPI", "SECRETAPP", "SECRETAPI.evil.com/x", WINDOW),
+            ("SECRETAPI", "SECRETAPP", "datadoghq.com", Duration::ZERO),
+        ];
+        for (api, app, site, window) in cases {
+            for custom in [false, true] {
+                let result = if custom {
+                    DatadogSource::new_allowing_custom_site(api, app, site, window)
+                } else {
+                    DatadogSource::new(api, app, site, window)
+                };
+                if let Err(err) = result {
+                    assert_no_secrets(site, &format!("{err} | {err:?}"));
+                }
+            }
+        }
+        let long = format!("SECRETAPI{}", "x".repeat(300));
+        let err = DatadogSource::new(&long, "SECRETAPP", "datadoghq.com", WINDOW).unwrap_err();
+        assert_no_secrets("long key", &format!("{err} | {err:?}"));
+    }
+
+    #[test]
+    fn display_and_debug_of_every_source_state_are_redacted() {
+        let source = DatadogSource::new("SECRETAPI", "SECRETAPP", "datadoghq.com", WINDOW).unwrap();
+        assert_no_secrets("debug", &format!("{source:?} {source:#?}"));
+        let cloned = source.clone();
+        assert_no_secrets("clone", &format!("{cloned:?}"));
+        assert_eq!(source.window(), WINDOW);
+    }
+
+    #[test]
+    fn backend_responses_never_leak_into_errors() {
+        let nodes = marigold_node_ids("range(0, 3).return", "demo");
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id.clone()).collect();
+        let bodies: [(u16, String); 8] = [
+            (500, "BODYSECRET SECRETAPI SECRETAPP".into()),
+            (403, "BODYSECRET SECRETAPI".into()),
+            (401, "BODYSECRET".into()),
+            (302, "BODYSECRET SECRETAPP".into()),
+            (200, "BODYSECRET SECRETAPI not json".into()),
+            (
+                200,
+                r#"{"status":"error","error":"BODYSECRET SECRETAPI SECRETAPP"}"#.into(),
+            ),
+            (
+                200,
+                r#"{"series":[{"scope":"BODYSECRET SECRETAPP","pointlist":"BODYSECRET"}]}"#.into(),
+            ),
+            (
+                200,
+                r#"{"series":[{"scope":"marigold.node_id:a","pointlist":[["BODYSECRET"]]}]}"#
+                    .into(),
+            ),
+        ];
+        for (status, body) in bodies {
+            let fake = fake_server(4, move |_| (status, body.clone()));
+            let source = local_source(fake.port);
+            let outcome = catch_unwind(AssertUnwindSafe(|| source.node_stats("demo", &ids)));
+            match outcome {
+                Ok(Ok(stats)) => assert_no_secrets("stats", &format!("{stats:?}")),
+                Ok(Err(err)) => assert_no_secrets(&status.to_string(), &format!("{err} | {err:?}")),
+                Err(payload) => {
+                    let text = payload
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                        .unwrap_or_default();
+                    panic!("source panicked: {text}");
+                }
+            }
+            drop(fake.handle);
+        }
+    }
+
+    #[test]
+    fn transport_failures_never_leak_into_errors() {
+        let nodes = marigold_node_ids("range(0, 3).return", "demo");
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id.clone()).collect();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let err = local_source(port).node_stats("demo", &ids).unwrap_err();
+        assert_eq!(
+            err,
+            TelemetryError::Unavailable("could not reach Datadog".into())
+        );
+        assert_no_secrets("refused", &format!("{err} | {err:?}"));
+        let mut hung = local_source(port);
+        hung.total_deadline = Duration::ZERO;
+        let err = hung.node_stats("demo", &ids).unwrap_err();
+        assert_no_secrets("deadline", &format!("{err} | {err:?}"));
+    }
+
+    #[test]
+    fn from_vars_errors_never_contain_the_keys() {
+        for site in ["evil.com", "SECRETAPI.evil.com", "a b"] {
+            let vars = HashMap::from([
+                ("DD_API_KEY", "SECRETAPI"),
+                ("DD_APP_KEY", "SECRETAPP"),
+                ("DD_SITE", site),
+            ]);
+            let err = DatadogSource::from_vars(|n| vars.get(n).map(|v| v.to_string()), WINDOW)
+                .unwrap_err();
+            let shown = format!("{err} | {err:?}");
+            assert!(!shown.contains("SECRETAPP"), "{shown}");
+            assert!(!shown.contains("SECRETAPI"), "{shown}");
+        }
     }
 
     #[test]
