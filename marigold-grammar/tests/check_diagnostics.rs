@@ -904,3 +904,35 @@ fn syntax_error_hides_resolver_diagnostics_for_the_whole_file() {
     assert!(diags.iter().all(|d| d.is_error()), "{diags:?}");
     assert!(diags.iter().all(|d| d.code != "undefined-fn"), "{diags:?}");
 }
+
+fn many_declared_fns_with_near_miss(n: usize) -> String {
+    let mut src = String::new();
+    for i in 0..n {
+        src.push_str(&format!("fn name{i}(x: i32) -> i32 {{ x }}\n"));
+    }
+    src.push_str("range(0, 3).map(name0x).return\n");
+    src
+}
+
+#[test]
+fn did_you_mean_is_offered_when_declared_fns_fit_the_candidate_cap() {
+    let src = many_declared_fns_with_near_miss(200);
+    let diags = marigold_check(&src);
+    assert!(!has_error(&diags), "{diags:?}");
+    let d = only(diags);
+    assert_eq!(d.code, "undefined-fn");
+    let help = d.help.unwrap();
+    assert!(help.contains("did you mean 'name0'?"), "{help}");
+}
+
+#[test]
+fn did_you_mean_is_omitted_when_declared_fns_exceed_the_candidate_cap() {
+    let src = many_declared_fns_with_near_miss(201);
+    let diags = marigold_check(&src);
+    assert!(!has_error(&diags), "{diags:?}");
+    let d = only(diags);
+    assert_eq!(d.code, "undefined-fn");
+    let help = d.help.unwrap();
+    assert!(!help.contains("did you mean"), "{help}");
+    assert!(help.contains("and 181 more"), "{help}");
+}

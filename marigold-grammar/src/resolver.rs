@@ -350,6 +350,55 @@ mod tests {
         assert!(calls > 0 && calls <= MAX_DIAGNOSTICS * n, "{calls}");
     }
 
+    fn near_miss_index(declared: usize, references: usize) -> SpanIndex {
+        let mut index = SpanIndex::default();
+        for i in 0..declared {
+            index.declarations.push(crate::span_index::Declaration {
+                name: format!("name{i}"),
+                range: range(),
+                kind: SymbolKind::Function,
+                expr_index: i,
+            });
+        }
+        for _ in 0..references {
+            index.references.push(Reference {
+                name: "name0x".to_string(),
+                range: range(),
+                source: ReferenceSource::MapFn,
+                expr_index: 0,
+            });
+        }
+        index
+    }
+
+    #[test]
+    fn suggestion_cap_boundary_decides_whether_did_you_mean_is_shown() {
+        let helps = |n: usize| -> Vec<String> {
+            warnings(&near_miss_index(n, 1))
+                .into_iter()
+                .map(|d| d.help.unwrap())
+                .collect()
+        };
+        let at_cap = helps(200);
+        assert!(at_cap[0].contains("did you mean 'name0'?"), "{}", at_cap[0]);
+        let over_cap = helps(201);
+        assert!(!over_cap[0].contains("did you mean"), "{}", over_cap[0]);
+    }
+
+    #[test]
+    fn suggestion_work_at_the_cap_is_per_reference_and_zero_beyond_it() {
+        let references = 7;
+        let at_cap = levenshtein_calls_during(&near_miss_index(200, references));
+        assert!(at_cap > 0, "{at_cap}");
+        assert!(at_cap <= references * 200, "{at_cap}");
+        let doubled = levenshtein_calls_during(&near_miss_index(200, references * 2));
+        assert_eq!(doubled, at_cap * 2);
+        for declared in [201, 5_000] {
+            let over = levenshtein_calls_during(&near_miss_index(declared, references));
+            assert_eq!(over, 0, "declared={declared}");
+        }
+    }
+
     #[test]
     fn function_resolution_scales_linearly() {
         assert_scales_linearly(fn_index);
