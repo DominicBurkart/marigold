@@ -80,10 +80,12 @@ winning, and the combined size is capped at 32 KiB by default
 
 Ask the agent to add `x.map(undefined_fn)` to a `.marigold` file and check
 that it calls `marigold_check` and reports the diagnostic. That is an
-information diagnostic, `undefined-fn`, and `ok` stays true. Use a stream
-variable that is never declared to get a warning,
-`undefined-stream-variable`; `ok` is still true, with a nonzero
-`warning_count`. Information shows in `info_count`.
+information diagnostic, `undefined-fn`, and `ok` stays true. A stream variable
+that is never declared, such as `nothing.return`, is also information,
+`undefined-stream-variable`, because it may be a Rust binding with a `get()`
+method. To get a warning, add `a = a` to the file: reading a variable before
+its declaration gives `undefined-stream-variable` as a warning; `ok` is still
+true, with a nonzero `warning_count`. Information shows in `info_count`.
 
 ## Version notes
 

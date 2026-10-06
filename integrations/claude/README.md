@@ -48,8 +48,10 @@ defaults apply.
 
 Ask Claude to add `x.map(undefined_fn)` to a `.marigold` file and then to keep
 working, for example by reading the file back. That yields an information
-diagnostic, `undefined-fn`. To see a warning, use a stream variable that is
-never declared, which yields `undefined-stream-variable`. Claude Code is
+diagnostic, `undefined-fn`. To see a warning, add `a = a`, a variable read
+before it is declared, which yields `undefined-stream-variable`. A stream
+variable that is never declared yields the same code as information. Claude
+Code is
 documented to
 show a line reading `Found N new diagnostic issues`, with Ctrl+O to expand it;
 both are UNVERIFIED here. To check the plugin without relying on that line,
@@ -63,12 +65,14 @@ the edit acts on them is UNVERIFIED. As a backstop, have the agent run
 `marigold check` before it finishes.
 
 Diagnostics have three severities. Errors mean the program is invalid. The
-only warning is `undefined-stream-variable`, which is almost always a real
-mistake. `undefined-fn` and `undefined-struct` are information, because
-Marigold fns and structs normally live in Rust code surrounding the program
-inside `m!()`; the message says the name may be a Rust item in scope and can be
-ignored in that case. `resolver-diagnostics-truncated` is also information: more
-than 50 undefined-name diagnostics were found; only the first 50 are reported.
+only warning is `undefined-stream-variable` for a variable read before it is
+declared, which is almost always a real mistake. An undeclared stream variable
+(a Rust binding with a `get()` method can satisfy it), `undefined-fn` and
+`undefined-struct` are information, because Marigold fns and structs normally
+live in Rust code surrounding the program inside `m!()`; the message says the
+name may be a Rust item in scope and can be ignored in that case.
+`resolver-diagnostics-truncated` is also information: more than 50
+undefined-name diagnostics were found; only the first 50 are reported.
 Fix those and check again. `marigold check` exits 0 for warnings and
 information and 1 on any error, and, if the MCP server is registered,
 `marigold_check` returns `ok: true` with `error_count`, `warning_count` and

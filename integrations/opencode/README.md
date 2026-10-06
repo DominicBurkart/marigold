@@ -73,8 +73,10 @@ Each entry under `lsp` accepts these keys, per the opencode docs:
 
 Ask the agent to add `x.map(undefined_fn)` to a `.marigold` file and check that
 the resulting diagnostic is reported back to it. That yields an information
-diagnostic, `undefined-fn`; an undeclared stream variable yields a warning,
-`undefined-stream-variable`. Neither is an error, so tell the agent to fix
+diagnostic, `undefined-fn`; a variable read before it is declared (`a = a`)
+yields a warning, `undefined-stream-variable`, while an undeclared stream
+variable yields the same code as information. Neither is an error, so tell the
+agent to fix
 warnings and read information diagnostics too. How opencode surfaces
 information diagnostics to the model is UNVERIFIED. `opencode debug lsp
 diagnostics <file>` shows what the server reports.
