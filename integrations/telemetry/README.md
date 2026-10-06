@@ -228,7 +228,8 @@ count can outlive the code it was recorded against. An annotation whose
 recorded content hash differs from the current node text is marked
 `(stale)`. The Datadog source cannot do this yet: the exported metrics do
 not carry a content hash, so `DatadogSource` leaves `content_hash` as
-`None` and Datadog annotations are never marked stale. The check is implemented and tested for sources that do report a hash.
+`None` and Datadog annotations are never marked stale. The check is
+implemented and tested for sources that do report a hash.
 
 ## Unverified
 
