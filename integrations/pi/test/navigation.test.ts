@@ -61,7 +61,8 @@ describe("registration", () => {
 
   it("documents the severities in the check tool and skill", () => {
     const description = pi.tools.get("marigold_check").description;
-    expect(description).toMatch(/undefined stream variables/);
+    expect(description).toMatch(/read before it is declared/);
+    expect(description).toMatch(/get\(\) method/);
     expect(description).toMatch(/information/);
     expect(description).toMatch(/Rust items in scope/);
     const skill = readFileSync(join(__dirname, "..", "skills", "marigold", "SKILL.md"), "utf8");
@@ -69,7 +70,7 @@ describe("registration", () => {
     const information = skill.slice(skill.indexOf("Information:"), skill.indexOf("## Complexity"));
     expect(warning).toContain("undefined-stream-variable");
     expect(warning).not.toContain("undefined-fn");
-    for (const code of ["undefined-fn", "undefined-struct", "resolver-diagnostics-truncated"]) {
+    for (const code of ["undefined-stream-variable", "undefined-fn", "undefined-struct", "resolver-diagnostics-truncated"]) {
       expect(information).toContain(code);
     }
   });

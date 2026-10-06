@@ -174,7 +174,7 @@ fn check_source_reports_one_based_diagnostics() {
 
 #[test]
 fn check_counts_each_severity_and_stays_ok_without_errors() {
-    let src = "range(0, 5).map(doubel).return\nnothing.return";
+    let src = "range(0, 5).map(doubel).return\na = a\na.return";
     let result = call("marigold_check", json!({"source": src}));
     let s = &result["structuredContent"];
     assert_eq!(s["ok"], true);
@@ -208,6 +208,17 @@ fn check_undefined_fn_only_is_information_not_warning() {
     assert_eq!(s["ok"], true);
     assert_eq!(s["warning_count"], 0);
     assert_eq!(s["info_count"], 1);
+}
+
+#[test]
+fn check_undefined_stream_variable_only_is_information_not_warning() {
+    let result = call("marigold_check", json!({"source": "nothing.return"}));
+    let s = &result["structuredContent"];
+    assert_eq!(s["ok"], true);
+    assert_eq!(s["warning_count"], 0);
+    assert_eq!(s["info_count"], 1);
+    assert_eq!(s["diagnostics"][0]["severity"], "information");
+    assert_eq!(s["diagnostics"][0]["code"], "undefined-stream-variable");
 }
 
 #[test]
@@ -841,10 +852,15 @@ fn instructions_and_check_description_require_reviewing_warnings() {
         .unwrap();
     for text in [instructions, description] {
         assert!(text.contains("warning"), "{text}");
-        assert!(text.contains("undefined stream variables"), "{text}");
+        assert!(text.contains("read before it is declared"), "{text}");
+        assert!(
+            !text.contains("(for example undefined stream variables)"),
+            "{text}"
+        );
         assert!(text.contains("information"), "{text}");
         assert!(text.contains("info_count"), "{text}");
         assert!(text.contains("Rust items in scope in m!()"), "{text}");
+        assert!(text.contains("Rust binding with a get() method"), "{text}");
         assert!(
             !text.contains("undefined stream variables, functions"),
             "{text}"
