@@ -68,9 +68,10 @@ the real symbol.
 - `undefined-type`: a bound expression such as `Name.len()` refers to an
   unknown enum or field.
 - `cyclic-bound`: bound expressions refer to each other in a cycle.
-- `undefined-stream-variable` (warning): a stream variable is read before
-  the line that declares it, or by its own declaration; read only variables
-  declared above.
+- `undefined-stream-variable` (information when never declared, warning
+  when read before declared): a stream variable is read before the line
+  that declares it, or by its own declaration, or is never declared; read
+  only variables declared above.
 - `input-too-large`: the file is over the 10 MiB limit and was not
   checked.
 
@@ -105,3 +106,7 @@ Use `marigold_hover` for a quick complexity line, or run
 `marigold analyze <file>` to get JSON with each stream's cardinality and
 time/space complexity before choosing between `permutations`,
 `combinations`, and filters on large inputs.
+
+When a chain collects its input (for example `permutations`), space is
+reported as `not estimated (collects input)` because the analyzer's constant
+figure does not account for the collected items.
