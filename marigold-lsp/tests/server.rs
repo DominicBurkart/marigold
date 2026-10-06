@@ -163,7 +163,23 @@ fn publishes_diagnostics_on_open() {
 }
 
 #[test]
-fn undefined_stream_variable_is_published_as_warning() {
+fn read_before_declared_stream_variable_is_published_as_warning() {
+    let (client, _) = Client::start();
+    open(&client, "a = a\na.return\n");
+    let published = client.diagnostics();
+    let [d] = published.diagnostics.as_slice() else {
+        panic!("{:?}", published.diagnostics)
+    };
+    assert_eq!(
+        d.code,
+        Some(NumberOrString::String("undefined-stream-variable".into()))
+    );
+    assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::WARNING));
+    client.shutdown();
+}
+
+#[test]
+fn undefined_stream_variable_is_published_as_information() {
     let (client, _) = Client::start();
     open(&client, "x = range(0, 3)\nxs.return\n");
     let published = client.diagnostics();
@@ -174,7 +190,7 @@ fn undefined_stream_variable_is_published_as_warning() {
         d.code,
         Some(NumberOrString::String("undefined-stream-variable".into()))
     );
-    assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::WARNING));
+    assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::INFORMATION));
     client.shutdown();
 }
 

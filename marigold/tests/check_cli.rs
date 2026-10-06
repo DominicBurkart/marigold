@@ -147,7 +147,7 @@ fn oversized_input_exits_one_with_input_too_large() {
 
 #[test]
 fn warning_only_program_prints_warning_label_and_exits_zero() {
-    let path = write_temp("warning.marigold", "xs.return");
+    let path = write_temp("warning.marigold", "a = a\na.return");
     let out = run_check(&[], &path);
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     let stdout = String::from_utf8(out.stdout).unwrap();
@@ -160,6 +160,24 @@ fn warning_only_program_prints_warning_label_and_exits_zero() {
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v[0]["severity"], "warning");
+    assert_eq!(v[0]["code"], "undefined-stream-variable");
+}
+
+#[test]
+fn undefined_stream_variable_prints_information_label_and_exits_zero() {
+    let path = write_temp("undefined_variable.marigold", "xs.return");
+    let out = run_check(&[], &path);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("information[undefined-stream-variable]"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("warning["), "{stdout}");
+
+    let out = run_check(&["--format", "json"], &path);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v[0]["severity"], "information");
 }
 
 #[test]

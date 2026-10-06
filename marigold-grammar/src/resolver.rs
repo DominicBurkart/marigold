@@ -28,6 +28,7 @@ const MAX_SUGGESTION_CANDIDATES: usize = 200;
 const MAX_LISTED_NAMES: usize = 20;
 const RUST_SCOPE_NOTE: &str =
     "it may be a Rust item in scope inside m!() and can be ignored in that case";
+const RUST_VARIABLE_NOTE: &str = "it may be a Rust binding with a get() method returning a stream, in scope inside m!(), and can be ignored in that case";
 
 pub(crate) fn closest<'a>(name: &str, candidates: &[&'a str]) -> Option<&'a str> {
     let name_len = name.chars().count();
@@ -75,7 +76,7 @@ const VARIABLE: Noun = Noun {
     code: "undefined-stream-variable",
     plural: "stream variables",
     listed: "defined",
-    severity: Severity::Warning,
+    severity: Severity::Information,
     singular: "stream variable",
 };
 const FUNCTION: Noun = Noun {
@@ -104,9 +105,9 @@ fn explain(r: &Reference, noun: &Noun, names: &Names, problem: &Problem) -> Diag
         Problem::ReadBeforeDeclared => format!(
             "stream variable '{name}' is read before it is declared; a stream variable can only read variables declared above it"
         ),
-        Problem::Undefined if noun.severity == Severity::Warning => {
-            format!("stream variable '{name}' is not defined in this program")
-        }
+        Problem::Undefined if noun.code == VARIABLE.code => format!(
+            "stream variable '{name}' is not defined in this program; {RUST_VARIABLE_NOTE}"
+        ),
         Problem::Undefined => format!(
             "{} '{name}' is not declared in this program; {RUST_SCOPE_NOTE}",
             noun.singular
@@ -135,12 +136,21 @@ fn explain(r: &Reference, noun: &Noun, names: &Names, problem: &Problem) -> Diag
             help.push_str(&format!(", and {} more", names.ordered.len() - shown.len()));
         }
     }
-    if noun.severity == Severity::Information {
+    let severity = match problem {
+        Problem::ReadBeforeDeclared => Severity::Warning,
+        Problem::Undefined => noun.severity,
+    };
+    if severity == Severity::Information {
+        let what = if noun.code == VARIABLE.code {
+            "Rust binding with a get() method returning a stream"
+        } else {
+            "Rust item"
+        };
         help.push_str(&format!(
-            "; if '{name}' is a Rust item in scope inside m!(), ignore this"
+            "; if '{name}' is a {what} in scope inside m!(), ignore this"
         ));
     }
-    Diagnostic::new(r.range, noun.severity, noun.code, message).with_help(help)
+    Diagnostic::new(r.range, severity, noun.code, message).with_help(help)
 }
 
 pub(crate) fn warnings(index: &SpanIndex) -> Vec<Diagnostic> {
@@ -191,7 +201,7 @@ pub(crate) fn warnings(index: &SpanIndex) -> Vec<Diagnostic> {
             ReferenceSource::RangeEnum => {}
         }
     }
-    found.sort_by_key(|(_, noun, _, _)| noun.severity != Severity::Warning);
+    found.sort_by_key(|(_, _, _, problem)| !matches!(problem, Problem::ReadBeforeDeclared));
     let omitted = found.len().saturating_sub(MAX_DIAGNOSTICS);
     let first_omitted = found.get(MAX_DIAGNOSTICS).map(|(r, ..)| r.range);
     let mut out: Vec<Diagnostic> = found

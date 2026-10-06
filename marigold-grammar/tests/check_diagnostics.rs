@@ -352,11 +352,41 @@ fn undefined_stream_variable_in_stream_start() {
     let src = "x = range(0, 3)\nxs.return";
     let d = warning(src);
     assert_eq!(d.code, "undefined-stream-variable");
-    assert_eq!(d.severity, Severity::Warning);
+    assert_eq!(d.severity, Severity::Information);
     assert_eq!(slice(src, &d), "xs");
+    assert!(
+        d.message.contains("Rust binding with a get() method"),
+        "{}",
+        d.message
+    );
     let help = d.help.unwrap();
     assert!(help.contains("did you mean 'x'?"), "{help}");
     assert!(help.contains("defined stream variables: x"), "{help}");
+    assert!(help.contains("Rust binding"), "{help}");
+}
+
+#[test]
+fn undefined_name_used_as_a_stream_start_is_never_a_warning() {
+    for src in [
+        "x.return",
+        "x.map(f).return",
+        "other = range(0, 3)
+x.return",
+        "x.filter(f).return",
+    ] {
+        let diags = marigold_check(src);
+        assert!(!has_error(&diags), "{src}: {diags:?}");
+        let x = diags
+            .iter()
+            .find(|d| d.code == "undefined-stream-variable")
+            .unwrap_or_else(|| panic!("{src}: {diags:?}"));
+        assert_eq!(x.severity, Severity::Information, "{src}");
+        assert!(
+            diags.iter().all(|d| d.severity != Severity::Warning),
+            "{src}: {diags:?}"
+        );
+        assert!(marigold_parse(src).is_ok(), "{src}");
+    }
 }
 
 #[test]
@@ -368,6 +398,7 @@ fn undefined_stream_variable_in_variable_source() {
         codes,
         vec![("undefined-stream-variable", "aa"), ("undefined-fn", "p")]
     );
+    assert!(diags.iter().all(|d| d.severity == Severity::Information));
 }
 
 #[test]
@@ -375,6 +406,7 @@ fn stream_variable_with_no_declarations_says_so() {
     let src = "nothing.return";
     let d = warning(src);
     assert_eq!(d.code, "undefined-stream-variable");
+    assert_eq!(d.severity, Severity::Information);
     assert!(d.help.unwrap().contains("no stream variables"));
 }
 
@@ -416,6 +448,8 @@ fn forward_reference_from_variable_to_later_variable_warns() {
         found,
         vec![("undefined-stream-variable", "a"), ("undefined-fn", "p")]
     );
+    assert_eq!(diags[0].severity, Severity::Warning);
+    assert_eq!(diags[1].severity, Severity::Information);
     assert!(
         diags[0].message.contains("declared"),
         "{}",
@@ -428,6 +462,7 @@ fn variable_referencing_itself_warns() {
     let src = "a = a.map(f)\na.return";
     let d = &warnings(src)[0];
     assert_eq!(d.code, "undefined-stream-variable");
+    assert_eq!(d.severity, Severity::Warning);
     assert_eq!(slice(src, d), "a");
 }
 
@@ -652,7 +687,7 @@ fn legitimate_programs_have_no_errors_or_warnings() {
 }
 
 #[test]
-fn undefined_stream_variable_is_the_only_warning_source() {
+fn use_before_declare_is_the_only_warning_source() {
     let sources = [
         "range(0, 5).map(f).filter(g).filter_map(h).fold(0, i).return\nrange(0, 5).keep_first_n(2, j).return",
         "read_file(\"d.csv\", csv, struct=Nope).return",
@@ -660,18 +695,29 @@ fn undefined_stream_variable_is_the_only_warning_source() {
         "enum E { A }\nrange(E).return",
         "b = a.map(f)\nb.return\nc.return",
         "x = x.map(f)\nx.return",
+        "b = a.map(f)\na = range(0, 3)\nb.return",
     ];
-    let mut warning_codes = std::collections::BTreeSet::new();
+    let mut warnings_seen = Vec::new();
     for src in sources {
         for d in marigold_check(src) {
             if d.severity == Severity::Warning {
-                warning_codes.insert(d.code);
+                assert!(
+                    d.message.contains("before it is declared"),
+                    "{src}: {}",
+                    d.message
+                );
+                warnings_seen.push((d.code, slice(src, &d).to_string()));
+            } else if !d.is_error() {
+                assert_eq!(d.severity, Severity::Information, "{src}: {d:?}");
             }
         }
     }
     assert_eq!(
-        warning_codes.into_iter().collect::<Vec<_>>(),
-        vec!["undefined-stream-variable"]
+        warnings_seen,
+        vec![
+            ("undefined-stream-variable", "x".to_string()),
+            ("undefined-stream-variable", "a".to_string())
+        ]
     );
 }
 
@@ -825,10 +871,10 @@ fn resolver_diagnostics_are_capped_with_one_summary_that_prefers_warnings() {
     for i in 0..80 {
         src.push_str(&format!("range(0,3).map(g{i}).return\n"));
     }
-    src.push_str("nothing.return\n");
+    src.push_str("x = x\nx.return\n");
     let diags = marigold_check(&src);
     assert_eq!(diags.len(), 51, "{}", diags.len());
-    assert!(diags.iter().any(|d| d.code == "undefined-stream-variable"));
+    assert!(diags.iter().any(|d| d.severity == Severity::Warning));
     let summary: Vec<_> = diags
         .iter()
         .filter(|d| d.code == "resolver-diagnostics-truncated")
@@ -849,4 +895,12 @@ fn help_lists_at_most_a_bounded_number_of_defined_names() {
     assert!(help.contains("name0"), "{help}");
     assert!(!help.contains("name59"), "{help}");
     assert!(help.contains("more"), "{help}");
+}
+
+#[test]
+fn syntax_error_hides_resolver_diagnostics_for_the_whole_file() {
+    let src = "range(0, 5).map(f).return\nrange(0, 5).retur";
+    let diags = marigold_check(src);
+    assert!(diags.iter().all(|d| d.is_error()), "{diags:?}");
+    assert!(diags.iter().all(|d| d.code != "undefined-fn"), "{diags:?}");
 }

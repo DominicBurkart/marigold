@@ -99,10 +99,15 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
 /// Check Marigold source and return every diagnostic found, with byte ranges.
 ///
 /// No diagnostic has [`diagnostics::Severity::Error`] exactly when [`marigold_parse`]
-/// succeeds. Warnings (undefined stream variables) and information (functions and
-/// structs not declared in the program, which may be Rust items in scope inside
-/// `m!()`) never affect [`marigold_parse`].
+/// succeeds. Warnings (a stream variable read before it is declared) and information
+/// (stream variables, functions and structs not declared in the program, which may
+/// be Rust items in scope inside `m!()`; a stream variable may be any Rust binding
+/// with a `get()` method returning a stream) never affect [`marigold_parse`].
 /// At most 50 resolver diagnostics are reported per file.
+///
+/// A syntax error anywhere in the file hides the resolver diagnostics (warnings and
+/// information) for the whole file; only the syntax error is reported until it is fixed.
+/// This is intended.
 ///
 /// Input larger than [`diagnostics::MAX_CHECK_INPUT_BYTES`] is rejected with a
 /// single `input-too-large` error diagnostic without being parsed.
