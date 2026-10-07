@@ -126,7 +126,58 @@ fn read_line<R: BufRead>(reader: &mut R, max: usize) -> io::Result<Line> {
 /// assert_eq!(lines[0]["id"], "a");
 /// assert_eq!(lines[1]["error"]["code"], -32700);
 /// ```
-pub fn serve_mcp<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Result<()> {
+pub fn serve_mcp<R: BufRead, W: Write>(reader: R, writer: W) -> io::Result<()> {
+    #[cfg(feature = "telemetry")]
+    {
+        let source = crate::telemetry::source_from_env();
+        serve_mcp_with_telemetry(
+            reader,
+            writer,
+            source
+                .as_deref()
+                .map(|s| s as &dyn crate::telemetry::TelemetrySource),
+        )
+    }
+    #[cfg(not(feature = "telemetry"))]
+    serve_loop(reader, writer, &Ctx::default())
+}
+
+/// Like [`serve_mcp`], with an explicit telemetry source instead of one read from the
+/// environment. With `None` the tool list and every response match a build without telemetry.
+///
+/// ```
+/// use marigold_lsp::telemetry::StaticSource;
+/// use std::io::Cursor;
+///
+/// let request = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
+/// let source = StaticSource::default();
+/// let mut out = Vec::new();
+/// marigold_lsp::mcp::serve_mcp_with_telemetry(
+///     Cursor::new(format!("{request}\n")),
+///     &mut out,
+///     Some(&source),
+/// )
+/// .unwrap();
+/// assert!(String::from_utf8(out).unwrap().contains("marigold_telemetry"));
+/// ```
+#[cfg(feature = "telemetry")]
+pub fn serve_mcp_with_telemetry<R: BufRead, W: Write>(
+    reader: R,
+    writer: W,
+    source: Option<&dyn crate::telemetry::TelemetrySource>,
+) -> io::Result<()> {
+    serve_loop(reader, writer, &Ctx { telemetry: source })
+}
+
+#[derive(Default)]
+struct Ctx<'a> {
+    #[cfg(feature = "telemetry")]
+    telemetry: Option<&'a dyn crate::telemetry::TelemetrySource>,
+    #[cfg(not(feature = "telemetry"))]
+    unused: std::marker::PhantomData<&'a ()>,
+}
+
+fn serve_loop<R: BufRead, W: Write>(mut reader: R, mut writer: W, ctx: &Ctx) -> io::Result<()> {
     loop {
         let response = match read_line(&mut reader, MAX_LINE_BYTES)? {
             Line::Eof => return Ok(()),
@@ -135,7 +186,7 @@ pub fn serve_mcp<R: BufRead, W: Write>(mut reader: R, mut writer: W) -> io::Resu
                 INVALID_REQUEST,
                 "request line exceeds the 16 MiB limit",
             )),
-            Line::Data(bytes) => handle_line(&bytes),
+            Line::Data(bytes) => handle_line(&bytes, ctx),
         };
         if let Some(response) = response {
             let mut encoded = serde_json::to_vec(&response).map_err(io::Error::other)?;
@@ -159,7 +210,7 @@ fn error_response(id: Value, code: i64, message: impl Into<String>) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message.into()}})
 }
 
-fn handle_line(bytes: &[u8]) -> Option<Value> {
+fn handle_line(bytes: &[u8], ctx: &Ctx) -> Option<Value> {
     let trimmed = bytes.trim_ascii();
     if trimmed.is_empty() {
         return None;
@@ -181,10 +232,10 @@ fn handle_line(bytes: &[u8]) -> Option<Value> {
             "expected a single JSON-RPC request object",
         ));
     };
-    handle_message(&message)
+    handle_message(&message, ctx)
 }
 
-fn handle_message(message: &Map<String, Value>) -> Option<Value> {
+fn handle_message(message: &Map<String, Value>, ctx: &Ctx) -> Option<Value> {
     if !message.contains_key("method")
         && (message.contains_key("result") || message.contains_key("error"))
     {
@@ -218,18 +269,18 @@ fn handle_message(message: &Map<String, Value>) -> Option<Value> {
         ));
     };
     let id = id?;
-    Some(match handle_request(method, message.get("params")) {
+    Some(match handle_request(method, message.get("params"), ctx) {
         Ok(result) => ok_response(id, result),
         Err(e) => error_response(id, e.code, e.message),
     })
 }
 
-fn handle_request(method: &str, params: Option<&Value>) -> Result<Value, RpcError> {
+fn handle_request(method: &str, params: Option<&Value>, ctx: &Ctx) -> Result<Value, RpcError> {
     match method {
         "initialize" => initialize(params),
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({"tools": tool_definitions()})),
-        "tools/call" => call_tool(params),
+        "tools/list" => Ok(json!({"tools": tool_definitions(ctx)})),
+        "tools/call" => call_tool(params, ctx),
         other => Err(rpc_error(
             METHOD_NOT_FOUND,
             format!("method not found: {other}"),
@@ -264,7 +315,21 @@ fn initialize(params: Option<&Value>) -> Result<Value, RpcError> {
     }))
 }
 
-fn tool_definitions() -> Value {
+fn tool_definitions(ctx: &Ctx) -> Value {
+    #[allow(unused_mut)]
+    let mut tools = base_tool_definitions();
+    #[cfg(feature = "telemetry")]
+    if ctx.telemetry.is_some() {
+        if let Value::Array(list) = &mut tools {
+            list.push(telemetry_tool_definition());
+        }
+    }
+    #[cfg(not(feature = "telemetry"))]
+    let _ = ctx;
+    tools
+}
+
+fn base_tool_definitions() -> Value {
     let path = json!({"type": "string", "description": "Path to a .marigold file, absolute or relative to the server's working directory."});
     let line = json!({"type": "integer", "minimum": 1, "description": "1-based line number."});
     let column = json!({"type": "integer", "minimum": 1, "description": "1-based column, counted in characters."});
@@ -347,7 +412,7 @@ struct ToolOutput {
 
 type ToolResult = Result<ToolOutput, String>;
 
-fn call_tool(params: Option<&Value>) -> Result<Value, RpcError> {
+fn call_tool(params: Option<&Value>, ctx: &Ctx) -> Result<Value, RpcError> {
     let params = params
         .and_then(Value::as_object)
         .ok_or_else(|| rpc_error(INVALID_PARAMS, "tools/call params must be an object"))?;
@@ -366,6 +431,14 @@ fn call_tool(params: Option<&Value>) -> Result<Value, RpcError> {
             ))
         }
     };
+    #[cfg(feature = "telemetry")]
+    if let (Some(source), "marigold_telemetry") = (ctx.telemetry, name) {
+        let outcome = catch_unwind(AssertUnwindSafe(|| telemetry_tool(args, source)))
+            .unwrap_or_else(|_| Err("internal error while analysing the program".to_string()));
+        return Ok(tool_result(outcome));
+    }
+    #[cfg(not(feature = "telemetry"))]
+    let _ = ctx;
     let tool: fn(&Map<String, Value>) -> ToolResult = match name {
         "marigold_check" => check_tool,
         "marigold_symbols" => symbols_tool,
@@ -376,7 +449,11 @@ fn call_tool(params: Option<&Value>) -> Result<Value, RpcError> {
     };
     let outcome = catch_unwind(AssertUnwindSafe(|| tool(args)))
         .unwrap_or_else(|_| Err("internal error while analysing the program".to_string()));
-    Ok(match outcome {
+    Ok(tool_result(outcome))
+}
+
+fn tool_result(outcome: ToolResult) -> Value {
+    match outcome {
         Ok(out) => json!({
             "content": [{"type": "text", "text": out.text}],
             "structuredContent": out.structured,
@@ -386,7 +463,7 @@ fn call_tool(params: Option<&Value>) -> Result<Value, RpcError> {
             "content": [{"type": "text", "text": message}],
             "isError": true,
         }),
-    })
+    }
 }
 
 fn string_arg<'a>(args: &'a Map<String, Value>, key: &str) -> Result<Option<&'a str>, String> {
@@ -734,5 +811,64 @@ fn complexity_tool(args: &Map<String, Value>) -> ToolResult {
     Ok(ToolOutput {
         text: lines.join("\n"),
         structured: json!({"path": path, "streams": streams}),
+    })
+}
+
+#[cfg(feature = "telemetry")]
+fn telemetry_tool_definition() -> Value {
+    json!({
+        "name": "marigold_telemetry",
+        "title": "Observed Marigold telemetry",
+        "description": format!("Report observed inputs, runs and errors per node of a .marigold file from the configured telemetry backend, flagging nodes edited since the data was recorded as stale. Read-only; no data values are involved, only counts. {POSITION_NOTE}"),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Path to a .marigold file, absolute or relative to the server's working directory."}},
+            "required": ["path"],
+            "additionalProperties": false,
+        },
+        "annotations": {"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": true},
+    })
+}
+
+#[cfg(feature = "telemetry")]
+fn telemetry_tool(
+    args: &Map<String, Value>,
+    source: &dyn crate::telemetry::TelemetrySource,
+) -> ToolResult {
+    let path = required_path(args)?;
+    let text = read_marigold(path)?;
+    let program = crate::telemetry::program_name(Some(path));
+    let annotations =
+        crate::telemetry::try_annotate(&program, &text, source).map_err(|e| e.to_string())?;
+    let index = LineIndex::new(&text);
+    let window = annotations.first().map(|a| a.stats.window.as_secs());
+    let mut lines = vec![format!(
+        "marigold: telemetry for {} nodes in {path}",
+        annotations.len()
+    )];
+    let nodes: Vec<Value> = annotations
+        .iter()
+        .map(|a| {
+            let mut m = span(&index, a.range);
+            lines.push(format!(
+                "{path}:{}:{}: {}",
+                m["line"],
+                m["column"],
+                crate::telemetry::observed_line(a)
+            ));
+            m.insert("node_id".into(), json!(a.node_id.as_str()));
+            m.insert("kind".into(), json!(a.kind));
+            m.insert("observed_inputs".into(), json!(a.stats.observed_inputs));
+            m.insert("observed_runs".into(), json!(a.stats.observed_runs));
+            m.insert("errors".into(), json!(a.stats.errors));
+            m.insert("last_seen".into(), json!(a.stats.last_seen));
+            m.insert("window_seconds".into(), json!(a.stats.window.as_secs()));
+            m.insert("stale".into(), json!(a.stale));
+            Value::Object(m)
+        })
+        .collect();
+    Ok(ToolOutput {
+        text: lines.join("\n"),
+        structured: json!({"path": path, "program": program, "window_seconds": window, "nodes": nodes}),
     })
 }

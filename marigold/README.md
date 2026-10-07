@@ -107,8 +107,41 @@ marigold analyze hello_world.marigold
 }
 ```
 
-Optional editor and agent integrations (Claude Code, opencode, Codex, pi) live
-in [integrations/](https://github.com/DominicBurkart/marigold/tree/main/integrations).
+### Editor and Agent Integration
+
+Marigold ships an optional language server, `marigold-lsp`, that reports
+diagnostics for `.marigold` files and supports go-to-definition, references,
+rename, symbols and hover (with a complexity estimate). None of it is needed to
+build or run Marigold programs.
+
+Install the server from a clone of this repository:
+
+```sh
+cargo install --path marigold-lsp
+```
+
+Then connect your tool using the matching directory under
+[integrations/](https://github.com/DominicBurkart/marigold/tree/main/integrations):
+Claude Code (plugin), opencode (`lsp` config), Codex (MCP server and
+`AGENTS.md`) and pi (extension). `marigold-lsp mcp` serves the same checks,
+symbols and complexity estimates as MCP tools for agents without an LSP client.
+
+For tools that can only run shell commands, build the CLI with `-F cli` and run:
+
+```sh
+marigold check hello_world.marigold
+marigold check --format json hello_world.marigold
+```
+
+Diagnostics have three levels. Errors make the program invalid and the command
+exit 1. Warnings flag likely mistakes, such as a stream variable read before it
+is declared. Information covers names that may be Rust items in scope inside
+`m!()`, such as an undeclared function, and can be ignored in that case.
+Warnings and information leave the exit code at 0, so read them as well.
+
+Opt-in telemetry annotations (observed inputs, runs and errors per stream
+node) are described in
+[integrations/telemetry](https://github.com/DominicBurkart/marigold/tree/main/integrations/telemetry).
 
 ## Runtimes
 

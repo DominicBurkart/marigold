@@ -16,6 +16,7 @@ pub struct Client {
     conn: Connection,
     server: Option<thread::JoinHandle<()>>,
     next_id: i32,
+    stashed: std::collections::VecDeque<Request>,
 }
 
 impl Client {
@@ -30,6 +31,70 @@ impl Client {
             conn,
             server: Some(server),
             next_id: 0,
+            stashed: Default::default(),
+        };
+        let result = client
+            .call::<Initialize>(params)
+            .response_result
+            .expect("initialize failed");
+        client.notify::<Initialized>(lsp_types::InitializedParams {});
+        (client, serde_json::from_value(result).unwrap())
+    }
+
+    #[cfg(feature = "telemetry")]
+    pub fn start_telemetry(
+        source: Option<Box<dyn marigold_lsp::telemetry::TelemetrySource + Send>>,
+    ) -> (Self, InitializeResult) {
+        Self::start_telemetry_with(InitializeParams::default(), source)
+    }
+
+    #[cfg(feature = "telemetry")]
+    pub fn start_telemetry_refreshing(
+        source: Option<Box<dyn marigold_lsp::telemetry::TelemetrySource + Send>>,
+    ) -> (Self, InitializeResult) {
+        let params: InitializeParams = serde_json::from_value(serde_json::json!({
+            "capabilities": {"workspace": {"inlayHint": {"refreshSupport": true}}}
+        }))
+        .unwrap();
+        Self::start_telemetry_with(params, source)
+    }
+
+    pub fn wait_for_refresh(&mut self) {
+        loop {
+            let request = match self.stashed.pop_front() {
+                Some(request) => request,
+                None => match self.recv() {
+                    Message::Request(request) => request,
+                    _ => continue,
+                },
+            };
+            if request.method == "workspace/inlayHint/refresh" {
+                self.conn
+                    .sender
+                    .send(Message::Response(Response::new_ok(
+                        request.id,
+                        serde_json::Value::Null,
+                    )))
+                    .unwrap();
+                return;
+            }
+        }
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn start_telemetry_with(
+        params: InitializeParams,
+        source: Option<Box<dyn marigold_lsp::telemetry::TelemetrySource + Send>>,
+    ) -> (Self, InitializeResult) {
+        let (server_conn, conn) = Connection::memory();
+        let server = thread::spawn(move || {
+            marigold_lsp::serve_with_telemetry(&server_conn, source).unwrap()
+        });
+        let mut client = Client {
+            conn,
+            server: Some(server),
+            next_id: 0,
+            stashed: Default::default(),
         };
         let result = client
             .call::<Initialize>(params)
@@ -55,10 +120,10 @@ impl Client {
             )))
             .unwrap();
         loop {
-            if let Message::Response(r) = self.recv() {
-                if r.id == id {
-                    return r;
-                }
+            match self.recv() {
+                Message::Response(r) if r.id == id => return r,
+                Message::Request(req) => self.stashed.push_back(req),
+                _ => {}
             }
         }
     }

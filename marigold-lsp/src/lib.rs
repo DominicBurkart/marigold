@@ -17,10 +17,16 @@
 //! assert_eq!(diags[0].range.start, lsp_types::Position::new(0, 6));
 //! ```
 
+#[cfg(feature = "datadog")]
+pub mod datadog;
 pub mod hover;
+#[cfg(feature = "telemetry")]
+pub mod lookup;
 pub mod mcp;
 pub mod nav;
 pub mod position;
+#[cfg(feature = "telemetry")]
+pub mod telemetry;
 pub mod workspace;
 
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
@@ -155,21 +161,95 @@ pub fn capabilities() -> InitializeResult {
 /// assert!(handle.join().unwrap().is_ok());
 /// ```
 pub fn serve(connection: &Connection) -> Result<(), Error> {
+    #[cfg(feature = "telemetry")]
+    return serve_with_telemetry(connection, telemetry::source_from_env());
+    #[cfg(not(feature = "telemetry"))]
     serve_guarded(connection, None)
+}
+
+/// Like [`serve`], with an explicit telemetry source instead of one read from the environment.
+///
+/// With a source, hover gains an `observed:` line and `textDocument/inlayHint` is advertised
+/// and answered. With `None` the server behaves exactly like a build without telemetry.
+#[cfg(feature = "telemetry")]
+pub fn serve_with_telemetry(
+    connection: &Connection,
+    source: Option<Box<dyn telemetry::TelemetrySource + Send>>,
+) -> Result<(), Error> {
+    serve_guarded(connection, None, source)
 }
 
 #[doc(hidden)]
 pub fn serve_with_probe(connection: &Connection, probe: fn(&str)) -> Result<(), Error> {
+    #[cfg(feature = "telemetry")]
+    return serve_guarded(connection, Some(probe), None);
+    #[cfg(not(feature = "telemetry"))]
     serve_guarded(connection, Some(probe))
 }
 
-fn serve_guarded(connection: &Connection, probe: Option<fn(&str)>) -> Result<(), Error> {
+#[cfg(feature = "telemetry")]
+type TelemetryBox = Option<Box<dyn telemetry::TelemetrySource + Send>>;
+
+fn serve_guarded(
+    connection: &Connection,
+    probe: Option<fn(&str)>,
+    #[cfg(feature = "telemetry")] source: TelemetryBox,
+) -> Result<(), Error> {
     let (id, params) = connection.initialize_start()?;
-    connection.initialize_finish(id, serde_json::to_value(capabilities())?)?;
+    #[cfg_attr(not(feature = "telemetry"), allow(unused_mut))]
+    let mut init = capabilities();
+    #[cfg(feature = "telemetry")]
+    if source.is_some() {
+        init.capabilities.inlay_hint_provider = Some(OneOf::Left(true));
+    }
+    connection.initialize_finish(id, serde_json::to_value(init)?)?;
     let params: InitializeParams = serde_json::from_value(params).unwrap_or_default();
     let mut server = Server::new(&params);
     server.probe = probe;
+    #[cfg(feature = "telemetry")]
+    {
+        let refresh_supported = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|w| w.inlay_hint.as_ref())
+            .and_then(|h| h.refresh_support)
+            .unwrap_or(false);
+        server.telemetry = source.map(|source| TelemetryState {
+            lookups: lookup::Lookups::spawn(
+                source,
+                std::sync::Arc::new(std::time::Instant::now),
+                {
+                    let sender = connection.sender.clone();
+                    refresh_hook(refresh_supported, move |m| {
+                        let _ = sender.send(m);
+                    })
+                },
+            ),
+        });
+    }
     main_loop(connection, &mut server)
+}
+
+#[cfg(feature = "telemetry")]
+struct TelemetryState {
+    lookups: lookup::Lookups,
+}
+
+#[cfg(feature = "telemetry")]
+fn refresh_hook(supported: bool, send: impl Fn(Message) + Send + 'static) -> lookup::Completion {
+    let counter = std::sync::atomic::AtomicU64::new(0);
+    Box::new(move |changed| {
+        if !(supported && changed) {
+            return;
+        }
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        send(Message::Request(Request::new(
+            lsp_server::RequestId::from(format!("marigold-inlay-refresh-{n}")),
+            "workspace/inlayHint/refresh".to_string(),
+            serde_json::Value::Null,
+        )));
+    })
 }
 
 struct Server {
@@ -178,6 +258,8 @@ struct Server {
     roots: Vec<PathBuf>,
     probe: Option<fn(&str)>,
     index: std::sync::Mutex<workspace::SymbolIndex>,
+    #[cfg(feature = "telemetry")]
+    telemetry: Option<TelemetryState>,
 }
 
 type Failure = (ErrorCode, String);
@@ -208,6 +290,8 @@ impl Server {
             roots,
             probe: None,
             index: Default::default(),
+            #[cfg(feature = "telemetry")]
+            telemetry: None,
         }
     }
 
@@ -233,6 +317,10 @@ impl Server {
             }
             Rename::METHOD => {
                 self.rename(serde_json::from_value(req.params).map_err(invalid_params)?)
+            }
+            #[cfg(feature = "telemetry")]
+            lsp_types::request::InlayHintRequest::METHOD if self.telemetry.is_some() => {
+                self.inlay_hints(serde_json::from_value(req.params).map_err(invalid_params)?)
             }
             other => Err((
                 ErrorCode::MethodNotFound,
@@ -325,11 +413,73 @@ impl Server {
 
     fn hover(&self, params: HoverParams) -> Result<serde_json::Value, Failure> {
         let at = params.text_document_position_params;
-        let found = self
+        #[allow(unused_mut)]
+        let mut found = self
             .docs
             .get(&at.text_document.uri)
             .and_then(|text| hover::hover(text, at.position));
+        #[cfg(feature = "telemetry")]
+        if let (Some(hover), Some(text)) = (found.as_mut(), self.docs.get(&at.text_document.uri)) {
+            let offset = LineIndex::new(text).offset(at.position);
+            let annotations = self.annotations(&at.text_document.uri, text);
+            if let (Some(node), lsp_types::HoverContents::Markup(markup)) = (
+                telemetry::narrowest_at(&annotations, offset),
+                &mut hover.contents,
+            ) {
+                markup.value.push('\n');
+                markup.value.push_str(&telemetry::observed_line(node));
+            }
+        }
         serde_json::to_value(found).map_err(internal)
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn annotations(&self, uri: &Uri, text: &str) -> Vec<telemetry::NodeAnnotation> {
+        let Some(state) = &self.telemetry else {
+            return Vec::new();
+        };
+        let path = workspace::uri_to_path(uri);
+        let program = telemetry::program_name(path.as_deref().and_then(|p| p.to_str()));
+        let nodes = marigold_grammar::marigold_node_ids(text, &program);
+        if nodes.is_empty() {
+            return Vec::new();
+        }
+        let key = lookup::Key::new(uri.as_str(), &program, nodes.iter().map(|n| n.id.clone()));
+        telemetry::join_stats(nodes, state.lookups.request(key))
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn inlay_hints(
+        &self,
+        params: lsp_types::InlayHintParams,
+    ) -> Result<serde_json::Value, Failure> {
+        let uri = params.text_document.uri;
+        let Some(text) = self.docs.get(&uri) else {
+            return Ok(serde_json::Value::Null);
+        };
+        let lines = LineIndex::new(text);
+        let wanted = (
+            lines.offset(params.range.start),
+            lines.offset(params.range.end),
+        );
+        let hints: Vec<lsp_types::InlayHint> = self
+            .annotations(&uri, text)
+            .iter()
+            .filter(|a| a.range.end >= wanted.0 && a.range.end <= wanted.1)
+            .map(|a| lsp_types::InlayHint {
+                position: lines.position(a.range.end),
+                label: lsp_types::InlayHintLabel::String(telemetry::hint_label(a)),
+                kind: None,
+                text_edits: None,
+                tooltip: Some(lsp_types::InlayHintTooltip::String(
+                    telemetry::observed_line(a),
+                )),
+                padding_left: Some(true),
+                padding_right: None,
+                data: None,
+            })
+            .collect();
+        serde_json::to_value(Some(hints)).map_err(internal)
     }
 
     fn prepare_rename(
@@ -597,5 +747,41 @@ mod tests {
     fn error_diagnostics_keep_error_severity() {
         let diags = lsp_diagnostics("range(Colour).return");
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+}
+
+#[cfg(all(test, feature = "telemetry"))]
+mod refresh_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn collected(supported: bool, completions: &[bool]) -> Vec<Message> {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&sent);
+        let hook = refresh_hook(supported, move |m| sink.lock().unwrap().push(m));
+        for changed in completions {
+            hook(*changed);
+        }
+        let out = std::mem::take(&mut *sent.lock().unwrap());
+        out
+    }
+
+    #[test]
+    fn refresh_is_sent_only_when_supported_and_changed() {
+        assert!(collected(false, &[true, true]).is_empty());
+        assert!(collected(true, &[false, false]).is_empty());
+        let sent = collected(true, &[true, false, true]);
+        assert_eq!(sent.len(), 2);
+        let ids: Vec<String> = sent
+            .iter()
+            .map(|m| match m {
+                Message::Request(r) => {
+                    assert_eq!(r.method, "workspace/inlayHint/refresh");
+                    r.id.to_string()
+                }
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_ne!(ids[0], ids[1]);
     }
 }
