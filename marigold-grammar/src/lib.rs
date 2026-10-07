@@ -68,8 +68,10 @@ pub use itertools;
 
 pub mod bound_resolution;
 pub mod complexity;
+pub mod diagnostics;
 pub mod nodes;
 pub mod parser;
+mod span_index;
 pub mod symbol_table;
 mod type_aggregation;
 
@@ -90,6 +92,27 @@ pub mod pest_ast_builder;
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
+}
+
+/// Check Marigold source and return every diagnostic found, with byte ranges.
+///
+/// Returns an empty vector exactly when [`marigold_parse`] succeeds, except
+/// that input larger than [`diagnostics::MAX_CHECK_INPUT_BYTES`] is rejected
+/// with a single `input-too-large` diagnostic without being parsed.
+///
+/// ```
+/// use marigold_grammar::marigold_check;
+///
+/// assert!(marigold_check("range(0, 10).return").is_empty());
+///
+/// let diags = marigold_check("range(0, 10).retur");
+/// assert_eq!(diags[0].code, "syntax-error");
+/// ```
+pub fn marigold_check(s: &str) -> Vec<diagnostics::Diagnostic> {
+    if s.len() > diagnostics::MAX_CHECK_INPUT_BYTES {
+        return vec![diagnostics::Diagnostic::input_too_large(s)];
+    }
+    parser::PestParser::check(s)
 }
 
 pub fn marigold_analyze(

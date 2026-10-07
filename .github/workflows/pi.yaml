@@ -1,0 +1,35 @@
+name:                pi
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents:          read
+
+concurrency:
+  group:             pi-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR:  always
+
+jobs:
+  pi:
+    name:            pi-marigold
+    runs-on:         ubuntu-latest
+    steps:
+    - uses:          actions/checkout@v4
+    - uses:          dtolnay/rust-toolchain@stable
+    - uses:          actions/setup-node@v4
+      with:
+        node-version: 22
+    - run:           cargo build -p marigold-lsp
+    - run:           npm ci
+      working-directory: integrations/pi
+    - run:           npx tsc --noEmit
+      working-directory: integrations/pi
+    - run:           npx vitest run
+      working-directory: integrations/pi
+      env:
+        MARIGOLD_LSP_BIN: ${{ github.workspace }}/target/debug/marigold-lsp
