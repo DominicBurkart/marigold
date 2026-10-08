@@ -107,6 +107,9 @@ marigold analyze hello_world.marigold
 }
 ```
 
+Optional editor and agent integrations (Claude Code, opencode, Codex, pi) live
+in [integrations/](https://github.com/DominicBurkart/marigold/tree/main/integrations).
+
 ## Runtimes
 
 By default, Marigold works in a single future and can work with any runtime.
