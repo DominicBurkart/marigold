@@ -29,6 +29,14 @@ use position::LineIndex;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
+fn lsp_severity(severity: Severity) -> DiagnosticSeverity {
+    match severity {
+        Severity::Warning => DiagnosticSeverity::WARNING,
+        Severity::Information => DiagnosticSeverity::INFORMATION,
+        _ => DiagnosticSeverity::ERROR,
+    }
+}
+
 /// Checks `text` and converts every diagnostic to LSP form with UTF-16 ranges.
 ///
 /// Oversized input yields the single `input-too-large` diagnostic that
@@ -53,10 +61,7 @@ pub fn lsp_diagnostics(text: &str) -> Vec<Diagnostic> {
                 Some(help) => format!("{}\nhelp: {help}", d.message),
                 None => d.message.clone(),
             };
-            let severity = match d.severity {
-                Severity::Error => DiagnosticSeverity::ERROR,
-                _ => DiagnosticSeverity::ERROR,
-            };
+            let severity = lsp_severity(d.severity);
             Diagnostic {
                 range: Range::new(index.position(d.range.start), index.position(d.range.end)),
                 severity: Some(severity),
@@ -221,4 +226,25 @@ fn publish(
             params,
         )))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_severity() {
+        assert_eq!(lsp_severity(Severity::Error), DiagnosticSeverity::ERROR);
+        assert_eq!(lsp_severity(Severity::Warning), DiagnosticSeverity::WARNING);
+        assert_eq!(
+            lsp_severity(Severity::Information),
+            DiagnosticSeverity::INFORMATION
+        );
+    }
+
+    #[test]
+    fn error_diagnostics_keep_error_severity() {
+        let diags = lsp_diagnostics("range(Colour).return");
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
 }

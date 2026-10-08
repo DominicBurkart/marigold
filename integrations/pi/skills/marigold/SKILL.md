@@ -29,6 +29,14 @@ sequence of declarations (`struct`, `enum`, `fn`) and streams such as
 - `undefined-type`: a bound expression such as `Name.len()` refers to an
   unknown enum or field.
 - `cyclic-bound`: bound expressions refer to each other in a cycle.
+- `undefined-stream-variable` (warning): a stream variable is read before
+  the line that declares it, or by its own declaration; read only variables
+  declared above.
+- `undefined-stream-variable` (information), `undefined-fn`, and
+  `undefined-struct` (information): the name is not declared in the
+  program. It may be a Rust item in scope inside `m!()` (a stream variable
+  may be a Rust binding with a `get()` method returning a stream), so it can
+  be ignored in that case.
 
 ## Complexity
 

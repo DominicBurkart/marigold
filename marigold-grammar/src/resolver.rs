@@ -1,0 +1,455 @@
+use crate::diagnostics::{Diagnostic, Severity};
+use crate::span_index::{Reference, ReferenceSource, SpanIndex, SymbolKind};
+use std::collections::{HashMap, HashSet};
+
+#[cfg(test)]
+thread_local! {
+    static LEVENSHTEIN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static NAME_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DECLARATIONS_VISITED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[derive(Clone, Copy)]
+struct Name<'a>(&'a str);
+
+impl PartialEq for Name<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        #[cfg(test)]
+        NAME_COMPARISONS.with(|c| c.set(c.get() + 1));
+        self.0 == other.0
+    }
+}
+
+impl Eq for Name<'_> {}
+
+impl std::hash::Hash for Name<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+fn declarations_of(
+    index: &SpanIndex,
+    kind: SymbolKind,
+) -> impl Iterator<Item = &crate::span_index::Declaration> {
+    index.declarations.iter().filter(move |d| {
+        #[cfg(test)]
+        DECLARATIONS_VISITED.with(|c| c.set(c.get() + 1));
+        d.kind == kind
+    })
+}
+
+pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
+    #[cfg(test)]
+    LEVENSHTEIN_CALLS.with(|c| c.set(c.get() + 1));
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            let substitution = prev[j] + usize::from(ca != *cb);
+            cur.push(substitution.min(prev[j + 1] + 1).min(cur[j] + 1));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+const MAX_DIAGNOSTICS: usize = 50;
+const MAX_SUGGESTION_CANDIDATES: usize = 200;
+const MAX_LISTED_NAMES: usize = 20;
+const RUST_SCOPE_NOTE: &str =
+    "it may be a Rust item in scope inside m!() and can be ignored in that case";
+const RUST_VARIABLE_NOTE: &str = "it may be a Rust binding with a get() method returning a stream, in scope inside m!(), and can be ignored in that case";
+
+pub(crate) fn closest<'a>(name: &str, candidates: &[&'a str]) -> Option<&'a str> {
+    let name_len = name.chars().count();
+    let limit = 2.min(name_len.saturating_sub(1));
+    candidates
+        .iter()
+        .filter(|c| c.chars().count().abs_diff(name_len) <= limit)
+        .map(|c| (levenshtein(name, c), *c))
+        .filter(|(d, _)| (1..=limit).contains(d))
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, c)| c)
+}
+
+struct Names<'a> {
+    ordered: Vec<Name<'a>>,
+    set: HashSet<Name<'a>>,
+}
+
+impl<'a> Names<'a> {
+    fn of(index: &'a SpanIndex, kind: SymbolKind) -> Self {
+        let mut ordered = Vec::new();
+        let mut set = HashSet::new();
+        for d in declarations_of(index, kind) {
+            let name = Name(d.name.as_str());
+            if set.insert(name) {
+                ordered.push(name);
+            }
+        }
+        Self { ordered, set }
+    }
+
+    fn contains(&self, name: &str) -> bool {
+        self.set.contains(&Name(name))
+    }
+}
+
+struct Noun {
+    code: &'static str,
+    plural: &'static str,
+    listed: &'static str,
+    severity: Severity,
+    singular: &'static str,
+}
+
+const VARIABLE: Noun = Noun {
+    code: "undefined-stream-variable",
+    plural: "stream variables",
+    listed: "defined",
+    severity: Severity::Information,
+    singular: "stream variable",
+};
+const FUNCTION: Noun = Noun {
+    code: "undefined-fn",
+    plural: "functions",
+    listed: "declared",
+    severity: Severity::Information,
+    singular: "function",
+};
+const STRUCT: Noun = Noun {
+    code: "undefined-struct",
+    plural: "structs",
+    listed: "declared",
+    severity: Severity::Information,
+    singular: "struct",
+};
+
+enum Problem {
+    Undefined,
+    ReadBeforeDeclared,
+}
+
+fn explain(r: &Reference, noun: &Noun, names: &Names, problem: &Problem) -> Diagnostic {
+    let name = &r.name;
+    let message = match problem {
+        Problem::ReadBeforeDeclared => format!(
+            "stream variable '{name}' is read before it is declared; a stream variable can only read variables declared above it"
+        ),
+        Problem::Undefined if noun.code == VARIABLE.code => format!(
+            "stream variable '{name}' is not defined in this program; {RUST_VARIABLE_NOTE}"
+        ),
+        Problem::Undefined => format!(
+            "{} '{name}' is not declared in this program; {RUST_SCOPE_NOTE}",
+            noun.singular
+        ),
+    };
+    let mut help = String::new();
+    if names.ordered.len() <= MAX_SUGGESTION_CANDIDATES {
+        let candidates: Vec<&str> = names.ordered.iter().map(|n| n.0).collect();
+        if let Some(close) = closest(name, &candidates) {
+            help.push_str(&format!("did you mean '{close}'? "));
+        }
+    }
+    if names.ordered.is_empty() {
+        help.push_str(&format!(
+            "no {} are {} in this program",
+            noun.plural, noun.listed
+        ));
+    } else {
+        let shown: Vec<&str> = names
+            .ordered
+            .iter()
+            .take(MAX_LISTED_NAMES)
+            .map(|n| n.0)
+            .collect();
+        help.push_str(&format!(
+            "{} {}: {}",
+            noun.listed,
+            noun.plural,
+            shown.join(", ")
+        ));
+        if names.ordered.len() > shown.len() {
+            help.push_str(&format!(", and {} more", names.ordered.len() - shown.len()));
+        }
+    }
+    let severity = match problem {
+        Problem::ReadBeforeDeclared => Severity::Warning,
+        Problem::Undefined => noun.severity,
+    };
+    if severity == Severity::Information {
+        let what = if noun.code == VARIABLE.code {
+            "Rust binding with a get() method returning a stream"
+        } else {
+            "Rust item"
+        };
+        help.push_str(&format!(
+            "; if '{name}' is a {what} in scope inside m!(), ignore this"
+        ));
+    }
+    Diagnostic::new(r.range, severity, noun.code, message).with_help(help)
+}
+
+pub(crate) fn warnings(index: &SpanIndex) -> Vec<Diagnostic> {
+    let variables = Names::of(index, SymbolKind::StreamVariable);
+    let functions = Names::of(index, SymbolKind::Function);
+    let structs = Names::of(index, SymbolKind::Struct);
+    let mut first_declared: HashMap<Name, usize> = HashMap::new();
+    for d in declarations_of(index, SymbolKind::StreamVariable) {
+        let entry = first_declared
+            .entry(Name(d.name.as_str()))
+            .or_insert(d.expr_index);
+        *entry = (*entry).min(d.expr_index);
+    }
+    let mut found: Vec<(&Reference, &'static Noun, &Names, Problem)> = Vec::new();
+    for r in &index.references {
+        let name = r.name.as_str();
+        match r.source {
+            ReferenceSource::StreamStart => {
+                if !variables.contains(name) {
+                    found.push((r, &VARIABLE, &variables, Problem::Undefined));
+                }
+            }
+            ReferenceSource::VariableSource => match first_declared.get(&Name(name)) {
+                None => found.push((r, &VARIABLE, &variables, Problem::Undefined)),
+                Some(&at) if at >= r.expr_index => {
+                    found.push((r, &VARIABLE, &variables, Problem::ReadBeforeDeclared))
+                }
+                Some(_) => {}
+            },
+            ReferenceSource::MapFn
+            | ReferenceSource::FilterFn
+            | ReferenceSource::FilterMapFn
+            | ReferenceSource::FoldFn
+            | ReferenceSource::KeepFirstNFn => {
+                if !functions.contains(name) {
+                    found.push((r, &FUNCTION, &functions, Problem::Undefined));
+                }
+            }
+            ReferenceSource::ReadFileStruct => {
+                if !structs.contains(name) {
+                    found.push((r, &STRUCT, &structs, Problem::Undefined));
+                }
+            }
+            ReferenceSource::RangeEnum => {}
+        }
+    }
+    found.sort_by_key(|(_, _, _, problem)| !matches!(problem, Problem::ReadBeforeDeclared));
+    let omitted = found.len().saturating_sub(MAX_DIAGNOSTICS);
+    let first_omitted = found.get(MAX_DIAGNOSTICS).map(|(r, ..)| r.range);
+    let mut out: Vec<Diagnostic> = found
+        .iter()
+        .take(MAX_DIAGNOSTICS)
+        .map(|(r, noun, names, problem)| explain(r, noun, names, problem))
+        .collect();
+    if let Some(range) = first_omitted {
+        out.push(Diagnostic::information(
+            range,
+            "resolver-diagnostics-truncated",
+            format!(
+                "{omitted} more undefined-name diagnostics were omitted; only the first {MAX_DIAGNOSTICS} are reported per file"
+            ),
+        ));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn levenshtein_basics() {
+        assert_eq!(levenshtein("", ""), 0);
+        assert_eq!(levenshtein("abc", ""), 3);
+        assert_eq!(levenshtein("", "abc"), 3);
+        assert_eq!(levenshtein("kitten", "sitting"), 3);
+        assert_eq!(levenshtein("double", "doubel"), 2);
+        assert_eq!(levenshtein("f", "g"), 1);
+        assert_eq!(levenshtein("\u{fc}ber", "uber"), 1);
+    }
+
+    #[test]
+    fn closest_prefers_nearest_and_ignores_exact_and_far() {
+        assert_eq!(closest("doubel", &["triple", "double"]), Some("double"));
+        assert_eq!(closest("double", &["double"]), None);
+        assert_eq!(closest("abcdef", &["uvwxyz"]), None);
+        assert_eq!(closest("ab", &["ac"]), Some("ac"));
+        assert_eq!(closest("a", &["b"]), None);
+        assert_eq!(closest("x", &[]), None);
+    }
+
+    fn range() -> crate::diagnostics::ByteRange {
+        crate::diagnostics::ByteRange { start: 0, end: 1 }
+    }
+
+    fn fn_index(n: usize) -> SpanIndex {
+        let mut index = SpanIndex::default();
+        for i in 0..n {
+            index.declarations.push(crate::span_index::Declaration {
+                name: format!("f{i}"),
+                range: range(),
+                kind: SymbolKind::Function,
+                expr_index: i,
+            });
+            index.references.push(Reference {
+                name: format!("g{i}"),
+                range: range(),
+                source: ReferenceSource::MapFn,
+                expr_index: i,
+            });
+        }
+        index
+    }
+
+    fn variable_index(n: usize) -> SpanIndex {
+        let mut index = SpanIndex::default();
+        for i in 0..n {
+            index.declarations.push(crate::span_index::Declaration {
+                name: format!("v{i}"),
+                range: range(),
+                kind: SymbolKind::StreamVariable,
+                expr_index: i,
+            });
+            index.references.push(Reference {
+                name: format!("v{i}"),
+                range: range(),
+                source: ReferenceSource::VariableSource,
+                expr_index: i + 1,
+            });
+            index.references.push(Reference {
+                name: format!("w{i}"),
+                range: range(),
+                source: ReferenceSource::StreamStart,
+                expr_index: i,
+            });
+        }
+        index
+    }
+
+    fn levenshtein_calls_during(index: &SpanIndex) -> usize {
+        LEVENSHTEIN_CALLS.with(|c| c.set(0));
+        let _ = warnings(index);
+        LEVENSHTEIN_CALLS.with(|c| c.get())
+    }
+
+    struct Work {
+        comparisons: usize,
+        declarations_visited: usize,
+        diagnostics: usize,
+    }
+
+    fn work_during(index: &SpanIndex) -> Work {
+        NAME_COMPARISONS.with(|c| c.set(0));
+        DECLARATIONS_VISITED.with(|c| c.set(0));
+        let diagnostics = warnings(index).len();
+        Work {
+            comparisons: NAME_COMPARISONS.with(|c| c.get()),
+            declarations_visited: DECLARATIONS_VISITED.with(|c| c.get()),
+            diagnostics,
+        }
+    }
+
+    fn assert_work_is_linear(build: fn(usize) -> SpanIndex) {
+        for n in [1_000, 4_000, 16_000] {
+            let index = build(n);
+            let total = index.declarations.len() + index.references.len();
+            let work = work_during(&index);
+            assert!(
+                work.comparisons <= 4 * total,
+                "n={n} comparisons={} total={total}",
+                work.comparisons
+            );
+            assert!(
+                work.declarations_visited <= 4 * index.declarations.len(),
+                "n={n} visited={} declarations={}",
+                work.declarations_visited,
+                index.declarations.len()
+            );
+            assert_eq!(work.diagnostics, MAX_DIAGNOSTICS + 1, "n={n}");
+        }
+    }
+
+    #[test]
+    fn levenshtein_calls_are_bounded_independently_of_program_size() {
+        let bound = MAX_DIAGNOSTICS * MAX_SUGGESTION_CANDIDATES;
+        for n in [10, 150, 1_000, 20_000] {
+            let calls = levenshtein_calls_during(&fn_index(n));
+            assert!(calls <= bound, "n={n} calls={calls} bound={bound}");
+        }
+    }
+
+    #[test]
+    fn levenshtein_is_not_called_when_candidates_exceed_the_cap() {
+        let calls = levenshtein_calls_during(&fn_index(MAX_SUGGESTION_CANDIDATES + 1));
+        assert_eq!(calls, 0);
+    }
+
+    #[test]
+    fn levenshtein_is_called_per_diagnostic_when_candidates_fit_the_cap() {
+        let n = MAX_SUGGESTION_CANDIDATES;
+        let calls = levenshtein_calls_during(&fn_index(n));
+        assert!(calls > 0 && calls <= MAX_DIAGNOSTICS * n, "{calls}");
+    }
+
+    fn near_miss_index(declared: usize, references: usize) -> SpanIndex {
+        let mut index = SpanIndex::default();
+        for i in 0..declared {
+            index.declarations.push(crate::span_index::Declaration {
+                name: format!("name{i}"),
+                range: range(),
+                kind: SymbolKind::Function,
+                expr_index: i,
+            });
+        }
+        for _ in 0..references {
+            index.references.push(Reference {
+                name: "name0x".to_string(),
+                range: range(),
+                source: ReferenceSource::MapFn,
+                expr_index: 0,
+            });
+        }
+        index
+    }
+
+    #[test]
+    fn suggestion_cap_boundary_decides_whether_did_you_mean_is_shown() {
+        let helps = |n: usize| -> Vec<String> {
+            warnings(&near_miss_index(n, 1))
+                .into_iter()
+                .map(|d| d.help.unwrap())
+                .collect()
+        };
+        let at_cap = helps(200);
+        assert!(at_cap[0].contains("did you mean 'name0'?"), "{}", at_cap[0]);
+        let over_cap = helps(201);
+        assert!(!over_cap[0].contains("did you mean"), "{}", over_cap[0]);
+    }
+
+    #[test]
+    fn suggestion_work_at_the_cap_is_per_reference_and_zero_beyond_it() {
+        let references = 7;
+        let at_cap = levenshtein_calls_during(&near_miss_index(200, references));
+        assert!(at_cap > 0, "{at_cap}");
+        assert!(at_cap <= references * 200, "{at_cap}");
+        let doubled = levenshtein_calls_during(&near_miss_index(200, references * 2));
+        assert_eq!(doubled, at_cap * 2);
+        for declared in [201, 5_000] {
+            let over = levenshtein_calls_during(&near_miss_index(declared, references));
+            assert_eq!(over, 0, "declared={declared}");
+        }
+    }
+
+    #[test]
+    fn function_resolution_work_is_linear() {
+        assert_work_is_linear(fn_index);
+    }
+
+    #[test]
+    fn stream_variable_resolution_work_is_linear() {
+        assert_work_is_linear(variable_index);
+    }
+}

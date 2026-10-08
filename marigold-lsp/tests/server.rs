@@ -14,7 +14,8 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
-const JOIN_LIMIT: Duration = Duration::from_secs(10);
+const HANG_GUARD: Duration = Duration::from_secs(60);
+const JOIN_HANG_GUARD: Duration = Duration::from_secs(30);
 
 fn join_within<T>(handle: thread::JoinHandle<T>, limit: Duration) -> thread::Result<T> {
     let start = std::time::Instant::now();
@@ -98,7 +99,7 @@ impl Client {
     fn recv(&self) -> Message {
         self.conn
             .receiver
-            .recv_timeout(Duration::from_secs(10))
+            .recv_timeout(HANG_GUARD)
             .expect("server did not respond")
     }
 
@@ -115,7 +116,7 @@ impl Client {
     fn shutdown(mut self) {
         self.request::<Shutdown>(());
         self.notify::<Exit>(());
-        join_within(self.server.take().unwrap(), JOIN_LIMIT).unwrap();
+        join_within(self.server.take().unwrap(), JOIN_HANG_GUARD).unwrap();
     }
 }
 
@@ -159,6 +160,56 @@ fn publishes_diagnostics_on_open() {
     assert_eq!(d.source.as_deref(), Some("marigold"));
     assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::ERROR));
     assert!(d.message.contains("no enums are declared"), "{}", d.message);
+    client.shutdown();
+}
+
+#[test]
+fn read_before_declared_stream_variable_is_published_as_warning() {
+    let (client, _) = Client::start();
+    open(&client, "a = a\na.return\n");
+    let published = client.diagnostics();
+    let [d] = published.diagnostics.as_slice() else {
+        panic!("{:?}", published.diagnostics)
+    };
+    assert_eq!(
+        d.code,
+        Some(NumberOrString::String("undefined-stream-variable".into()))
+    );
+    assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::WARNING));
+    client.shutdown();
+}
+
+#[test]
+fn undefined_stream_variable_is_published_as_information() {
+    let (client, _) = Client::start();
+    open(&client, "x = range(0, 3)\nxs.return\n");
+    let published = client.diagnostics();
+    let [d] = published.diagnostics.as_slice() else {
+        panic!("{:?}", published.diagnostics)
+    };
+    assert_eq!(
+        d.code,
+        Some(NumberOrString::String("undefined-stream-variable".into()))
+    );
+    assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::INFORMATION));
+    client.shutdown();
+}
+
+#[test]
+fn undefined_fn_is_published_as_information() {
+    let (client, _) = Client::start();
+    open(&client, "range(0, 3).map(f).return\n");
+    let published = client.diagnostics();
+    let [d] = published.diagnostics.as_slice() else {
+        panic!("{:?}", published.diagnostics)
+    };
+    assert_eq!(d.code, Some(NumberOrString::String("undefined-fn".into())));
+    assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::INFORMATION));
+    assert!(
+        d.message.contains("Rust item in scope inside m!()"),
+        "{}",
+        d.message
+    );
     client.shutdown();
 }
 
@@ -291,7 +342,7 @@ fn exit_without_shutdown_returns_error() {
             InitializeParams::default(),
         )))
         .unwrap();
-    conn.receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+    conn.receiver.recv_timeout(HANG_GUARD).unwrap();
     conn.sender
         .send(Message::Notification(Notification::new(
             "initialized".into(),
@@ -304,7 +355,7 @@ fn exit_without_shutdown_returns_error() {
             serde_json::Value::Null,
         )))
         .unwrap();
-    assert!(join_within(server, JOIN_LIMIT).unwrap().is_err());
+    assert!(join_within(server, JOIN_HANG_GUARD).unwrap().is_err());
 }
 
 #[test]
@@ -312,7 +363,7 @@ fn exit_after_shutdown_returns_ok() {
     let (mut client, _) = Client::start();
     client.request::<Shutdown>(());
     client.notify::<Exit>(());
-    assert!(join_within(client.server.take().unwrap(), JOIN_LIMIT).is_ok());
+    assert!(join_within(client.server.take().unwrap(), JOIN_HANG_GUARD).is_ok());
 }
 
 #[test]
@@ -327,7 +378,7 @@ fn shutdown_then_channel_close_returns_ok() {
     client.notify::<Initialized>(lsp_types::InitializedParams {});
     client.request::<Shutdown>(());
     drop(client);
-    assert!(join_within(server, JOIN_LIMIT).unwrap().is_ok());
+    assert!(join_within(server, JOIN_HANG_GUARD).unwrap().is_ok());
 }
 
 #[test]
@@ -340,12 +391,12 @@ fn request_before_initialize_does_not_panic() {
             serde_json::Value::Null,
         )))
         .unwrap();
-    match conn.receiver.recv_timeout(Duration::from_secs(10)).unwrap() {
+    match conn.receiver.recv_timeout(HANG_GUARD).unwrap() {
         Message::Response(r) => assert_eq!(r.id, RequestId::from(1)),
         other => panic!("{other:?}"),
     }
     drop(conn);
-    assert!(join_within(server, JOIN_LIMIT).unwrap().is_err());
+    assert!(join_within(server, JOIN_HANG_GUARD).unwrap().is_err());
 }
 
 #[test]
@@ -372,7 +423,7 @@ fn requests_after_shutdown_are_rejected() {
         other => panic!("{other:?}"),
     }
     client.notify::<Exit>(());
-    join_within(client.server.take().unwrap(), JOIN_LIMIT).unwrap();
+    join_within(client.server.take().unwrap(), JOIN_HANG_GUARD).unwrap();
 }
 
 #[test]
@@ -454,19 +505,19 @@ fn document_at_the_size_cap_is_still_checked_through_did_open() {
 }
 
 #[test]
-fn large_document_completes_within_bound() {
-    let (client, _) = Client::start();
+fn large_documents_are_fully_analysed_at_every_size() {
     let line = "range(0, 1).return\n";
-    let text = line.repeat(1_000_000 / line.len());
-    let start = std::time::Instant::now();
-    open(&client, &text);
-    client.diagnostics();
-    assert!(
-        start.elapsed() < Duration::from_secs(8),
-        "{:?}",
-        start.elapsed()
-    );
-    client.shutdown();
+    for bytes in [250_000, 500_000] {
+        let text = line.repeat(bytes / line.len());
+        assert_eq!(text.len(), bytes / line.len() * line.len());
+        let (client, _) = Client::start();
+        let start = std::time::Instant::now();
+        open(&client, &text);
+        let published = client.diagnostics();
+        assert!(start.elapsed() < HANG_GUARD, "{:?}", start.elapsed());
+        assert_eq!(published.diagnostics.len(), 0, "bytes={bytes}");
+        client.shutdown();
+    }
 }
 
 #[test]

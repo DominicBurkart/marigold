@@ -144,3 +144,66 @@ fn oversized_input_exits_one_with_input_too_large() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v[0]["code"], "input-too-large");
 }
+
+#[test]
+fn warning_only_program_prints_warning_label_and_exits_zero() {
+    let path = write_temp("warning.marigold", "a = a\na.return");
+    let out = run_check(&[], &path);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("warning[undefined-stream-variable]"),
+        "{stdout}"
+    );
+
+    let out = run_check(&["--format", "json"], &path);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v[0]["severity"], "warning");
+    assert_eq!(v[0]["code"], "undefined-stream-variable");
+}
+
+#[test]
+fn undefined_stream_variable_prints_information_label_and_exits_zero() {
+    let path = write_temp("undefined_variable.marigold", "xs.return");
+    let out = run_check(&[], &path);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("information[undefined-stream-variable]"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("warning["), "{stdout}");
+
+    let out = run_check(&["--format", "json"], &path);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v[0]["severity"], "information");
+}
+
+#[test]
+fn information_only_program_prints_information_label_and_exits_zero() {
+    let path = write_temp("information.marigold", "range(0, 1).map(f).return");
+    let out = run_check(&[], &path);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("information[undefined-fn]"), "{stdout}");
+
+    let out = run_check(&["--format", "json"], &path);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v[0]["severity"], "information");
+    assert_eq!(v[0]["code"], "undefined-fn");
+}
+
+#[test]
+fn warning_alongside_error_still_exits_one() {
+    let path = write_temp(
+        "mixed.marigold",
+        "range(0, 1).map(f).return\nrange(Colour).return",
+    );
+    let out = run_check(&[], &path);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("information[undefined-fn]"), "{stdout}");
+    assert!(stdout.contains("error[undefined-enum]"), "{stdout}");
+}

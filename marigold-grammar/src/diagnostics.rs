@@ -2,7 +2,7 @@
 //!
 //! Unlike [`crate::marigold_parse`], which stops at the first error and returns
 //! a flat message, [`crate::marigold_check`] returns every diagnostic it can
-//! find, each carrying a byte range into the original source. Ranges always lie
+//! find (errors, warnings and information), each carrying a byte range into the original source. Ranges always lie
 //! on `char` boundaries within the input, so they can be converted to any
 //! editor position encoding.
 //!
@@ -33,6 +33,8 @@ pub struct ByteRange {
 #[non_exhaustive]
 pub enum Severity {
     Error,
+    Warning,
+    Information,
 }
 
 impl Severity {
@@ -40,10 +42,14 @@ impl Severity {
     /// use marigold_grammar::diagnostics::Severity;
     ///
     /// assert_eq!(Severity::Error.as_str(), "error");
+    /// assert_eq!(Severity::Warning.as_str(), "warning");
+    /// assert_eq!(Severity::Information.as_str(), "information");
     /// ```
     pub fn as_str(self) -> &'static str {
         match self {
             Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Information => "information",
         }
     }
 }
@@ -99,6 +105,25 @@ impl Diagnostic {
         )
     }
 
+    pub(crate) fn new(
+        range: ByteRange,
+        severity: Severity,
+        code: &'static str,
+        message: String,
+    ) -> Self {
+        Self {
+            severity,
+            ..Self::error(range, code, message)
+        }
+    }
+
+    pub(crate) fn information(range: ByteRange, code: &'static str, message: String) -> Self {
+        Self {
+            severity: Severity::Information,
+            ..Self::error(range, code, message)
+        }
+    }
+
     pub(crate) fn whole(src: &str, code: &'static str, message: String) -> Self {
         Self::error(
             ByteRange {
@@ -130,6 +155,13 @@ impl Diagnostic {
             "syntax-error",
             e.variant.message().into_owned(),
         )
+    }
+
+    pub(crate) fn rebased(mut self, offset: usize, limit: usize) -> Self {
+        let start = (self.range.start + offset).min(limit);
+        let end = (self.range.end + offset).clamp(start, limit);
+        self.range = ByteRange { start, end };
+        self
     }
 
     pub(crate) fn with_help(mut self, help: String) -> Self {
@@ -182,4 +214,52 @@ fn floor_char_boundary(src: &str, i: usize) -> usize {
         i -= 1;
     }
     i
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warning_constructor_sets_severity() {
+        let d = Diagnostic::new(
+            ByteRange { start: 1, end: 3 },
+            Severity::Warning,
+            "w",
+            "m".into(),
+        );
+        assert_eq!(d.severity, Severity::Warning);
+        assert_eq!(d.code, "w");
+        assert_eq!(d.range, ByteRange { start: 1, end: 3 });
+        assert_eq!(d.help, None);
+    }
+
+    #[test]
+    fn information_constructor_sets_severity_and_is_not_an_error() {
+        let d = Diagnostic::information(ByteRange { start: 0, end: 1 }, "i", "m".into());
+        assert_eq!(d.severity, Severity::Information);
+        assert!(!d.is_error());
+    }
+
+    #[test]
+    fn error_constructor_sets_severity() {
+        let d = Diagnostic::error(ByteRange { start: 0, end: 0 }, "e", "m".into());
+        assert_eq!(d.severity, Severity::Error);
+    }
+
+    #[test]
+    fn severity_serializes_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&Severity::Error).unwrap(),
+            "\"error\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Severity::Warning).unwrap(),
+            "\"warning\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Severity::Information).unwrap(),
+            "\"information\""
+        );
+    }
 }
