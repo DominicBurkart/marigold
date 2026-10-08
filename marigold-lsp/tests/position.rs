@@ -138,3 +138,21 @@ proptest! {
         prop_assert!(src.is_char_boundary(o));
     }
 }
+
+#[test]
+fn char_columns_round_trip() {
+    let text = "a\u{1F600}b\r\n\u{e9}x";
+    let idx = LineIndex::new(text);
+    for (offset, _) in text.char_indices() {
+        let (line, col) = idx.char_position(offset);
+        if text.as_bytes().get(offset) == Some(&b'\n') {
+            continue;
+        }
+        assert_eq!(idx.offset_of_char(line, col), Some(offset));
+    }
+    assert_eq!(idx.char_position(1), (0, 1));
+    assert_eq!(idx.char_position(5), (0, 2));
+    assert_eq!(idx.position(5), lsp_types::Position::new(0, 3));
+    assert_eq!(idx.offset_of_char(0, 4), None);
+    assert_eq!(idx.offset_of_char(1, 2), Some(text.len()));
+}

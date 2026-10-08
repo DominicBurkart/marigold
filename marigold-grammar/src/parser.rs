@@ -66,6 +66,37 @@ impl PestParser {
         Ok(crate::complexity::analyze_program(&expressions))
     }
 
+    pub fn stream_complexities(
+        input: &str,
+    ) -> Result<Vec<crate::complexity::NodeComplexity>, MarigoldParseError> {
+        let pairs = MarigoldPestParser::parse(Rule::program, input)
+            .map_err(|e| MarigoldParseError(format!("Parse error: {}", e)))?;
+        let ranges: Vec<crate::diagnostics::ByteRange> = pairs
+            .clone()
+            .flatten()
+            .filter(|p| p.as_rule() == Rule::expr)
+            .map(|p| crate::diagnostics::ByteRange {
+                start: p.as_span().start(),
+                end: p.as_span().start() + p.as_str().trim_end().len(),
+            })
+            .collect();
+        let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)
+            .map_err(MarigoldParseError)?;
+        Self::resolve_enum_range_counts(&mut expressions).map_err(MarigoldParseError)?;
+        let (_, nodes) = crate::complexity::analyze_nodes(&expressions);
+        Ok(nodes
+            .into_iter()
+            .map(
+                |(expr_index, name, complexity)| crate::complexity::NodeComplexity {
+                    name,
+                    expr_index,
+                    range: ranges[expr_index],
+                    complexity,
+                },
+            )
+            .collect())
+    }
+
     pub(crate) fn check(input: &str) -> Vec<crate::diagnostics::Diagnostic> {
         let pairs = match MarigoldPestParser::parse(Rule::program, input) {
             Ok(pairs) => pairs,

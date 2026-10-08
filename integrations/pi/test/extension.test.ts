@@ -2,31 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createMarigoldExtension } from "../extensions/marigold.ts";
-import { fakeServer, lspBinary, tempDir } from "./helpers.ts";
-
-type Handler = (event: any, ctx: any) => any;
-
-function fakePi() {
-  const handlers = new Map<string, Handler[]>();
-  const tools = new Map<string, any>();
-  return {
-    api: {
-      on(event: string, handler: Handler) {
-        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
-        return () => {};
-      },
-      registerTool(tool: any) {
-        tools.set(tool.name, tool);
-      },
-    },
-    async emit(event: string, payload: any, ctx: any) {
-      let result: any;
-      for (const h of handlers.get(event) ?? []) result = (await h(payload, ctx)) ?? result;
-      return result;
-    },
-    tools,
-  };
-}
+import { fakePi, fakeServer, lspBinary, tempDir } from "./helpers.ts";
 
 let dir: string;
 let pi: ReturnType<typeof fakePi>;

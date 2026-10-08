@@ -780,6 +780,30 @@ pub struct StreamComplexity {
     pub collects_input: bool,
 }
 
+/// Complexity of one stream expression, located by name and source range.
+///
+/// `name` is the declared variable for `x = ...` expressions and `None` for
+/// output streams such as `range(0, 3).return` or `x.return`.
+///
+/// ```
+/// use marigold_grammar::marigold_stream_complexities;
+///
+/// let src = "x = range(0, 5)\nx.return";
+/// let nodes = marigold_stream_complexities(src).unwrap();
+/// assert_eq!(nodes[0].name.as_deref(), Some("x"));
+/// assert_eq!(&src[nodes[0].range.start..nodes[0].range.end], "x = range(0, 5)");
+/// assert_eq!(nodes[1].name, None);
+/// assert_eq!(nodes[1].expr_index, 1);
+/// ```
+#[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
+pub struct NodeComplexity {
+    pub name: Option<String>,
+    pub expr_index: usize,
+    pub range: crate::diagnostics::ByteRange,
+    pub complexity: StreamComplexity,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProgramComplexity {
     pub streams: Vec<StreamComplexity>,
@@ -944,16 +968,32 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
 }
 
 pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
+    analyze_nodes(expressions).0
+}
+
+pub(crate) fn analyze_nodes(
+    expressions: &[TypedExpression],
+) -> (
+    ProgramComplexity,
+    Vec<(usize, Option<String>, StreamComplexity)>,
+) {
+    let mut nodes: Vec<(usize, Option<String>, StreamComplexity)> = Vec::new();
     let mut stream_vars: std::collections::HashMap<
         String,
-        (Symbolic, ComplexityClass, ExactComplexity, ExactComplexity),
+        (
+            Symbolic,
+            ComplexityClass,
+            ExactComplexity,
+            ExactComplexity,
+            bool,
+        ),
     > = std::collections::HashMap::new();
 
-    for expr in expressions {
+    for (expr_index, expr) in expressions.iter().enumerate() {
         match expr {
             TypedExpression::StreamVariable(v) => {
                 let card = input_cardinality(&v.inp);
-                let mut current_card = card;
+                let mut current_card = card.clone();
                 let mut var_exact_time = ExactComplexity::new();
                 let mut var_exact_space = ExactComplexity::new();
                 for f in &v.funs {
@@ -964,24 +1004,45 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
                     current_card = propagate_cardinality(current_card, &f.kind);
                 }
                 let space = var_exact_space.simplified().max(ComplexityClass::ON);
+                let desc = if v.funs.is_empty() {
+                    format!("{} = input", v.variable_name)
+                } else {
+                    format!(
+                        "{} = input.{}",
+                        v.variable_name,
+                        describe_stream_fns(&v.funs)
+                    )
+                };
+                let mut node_sc = analyze_stream_fns(&v.funs, card, &desc);
+                node_sc.space_class = node_sc.exact_space.simplified().max(ComplexityClass::ON);
+                let collects = node_sc.collects_input;
+                nodes.push((expr_index, Some(v.variable_name.clone()), node_sc));
                 stream_vars.insert(
                     v.variable_name.clone(),
-                    (current_card, space, var_exact_time, var_exact_space),
+                    (
+                        current_card,
+                        space,
+                        var_exact_time,
+                        var_exact_space,
+                        collects,
+                    ),
                 );
             }
             TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                let (prior_card, prior_space, prior_exact_time, prior_exact_space) = stream_vars
-                    .get(&v.prior_stream_variable)
-                    .cloned()
-                    .unwrap_or((
-                        Symbolic::Unknown,
-                        ComplexityClass::Unknown,
-                        ExactComplexity::new(),
-                        ExactComplexity::new(),
-                    ));
-                let mut current_card = prior_card;
-                let mut var_exact_time = prior_exact_time;
-                let mut var_exact_space = prior_exact_space;
+                let (prior_card, prior_space, prior_exact_time, prior_exact_space, prior_collects) =
+                    stream_vars
+                        .get(&v.prior_stream_variable)
+                        .cloned()
+                        .unwrap_or((
+                            Symbolic::Unknown,
+                            ComplexityClass::Unknown,
+                            ExactComplexity::new(),
+                            ExactComplexity::new(),
+                            false,
+                        ));
+                let mut current_card = prior_card.clone();
+                let mut var_exact_time = prior_exact_time.clone();
+                let mut var_exact_space = prior_exact_space.clone();
                 for f in &v.funs {
                     let time_work = step_work_class(&current_card, &f.kind);
                     var_exact_time.add_work(time_work, 1);
@@ -989,10 +1050,34 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
                     var_exact_space.add_work(space_work, 1);
                     current_card = propagate_cardinality(current_card, &f.kind);
                 }
-                let space = var_exact_space.simplified().max(prior_space);
+                let space = var_exact_space.simplified().max(prior_space.clone());
+                let desc = if v.funs.is_empty() {
+                    format!("{} = {}", v.variable_name, v.prior_stream_variable)
+                } else {
+                    format!(
+                        "{} = {}.{}",
+                        v.variable_name,
+                        v.prior_stream_variable,
+                        describe_stream_fns(&v.funs)
+                    )
+                };
+                let mut node_sc = analyze_stream_fns(&v.funs, prior_card, &desc);
+                node_sc.exact_time.merge(&prior_exact_time);
+                node_sc.time_class = node_sc.exact_time.simplified();
+                node_sc.exact_space.merge(&prior_exact_space);
+                node_sc.space_class = node_sc.exact_space.simplified().max(prior_space);
+                node_sc.collects_input |= prior_collects;
+                let collects = node_sc.collects_input;
+                nodes.push((expr_index, Some(v.variable_name.clone()), node_sc));
                 stream_vars.insert(
                     v.variable_name.clone(),
-                    (current_card, space, var_exact_time, var_exact_space),
+                    (
+                        current_card,
+                        space,
+                        var_exact_time,
+                        var_exact_space,
+                        collects,
+                    ),
                 );
             }
             _ => {}
@@ -1006,7 +1091,7 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
     let mut program_exact_space = ExactComplexity::new();
     let mut program_cardinality = Cardinality::Exact(BigUint::zero());
 
-    for expr in expressions {
+    for (expr_index, expr) in expressions.iter().enumerate() {
         let sc = match expr {
             TypedExpression::UnnamedReturningStream(s)
             | TypedExpression::UnnamedNonReturningStream(s) => {
@@ -1026,12 +1111,13 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
             }
             TypedExpression::NamedReturningStream(s)
             | TypedExpression::NamedNonReturningStream(s) => {
-                let (card, var_space, var_exact_time, var_exact_space) =
+                let (card, var_space, var_exact_time, var_exact_space, _) =
                     stream_vars.get(&s.stream_variable).cloned().unwrap_or((
                         Symbolic::Unknown,
                         ComplexityClass::Unknown,
                         ExactComplexity::new(),
                         ExactComplexity::new(),
+                        false,
                     ));
                 let funs_desc = describe_stream_fns(&s.funs);
                 let out_desc = if s.out.returning {
@@ -1059,17 +1145,20 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
         program_space = program_space.max(sc.space_class.clone());
         program_exact_space.merge(&sc.exact_space);
         program_cardinality = program_cardinality.max(sc.cardinality.clone());
+        nodes.push((expr_index, None, sc.clone()));
         streams.push(sc);
     }
+    nodes.sort_by_key(|n| n.0);
 
-    ProgramComplexity {
+    let program = ProgramComplexity {
         streams,
         program_time,
         program_exact_time,
         program_space,
         program_exact_space,
         program_cardinality,
-    }
+    };
+    (program, nodes)
 }
 
 #[cfg(test)]

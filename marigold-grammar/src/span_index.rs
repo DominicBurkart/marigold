@@ -2,13 +2,7 @@ use crate::diagnostics::ByteRange;
 use crate::parser::Rule;
 use pest::iterators::{Pair, Pairs};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SymbolKind {
-    StreamVariable,
-    Function,
-    Struct,
-    Enum,
-}
+pub(crate) use crate::symbols::SymbolKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReferenceSource {
