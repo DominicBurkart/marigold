@@ -25,6 +25,17 @@ impl Writer {
             inner: WriteTarget::Vector(Box::pin(Vec::new())),
         }
     }
+
+    /// Returns the underlying `Vec<u8>` for a `Writer::vector()` instance, or
+    /// `None` for other variants. Exposed primarily so tests and callers that
+    /// constructed the writer with [`Self::vector`] can inspect or take
+    /// ownership of the buffered bytes after writes complete.
+    pub fn into_vec(self) -> Option<Vec<u8>> {
+        match self.inner {
+            WriteTarget::Vector(boxed) => Some(*Pin::into_inner(boxed)),
+            WriteTarget::File(_) => None,
+        }
+    }
 }
 
 impl tokio::io::AsyncWrite for Writer {
