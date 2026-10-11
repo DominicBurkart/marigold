@@ -54,7 +54,7 @@ identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
 
 // Quoted strings for file paths and default enum values
 // Must be double-quoted and cannot contain unescaped quotes
-quoted_string = @{ "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
+quoted_string = @{ "\"" ~ (!("\"" ) ~ ANY)* ~ "\"" }
 
 // Type annotations for struct fields and function parameters
 // Matches Rust type syntax including generics, array brackets, and commas
@@ -207,7 +207,7 @@ fn_body_content = @{
         fn_line_comment |
         fn_block_comment |
         fn_body_braced |
-        (!("{" | "}") ~ ANY)
+        (!("{"|"}") ~ ANY)
     )*
 }
 
@@ -363,6 +363,7 @@ stream_function = {
     permutations_with_replacement_fn |
     combinations_fn |
     keep_first_n_fn |
+    take_while_fn |
     filter_fn |
     filter_map_fn |
     map_fn |
@@ -375,6 +376,14 @@ stream_function = {
 // Transforms Stream<T> -> Stream<U> where U = closure(T)
 // Argument: Rust closure expression (e.g., "x -> x + 1" or "x -> x.to_uppercase()")
 map_fn = { "map(" ~ free_text_identifier ~ ")" }
+
+// take_while(closure) - Yield items while closure returns true, stop at first false
+// Transforms Stream<T> -> Stream<T>, stopping at first non-matching item
+// Argument: Rust function that takes &T and returns bool (predicate must accept &T, not T by
+// value; passing a fn(T)->bool will fail with an opaque trait-bound error at the call site).
+// TODO: consider emitting a compile_error! shim with a clearer message, or validate the
+// predicate signature at parse time, to improve the error experience for by-value predicates.
+take_while_fn = { "take_while(" ~ free_text_identifier ~ ")" }
 
 // filter(closure) - Keep items where closure returns true
 // Transforms Stream<T> -> Stream<T>, keeping only matching items

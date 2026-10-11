@@ -39,6 +39,11 @@ fn arb_streaming_fn() -> impl Strategy<Value = StreamFn> {
             is_collecting: false,
             is_fold: false,
         }),
+        arb_identifier().prop_map(|id| StreamFn {
+            text: format!("take_while({id})"),
+            is_collecting: false,
+            is_fold: false,
+        }),
     ]
 }
 
@@ -443,16 +448,21 @@ proptest! {
 
     /// Range-based streams with constant bounds and no filter ops should have time == O(1).
     ///
-    /// filter/filter_map produce Symbolic::Filtered cardinality; subsequent steps on Filtered
-    /// see try_evaluate() == None and fall through to O(n).  This is intentional (the number
-    /// of elements that pass the predicate is unknown at compile time even when the source
-    /// cardinality is a constant).  We therefore only check the O(1) invariant for programs
-    /// whose chains contain no filter or filter_map ops.
+    /// filter/filter_map/take_while produce Symbolic::Filtered cardinality; subsequent steps
+    /// on Filtered see try_evaluate() == None and fall through to O(n).  This is intentional
+    /// (the number of elements that pass the predicate — or the prefix length before a
+    /// take_while stops — is unknown at compile time even when the source cardinality is a
+    /// constant).  We therefore only check the O(1) invariant for programs whose chains
+    /// contain no filter, filter_map, or take_while ops.
     #[test]
     fn range_programs_with_constant_bounds_have_o1_time(prog in arb_unnamed_stream_program()) {
-        // Skip programs whose pipeline contains filter / filter_map: those intentionally
-        // produce Symbolic::Filtered cardinality, which is treated as O(n) for downstream ops.
-        if prog.source.contains(".filter(") || prog.source.contains(".filter_map(") {
+        // Skip programs whose pipeline contains filter / filter_map / take_while: those
+        // intentionally produce Symbolic::Filtered cardinality, which is treated as O(n)
+        // for downstream ops.
+        if prog.source.contains(".filter(")
+            || prog.source.contains(".filter_map(")
+            || prog.source.contains(".take_while(")
+        {
             return Ok(());
         }
         let result = marigold_grammar::marigold_analyze(&prog.source).unwrap();

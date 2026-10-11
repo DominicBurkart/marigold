@@ -165,6 +165,174 @@ mod tests {
     // }
 
     #[tokio::test]
+    async fn test_take_while_basic() {
+        fn less_than_4(i: &i32) -> bool {
+            *i < 4
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 10)
+                .take_while(less_than_4)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![0, 1, 2, 3]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_take_while_stops_at_first_failure() {
+        fn less_than_3(i: &i32) -> bool {
+            *i < 3
+        }
+
+        // Uses range where values AFTER the cutoff (5, 6, 7...) would fail,
+        // but values in between (3, 4) also fail. This doesn't distinguish
+        // take_while from filter. See test_take_while_no_resume for that.
+        assert_eq!(
+            m!(
+                range(0, 10)
+                .take_while(less_than_3)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![0, 1, 2]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_take_while_no_resume() {
+        // Distinguishes take_while from filter: predicate fails at 1 (first odd),
+        // but later values (2, 4, 6, 8) are even and WOULD pass filter.
+        // take_while must stop at 1 and not resume.
+        //
+        // TODO: replace with the issue #103 example (range(-3, 3).take_while(is_negative)
+        // -> [-3, -2, -1]) once negative range literals are supported by the grammar.
+        fn is_even(i: &i32) -> bool {
+            *i % 2 == 0
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 10)
+                .take_while(is_even)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![0]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_take_while_multi_element_prefix() {
+        // Hardens the prefix invariant beyond the single-element vec![0] case above.
+        // less_than_5 passes for 0..4 (5 elements), then fails at 5 and must not resume.
+        // Values 6, 7, 8, 9 would also fail, but value 5 is the critical stop point.
+        fn less_than_5(i: &i32) -> bool {
+            *i < 5
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 10)
+                .take_while(less_than_5)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![0, 1, 2, 3, 4]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_take_while_after_map() {
+        fn double(v: i32) -> i32 {
+            v * 2
+        }
+        fn less_than_10(i: &i32) -> bool {
+            *i < 10
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 10)
+                .map(double)
+                .take_while(less_than_10)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![0, 2, 4, 6, 8]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_take_while_always_true() {
+        fn always_true(_i: &i32) -> bool {
+            true
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 5)
+                .take_while(always_true)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            vec![0, 1, 2, 3, 4]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_take_while_always_false() {
+        fn always_false(_i: &i32) -> bool {
+            false
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 5)
+                .take_while(always_false)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            Vec::<i32>::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_take_while_empty_stream() {
+        fn always_true(_i: &i32) -> bool {
+            true
+        }
+
+        assert_eq!(
+            m!(
+                range(0, 0)
+                .take_while(always_true)
+                .return
+            )
+            .await
+            .collect::<Vec<_>>()
+            .await,
+            Vec::<i32>::new()
+        );
+    }
+
+    #[tokio::test]
     async fn test_enum_range() {
         let r = m!(
             enum Words { Hello, World, }
