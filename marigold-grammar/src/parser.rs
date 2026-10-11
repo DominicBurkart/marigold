@@ -1,21 +1,20 @@
-#![forbid(unsafe_code)]
-
-//! # Marigold Parser Module
+//! # Marigold Parser
 //!
-//! This module provides the Marigold parser using the Pest parsing library.
+//! Marigold parser built on the Pest parsing library.
 //!
-//! ## Usage Examples
+//! ## Usage
 //!
-//! Parse Marigold code:
+//! One-shot parse:
 //! ```ignore
 //! let result = parse_marigold("range(0, 1).return")?;
 //! ```
 //!
-//! Explicitly create a parser instance:
+//! Explicit parser instance:
 //! ```ignore
 //! let parser = PestParser::new();
 //! let result = parser.parse("range(0, 1).return")?;
 //! ```
+#![forbid(unsafe_code)]
 
 use pest::Parser;
 use std::fmt;
