@@ -29,7 +29,10 @@ fn commit_hash(dir: &std::path::Path) -> String {
 fn write_and_commit(dir: &std::path::Path, content: &str, message: &str) -> String {
     std::fs::write(dir.join("program.marigold"), content).unwrap();
     git(dir, &["add", "program.marigold"]);
-    git(dir, &["commit", "-m", message]);
+    // Use `--no-gpg-sign` rather than mutating per-repo gpg-signing config
+    // (see #68): we only need to skip signing for this test repo, and forcing
+    // it via the CLI flag avoids any host-level gpg setup.
+    git(dir, &["commit", "--no-gpg-sign", "-m", message]);
     commit_hash(dir)
 }
 
@@ -47,7 +50,6 @@ fn test_bisect_detects_exact_to_bounded_regression() {
     git(dir, &["init"]);
     git(dir, &["config", "user.email", "test@test.com"]);
     git(dir, &["config", "user.name", "Test"]);
-    git(dir, &["config", "commit.gpgsign", "false"]);
 
     let commit_a = write_and_commit(
         dir,
