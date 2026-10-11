@@ -1,6 +1,20 @@
 const MAX_CUSTOM_TYPE_SIZE: usize = 9_999;
 const MAX_TYPE_REFERENCE_SIZE: usize = 256;
 
+/// Returns the trait list string for `#[derive(...)]` on generated structs and enums.
+///
+/// When the `io` feature is enabled, serde's `Serialize` and `Deserialize` traits
+/// are appended so generated types can be serialized for I/O operations.
+#[cfg(not(feature = "io"))]
+fn derive_traits() -> &'static str {
+    "Copy, Clone, Debug, Eq, PartialEq"
+}
+
+#[cfg(feature = "io")]
+fn derive_traits() -> &'static str {
+    "Copy, Clone, Debug, Eq, PartialEq, ::marigold::marigold_impl::serde::Serialize, ::marigold::marigold_impl::serde::Deserialize"
+}
+
 /// A bound expression for specifying min/max bounds in bounded types.
 ///
 /// Bound expressions can be literal values, references to other types'
@@ -323,19 +337,7 @@ impl StructDeclarationNode {
         &self,
         field_bounds: Option<&std::collections::HashMap<String, ResolvedFieldBounds>>,
     ) -> String {
-        #[cfg(not(feature = "io"))]
-        let traits = &["Copy", "Clone", "Debug", "Eq", "PartialEq"].join(", ");
-        #[cfg(feature = "io")]
-        let traits = &[
-            "Copy",
-            "Clone",
-            "Debug",
-            "Eq",
-            "PartialEq",
-            "::marigold::marigold_impl::serde::Serialize",
-            "::marigold::marigold_impl::serde::Deserialize",
-        ]
-        .join(", ");
+        let traits = derive_traits();
         let name = &self.name;
         #[cfg(not(feature = "io"))]
         let mut struct_rep = format!(
@@ -566,19 +568,7 @@ impl EnumDeclarationNode {
     }
 
     pub fn code(&self) -> String {
-        #[cfg(not(feature = "io"))]
-        let traits = &["Copy", "Clone", "Debug", "Eq", "PartialEq"].join(", ");
-        #[cfg(feature = "io")]
-        let traits = &[
-            "Copy",
-            "Clone",
-            "Debug",
-            "Eq",
-            "PartialEq",
-            "::marigold::marigold_impl::serde::Serialize",
-            "::marigold::marigold_impl::serde::Deserialize",
-        ]
-        .join(", ");
+        let traits = derive_traits();
         let name = &self.name;
         let mut enum_rep = format!("#[derive({traits})]");
         #[cfg(feature = "io")]
