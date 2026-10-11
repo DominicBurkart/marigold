@@ -46,7 +46,7 @@ where
 }
 
 /// Internal logic for keep_first_n. This is in a separate function so that we can get the full
-/// type of the binary heap, which includes a lambda for reversing the ordering fromt the passed
+/// type of the binary heap, which includes a lambda for reversing the ordering from the passed
 /// sort_by function. By declaring a new function, we can use generics to describe its type, and
 /// then can use that type while unsafely casting pointers.
 ///
