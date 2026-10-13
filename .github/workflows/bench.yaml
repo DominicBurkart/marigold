@@ -1,5 +1,24 @@
 name: bench
 
+# Benches on this device (dominicburkart/marigold#396): the required
+# `Benches` check used to compare a PR's run against a baseline recorded by
+# a *different* GitHub-hosted VM, which carried a systematic machine offset
+# large enough to fail identical code. Both the baseline (push-to-main) and
+# the comparison (same-repo pull_request) now run on the same dedicated,
+# otherwise-idle, CPU-pinned self-hosted runner, so a comparison is always
+# apples-to-apples. Baselines live on that runner's bind-mounted volume
+# (exact-sha lookup, loud miss) instead of the GitHub Actions cache, so
+# there's no silent restore-keys fallback to an unrelated older baseline.
+#
+# Security: per GitHub's guidance against using self-hosted runners with
+# public repositories, the self-hosted path is restricted to trusted
+# triggers only — push to main, and pull_request from this repository
+# itself. A fork pull request never touches this machine; it falls back to
+# an ubuntu-latest job that runs the benches with no comparison and says so.
+# `bench-pr-trusted` and `bench-pr-fork` share the job name `Benches` with
+# mutually exclusive `if:` conditions so exactly one always runs and
+# reports — the required check never gets stuck "expected".
+
 on:
   push:
     branches: [main]
@@ -13,10 +32,13 @@ jobs:
   cache-baseline:
     name: Save Criterion baseline
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, podman, bench]
     permissions:
       contents: read
     steps:
+    - name: Print CPU model
+      run: lscpu
+
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
     - uses: Swatinem/rust-cache@v2
@@ -41,11 +63,17 @@ jobs:
     - run: cargo bench --bench map_filter_utilization --features tokio
       working-directory: marigold-impl
 
-    - name: Save Criterion baseline to cache
-      uses: actions/cache/save@v4
-      with:
-        path: target/criterion
-        key: bench-criterion-${{ github.sha }}
+    - name: Publish baseline to the runner's persistent bench-baselines volume
+      run: |
+        set -euo pipefail
+        dest="/bench-baselines/${GITHUB_SHA}"
+        rm -rf "$dest"
+        mkdir -p "$dest"
+        cp -r target/criterion "$dest/criterion"
+        # Bound disk use: keep the 30 most recent baselines.
+        cd /bench-baselines
+        ls -1t | tail -n +31 | xargs -r rm -rf --
+        echo "Saved Criterion baseline for \`${GITHUB_SHA}\`." >> "$GITHUB_STEP_SUMMARY"
 
     - uses: actions/upload-artifact@v4
       if: always()
@@ -54,54 +82,72 @@ jobs:
         path: target/criterion/
         if-no-files-found: ignore
 
-  bench-pr:
+  bench-pr-trusted:
     name: Benches
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, podman, bench]
     permissions:
       contents: read
     steps:
+    - name: Print CPU model
+      run: lscpu
+
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
     - uses: Swatinem/rust-cache@v2
 
-    - name: Restore Criterion baseline from cache
+    - name: Restore Criterion baseline (exact base-sha match, no fallback)
       id: restore-baseline
-      uses: actions/cache/restore@v4
-      with:
-        path: target/criterion
-        key: bench-criterion-${{ github.event.pull_request.base.sha }}
-        restore-keys: bench-criterion-
+      run: |
+        set -euo pipefail
+        base_sha="${{ github.event.pull_request.base.sha }}"
+        src="/bench-baselines/${base_sha}/criterion"
+        if [ -d "$src" ]; then
+          mkdir -p target/criterion
+          cp -r "$src"/. target/criterion/
+          echo "found=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "found=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "### :warning: No benchmark baseline for \`${base_sha}\`"
+            echo ""
+            echo "Benches ran with no comparison. This repo-controlled runner only"
+            echo "accepts an exact base-commit match (no restore-keys fallback to an"
+            echo "unrelated baseline). A push to \`main\` publishes a fresh baseline"
+            echo "for subsequent PRs."
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
 
     - name: Criterion benches — compare to baseline
-      if: steps.restore-baseline.outputs.cache-hit != ''
+      if: steps.restore-baseline.outputs.found == 'true'
       run: cargo bench --bench keep_first_n --features tokio -- --baseline main 2>&1 | tee /tmp/bench_keep_first_n.txt
       working-directory: marigold-impl
-    - if: steps.restore-baseline.outputs.cache-hit != ''
+    - if: steps.restore-baseline.outputs.found == 'true'
       run: cargo bench --bench per_item_costs --features tokio -- --baseline main 2>&1 | tee /tmp/bench_per_item_costs.txt
       working-directory: marigold-impl
-    - if: steps.restore-baseline.outputs.cache-hit != ''
+    - if: steps.restore-baseline.outputs.found == 'true'
       run: cargo bench --bench pipeline_stages --features tokio -- --baseline main 2>&1 | tee /tmp/bench_pipeline_stages.txt
       working-directory: marigold-impl
-    - if: steps.restore-baseline.outputs.cache-hit != ''
+    - if: steps.restore-baseline.outputs.found == 'true'
       run: cargo bench --bench parser_bench -- --baseline main 2>&1 | tee /tmp/bench_parser_bench.txt
       working-directory: marigold-grammar
-    - if: steps.restore-baseline.outputs.cache-hit != ''
+    - if: steps.restore-baseline.outputs.found == 'true'
       run: cargo bench --bench color_picker_bench --features tokio -- --baseline main 2>&1 | tee /tmp/bench_color_picker_bench.txt
       working-directory: examples/color-palette-picker
 
     - name: Criterion benches — no baseline available
-      if: steps.restore-baseline.outputs.cache-hit == ''
+      if: steps.restore-baseline.outputs.found == 'false'
       run: |
-        echo "No cached baseline found — running benches without comparison"
         cargo bench --bench keep_first_n --features tokio
         cargo bench --bench per_item_costs --features tokio
         cargo bench --bench pipeline_stages --features tokio
       working-directory: marigold-impl
-    - if: steps.restore-baseline.outputs.cache-hit == ''
+    - if: steps.restore-baseline.outputs.found == 'false'
       run: cargo bench --bench parser_bench
       working-directory: marigold-grammar
-    - if: steps.restore-baseline.outputs.cache-hit == ''
+    - if: steps.restore-baseline.outputs.found == 'false'
       run: cargo bench --bench color_picker_bench --features tokio
       working-directory: examples/color-palette-picker
 
@@ -114,4 +160,55 @@ jobs:
       working-directory: marigold-impl
 
     - name: Check for regressions
+      if: steps.restore-baseline.outputs.found == 'true'
       run: bash marigold-impl/benches/check_regression.sh 15 $(ls /tmp/bench_*.txt 2>/dev/null || true)
+    - name: No regression check performed
+      if: steps.restore-baseline.outputs.found == 'false'
+      run: echo "No baseline was available, so no regression check ran (see summary)."
+
+  bench-pr-fork:
+    name: Benches
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Print CPU model
+      run: lscpu
+
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+
+    - name: Run benches (no comparison — fork pull request)
+      run: |
+        cargo bench --bench keep_first_n --features tokio
+        cargo bench --bench per_item_costs --features tokio
+        cargo bench --bench pipeline_stages --features tokio
+      working-directory: marigold-impl
+    - run: cargo bench --bench parser_bench
+      working-directory: marigold-grammar
+    - run: cargo bench --bench color_picker_bench --features tokio
+      working-directory: examples/color-palette-picker
+
+    - name: Custom benches — compile and run
+      run: cargo bench --bench cpu_utilization --features tokio
+      working-directory: marigold-impl
+    - run: cargo bench --bench driver_worker_split --features "tokio,bench-instrumentation"
+      working-directory: marigold-impl
+    - run: cargo bench --bench map_filter_utilization --features tokio
+      working-directory: marigold-impl
+
+    - name: Report why there's no comparison
+      run: |
+        {
+          echo "### Benches: fork pull request"
+          echo ""
+          echo "For security, pull requests from forks never run on the dedicated"
+          echo "self-hosted bench runner and are not compared against a baseline"
+          echo "(see [#396](https://github.com/dominicburkart/marigold/issues/396))."
+          echo "Raw numbers are in the job log / uploaded artifact; a same-repo"
+          echo "push or pull request gets the full regression comparison."
+        } >> "$GITHUB_STEP_SUMMARY"
