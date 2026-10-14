@@ -66,10 +66,13 @@ jobs:
     - name: Publish baseline to the runner's persistent bench-baselines volume
       run: |
         set -euo pipefail
+        # CARGO_TARGET_DIR is set to /cargo-target by this runner's container
+        # (not the workspace-relative ./target), so that's where Criterion
+        # actually wrote its output.
         dest="/bench-baselines/${GITHUB_SHA}"
         rm -rf "$dest"
         mkdir -p "$dest"
-        cp -r target/criterion "$dest/criterion"
+        cp -r "${CARGO_TARGET_DIR}/criterion" "$dest/criterion"
         # Bound disk use: keep the 30 most recent baselines.
         cd /bench-baselines
         ls -1t | tail -n +31 | xargs -r rm -rf --
@@ -79,7 +82,7 @@ jobs:
       if: always()
       with:
         name: criterion-reports
-        path: target/criterion/
+        path: /cargo-target/criterion/
         if-no-files-found: ignore
 
   bench-pr-trusted:
@@ -105,8 +108,9 @@ jobs:
         base_sha="${{ github.event.pull_request.base.sha }}"
         src="/bench-baselines/${base_sha}/criterion"
         if [ -d "$src" ]; then
-          mkdir -p target/criterion
-          cp -r "$src"/. target/criterion/
+          # CARGO_TARGET_DIR is /cargo-target on this runner (see cache-baseline).
+          mkdir -p "${CARGO_TARGET_DIR}/criterion"
+          cp -r "$src"/. "${CARGO_TARGET_DIR}/criterion/"
           echo "found=true" >> "$GITHUB_OUTPUT"
         else
           echo "found=false" >> "$GITHUB_OUTPUT"
