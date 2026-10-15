@@ -1,0 +1,12 @@
+{
+  "name": "marigold",
+  "description": "Optional editor and agent integrations for the Marigold language",
+  "owner": { "name": "Marigold contributors" },
+  "plugins": [
+    {
+      "name": "marigold-lsp",
+      "source": "./integrations/claude",
+      "description": "Marigold language server for Claude Code"
+    }
+  ]
+}

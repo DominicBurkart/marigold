@@ -1,0 +1,3 @@
+[mcp_servers.marigold]
+command = "marigold-lsp"
+args = ["mcp"]

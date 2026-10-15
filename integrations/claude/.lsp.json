@@ -1,0 +1,8 @@
+{
+  "marigold": {
+    "command": "marigold-lsp",
+    "extensionToLanguage": {
+      ".marigold": "marigold"
+    }
+  }
+}

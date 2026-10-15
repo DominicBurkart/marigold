@@ -23,7 +23,8 @@ Marigold language support for the [pi](https://pi.dev) coding agent.
   declared, `undefined-fn` and `undefined-struct`; fix them unless the name
   is a Rust item in scope inside `m!()` (a stream variable may be a Rust
   binding with a `get()` method). `resolver-diagnostics-truncated`
-  reports that more than 50 resolver diagnostics were omitted for a file.
+  reports that more than 50 undefined-name diagnostics were found for a
+  file and only the first 50 are reported.
 
 ## Navigation tools
 
