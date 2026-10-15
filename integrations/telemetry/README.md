@@ -205,6 +205,41 @@ and a success resets that. A failing or unreachable backend never affects
 diagnostics or hover: the annotations are simply absent, or the last good
 ones stay. The MCP tool reports the failure instead.
 
+## Cost of enabling the feature
+
+Measured on one machine with user-space instruction counters, over a
+100,000-item pipeline of map, filter and fold with 7 instrumented stages:
+
+| Build and state                              | Instructions per item |
+| -------------------------------------------- | --------------------- |
+| Uninstrumented pipeline                      | about 36              |
+| Instrumented, no meter provider installed    | about 202             |
+| Instrumented, SDK meter provider installed   | about 282             |
+
+That is about +165 instructions per item with no provider and about +245
+with a provider.
+
+Timings are approximate and machine-specific: about 1.8 ns per item
+uninstrumented, about 20 ns with no provider (about 11x) and about 32 ns
+with a provider (about 17x), for 7 stages.
+
+The "off" baseline in that benchmark is the plain pipeline inside a build
+that has the feature compiled in. It is not a build with the feature
+disabled. With the feature disabled the generated code is byte-identical to
+a build without it (checked by golden fixtures), and the compiled code of
+three benched paths (`keep_first_n`, `per_item_costs` and `pipeline_stages`)
+was shown identical in the LLVM IR, the disassembly and the symbol sizes for
+default features.
+
+The cost matters only for very cheap per-item work. It is negligible when
+per-item work takes microseconds.
+
+To reproduce:
+
+```sh
+cd marigold-impl && cargo bench --features tokio,otel --bench otel_overhead
+```
+
 ## Cardinality
 
 Metrics carry exactly two tags, so the number of series per metric is the
