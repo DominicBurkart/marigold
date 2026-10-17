@@ -3164,3 +3164,45 @@ fn x09_for_every_program_of_the_corpus_every_byte_agrees_with_the_t1_lookup() {
     }
     assert!(checked > 10_000, "{checked}");
 }
+
+#[test]
+fn x10_the_last_program_line_may_continue_into_text_after_the_program() {
+    // The program has no trailing newline, so the wrapper's closing text shares its last line.
+    let src = "fn f(x: i32) -> i32 { x }";
+    let rust = "async {\nconst fn f(x: i32) -> i32 { x }";
+    let file = format!("{rust} // wrapper tail\n");
+    let segment = Segment::new(
+        ByteRange {
+            start: 8,
+            end: rust.len(),
+        },
+        ByteRange {
+            start: 0,
+            end: src.len(),
+        },
+        SegmentKind::Function,
+        0,
+        Some("f".into()),
+    );
+    let program = GeneratedProgram::new(rust.to_string(), SourceMap::new(vec![segment]));
+    let at = rust.find("{ x }").unwrap() + 2;
+    let sp = rustc_span("gen.rs", &file, at, at + 1, true);
+    assert_eq!(
+        sp.text[0].text,
+        "const fn f(x: i32) -> i32 { x } // wrapper tail"
+    );
+    assert_mapped(src, &map_one(src, &program, "", &sp), Exact, "x", (1, 23));
+    // the part of the line that is the program's must still agree with the reported text
+    let mut other = sp.clone();
+    other.text[0].text = "const fn g(x: i32) -> i32 { x } // wrapper tail".into();
+    assert_unmapped(
+        &map_one(src, &program, "", &other),
+        UnmappedReason::StaleGeneratedFile,
+    );
+    // a span ending exactly at the end of the program, and the insertion point there
+    let end = rust.len();
+    for (a, b) in [(end - 1, end), (end, end)] {
+        let m = map_one(src, &program, "", &rustc_span("gen.rs", &file, a, b, true));
+        assert_eq!(m.precision, Exact, "{a}..{b}: {m:?}");
+    }
+}

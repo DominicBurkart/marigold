@@ -17,7 +17,7 @@
 //!   Marigold text. Today that is the body of a Marigold `fn`, which is copied through
 //!   (the generated `const ` before `fn` is not part of it). The range is the exact
 //!   same text in the Marigold source, and a zero-width insertion point stays zero-width.
-//! * [`Precision::Segment`]: the span lies inside one [`Segment`](crate::source_map::Segment);
+//! * [`Precision::Segment`]: the span lies inside one [`Segment`];
 //!   the range is that segment's whole source (never a guessed sub-range).
 //! * [`Precision::Expression`]: the span leaves its segment into generated glue or into
 //!   other segments of the *same* expression; the range is the widest segment source of
@@ -1614,11 +1614,12 @@ mod tests {
     }
 
     fn span(start: usize, end: usize) -> RustcSpan {
-        let mut s = RustcSpan::default();
-        s.file_name = "gen.rs".to_string();
-        s.byte_start = start;
-        s.byte_end = end;
-        s
+        RustcSpan {
+            file_name: "gen.rs".to_string(),
+            byte_start: start,
+            byte_end: end,
+            ..Default::default()
+        }
     }
 
     fn range(start: usize, end: usize) -> ByteRange {
