@@ -19,7 +19,7 @@ use proptest::prelude::*;
 const UNITS: [ColumnUnit; 3] = [ColumnUnit::Bytes, ColumnUnit::Chars, ColumnUnit::Utf16];
 
 fn lc(line: usize, col: usize) -> LineCol {
-    LineCol { line, col }
+    LineCol { line, column: col }
 }
 
 fn width(c: char, unit: ColumnUnit) -> usize {
@@ -279,7 +279,7 @@ proptest! {
         let idx = LineIndex::new(&src);
         for off in 0..=src.len() + 3 {
             let got = idx.line_col(off, ColumnUnit::Chars);
-            prop_assert_eq!((got.line, got.col), old_line_col(&src, off), "off {} in {:?}", off, src);
+            prop_assert_eq!((got.line, got.column), old_line_col(&src, off), "off {} in {:?}", off, src);
         }
     }
 
@@ -289,7 +289,7 @@ proptest! {
         for b in boundaries(&src) {
             for unit in UNITS {
                 let at = idx.line_col(b, unit);
-                prop_assert_eq!(idx.offset(at.line, at.col, unit), Some(b), "{:?} {:?} {:?}", b, unit, src);
+                prop_assert_eq!(idx.offset(at.line, at.column, unit), Some(b), "{:?} {:?} {:?}", b, unit, src);
             }
         }
     }
@@ -335,7 +335,7 @@ proptest! {
             let u = idx.line_col(off, ColumnUnit::Utf16);
             prop_assert_eq!(b.line, c.line);
             prop_assert_eq!(u.line, c.line);
-            prop_assert!(c.col <= u.col && u.col <= b.col, "{:?} {:?} {:?}", c, u, b);
+            prop_assert!(c.column <= u.column && u.column <= b.column, "{:?} {:?} {:?}", c, u, b);
         }
     }
 

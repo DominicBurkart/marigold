@@ -48,10 +48,10 @@ proptest! {
             }
             let chars = g.line_col(off, ColumnUnit::Chars);
             let (line0, col0) = l.char_position(off);
-            prop_assert_eq!((chars.line - 1, chars.col - 1), (line0 as usize, col0 as usize), "chars at {} in {:?}", off, src);
+            prop_assert_eq!((chars.line - 1, chars.column - 1), (line0 as usize, col0 as usize), "chars at {} in {:?}", off, src);
             let utf16 = g.line_col(off, ColumnUnit::Utf16);
             let p = l.position(off);
-            prop_assert_eq!((utf16.line - 1, utf16.col - 1), (p.line as usize, p.character as usize), "utf16 at {} in {:?}", off, src);
+            prop_assert_eq!((utf16.line - 1, utf16.column - 1), (p.line as usize, p.character as usize), "utf16 at {} in {:?}", off, src);
         }
     }
 
@@ -67,7 +67,7 @@ proptest! {
             if src.as_bytes().get(off) == Some(&b'\r') && src.as_bytes().get(off + 1) == Some(&b'\n') {
                 continue;
             }
-            prop_assert_eq!(g.offset(at.line, at.col, ColumnUnit::Chars), l.offset_of_char(at.line as u32 - 1, at.col as u32 - 1));
+            prop_assert_eq!(g.offset(at.line, at.column, ColumnUnit::Chars), l.offset_of_char(at.line as u32 - 1, at.column as u32 - 1));
         }
     }
 }
@@ -76,6 +76,6 @@ proptest! {
 fn the_documented_difference_exists_and_is_exactly_this() {
     let src = "ab\r\ncd";
     let (g, l) = (Grammar::new(src), Lsp::new(src));
-    assert_eq!(g.line_col(3, ColumnUnit::Chars).col, 4);
+    assert_eq!(g.line_col(3, ColumnUnit::Chars).column, 4);
     assert_eq!(l.char_position(3), (0, 2));
 }
