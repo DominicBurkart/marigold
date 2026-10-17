@@ -64,7 +64,20 @@ enum MarigoldCommand {
         /// Path of the Marigold file to read
         file: Option<String>,
     },
-    /// Emit the generated Rust (red stub).
+    /// Print the Rust code generated from a program, or that code with a source map.
+    ///
+    /// With `--format rust` (the default) prints the generated Rust code exactly as
+    /// `m!` would expand it, so it can be written to a file and compiled. With
+    /// `--format json` prints one JSON document with the program, the Rust code and a
+    /// list of segments, each mapping an expression of the program to the code
+    /// generated for it.
+    ///
+    /// Offsets are byte offsets into the text as read from the file (nothing is
+    /// trimmed). Lines and columns are 1-based and columns count Unicode scalar
+    /// values, like rustc. If the program does not compile, nothing is written to
+    /// stdout, the errors are printed to stderr as `marigold check` prints them (JSON
+    /// diagnostics with `--format json`) and the exit code is 1. Exits 2 if the input
+    /// cannot be read.
     Emit {
         /// Output format
         #[arg(long, value_enum, default_value_t = EmitFormat::Rust)]
@@ -109,21 +122,11 @@ fn get_file_name_argument(args: &Args) -> Option<String> {
     }
 }
 
+/// Read the program from `file`, or from stdin if there is none, exactly as it is
+/// (no trimming, so byte offsets index the file on disk). On failure, prints the error
+/// and returns `None`; the caller exits with status 2.
 #[cfg(feature = "cli")]
-fn line_col(src: &str, offset: usize) -> (usize, usize) {
-    let mut end = offset.min(src.len());
-    while !src.is_char_boundary(end) {
-        end -= 1;
-    }
-    let before = &src[..end];
-    let line = before.matches('\n').count() + 1;
-    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-    let col = before[line_start..].chars().count() + 1;
-    (line, col)
-}
-
-#[cfg(feature = "cli")]
-fn run_check(format: CheckFormat, file: Option<&str>) -> i32 {
+fn read_source(file: Option<&str>) -> Option<String> {
     use std::io::Read;
 
     let source = match file {
@@ -136,12 +139,50 @@ fn run_check(format: CheckFormat, file: Option<&str>) -> i32 {
                 .map(|_| buf)
         }
     };
-    let source = match source {
-        Ok(source) => source,
+    match source {
+        Ok(source) => Some(source),
         Err(e) => {
             eprintln!("error: could not read {}: {e}", file.unwrap_or("<stdin>"));
-            return 2;
+            None
         }
+    }
+}
+
+/// One line per diagnostic, `path:line:column: severity[code]: message`, followed by
+/// an indented `help:` line if it has one. Columns count Unicode scalar values.
+#[cfg(feature = "cli")]
+fn render_human(
+    path: &str,
+    source: &str,
+    diagnostics: &[marigold_grammar::diagnostics::Diagnostic],
+) -> String {
+    use marigold_grammar::line_index::{ColumnUnit, LineIndex};
+    use std::fmt::Write;
+
+    let index = LineIndex::new(source);
+    let mut out = String::new();
+    for d in diagnostics {
+        let position = index.line_col(d.range.start, ColumnUnit::Chars);
+        let _ = writeln!(
+            out,
+            "{path}:{}:{}: {}[{}]: {}",
+            position.line,
+            position.col,
+            d.severity.as_str(),
+            d.code,
+            d.message
+        );
+        if let Some(help) = &d.help {
+            let _ = writeln!(out, "  help: {help}");
+        }
+    }
+    out
+}
+
+#[cfg(feature = "cli")]
+fn run_check(format: CheckFormat, file: Option<&str>) -> i32 {
+    let Some(source) = read_source(file) else {
+        return 2;
     };
 
     let diagnostics = marigold_grammar::marigold_check(&source);
@@ -156,22 +197,111 @@ fn run_check(format: CheckFormat, file: Option<&str>) -> i32 {
         },
         CheckFormat::Human => {
             let path = file.unwrap_or("<stdin>");
-            for d in &diagnostics {
-                let (line, col) = line_col(&source, d.range.start);
-                println!(
-                    "{path}:{line}:{col}: {}[{}]: {}",
-                    d.severity.as_str(),
-                    d.code,
-                    d.message
-                );
-                if let Some(help) = &d.help {
-                    println!("  help: {help}");
-                }
-            }
+            print!("{}", render_human(path, &source, &diagnostics));
         }
     }
 
     i32::from(diagnostics.iter().any(|d| d.is_error()))
+}
+
+/// Print why `source` did not compile to stderr, as `marigold check` would (errors
+/// only), and return the exit status.
+#[cfg(feature = "cli")]
+fn report_emit_failure(
+    format: EmitFormat,
+    path: &str,
+    source: &str,
+    parse_error: &marigold_grammar::parser::MarigoldParseError,
+) -> i32 {
+    use marigold_grammar::diagnostics::MAX_CHECK_INPUT_BYTES;
+
+    // `marigold_check` refuses large inputs without parsing them (`input-too-large`),
+    // which would be false here: `emit` has no size limit.
+    let errors: Vec<_> = if source.len() <= MAX_CHECK_INPUT_BYTES {
+        marigold_grammar::marigold_check(source)
+            .into_iter()
+            .filter(|d| d.is_error())
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let message = parse_error.to_string();
+    let rendered = match format {
+        EmitFormat::Rust if errors.is_empty() => {
+            format!("{path}:1:1: error[syntax-error]: {message}\n")
+        }
+        EmitFormat::Rust => render_human(path, source, &errors),
+        // Serialize the typed values: going through `serde_json::Value` would sort the keys.
+        EmitFormat::Json => {
+            if errors.is_empty() {
+                // The one diagnostic of `check`'s array, written out because the CLI has
+                // no way to construct a `Diagnostic`: same keys, order and indentation.
+                let message = serde_json::Value::String(message).to_string();
+                format!(
+                    "[\n  {{\n    \"range\": {{\n      \"start\": 0,\n      \"end\": 0\n    }},\n    \
+                     \"severity\": \"error\",\n    \"code\": \"syntax-error\",\n    \
+                     \"message\": {message}\n  }}\n]\n"
+                )
+            } else {
+                match serde_json::to_string_pretty(&errors) {
+                    Ok(json) => format!("{json}\n"),
+                    Err(e) => {
+                        eprintln!("error: could not serialize diagnostics: {e}");
+                        return 2;
+                    }
+                }
+            }
+        }
+    };
+    eprint!("{rendered}");
+    1
+}
+
+/// Write `bytes` to stdout. A reader that goes away early (`marigold emit f | head`)
+/// is not an error.
+#[cfg(feature = "cli")]
+fn write_stdout(bytes: &[u8]) -> i32 {
+    use std::io::Write;
+
+    let mut stdout = std::io::stdout().lock();
+    match stdout.write_all(bytes).and_then(|()| stdout.flush()) {
+        Ok(()) => 0,
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => 0,
+        Err(e) => {
+            eprintln!("error: could not write to stdout: {e}");
+            2
+        }
+    }
+}
+
+#[cfg(feature = "cli")]
+fn run_emit(format: EmitFormat, file: Option<&str>) -> i32 {
+    let Some(source) = read_source(file) else {
+        return 2;
+    };
+
+    let program = match marigold_grammar::marigold_generate(&source) {
+        Ok(program) => program,
+        Err(e) => {
+            return report_emit_failure(format, file.unwrap_or("<stdin>"), &source, &e);
+        }
+    };
+
+    match format {
+        EmitFormat::Rust => write_stdout(program.rust.as_bytes()),
+        EmitFormat::Json => {
+            let document =
+                marigold_grammar::emit::EmitDocument::new(&source, &program.rust, &program.map);
+            match serde_json::to_string_pretty(&document) {
+                Ok(json) => write_stdout(format!("{json}\n").as_bytes()),
+                Err(e) => {
+                    eprintln!("error: could not serialize the document: {e}");
+                    2
+                }
+            }
+        }
+    }
 }
 
 #[cfg(feature = "cli")]
@@ -190,9 +320,8 @@ fn main() -> Result<()> {
     if let Some(Check { format, file }) = &args.command {
         std::process::exit(run_check(*format, file.as_deref()));
     }
-    if let Some(Emit { .. }) = &args.command {
-        eprintln!("error: emit is not implemented yet");
-        std::process::exit(2);
+    if let Some(Emit { format, file }) = &args.command {
+        std::process::exit(run_emit(*format, file.as_deref()));
     }
 
     let marigold_cache_directory = home::home_dir()
@@ -374,33 +503,6 @@ tokio = {{ version = "1", features = ["full"]}}
     };
 
     std::process::exit(exit_status.code().unwrap_or(0));
-}
-
-#[cfg(all(test, feature = "cli"))]
-mod line_col_tests {
-    use super::line_col;
-
-    #[test]
-    fn start_of_input() {
-        assert_eq!(line_col("abc", 0), (1, 1));
-    }
-
-    #[test]
-    fn second_line() {
-        assert_eq!(line_col("ab\ncd", 4), (2, 2));
-    }
-
-    #[test]
-    fn counts_chars_not_bytes() {
-        let src = "\"ünï\" x";
-        assert_eq!(line_col(src, src.find('x').unwrap()), (1, 7));
-    }
-
-    #[test]
-    fn clamps_past_end_and_mid_char() {
-        assert_eq!(line_col("a\nb", 99), (2, 2));
-        assert_eq!(line_col("ü", 1), (1, 1));
-    }
 }
 
 #[cfg(test)]
