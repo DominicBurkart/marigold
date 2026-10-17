@@ -1,0 +1,82 @@
+{
+  "segments": [
+    {
+      "generated": {
+        "start": 50,
+        "end": 230
+      },
+      "source": {
+        "start": 0,
+        "end": 16
+      },
+      "kind": "stream_variable",
+      "expr_index": 0,
+      "name": "xs"
+    },
+    {
+      "generated": {
+        "start": 232,
+        "end": 659
+      },
+      "source": {
+        "start": 17,
+        "end": 68
+      },
+      "kind": "stream_variable",
+      "expr_index": 1,
+      "name": "ys"
+    },
+    {
+      "generated": {
+        "start": 661,
+        "end": 3803
+      },
+      "source": {
+        "start": 69,
+        "end": 96
+      },
+      "kind": "non_returning_stream",
+      "expr_index": 2,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 3804,
+        "end": 6946
+      },
+      "source": {
+        "start": 97,
+        "end": 124
+      },
+      "kind": "non_returning_stream",
+      "expr_index": 3,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 6947,
+        "end": 7165
+      },
+      "source": {
+        "start": 0,
+        "end": 16
+      },
+      "kind": "stream_variable_runner",
+      "expr_index": 0,
+      "name": "xs"
+    },
+    {
+      "generated": {
+        "start": 7166,
+        "end": 7384
+      },
+      "source": {
+        "start": 17,
+        "end": 68
+      },
+      "kind": "stream_variable_runner",
+      "expr_index": 1,
+      "name": "ys"
+    }
+  ]
+}

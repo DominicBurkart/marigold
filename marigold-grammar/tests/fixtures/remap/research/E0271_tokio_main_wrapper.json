@@ -1,0 +1,114 @@
+{
+ "reason": "compiler-message",
+ "package_id": "path+file:///work/research/t3#0.0.1",
+ "manifest_path": "/work/research/t3/Cargo.toml",
+ "target": {
+  "kind": [
+   "bin"
+  ],
+  "crate_types": [
+   "bin"
+  ],
+  "name": "t3",
+  "src_path": "/work/research/t3/src/main.rs",
+  "edition": "2021",
+  "doc": true,
+  "doctest": false,
+  "test": true
+ },
+ "message": {
+  "rendered": "error[E0271]: expected `{async block@src/main.rs:1:1: 1:15}` to be a future that resolves to `()`, but it resolves to `SelectAll<Pin<Box<dyn Stream<Item = _>>>>`\n --> src/main.rs:1:1\n  |\n1 | #[tokio::main] async fn main() { marigold::m!(range(0, 5).map(undefined_fn).return) .await }\n  | ^^^^^^^^^^^^^^ expected `()`, found `SelectAll<Pin<Box<...>>>`\n  |\n  = note: expected unit type `()`\n                found struct `marigold::marigold_impl::futures::stream::SelectAll<Pin<Box<dyn Stream<Item = _>>>>`\n  = note: required for the cast from `&{async block@src/main.rs:1:1: 1:15}` to `&dyn std::future::Future<Output = ()>`\n  = note: this error originates in the attribute macro `tokio::main` (in Nightly builds, run with -Z macro-backtrace for more info)\n\n",
+  "$message_type": "diagnostic",
+  "children": [
+   {
+    "children": [],
+    "code": null,
+    "level": "note",
+    "message": "expected unit type `()`\n      found struct `marigold::marigold_impl::futures::stream::SelectAll<Pin<Box<dyn Stream<Item = _>>>>`",
+    "rendered": null,
+    "spans": []
+   },
+   {
+    "children": [],
+    "code": null,
+    "level": "note",
+    "message": "required for the cast from `&{async block@src/main.rs:1:1: 1:15}` to `&dyn std::future::Future<Output = ()>`",
+    "rendered": null,
+    "spans": []
+   }
+  ],
+  "level": "error",
+  "message": "expected `{async block@src/main.rs:1:1: 1:15}` to be a future that resolves to `()`, but it resolves to `SelectAll<Pin<Box<dyn Stream<Item = _>>>>`",
+  "spans": [
+   {
+    "byte_end": 14,
+    "byte_start": 0,
+    "column_end": 15,
+    "column_start": 1,
+    "expansion": {
+     "def_site_span": {
+      "byte_end": 8327,
+      "byte_start": 8263,
+      "column_end": 65,
+      "column_start": 1,
+      "expansion": null,
+      "file_name": "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-macros-2.7.2/src/lib.rs",
+      "is_primary": false,
+      "label": null,
+      "line_end": 314,
+      "line_start": 314,
+      "suggested_replacement": null,
+      "suggestion_applicability": null,
+      "text": [
+       {
+        "highlight_end": 65,
+        "highlight_start": 1,
+        "text": "pub fn main(args: TokenStream, item: TokenStream) -> TokenStream {"
+       }
+      ]
+     },
+     "macro_decl_name": "#[tokio::main]",
+     "span": {
+      "byte_end": 14,
+      "byte_start": 0,
+      "column_end": 15,
+      "column_start": 1,
+      "expansion": null,
+      "file_name": "src/main.rs",
+      "is_primary": false,
+      "label": null,
+      "line_end": 1,
+      "line_start": 1,
+      "suggested_replacement": null,
+      "suggestion_applicability": null,
+      "text": [
+       {
+        "highlight_end": 15,
+        "highlight_start": 1,
+        "text": "#[tokio::main] async fn main() { marigold::m!(range(0, 5).map(undefined_fn).return) .await }"
+       }
+      ]
+     }
+    },
+    "file_name": "src/main.rs",
+    "is_primary": true,
+    "label": "expected `()`, found `SelectAll<Pin<Box<...>>>`",
+    "line_end": 1,
+    "line_start": 1,
+    "suggested_replacement": null,
+    "suggestion_applicability": null,
+    "text": [
+     {
+      "highlight_end": 15,
+      "highlight_start": 1,
+      "text": "#[tokio::main] async fn main() { marigold::m!(range(0, 5).map(undefined_fn).return) .await }"
+     }
+    ]
+   }
+  ],
+  "code": {
+   "code": "E0271",
+   "explanation": "<elided>"
+  }
+ }
+}

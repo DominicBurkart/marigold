@@ -1,0 +1,228 @@
+{
+ "reason": "compiler-message",
+ "package_id": "path+file:///work/research/t1#0.0.1",
+ "manifest_path": "/work/research/t1/Cargo.toml",
+ "target": {
+  "kind": [
+   "bin"
+  ],
+  "crate_types": [
+   "bin"
+  ],
+  "name": "t1",
+  "src_path": "/work/research/t1/src/main.rs",
+  "edition": "2021",
+  "doc": true,
+  "doctest": false,
+  "test": true
+ },
+ "message": {
+  "rendered": "error[E0382]: borrow of moved value: `s`\n --> src/main.rs:4:59\n  |\n4 | fn c() { let s = String::new(); let t = s; println!(\"{}\", s); }\n  |              -                          -                 ^ value borrowed here after move\n  |              |                          |\n  |              |                          value moved here\n  |              move occurs because `s` has type `String`, which does not implement the `Copy` trait\n  |\nhelp: consider cloning the value if the performance cost is acceptable\n  |\n4 | fn c() { let s = String::new(); let t = s.clone(); println!(\"{}\", s); }\n  |                                          ++++++++\n\n",
+  "$message_type": "diagnostic",
+  "children": [
+   {
+    "children": [],
+    "code": null,
+    "level": "help",
+    "message": "consider cloning the value if the performance cost is acceptable",
+    "rendered": null,
+    "spans": [
+     {
+      "byte_end": 146,
+      "byte_start": 146,
+      "column_end": 42,
+      "column_start": 42,
+      "expansion": null,
+      "file_name": "src/main.rs",
+      "is_primary": true,
+      "label": null,
+      "line_end": 4,
+      "line_start": 4,
+      "suggested_replacement": ".clone()",
+      "suggestion_applicability": "MachineApplicable",
+      "text": [
+       {
+        "highlight_end": 42,
+        "highlight_start": 42,
+        "text": "fn c() { let s = String::new(); let t = s; println!(\"{}\", s); }"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "level": "error",
+  "message": "borrow of moved value: `s`",
+  "spans": [
+   {
+    "byte_end": 146,
+    "byte_start": 145,
+    "column_end": 42,
+    "column_start": 41,
+    "expansion": null,
+    "file_name": "src/main.rs",
+    "is_primary": false,
+    "label": "value moved here",
+    "line_end": 4,
+    "line_start": 4,
+    "suggested_replacement": null,
+    "suggestion_applicability": null,
+    "text": [
+     {
+      "highlight_end": 42,
+      "highlight_start": 41,
+      "text": "fn c() { let s = String::new(); let t = s; println!(\"{}\", s); }"
+     }
+    ]
+   },
+   {
+    "byte_end": 164,
+    "byte_start": 163,
+    "column_end": 60,
+    "column_start": 59,
+    "expansion": {
+     "def_site_span": {
+      "byte_end": 0,
+      "byte_start": 0,
+      "column_end": 1,
+      "column_start": 1,
+      "expansion": null,
+      "file_name": "src/main.rs",
+      "is_primary": false,
+      "label": null,
+      "line_end": 1,
+      "line_start": 1,
+      "suggested_replacement": null,
+      "suggestion_applicability": null,
+      "text": []
+     },
+     "macro_decl_name": "desugaring of format string literal",
+     "span": {
+      "byte_end": 4465,
+      "byte_start": 4432,
+      "column_end": 61,
+      "column_start": 28,
+      "expansion": {
+       "def_site_span": {
+        "byte_end": 36235,
+        "byte_start": 36208,
+        "column_end": 32,
+        "column_start": 5,
+        "expansion": null,
+        "file_name": "/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/macros/mod.rs",
+        "is_primary": false,
+        "label": null,
+        "line_end": 1026,
+        "line_start": 1026,
+        "suggested_replacement": null,
+        "suggestion_applicability": null,
+        "text": []
+       },
+       "macro_decl_name": "$crate::format_args_nl!",
+       "span": {
+        "byte_end": 4465,
+        "byte_start": 4432,
+        "column_end": 61,
+        "column_start": 28,
+        "expansion": {
+         "def_site_span": {
+          "byte_end": 4330,
+          "byte_start": 4310,
+          "column_end": 21,
+          "column_start": 1,
+          "expansion": null,
+          "file_name": "/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/macros.rs",
+          "is_primary": false,
+          "label": null,
+          "line_end": 141,
+          "line_start": 141,
+          "suggested_replacement": null,
+          "suggestion_applicability": null,
+          "text": []
+         },
+         "macro_decl_name": "println!",
+         "span": {
+          "byte_end": 165,
+          "byte_start": 148,
+          "column_end": 61,
+          "column_start": 44,
+          "expansion": null,
+          "file_name": "src/main.rs",
+          "is_primary": false,
+          "label": null,
+          "line_end": 4,
+          "line_start": 4,
+          "suggested_replacement": null,
+          "suggestion_applicability": null,
+          "text": [
+           {
+            "highlight_end": 61,
+            "highlight_start": 44,
+            "text": "fn c() { let s = String::new(); let t = s; println!(\"{}\", s); }"
+           }
+          ]
+         }
+        },
+        "file_name": "/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/macros.rs",
+        "is_primary": false,
+        "label": null,
+        "line_end": 146,
+        "line_start": 146,
+        "suggested_replacement": null,
+        "suggestion_applicability": null,
+        "text": []
+       }
+      },
+      "file_name": "/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/macros.rs",
+      "is_primary": false,
+      "label": null,
+      "line_end": 146,
+      "line_start": 146,
+      "suggested_replacement": null,
+      "suggestion_applicability": null,
+      "text": []
+     }
+    },
+    "file_name": "src/main.rs",
+    "is_primary": true,
+    "label": "value borrowed here after move",
+    "line_end": 4,
+    "line_start": 4,
+    "suggested_replacement": null,
+    "suggestion_applicability": null,
+    "text": [
+     {
+      "highlight_end": 60,
+      "highlight_start": 59,
+      "text": "fn c() { let s = String::new(); let t = s; println!(\"{}\", s); }"
+     }
+    ]
+   },
+   {
+    "byte_end": 119,
+    "byte_start": 118,
+    "column_end": 15,
+    "column_start": 14,
+    "expansion": null,
+    "file_name": "src/main.rs",
+    "is_primary": false,
+    "label": "move occurs because `s` has type `String`, which does not implement the `Copy` trait",
+    "line_end": 4,
+    "line_start": 4,
+    "suggested_replacement": null,
+    "suggestion_applicability": null,
+    "text": [
+     {
+      "highlight_end": 15,
+      "highlight_start": 14,
+      "text": "fn c() { let s = String::new(); let t = s; println!(\"{}\", s); }"
+     }
+    ]
+   }
+  ],
+  "code": {
+   "code": "E0382",
+   "explanation": "<elided>"
+  }
+ }
+}

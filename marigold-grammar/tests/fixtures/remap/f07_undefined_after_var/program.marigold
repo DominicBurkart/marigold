@@ -1,0 +1,3 @@
+fn inc(x: i32) -> i32 { x + 1 }
+xs = range(0, 5).map(inc)
+xs.map(not_defined).write_file("a.csv", csv)

@@ -1,0 +1,43 @@
+{
+  "segments": [
+    {
+      "generated": {
+        "start": 50,
+        "end": 82
+      },
+      "source": {
+        "start": 0,
+        "end": 26
+      },
+      "kind": "function",
+      "expr_index": 0,
+      "name": "id"
+    },
+    {
+      "generated": {
+        "start": 84,
+        "end": 131
+      },
+      "source": {
+        "start": 27,
+        "end": 68
+      },
+      "kind": "function",
+      "expr_index": 1,
+      "name": "g"
+    },
+    {
+      "generated": {
+        "start": 133,
+        "end": 3336
+      },
+      "source": {
+        "start": 69,
+        "end": 120
+      },
+      "kind": "non_returning_stream",
+      "expr_index": 2,
+      "name": null
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "segments": [
+    {
+      "generated": {
+        "start": 50,
+        "end": 145
+      },
+      "source": {
+        "start": 0,
+        "end": 89
+      },
+      "kind": "function",
+      "expr_index": 0,
+      "name": "first"
+    },
+    {
+      "generated": {
+        "start": 147,
+        "end": 3370
+      },
+      "source": {
+        "start": 91,
+        "end": 150
+      },
+      "kind": "non_returning_stream",
+      "expr_index": 1,
+      "name": null
+    }
+  ]
+}

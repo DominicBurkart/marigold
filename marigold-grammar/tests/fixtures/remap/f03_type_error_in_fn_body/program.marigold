@@ -1,0 +1,4 @@
+fn is_big(x: i32) -> bool {
+    x + "oops"
+}
+range(0, 10).filter(is_big).write_file("out.csv", csv)

@@ -1,0 +1,69 @@
+
+thread 'main' (15182) panicked at src/gen.rs:5:27:
+index out of bounds: the len is 2 but the index is 5
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:80:14
+   2: core::panicking::panic_bounds_check
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:271:5
+   3: fx::main::{closure#0}::{closure#0}::first
+             at ./src/gen.rs:5:27
+   4: <fx::main::{closure#0}::{closure#0}::first as core::ops::function::FnMut<(i32,)>>::call_mut
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:166:5
+   5: <fx::main::{closure#0}::{closure#0}::first as futures_util::fns::FnMut1<i32>>::call_mut
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/fns.rs:28:9
+   6: <futures_util::stream::stream::map::Map<futures_util::stream::iter::Iter<core::ops::range::Range<i32>>, fx::main::{closure#0}::{closure#0}::first> as futures_core::stream::Stream>::poll_next::{closure#0}
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/stream/map.rs:59:40
+   7: <core::option::Option<i32>>::map::<i32, <futures_util::stream::stream::map::Map<futures_util::stream::iter::Iter<core::ops::range::Range<i32>>, fx::main::{closure#0}::{closure#0}::first> as futures_core::stream::Stream>::poll_next::{closure#0}>
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/option.rs:1162:29
+   8: <futures_util::stream::stream::map::Map<futures_util::stream::iter::Iter<core::ops::range::Range<i32>>, fx::main::{closure#0}::{closure#0}::first> as futures_core::stream::Stream>::poll_next
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/stream/map.rs:59:25
+   9: <futures_util::stream::stream::filter_map::FilterMap<futures_util::stream::stream::map::Map<futures_util::stream::iter::Iter<core::ops::range::Range<i32>>, fx::main::{closure#0}::{closure#0}::first>, fx::main::{closure#0}::{closure#0}::{closure#0}::{closure#0}, fx::main::{closure#0}::{closure#0}::{closure#0}> as futures_core::stream::Stream>::poll_next
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/stream/filter_map.rs:79:68
+  10: <futures_util::stream::stream::chain::Chain<futures_util::stream::stream::filter_map::FilterMap<futures_util::stream::stream::map::Map<futures_util::stream::iter::Iter<core::ops::range::Range<i32>>, fx::main::{closure#0}::{closure#0}::first>, fx::main::{closure#0}::{closure#0}::{closure#0}::{closure#0}, fx::main::{closure#0}::{closure#0}::{closure#0}>, futures_util::stream::stream::filter_map::FilterMap<futures_util::stream::iter::Iter<core::ops::range::Range<i32>>, fx::main::{closure#0}::{closure#0}::{closure#1}::{closure#0}, fx::main::{closure#0}::{closure#0}::{closure#1}>> as futures_core::stream::Stream>::poll_next
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/stream/chain.rs:50:46
+  11: <core::pin::Pin<alloc::boxed::Box<dyn futures_core::stream::Stream<Item = ()>>> as futures_core::stream::Stream>::poll_next
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-core-0.3.34/src/stream.rs:130:33
+  12: <core::pin::Pin<alloc::boxed::Box<dyn futures_core::stream::Stream<Item = ()>>> as futures_util::stream::stream::StreamExt>::poll_next_unpin
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/stream/mod.rs:1637:24
+  13: <futures_util::stream::stream::into_future::StreamFuture<core::pin::Pin<alloc::boxed::Box<dyn futures_core::stream::Stream<Item = ()>>>> as core::future::future::Future>::poll
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/stream/into_future.rs:85:22
+  14: <futures_util::stream::futures_unordered::FuturesUnordered<futures_util::stream::stream::into_future::StreamFuture<core::pin::Pin<alloc::boxed::Box<dyn futures_core::stream::Stream<Item = ()>>>>> as futures_core::stream::Stream>::poll_next
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/futures_unordered/mod.rs:539:24
+  15: <futures_util::stream::futures_unordered::FuturesUnordered<futures_util::stream::stream::into_future::StreamFuture<core::pin::Pin<alloc::boxed::Box<dyn futures_core::stream::Stream<Item = ()>>>>> as futures_util::stream::stream::StreamExt>::poll_next_unpin
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/stream/mod.rs:1637:24
+  16: <futures_util::stream::select_all::SelectAll<core::pin::Pin<alloc::boxed::Box<dyn futures_core::stream::Stream<Item = ()>>>> as futures_core::stream::Stream>::poll_next
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/select_all.rs:95:37
+  17: <futures_util::stream::stream::collect::Collect<futures_util::stream::select_all::SelectAll<core::pin::Pin<alloc::boxed::Box<dyn futures_core::stream::Stream<Item = ()>>>>, alloc::vec::Vec<()>> as core::future::future::Future>::poll
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-util-0.3.34/src/stream/stream/collect.rs:50:47
+  18: fx::main::{closure#0}::{closure#0}
+             at ./src/gen.rs:85:127
+  19: fx::main::{closure#0}
+             at ./src/main.rs:3:24
+  20: <tokio::runtime::park::CachedParkThread>::block_on::<fx::main::{closure#0}>::{closure#0}
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/runtime/park.rs:284:71
+  21: tokio::task::coop::with_budget::<core::task::poll::Poll<()>, <tokio::runtime::park::CachedParkThread>::block_on<fx::main::{closure#0}>::{closure#0}>
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/task/coop/mod.rs:167:5
+  22: tokio::task::coop::budget::<core::task::poll::Poll<()>, <tokio::runtime::park::CachedParkThread>::block_on<fx::main::{closure#0}>::{closure#0}>
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/task/coop/mod.rs:133:5
+  23: <tokio::runtime::park::CachedParkThread>::block_on::<fx::main::{closure#0}>
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/runtime/park.rs:284:31
+  24: <tokio::runtime::context::blocking::BlockingRegionGuard>::block_on::<fx::main::{closure#0}>
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/runtime/context/blocking.rs:66:14
+  25: <tokio::runtime::scheduler::multi_thread::MultiThread>::block_on::<fx::main::{closure#0}>::{closure#0}
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/runtime/scheduler/multi_thread/mod.rs:92:22
+  26: tokio::runtime::context::runtime::enter_runtime::<<tokio::runtime::scheduler::multi_thread::MultiThread>::block_on<fx::main::{closure#0}>::{closure#0}, ()>
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/runtime/context/runtime.rs:65:16
+  27: <tokio::runtime::scheduler::multi_thread::MultiThread>::block_on::<fx::main::{closure#0}>
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/runtime/scheduler/multi_thread/mod.rs:91:9
+  28: <tokio::runtime::runtime::Runtime>::block_on_inner::<fx::main::{closure#0}>
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/runtime/runtime.rs:376:50
+  29: <tokio::runtime::runtime::Runtime>::block_on::<fx::main::{closure#0}>
+             at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.3/src/runtime/runtime.rs:343:18
+  30: fx::main
+             at ./src/main.rs:3:29
+  31: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.

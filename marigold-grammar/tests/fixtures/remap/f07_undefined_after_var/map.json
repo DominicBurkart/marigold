@@ -1,0 +1,56 @@
+{
+  "segments": [
+    {
+      "generated": {
+        "start": 50,
+        "end": 87
+      },
+      "source": {
+        "start": 0,
+        "end": 31
+      },
+      "kind": "function",
+      "expr_index": 0,
+      "name": "inc"
+    },
+    {
+      "generated": {
+        "start": 89,
+        "end": 278
+      },
+      "source": {
+        "start": 32,
+        "end": 57
+      },
+      "kind": "stream_variable",
+      "expr_index": 1,
+      "name": "xs"
+    },
+    {
+      "generated": {
+        "start": 280,
+        "end": 3439
+      },
+      "source": {
+        "start": 58,
+        "end": 102
+      },
+      "kind": "non_returning_stream",
+      "expr_index": 2,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 3440,
+        "end": 3658
+      },
+      "source": {
+        "start": 32,
+        "end": 57
+      },
+      "kind": "stream_variable_runner",
+      "expr_index": 1,
+      "name": "xs"
+    }
+  ]
+}
