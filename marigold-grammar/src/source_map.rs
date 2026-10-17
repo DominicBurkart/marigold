@@ -556,6 +556,47 @@ mod tests {
     }
 
     #[test]
+    fn touching_source_ranges_do_not_overlap_even_inside_a_longer_one() {
+        // `(5, 10)` ends exactly where the query starts; the longer `(0, 50)` before it
+        // in source order keeps the prefix maximum above the query start, so only the
+        // final overlap check can reject it.
+        let m = SourceMap::new(vec![
+            seg((0, 100), (0, 50), SegmentKind::ReturningStream, 0),
+            seg((10, 20), (5, 10), SegmentKind::StreamVariable, 1),
+        ]);
+        let q = |a, b| ids(m.generated_for_source(r(a, b)));
+        assert_eq!(q(10, 11), vec![(0, SegmentKind::ReturningStream)]);
+        assert_eq!(q(10, 10), vec![(0, SegmentKind::ReturningStream)]);
+        assert_eq!(q(4, 5).len(), 1);
+        assert_eq!(q(9, 10).len(), 2);
+    }
+
+    #[test]
+    fn adjacent_generated_ranges_are_siblings_not_a_chain() {
+        // Otherwise every lookup past the last segment would walk all of them.
+        let m = SourceMap::new(
+            (0..1000)
+                .map(|i| seg((i * 4, i * 4 + 4), (i, i + 1), SegmentKind::Struct, i))
+                .collect(),
+        );
+        assert!(m.parents.iter().all(|p| p.is_none()));
+        assert_eq!(m.source_for_generated(4_000), None);
+        assert_eq!(m.source_for_generated(3).map(|s| s.expr_index), Some(0));
+        assert_eq!(m.source_for_generated(4).map(|s| s.expr_index), Some(1));
+    }
+
+    #[test]
+    fn equal_generated_ranges_keep_input_order_and_the_later_one_wins() {
+        let m = SourceMap::new(vec![
+            seg((10, 20), (0, 1), SegmentKind::Struct, 0),
+            seg((10, 20), (2, 3), SegmentKind::Enum, 1),
+        ]);
+        let order: Vec<_> = m.segments().iter().map(|s| s.expr_index).collect();
+        assert_eq!(order, vec![0, 1]);
+        assert_eq!(m.source_for_generated(15).map(|s| s.expr_index), Some(1));
+    }
+
+    #[test]
     fn empty_map_answers_none_and_empty() {
         let m = SourceMap::new(Vec::new());
         assert!(m.segments().is_empty());
