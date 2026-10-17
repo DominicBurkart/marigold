@@ -12,6 +12,8 @@
 //! - **Pest-based parser**: Fast, maintainable PEG parser
 //! - **AST definitions**: Complete abstract syntax tree for Marigold programs
 //! - **Code generation**: Transforms Marigold programs into valid Rust code
+//! - **Source maps**: [`marigold_generate`] returns that code together with a
+//!   [`source_map::SourceMap`] from generated Rust back to Marigold source and forward
 //!
 //! ## Quick Start
 //!
@@ -41,6 +43,7 @@
 //! - [`nodes`]: AST node definitions for all Marigold constructs
 //! - Code generation: Internal function that transforms AST to Rust code
 //! - [`pest_ast_builder`]: Transforms Pest parse trees into the AST
+//! - [`source_map`]: Maps the generated Rust back to the Marigold expressions it came from
 //!
 //! ## Testing & Validation
 //!
@@ -103,6 +106,15 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
 /// `rust` is byte-for-byte what [`marigold_parse`] returns, and this fails exactly when
 /// [`marigold_parse`] fails, with the same message. Unlike [`marigold_check`], input
 /// size is not limited, because [`marigold_parse`] has no limit either.
+///
+/// # What the offsets refer to
+///
+/// Source offsets in the map are valid only against the exact string passed here, and
+/// generated offsets only against the returned `rust`. Inside `m!()` the macro sees
+/// rustc's re-printed tokens (comments dropped, whitespace normalized), wraps the
+/// generated code in `{\n` ... `\n}\n` and gives every token a call-site span, so rustc
+/// diagnostics cannot be mapped through `m!()`. Mapping them requires writing `rust`
+/// verbatim to a real file and compiling that. See [`source_map`] for details.
 ///
 /// ```
 /// use marigold_grammar::source_map::SegmentKind;

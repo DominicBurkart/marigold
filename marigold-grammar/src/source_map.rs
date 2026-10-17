@@ -12,6 +12,20 @@
 //! code before the first segment, the separators between segments and the code
 //! that wires the streams together) is not covered by any segment.
 //!
+//! # What the offsets refer to
+//!
+//! * [`Segment::source`] is valid only against the exact string passed to
+//!   [`crate::marigold_generate`]. Inside `m!()` that is not the text in your `.rs` file: the
+//!   macro receives rustc's re-printed `TokenStream`, with comments dropped and whitespace
+//!   normalized.
+//! * [`Segment::generated`] is valid only against [`GeneratedProgram::rust`]. The `m!()` macro
+//!   wraps that code in `{\n` ... `\n}\n` and re-lexes it, and every token it produces carries a
+//!   call-site span, so rustc diagnostics can never point into the generated code.
+//!
+//! To map a rustc diagnostic back to Marigold, write `rust` verbatim to a real file, compile
+//! that file and look the diagnostic's byte offset up with
+//! [`SourceMap::source_for_generated`].
+//!
 //! ```
 //! use marigold_grammar::marigold_generate;
 //! use marigold_grammar::source_map::SegmentKind;
@@ -96,7 +110,9 @@ pub enum SegmentKind {
 #[non_exhaustive]
 pub struct Segment {
     /// Where the code was written in the generated Rust. Exactly the bytes emitted for
-    /// this expression: the separator that follows it is not included.
+    /// this expression: the separator that follows it is not included, but nothing is
+    /// trimmed either. A struct's code starts with a newline and indentation, so a
+    /// highlighter should trim the text it shows.
     pub generated: ByteRange,
     /// The whole Marigold expression, without trailing whitespace.
     pub source: ByteRange,
@@ -113,6 +129,10 @@ pub struct Segment {
 
 impl Segment {
     /// Build a segment, for example to hand-build a [`SourceMap`] in a test.
+    ///
+    /// Segments are expected to gain fields in later releases (finer-grained segments),
+    /// and the arguments of this constructor may change with them. Outside tests, prefer
+    /// the segments [`crate::marigold_generate`] returns over building your own.
     ///
     /// ```
     /// use marigold_grammar::diagnostics::ByteRange;
@@ -171,7 +191,11 @@ impl SourceMap {
     ///
     /// Segments of a map built by [`crate::marigold_generate`] never overlap. Hand-built
     /// maps may nest segments (the innermost one wins in
-    /// [`source_for_generated`](Self::source_for_generated)). Any input is accepted.
+    /// [`source_for_generated`](Self::source_for_generated)). Any input is accepted and
+    /// nothing panics, but "innermost" is only defined when the generated ranges nest or
+    /// are disjoint: lookups on partially overlapping ranges are best effort. The lookups
+    /// are fast as documented only for such maps; see
+    /// [`generated_for_source`](Self::generated_for_source) for the source side.
     ///
     /// ```
     /// use marigold_grammar::diagnostics::ByteRange;
@@ -244,6 +268,10 @@ impl SourceMap {
     /// Takes `O(log n)` plus the nesting depth. `offset` may fall inside a multibyte
     /// character of the generated code.
     ///
+    /// Ranges are half-open, so the offset one past a segment's last byte is not in it.
+    /// An editor cursor sitting right after the last byte of an expression (offset 8 in
+    /// `x.return`) therefore finds nothing; also query the offset before the cursor.
+    ///
     /// ```
     /// use marigold_grammar::marigold_generate;
     ///
@@ -280,11 +308,14 @@ impl SourceMap {
     ///
     /// Ranges are half-open, so touching ranges do not overlap. A zero-width `range`
     /// is a cursor position: it matches the segments containing that byte (a cursor
-    /// right after a segment's last byte does not match it). An inverted range
-    /// (`start > end`) and a range outside the source match nothing.
+    /// right after a segment's last byte, like offset 8 in `x.return`, does not match
+    /// it, so editors should also query the position before the cursor). An inverted
+    /// range (`start > end`) and a range outside the source match nothing.
     ///
     /// Takes `O(log n + k)` for `k` results when source ranges are disjoint, as they
-    /// are in a generated program. A stream variable's range finds both its declaration
+    /// are in a generated program. For hand-built maps whose source ranges nest in long
+    /// chains it degrades to a scan of the segments that start before the query ends.
+    /// A stream variable's range finds both its declaration
     /// and its runner, but not the streams that merely use the variable.
     ///
     /// ```
@@ -358,6 +389,30 @@ pub struct GeneratedProgram {
     pub map: SourceMap,
 }
 
+impl GeneratedProgram {
+    /// Pair generated code with a map, for example to hand-build a program in a test.
+    /// [`crate::marigold_generate`] is the way to get a real one; nothing checks that
+    /// `map` describes `rust`.
+    ///
+    /// ```
+    /// use marigold_grammar::diagnostics::ByteRange;
+    /// use marigold_grammar::source_map::{GeneratedProgram, Segment, SegmentKind, SourceMap};
+    ///
+    /// let segment = Segment::new(
+    ///     ByteRange { start: 0, end: 5 },
+    ///     ByteRange { start: 0, end: 9 },
+    ///     SegmentKind::Struct,
+    ///     0,
+    ///     Some("S".to_string()),
+    /// );
+    /// let program = GeneratedProgram::new("struct".to_string(), SourceMap::new(vec![segment]));
+    /// assert_eq!(program.map.source_for_generated(2).unwrap().name.as_deref(), Some("S"));
+    /// ```
+    pub fn new(rust: String, map: SourceMap) -> GeneratedProgram {
+        GeneratedProgram { rust, map }
+    }
+}
+
 /// A piece of generated code, before its source range is known.
 ///
 /// Code generation sees expressions, not source text, so it records the generated
@@ -375,6 +430,9 @@ impl GeneratedSegment {
     pub(crate) fn attach_source(self, ranges: &[ByteRange]) -> Segment {
         Segment {
             generated: self.generated,
+            // `ranges` is parallel to the expressions code generation saw: `build_program`
+            // pushes exactly one `TypedExpression` per `Rule::expr`, and `Rule::expr` never
+            // nests. A wrong index would be a silently wrong range, so it must stay a panic.
             source: ranges[self.expr_index],
             kind: self.kind,
             expr_index: self.expr_index,
