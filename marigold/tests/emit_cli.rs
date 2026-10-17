@@ -37,10 +37,33 @@ fn temp_dir() -> PathBuf {
     dir
 }
 
-fn write_temp(name: &str, contents: impl AsRef<[u8]>) -> PathBuf {
+/// A file in the per-process temp directory that is deleted when it goes out of scope (the
+/// tests write up to 10 MiB each).
+struct TempFile(PathBuf);
+
+impl std::ops::Deref for TempFile {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TempFile {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn write_temp(name: &str, contents: impl AsRef<[u8]>) -> TempFile {
     let path = temp_dir().join(name);
     std::fs::write(&path, contents).unwrap();
-    path
+    TempFile(path)
 }
 
 fn emit_file(args: &[&str], path: &Path) -> Output {
@@ -143,6 +166,7 @@ fn assert_document_ok(doc: &Value, src: &str) {
     check_semantics(doc).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(doc["source"], json!(src), "`source` is the input verbatim");
     assert_eq!(doc["rust"], json!(marigold_parse(src).unwrap()));
+    assert_eq!(doc["features"], json!(expected_features()));
     let program = marigold_generate(src).unwrap();
     let segs = program.map.segments();
     let out = doc["segments"].as_array().unwrap();
@@ -312,12 +336,21 @@ fn json_is_pretty_printed_with_exactly_one_trailing_newline_and_fixed_key_order(
         "{:?}",
         &text[text.len().saturating_sub(10)..]
     );
-    assert!(text.starts_with("{\n  \"version\": 1,\n  \"source\": \"x = range(0, 5)\\nx.return\",\n  \"rust\": \"async {"), "{}", &text[..80]);
+    let features: String = expected_features()
+        .iter()
+        .map(|f| format!("\n    \"{f}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    assert!(
+        text.starts_with(&format!("{{\n  \"version\": 1,\n  \"features\": [{features}\n  ],\n  \"source\": \"x = range(0, 5)\\nx.return\",\n  \"rust\": \"async {{")),
+        "{}",
+        &text[..120]
+    );
     assert!(text.contains("\n  \"segments\": [\n    {\n      \"kind\": \"stream_variable\",\n      \"name\": \"x\",\n      \"expr_index\": 0,\n      \"parent\": null,\n      \"source\": {\n        \"start\": 0,\n        \"end\": 15,\n        \"start_line\": 1,\n        \"start_column\": 1,\n        \"end_line\": 1,\n        \"end_column\": 16\n      },"), "{text}");
     assert_eq!(
         text.lines().filter(|l| l.starts_with("  \"")).count(),
-        4,
-        "exactly four top-level keys"
+        5,
+        "exactly five top-level keys"
     );
 }
 
@@ -332,7 +365,7 @@ fn json_is_deterministic_and_independent_of_cwd_and_environment() {
         .current_dir("/")
         .env_clear()
         .args(["emit", "--format", "json"])
-        .arg(&path)
+        .arg(&*path)
         .output()
         .unwrap();
     assert_eq!(a.status.code(), Some(0));
@@ -407,34 +440,44 @@ fn golden_inputs_have_the_bytes_the_tests_rely_on() {
     assert!(read("g18_trailing_ws_between_vars").contains("   \t\n"));
 }
 
-/// The generated Rust, and with it every golden document, depends on the features the binary
-/// is built with (`io` adds I/O code, `tokio` / `async-std` switch stream functions to their
-/// async forms): one set of golden documents per combination CI runs, named like the snapshot
-/// sets of `marigold-grammar/tests/generated_rust_golden.rs`, which also serve as an independent
-/// oracle for the `rust` field of every golden document.
+/// The generated Rust, and with it every golden document, depends on the features of the grammar
+/// crate the binary links. `cli` enables `marigold-grammar/io` (the view `m!` has under
+/// `marigold run`); `tokio` / `async-std` of this package switch stream functions to their async
+/// forms. So there are two sets of golden documents, named like the snapshot sets of
+/// `marigold-grammar/tests/generated_rust_golden.rs`, which also serve as an independent oracle
+/// for the `rust` field of every golden document and for `--format rust`.
 fn golden_variant() -> &'static str {
-    match (
-        cfg!(feature = "io"),
-        cfg!(any(feature = "tokio", feature = "async-std")),
-    ) {
-        (false, false) => "default",
-        (false, true) => "async_runtime",
-        (true, true) => "io_and_async_runtime",
-        (true, false) => unreachable!("no golden documents for io without an async runtime"),
+    if cfg!(any(feature = "tokio", feature = "async-std")) {
+        "io_and_async_runtime"
+    } else {
+        "io"
     }
 }
 
-/// `io` without an async runtime emits yet another variant that the CI matrix never builds, so
-/// there are no golden documents for it. This ignored test makes the gap visible.
-#[cfg(all(feature = "io", not(any(feature = "tokio", feature = "async-std"))))]
-#[test]
-#[ignore = "no golden documents for the io feature without tokio or async-std"]
-fn golden_json_documents_are_stable() {}
+/// The grammar features the binary was built with, sorted: what `"features"` must list.
+fn expected_features() -> Vec<&'static str> {
+    let mut features = vec!["io"];
+    if cfg!(feature = "async-std") {
+        features.push("async-std");
+    }
+    if cfg!(feature = "tokio") {
+        features.push("tokio");
+    }
+    features.sort();
+    features
+}
 
-#[cfg(not(all(feature = "io", not(any(feature = "tokio", feature = "async-std")))))]
+fn snapshot_path(variant: &str, name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../marigold-grammar/tests/golden_rust")
+        .join(variant)
+        .join(format!("{name}.rs"))
+}
+
 #[test]
 fn golden_json_documents_are_stable() {
-    let update = std::env::var_os("UPDATE_GOLDEN").is_some();
+    // Only the exact value `1` blesses, so a stray `UPDATE_GOLDEN=0` or `=` cannot rewrite them.
+    let update = std::env::var("UPDATE_GOLDEN").as_deref() == Ok("1");
     let variant = golden_variant();
     for name in GOLDEN_JSON {
         let input = golden_dir().join(format!("{name}.marigold"));
@@ -458,10 +501,7 @@ fn golden_json_documents_are_stable() {
         let document: Value = serde_json::from_slice(&want).unwrap();
         assert_document_ok(&document, &std::fs::read_to_string(&input).unwrap());
         // ... whose Rust is the snapshot captured from `main` before the source map existed
-        let snapshot = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../marigold-grammar/tests/golden_rust")
-            .join(variant)
-            .join(format!("{name}.rs"));
+        let snapshot = snapshot_path(variant, name);
         assert_eq!(
             document["rust"],
             json!(std::fs::read_to_string(&snapshot).unwrap()),
@@ -469,6 +509,48 @@ fn golden_json_documents_are_stable() {
             snapshot.display()
         );
     }
+    // Blessing is not a pass: the new files must be reviewed, then the tests rerun without it.
+    assert!(
+        !update,
+        "golden documents rewritten for `{variant}`: review `git diff`, then rerun without UPDATE_GOLDEN"
+    );
+}
+
+#[test]
+fn rust_output_equals_the_snapshots_captured_from_main_for_this_feature_set() {
+    // `marigold_parse` in this process and the binary share the grammar's features, so comparing
+    // them cannot notice a binary built with the wrong ones (`cli` must enable `io`, the view of
+    // the `m!` macro under `marigold run`). The snapshots were captured on main with those features.
+    let variant = golden_variant();
+    let mut compared = 0;
+    for (name, path, _) in golden_programs() {
+        let name = name.trim_end_matches(".marigold");
+        let Ok(snapshot) = std::fs::read_to_string(snapshot_path(variant, name)) else {
+            continue; // g25 is not one of the main snapshots
+        };
+        let out = emit_file(&[], &path);
+        assert_eq!(out.status.code(), Some(0), "{name}");
+        assert_eq!(s(&out.stdout), snapshot, "{name} ({variant})");
+        compared += 1;
+    }
+    assert!(compared >= 25, "only {compared} programs compared");
+}
+
+#[test]
+fn json_lists_the_grammar_features_the_rust_depends_on() {
+    let path = write_temp("features.marigold", "range(0, 3).return");
+    let doc = stdout_json(&emit_file(&["--format", "json"], &path));
+    assert_eq!(doc["features"], json!(expected_features()));
+    // `read_file` is where the `io` view differs from the featureless one: the generated code
+    // derives `Deserialize` for the struct, as the `m!` macro does under `marigold run`
+    let program = "struct R { a: i32 }\nread_file(\"data.csv\", csv, struct=R).ok().return";
+    let io_view = emit_file(&[], &write_temp("io_view.marigold", program));
+    assert_eq!(io_view.status.code(), Some(0));
+    assert!(
+        s(&io_view.stdout).contains("serde::Deserialize"),
+        "emit must generate what `m!` generates with the io feature: {}",
+        s(&io_view.stdout)
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -676,6 +758,52 @@ fn error_blocks(check_stdout: &str) -> String {
 }
 
 #[test]
+fn human_column_after_multibyte_text_counts_scalar_values() {
+    // "é" is 2 bytes and "😀" 4 bytes / 2 UTF-16 units: the error is on the same line, after them,
+    // so rendering the column in bytes or UTF-16 units gives a different number.
+    let first = "range(0, 1).write_file(\"é😀.csv\", csv)";
+    let src = format!("{first} range(Colour).return");
+    assert_ne!(first.len(), first.chars().count());
+    let col = first.chars().count() + 1 + 7; // a space, then `Colour` is the 7th char of `range(Colour)`
+    let path = write_temp("multibyte_column.marigold", &src);
+    let want = format!("{}:1:{col}: error[undefined-enum]: ", path.display());
+    let emit = emit_file(&[], &path);
+    assert!(s(&emit.stderr).starts_with(&want), "{}", s(&emit.stderr));
+    assert!(emit.stdout.is_empty());
+    let check = check_file(&[], &path);
+    assert!(s(&check.stdout).starts_with(&want), "{}", s(&check.stdout));
+}
+
+#[test]
+fn only_errors_are_printed_when_the_program_also_has_warnings() {
+    // `check` prints a warning (1:5) and an error (2:7) for this program; `emit` only the error.
+    let path = write_temp("warning_and_error.marigold", "a = a\nrange(Colour).return");
+    let check = check_file(&[], &path);
+    assert!(
+        s(&check.stdout).contains(":1:5: warning["),
+        "{}",
+        s(&check.stdout)
+    );
+    let human = emit_file(&[], &path);
+    assert_eq!(human.status.code(), Some(1));
+    assert!(
+        !s(&human.stderr).contains("warning["),
+        "{}",
+        s(&human.stderr)
+    );
+    assert!(
+        s(&human.stderr).contains(":2:7: error[undefined-enum]"),
+        "{}",
+        s(&human.stderr)
+    );
+    let json = emit_file(&["--format", "json"], &path);
+    let errors: Value = serde_json::from_slice(&json.stderr).unwrap();
+    assert_eq!(errors.as_array().unwrap().len(), 1, "{errors}");
+    assert_eq!(errors[0]["severity"], "error");
+    assert!(json.stdout.is_empty());
+}
+
+#[test]
 fn human_diagnostic_positions_are_line_and_scalar_column() {
     let src = "range(0, 1).return\n\"éé😀\" range(Colour).return";
     let path = write_temp("pos.marigold", src);
@@ -713,12 +841,14 @@ fn human_diagnostics_include_the_help_line_literally() {
 fn exit_codes_always_agree_with_check_on_every_input_we_have() {
     let mut paths: Vec<PathBuf> = golden_programs().into_iter().map(|(_, p, _)| p).collect();
     paths.extend(corpus());
+    let mut temps = Vec::new();
     for (name, src) in BAD_PROGRAMS {
-        paths.push(write_temp(&format!("cmp_{name}.marigold"), src));
+        temps.push(write_temp(&format!("cmp_{name}.marigold"), src));
     }
-    paths.push(write_temp("cmp_warn.marigold", "a = a\na.return"));
-    paths.push(write_temp("cmp_info.marigold", "range(0, 1).map(f).return"));
-    paths.push(write_temp("cmp_undefined_var.marigold", "xs.return"));
+    temps.push(write_temp("cmp_warn.marigold", "a = a\na.return"));
+    temps.push(write_temp("cmp_info.marigold", "range(0, 1).map(f).return"));
+    temps.push(write_temp("cmp_undefined_var.marigold", "xs.return"));
+    paths.extend(temps.iter().map(|t| t.to_path_buf()));
     for path in paths {
         let emit = emit_file(&[], &path);
         let check = check_file(&[], &path);
@@ -761,7 +891,7 @@ fn unreadable_input_exits_two_with_empty_stdout() {
     for path in [
         PathBuf::from("/nonexistent/definitely-missing.marigold"),
         dir.clone(),
-        invalid_utf8,
+        invalid_utf8.to_path_buf(),
     ] {
         for format in ["rust", "json"] {
             let out = emit_file(&["--format", format], &path);
@@ -823,12 +953,77 @@ fn help_documents_the_command_formats_and_units() {
         "byte offsets",
         "1-based",
         "scalar",
+        "build features",
+        "let _ = include!(\"gen.rs\").await;",
+        "stderr",
+        "TokenStream",
+        "a file named `-`",
     ] {
         assert!(
             help.contains(needle),
             "`emit --help` should mention {needle:?}:\n{help}"
         );
     }
+}
+
+#[test]
+fn dash_is_a_file_name_not_stdin() {
+    for format in ["rust", "json"] {
+        let out = marigold()
+            .args(["emit", "--format", format, "-"])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "{format}");
+        assert!(out.stdout.is_empty());
+        assert!(
+            s(&out.stderr).starts_with("error: could not read -:"),
+            "{}",
+            s(&out.stderr)
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_full_disk_is_exit_two_not_silent_success() {
+    let path = write_temp("full.marigold", "range(0, 3).return");
+    let out = marigold()
+        .arg("emit")
+        .arg(&*path)
+        .stdout(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .unwrap(),
+        )
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(
+        s(&out.stderr).contains("could not write to stdout"),
+        "{}",
+        s(&out.stderr)
+    );
+}
+
+#[test]
+fn input_of_exactly_the_check_limit_gets_the_diagnostics_check_gives() {
+    // 10 MiB exactly: `check` still parses it, so `emit` must report the same (real) position, not
+    // its fallback for larger inputs.
+    const MAX: usize = 10 * 1024 * 1024;
+    let mut src = " ".repeat(MAX - "range(0,".len());
+    src.push_str("range(0,");
+    assert_eq!(src.len(), MAX);
+    let path = write_temp("exactly_max.marigold", &src);
+    let check = check_file(&["--format", "json"], &path);
+    let checked = stdout_json(&check);
+    assert_ne!(checked[0]["code"], "input-too-large");
+    let emit = emit_file(&["--format", "json"], &path);
+    assert_eq!(emit.status.code(), Some(1));
+    let emitted: Value = serde_json::from_slice(&emit.stderr).unwrap();
+    assert_eq!(emitted, checked);
 }
 
 #[test]
@@ -859,25 +1054,75 @@ fn oversized_invalid_input_still_exits_one_and_prints_nothing_on_stdout() {
     // the synthetic diagnostic has the shape and key order of `check`'s
     assert_eq!(err.as_array().unwrap().len(), 1);
     assert_eq!(err[0]["code"], "syntax-error");
-    assert_eq!(err[0]["range"], json!({"start": 0, "end": 0}));
+    let end = 10 * 1024 * 1024 + 1 + "range(0,".len();
+    assert_eq!(err[0]["range"], json!({"start": end, "end": end}));
     assert_eq!(err[0].as_object().unwrap().len(), 4);
     assert!(
-        s(&out.stderr).starts_with("[\n  {\n    \"range\": {\n      \"start\": 0,\n      \"end\": 0\n    },\n    \"severity\": \"error\",\n    \"code\": \"syntax-error\",\n    \"message\": \"Parse error"),
+        s(&out.stderr).starts_with(&format!("[\n  {{\n    \"range\": {{\n      \"start\": {end},\n      \"end\": {end}\n    }},\n    \"severity\": \"error\",\n    \"code\": \"syntax-error\",\n    \"message\": \"Parse error")),
         "layout of the diagnostic differs from `check --format json`"
     );
 
-    // human format: one line with the usual prefix, position 1:1
+    // human format: one line with the usual prefix, at the position of the failure
     let out = emit_file(&[], &path);
     assert_eq!(out.status.code(), Some(1));
     assert!(out.stdout.is_empty());
     assert!(
         s(&out.stderr).starts_with(&format!(
-            "{}:1:1: error[syntax-error]: Parse error",
-            path.display()
+            "{}:1:{}: error[syntax-error]: Parse error",
+            path.display(),
+            10 * 1024 * 1024 + 1 + "range(0,".len() + 1
         )),
         "{}",
         &s(&out.stderr)[..200.min(out.stderr.len())]
     );
+    assert!(s(&out.stderr).ends_with('\n'));
+}
+
+#[test]
+fn oversized_invalid_input_has_a_short_escaped_message() {
+    // The raw parse error embeds the offending line twice (23 MB for this file) and whatever
+    // control characters it holds: an escape sequence in the input would reach the terminal.
+    let tail = "\nrange(0,\u{1b}]0;pwned\u{7}\u{1b}[31mred";
+    let src = format!("{}{tail}", " ".repeat(10 * 1024 * 1024 + 1));
+    let path = write_temp("huge_escape.marigold", &src);
+    for format in ["rust", "json"] {
+        let out = emit_file(&["--format", format], &path);
+        assert_eq!(out.status.code(), Some(1), "{format}");
+        assert!(out.stdout.is_empty(), "{format}");
+        assert!(
+            out.stderr.len() < 4096,
+            "{format}: {} bytes of diagnostics",
+            out.stderr.len()
+        );
+        assert!(
+            !out.stderr.iter().any(|&b| b == 0x1b || b == 0x07),
+            "{format}: control bytes reached stderr: {:?}",
+            s(&out.stderr)
+        );
+        assert!(out.stderr.ends_with(b"\n"), "{format}");
+    }
+    // the position is the line:column pest names, as an offset into the file
+    let json = emit_file(&["--format", "json"], &path);
+    let diagnostics: Value = serde_json::from_slice(&json.stderr).unwrap();
+    let human = emit_file(&[], &path);
+    let head = s(&human.stderr)
+        .split(": error[syntax-error]")
+        .next()
+        .unwrap();
+    let mut parts = head.rsplitn(3, ':');
+    let (column, line): (usize, usize) = (
+        parts.next().unwrap().parse().unwrap(),
+        parts.next().unwrap().parse().unwrap(),
+    );
+    assert_eq!(line, 2, "{head}");
+    let line_start = src.find('\n').unwrap() + 1;
+    let offset = line_start
+        + src[line_start..]
+            .char_indices()
+            .nth(column - 1)
+            .map_or(src.len() - line_start, |(i, _)| i);
+    assert_eq!(diagnostics[0]["range"]["start"], json!(offset));
+    assert_eq!(diagnostics[0]["range"]["end"], json!(offset));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -976,7 +1221,7 @@ fn a_closed_stdout_pipe_is_not_a_panic() {
     for format in ["rust", "json"] {
         let mut child = marigold()
             .args(["emit", "--format", format])
-            .arg(&path)
+            .arg(&*path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -1021,11 +1266,10 @@ fn check_is_unchanged_by_the_emit_refactor() {
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(
         s(&out.stdout),
-        format!("{}:2:7: error[undefined-enum]: ", path.display())
-            + s(&out.stdout)
-                .split(": error[undefined-enum]: ")
-                .nth(1)
-                .unwrap()
+        format!(
+            "{}:2:7: error[undefined-enum]: range(Colour): 'Colour' is not a declared enum in this program\n  help: no enums are declared in this program\n",
+            path.display()
+        )
     );
     assert!(out.stderr.is_empty());
 }

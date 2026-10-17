@@ -12,7 +12,7 @@
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-pub const TOP_KEYS: [&str; 4] = ["version", "source", "rust", "segments"];
+pub const TOP_KEYS: [&str; 5] = ["version", "features", "source", "rust", "segments"];
 pub const SEGMENT_KEYS: [&str; 6] = [
     "kind",
     "name",
@@ -96,6 +96,20 @@ pub fn validate_v1(doc: &Value) -> Result<(), String> {
         if !doc[k].is_string() {
             return Err(format!("$.{k}: expected a string"));
         }
+    }
+    let features = doc["features"]
+        .as_array()
+        .ok_or("$.features: expected an array")?;
+    let mut previous: Option<&str> = None;
+    for (i, f) in features.iter().enumerate() {
+        let name = f
+            .as_str()
+            .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_lowercase() || b == b'-'))
+            .ok_or_else(|| format!("$.features[{i}]: expected a feature name, got {f}"))?;
+        if previous.is_some_and(|p| p >= name) {
+            return Err(format!("$.features: not sorted and unique at {name:?}"));
+        }
+        previous = Some(name);
     }
     let segments = doc["segments"]
         .as_array()

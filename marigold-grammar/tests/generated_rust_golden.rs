@@ -7,8 +7,8 @@
 //!
 //! The emitted code depends on features: `io` adds I/O code and `tokio` / `async-std` (which emit
 //! the same code) switch stream functions to their async forms. There is one snapshot set per
-//! combination the CI matrix runs: none, `tokio` or `async-std`, and `io` together with either.
-//! `io` alone is not in the matrix and has no snapshots.
+//! combination the CI matrix runs: none, `tokio` or `async-std`, and `io` together with either,
+//! plus `io` alone, the grammar view of `marigold emit` and of the `m!` macro under `marigold run`.
 
 use marigold_grammar::{marigold_generate, marigold_parse};
 
@@ -87,10 +87,12 @@ mod io_and_async_runtime {
     programs!("io_and_async_runtime");
 }
 
-/// `io` without an async runtime emits yet another variant that the CI matrix never builds, so
-/// there is no snapshot set for it. This ignored test shows up in the output of
-/// `cargo test --features io` so the gap is visible instead of silent.
+/// `io` without an async runtime: the view the `m!` macro has under `marigold run`, and the one
+/// `marigold emit` is built with (`cli` enables `marigold-grammar/io`). Not in the CI feature
+/// matrix of this crate, but `cargo test -p marigold --features cli` pins it through
+/// `marigold/tests/emit_cli.rs`, which reads these snapshots.
 #[cfg(all(feature = "io", not(any(feature = "tokio", feature = "async-std"))))]
-#[test]
-#[ignore = "no snapshots for the io feature without tokio or async-std"]
-fn snapshots_for_io_without_an_async_runtime() {}
+mod io_without_async_runtime {
+    use super::*;
+    programs!("io");
+}

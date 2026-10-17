@@ -17,11 +17,27 @@ mod emit_schema;
 
 use emit_schema::{check_semantics, naive_line_col, segment_text, validate_v1};
 use marigold_grammar::diagnostics::ByteRange;
-use marigold_grammar::emit::{EmitDocument, EMIT_SCHEMA_VERSION};
+use marigold_grammar::emit::{EmitDocument, EmitRange, EMIT_SCHEMA_VERSION};
+use marigold_grammar::line_index::LineIndex;
 use marigold_grammar::source_map::{Segment, SegmentKind, SourceMap};
 use marigold_grammar::{marigold_generate, marigold_parse};
 use proptest::prelude::*;
 use serde_json::{json, Value};
+
+/// The grammar features this test target is built with, sorted: what `"features"` must list.
+fn expected_features() -> Vec<&'static str> {
+    let mut features = Vec::new();
+    if cfg!(feature = "async-std") {
+        features.push("async-std");
+    }
+    if cfg!(feature = "io") {
+        features.push("io");
+    }
+    if cfg!(feature = "tokio") {
+        features.push("tokio");
+    }
+    features
+}
 
 fn doc_for(src: &str) -> EmitDocument {
     let g = marigold_generate(src).unwrap_or_else(|e| panic!("{src:?} should generate: {e}"));
@@ -43,6 +59,7 @@ fn assert_document_ok(src: &str) {
     // header
     assert_eq!(v["version"], json!(1));
     assert_eq!(EMIT_SCHEMA_VERSION, 1);
+    assert_eq!(v["features"], json!(expected_features()));
     assert_eq!(v["source"], json!(src));
     assert_eq!(v["rust"], json!(marigold_parse(src).unwrap()));
 
@@ -96,8 +113,11 @@ fn every_segment_is_top_level_until_t2_adds_nesting() {
 fn json_shape_and_key_order_are_pinned() {
     let src = "x = range(0, 5)\nx.return";
     let text = serde_json::to_string(&doc_for(src)).unwrap();
+    let features = serde_json::to_string(&expected_features()).unwrap();
     assert!(
-        text.starts_with(r#"{"version":1,"source":"x = range(0, 5)\nx.return","rust":"async {"#),
+        text.starts_with(&format!(
+            r#"{{"version":1,"features":{features},"source":"x = range(0, 5)\nx.return","rust":"async {{"#
+        )),
         "{text}"
     );
     let first_segment = concat!(
@@ -446,7 +466,7 @@ fn an_empty_map_makes_a_header_only_document() {
     validate_v1(&v).unwrap();
     assert_eq!(
         v,
-        json!({"version": 1, "source": "src", "rust": "rust", "segments": []})
+        json!({"version": 1, "features": expected_features(), "source": "src", "rust": "rust", "segments": []})
     );
 }
 
@@ -462,6 +482,32 @@ fn corruptions() -> Vec<(&'static str, Corrupt)> {
         ("version as string", Box::new(|v| v["version"] = json!("1"))),
         ("version as float", Box::new(|v| v["version"] = json!(1.0))),
         ("unknown top-level key", Box::new(|v| v["extra"] = json!(1))),
+        (
+            "features missing",
+            Box::new(|v| {
+                v.as_object_mut().unwrap().remove("features");
+            }),
+        ),
+        (
+            "features not an array",
+            Box::new(|v| v["features"] = json!("io")),
+        ),
+        (
+            "feature not a string",
+            Box::new(|v| v["features"] = json!([1])),
+        ),
+        (
+            "feature name in the wrong case",
+            Box::new(|v| v["features"] = json!(["Io"])),
+        ),
+        (
+            "features unsorted",
+            Box::new(|v| v["features"] = json!(["tokio", "io"])),
+        ),
+        (
+            "features repeated",
+            Box::new(|v| v["features"] = json!(["io", "io"])),
+        ),
         (
             "unknown segment key",
             Box::new(|v| v["segments"][0]["extra"] = json!(1)),
@@ -761,4 +807,154 @@ fn twenty_thousand_expressions_on_one_line_build_in_linear_time() {
         (last.source.start_line, last.source.start_column),
         (1, src.len() - "v0.return".len() + 1)
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// deep nesting and validator meta-tests with hand-built documents
+// ---------------------------------------------------------------------------------------------
+
+fn nested(g: (usize, usize), s: (usize, usize), kind: SegmentKind) -> Segment {
+    seg(g, s, kind, 0)
+}
+
+#[test]
+fn six_levels_deep_chain_of_parents() {
+    let map = SourceMap::new(vec![
+        nested((0, 100), (0, 50), SegmentKind::ReturningStream),
+        nested((10, 90), (1, 49), SegmentKind::StreamVariable),
+        nested((20, 80), (2, 48), SegmentKind::Function),
+        nested((30, 70), (3, 47), SegmentKind::Struct),
+        nested((40, 60), (4, 46), SegmentKind::Enum),
+        nested((45, 55), (5, 45), SegmentKind::Enum),
+    ]);
+    let doc = EmitDocument::new(&"s".repeat(60), &"r".repeat(120), &map);
+    let parents: Vec<_> = doc.segments.iter().map(|s| s.parent).collect();
+    assert_eq!(parents, [None, Some(0), Some(1), Some(2), Some(3), Some(4)]);
+}
+
+#[test]
+fn the_features_are_the_ones_this_crate_was_built_with() {
+    let doc = doc_for("range(0, 3).return");
+    assert_eq!(doc.features, expected_features());
+    let mut sorted = doc.features.clone();
+    sorted.sort();
+    assert_eq!(doc.features, sorted, "sorted, as the schema promises");
+}
+
+fn hand_built(source: &str, rust: &str, segments: Vec<Segment>) -> Value {
+    serde_json::to_value(EmitDocument::new(source, rust, &SourceMap::new(segments))).unwrap()
+}
+
+const TWO_LINES: &str = "aaaaaaaaaa\nbbbbbbbbbb";
+const THREE_LINES: &str = "0123456789\n0123456789\n0123456789";
+
+#[test]
+fn semantic_validator_accepts_a_nested_document() {
+    let v = hand_built(
+        TWO_LINES,
+        THREE_LINES,
+        vec![
+            seg((0, 25), (0, 15), SegmentKind::ReturningStream, 0),
+            seg((5, 10), (2, 6), SegmentKind::Struct, 0),
+        ],
+    );
+    validate_v1(&v).unwrap();
+    check_semantics(&v).unwrap();
+}
+
+#[test]
+fn semantic_validator_rejects_an_ancestor_that_is_not_the_innermost_parent() {
+    let mut v = hand_built(
+        TWO_LINES,
+        THREE_LINES,
+        vec![
+            seg((0, 25), (0, 15), SegmentKind::ReturningStream, 0),
+            seg((5, 20), (2, 14), SegmentKind::StreamVariable, 0),
+            seg((8, 10), (3, 6), SegmentKind::Struct, 0),
+        ],
+    );
+    check_semantics(&v).unwrap();
+    assert_eq!(v["segments"][2]["parent"], json!(1));
+    v["segments"][2]["parent"] = json!(0); // an ancestor, but not the innermost one
+    assert!(check_semantics(&v).is_err());
+    v["segments"][2]["parent"] = json!(null); // nested, but claims to be top level
+    assert!(check_semantics(&v).is_err());
+}
+
+#[test]
+fn semantic_validator_rejects_an_empty_range() {
+    let mut v = hand_built(
+        TWO_LINES,
+        "0123456789\n0123456789",
+        vec![seg((0, 15), (2, 6), SegmentKind::Struct, 0)],
+    );
+    v["segments"][0]["source"]["end"] = json!(2);
+    v["segments"][0]["source"]["end_line"] = json!(1);
+    v["segments"][0]["source"]["end_column"] = json!(3);
+    validate_v1(&v).unwrap(); // structurally fine
+    assert!(
+        check_semantics(&v).is_err(),
+        "start == end must be rejected"
+    );
+}
+
+#[test]
+fn semantic_validator_rejects_partially_overlapping_generated_ranges() {
+    let v = hand_built(
+        "abcdefghij",
+        "0123456789abcdef",
+        vec![
+            seg((0, 10), (0, 3), SegmentKind::Struct, 0),
+            seg((5, 15), (4, 8), SegmentKind::Enum, 1),
+        ],
+    );
+    validate_v1(&v).unwrap();
+    assert!(check_semantics(&v).is_err(), "{v}");
+}
+
+#[test]
+fn semantic_validator_rejects_a_child_source_outside_its_parents_source() {
+    let v = hand_built(
+        TWO_LINES,
+        THREE_LINES,
+        vec![
+            seg((0, 25), (0, 5), SegmentKind::ReturningStream, 0),
+            seg((5, 10), (6, 9), SegmentKind::Struct, 0),
+        ],
+    );
+    validate_v1(&v).unwrap();
+    assert!(check_semantics(&v).is_err(), "{v}");
+}
+
+#[test]
+fn semantic_validator_rejects_offsets_inside_a_character_without_panicking() {
+    let v = hand_built(
+        "éa\nb",
+        "0123456789",
+        vec![seg((0, 5), (1, 3), SegmentKind::Struct, 0)],
+    );
+    validate_v1(&v).unwrap();
+    let verdict = std::panic::catch_unwind(|| check_semantics(&v));
+    assert!(
+        matches!(verdict, Ok(Err(_))),
+        "must be a clean Err, got {verdict:?}"
+    );
+}
+
+#[test]
+fn emit_range_converts_any_byte_range_with_a_line_index() {
+    let text = "ab\n\u{e9}d";
+    let index = LineIndex::new(text);
+    let range = EmitRange::new(
+        ByteRange {
+            start: 1,
+            end: text.len(),
+        },
+        &index,
+    );
+    assert_eq!(
+        (range.start, range.end, range.start_line, range.start_column),
+        (1, 6, 1, 2)
+    );
+    assert_eq!((range.end_line, range.end_column), (2, 3));
 }
