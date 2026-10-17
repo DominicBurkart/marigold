@@ -564,6 +564,70 @@ tokio = {{ version = "1", features = ["full"]}}
     std::process::exit(exit_status.code().unwrap_or(0));
 }
 
+#[cfg(all(test, feature = "cli"))]
+mod summary_tests {
+    use super::{summarize_parse_error, MAX_SUMMARY_BYTES};
+
+    #[test]
+    fn keeps_the_position_and_the_expectation_of_a_pest_message() {
+        let message =
+            "Parse error:  --> 3:9\n  |\n3 | range(0,\n  |         ^---\n  |\n  = expected free_text_literal or inclusive_marker";
+        let source = "   \n\nrange(0,";
+        assert_eq!(
+            summarize_parse_error(source, message),
+            (
+                3,
+                9,
+                source.len(),
+                "Parse error: expected free_text_literal or inclusive_marker".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn counts_the_column_in_characters_not_bytes() {
+        let message = "Parse error:  --> 1:5\n  |\n  = expected x";
+        // `éé` is four bytes: column 5 is byte offset 6 of "éé" + 2 more characters
+        assert_eq!(summarize_parse_error("ééab!", message).2, 6);
+    }
+
+    #[test]
+    fn a_message_without_a_position_is_reported_at_the_start() {
+        let (line, column, offset, text) = summarize_parse_error("abc", "Parse error: odd");
+        assert_eq!((line, column, offset), (1, 1, 0));
+        assert_eq!(text, "Parse error: odd");
+        // a position that is not in the source does not panic either
+        assert_eq!(
+            summarize_parse_error("abc", "Parse error:  --> 9:9\n  = expected x").2,
+            0
+        );
+    }
+
+    #[test]
+    fn escapes_control_characters_and_truncates_a_long_message() {
+        // no `= expected` line: the whole message is kept, so it must be made safe
+        let message = format!(
+            "Parse error: \u{1b}]0;pwned\u{7}\nline two\t{}",
+            "x".repeat(10_000)
+        );
+        let (_, _, _, text) = summarize_parse_error("", &message);
+        assert!(
+            !text.contains('\u{1b}') && !text.contains('\u{7}'),
+            "{text:?}"
+        );
+        assert!(text.contains("\\u{1b}]0;pwned\\u{7}\nline two"), "{text:?}");
+        assert!(text.ends_with(" [message truncated]"), "{text:?}");
+        assert!(text.len() <= MAX_SUMMARY_BYTES + " [message truncated]".len());
+    }
+
+    #[test]
+    fn escapes_what_the_expectation_line_holds() {
+        let message = "Parse error:  --> 1:1\n  |\n  = expected \u{1b}[31m";
+        let (_, _, _, text) = summarize_parse_error("", message);
+        assert_eq!(text, "Parse error: expected \\u{1b}[31m");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
