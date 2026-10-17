@@ -2,17 +2,21 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export function parseArgs(argv) {
-  const o = { after: null, contains: null, absent: null, file: null };
+  const o = { after: null, contains: null, absent: null, scope: null, file: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--after") o.after = Number(argv[++i]);
     else if (a === "--contains") o.contains = argv[++i];
     else if (a === "--absent") o.absent = argv[++i];
+    else if (a === "--scope") o.scope = argv[++i];
     else if (a.startsWith("--")) throw new Error(`unknown argument ${a}`);
     else o.file = a;
   }
   if (!o.file) throw new Error("usage: assert-diagnostic.mjs requests.jsonl ...");
   if (!Number.isInteger(o.after)) throw new Error("--after <turn> is required");
+  if (o.scope !== null && o.scope !== "tool-results") {
+    throw new Error('--scope must be "tool-results"');
+  }
   if (!o.contains) throw new Error("--contains <substring> is required");
   return o;
 }
@@ -24,16 +28,30 @@ export function readLog(text) {
     .map((l) => JSON.parse(l));
 }
 
-function bodyOf(entry) {
+function toolResults(request) {
+  const out = [];
+  for (const m of request?.messages ?? []) {
+    if (m.role === "tool") out.push(m.content);
+    if (Array.isArray(m.content)) {
+      for (const b of m.content) {
+        if (b && b.type === "tool_result") out.push(b.content);
+      }
+    }
+  }
+  return out;
+}
+
+function bodyOf(entry, scope = null) {
+  if (scope === "tool-results") return JSON.stringify(toolResults(entry.request));
   return JSON.stringify(entry.request ?? entry);
 }
 
-export function check(entries, { after, contains, absent }) {
+export function check(entries, { after, contains, absent, scope = null }) {
   const later = entries.filter(
     (e) => Number.isInteger(e.turn) && e.turn > after,
   );
-  const hits = later.filter((e) => bodyOf(e).includes(contains));
-  const bad = absent ? later.filter((e) => bodyOf(e).includes(absent)) : [];
+  const hits = later.filter((e) => bodyOf(e, scope).includes(contains));
+  const bad = absent ? later.filter((e) => bodyOf(e, scope).includes(absent)) : [];
   const problems = [];
   if (later.length === 0) {
     problems.push(`no request was logged after turn ${after}`);
@@ -48,18 +66,18 @@ export function check(entries, { after, contains, absent }) {
   return { ok: problems.length === 0, problems, hits, later };
 }
 
-function snippet(entry, needle) {
-  const s = bodyOf(entry);
+function snippet(entry, needle, scope = null) {
+  const s = bodyOf(entry, scope);
   const at = s.indexOf(needle);
   if (at < 0) return s.slice(-300);
   return s.slice(Math.max(0, at - 150), at + needle.length + 150);
 }
 
-function closest(entries, contains) {
+function closest(entries, contains, scope = null) {
   const words = contains.split(/[^A-Za-z0-9]+/).filter(Boolean);
   let best = null;
   for (const e of entries) {
-    const s = bodyOf(e);
+    const s = bodyOf(e, scope);
     const score = words.filter((w) => s.includes(w)).length;
     if (!best || score > best.score) best = { e, score };
   }
@@ -88,13 +106,13 @@ function main() {
   const turns = entries.map((e) => `${e.index}:${e.turn ?? "aux"}`).join(" ");
   console.error(`logged requests (index:turn): ${turns || "none"}`);
   if (r.later.length > 0) {
-    const bad = o.absent ? r.later.find((e) => bodyOf(e).includes(o.absent)) : null;
+    const bad = o.absent ? r.later.find((e) => bodyOf(e, o.scope).includes(o.absent)) : null;
     if (bad) {
-      console.error(`evidence: ...${snippet(bad, o.absent)}...`);
+      console.error(`evidence: ...${snippet(bad, o.absent, o.scope)}...`);
     } else {
-      const c = closest(r.later, o.contains);
+      const c = closest(r.later, o.contains, o.scope);
       console.error(
-        `closest request ${c.e.index} (turn ${c.e.turn}), tail: ...${snippet(c.e, o.contains)}`,
+        `closest request ${c.e.index} (turn ${c.e.turn}), tail: ...${snippet(c.e, o.contains, o.scope)}`,
       );
     }
   }

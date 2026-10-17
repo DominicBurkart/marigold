@@ -46,3 +46,33 @@ test("CLI exit codes", () => {
   assert.match(bad.stderr, /FAIL/);
   assert.equal(run("--after", "1", "--contains", "undefined-fn", "--absent", "undefined-fn").status, 1);
 });
+
+const scoped = [
+  { index: 1, turn: 1, request: { messages: [{ role: "system", content: "undefined-fn" }] } },
+  {
+    index: 2,
+    turn: 2,
+    request: {
+      messages: [
+        { role: "system", content: "undefined-fn" },
+        { role: "assistant", content: "x" },
+        { role: "tool", content: "Wrote file\nERROR here" },
+        { role: "user", content: [{ type: "tool_result", content: "anthropic style result" }] },
+      ],
+    },
+  },
+];
+
+test("tool-results scope ignores system and assistant text", () => {
+  const base = { after: 1, scope: "tool-results" };
+  assert.equal(check(scoped, { ...base, contains: "undefined-fn" }).ok, false);
+  assert.equal(check(scoped, { ...base, contains: "ERROR here" }).ok, true);
+  assert.equal(check(scoped, { ...base, contains: "anthropic style" }).ok, true);
+  assert.equal(check(scoped, { ...base, contains: "ERROR", absent: "undefined-fn" }).ok, true);
+  assert.equal(check(scoped, { after: 1, contains: "ERROR", absent: "undefined-fn" }).ok, false);
+});
+
+test("parseArgs validates scope", () => {
+  assert.equal(parseArgs(["f", "--after", "1", "--contains", "a", "--scope", "tool-results"]).scope, "tool-results");
+  assert.throws(() => parseArgs(["f", "--after", "1", "--contains", "a", "--scope", "x"]));
+});

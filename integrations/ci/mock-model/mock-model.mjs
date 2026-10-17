@@ -158,11 +158,15 @@ const anthropic = {
   },
 };
 
-export const PROTOCOLS = {
-  anthropic,
-  "openai-chat": null,
-  "openai-responses": null,
-};
+export const PROTOCOLS = { anthropic };
+for (const name of ["openai-chat", "openai-responses"]) {
+  try {
+    PROTOCOLS[name] = (await import(`./protocol-${name}.mjs`)).default;
+  } catch (e) {
+    if (e.code !== "ERR_MODULE_NOT_FOUND") throw e;
+    PROTOCOLS[name] = null;
+  }
+}
 
 export function createServer({ protocol, script, vars = {}, logPath }) {
   if (!Object.prototype.hasOwnProperty.call(PROTOCOLS, protocol)) {
