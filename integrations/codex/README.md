@@ -62,9 +62,9 @@ text you copied from `AGENTS.md`.
 Per the Codex docs, `[mcp_servers.<name>]` requires `command` and accepts
 `args`, `env`, `env_vars`, `cwd`, `startup_timeout_sec`, `tool_timeout_sec`,
 `enabled`, `required`, `enabled_tools`, and `disabled_tools`. Codex reads
-`~/.codex/config.toml` (UNVERIFIED: the path was taken from the docs and
-not tested against a running Codex CLI), and the docs also mention a
-project-scoped `.codex/config.toml`.
+`~/.codex/config.toml` (the `[mcp_servers.marigold]` snippet from this
+directory was accepted unchanged on Codex 0.163.0; see Version notes), and
+the docs also mention a project-scoped `.codex/config.toml`.
 
 ## AGENTS.md convention
 
@@ -91,11 +91,22 @@ true, with a nonzero `warning_count`. Information shows in `info_count`.
 
 - Sources: Codex MCP and AGENTS.md docs, read 2026-10-05 via
   learn.chatgpt.com (redirected from developers.openai.com/codex).
+- Verified on Codex 0.163.0 in an isolated container with a scripted model:
+  the shipped `config.toml` snippet is accepted unchanged with `marigold-lsp`
+  on the `PATH`, and `codex mcp list` shows the server enabled (its Auth
+  column reads Unsupported, which is harmless). `AGENTS.md` is picked up from
+  a project directory that is not a git repository and is sent to the model as
+  a user message. Codex shows the model the tool as namespace
+  `mcp__marigold`, tool `marigold_check`. The server's JSON arrives as text in
+  the next request's tool output (prefixed `Wall time: ...` and `Output:`),
+  including `"code":"undefined-fn"` with `"severity":"information"` and
+  `"code":"undefined-enum"` with `"severity":"error"`.
 - Minimum Codex CLI version: UNVERIFIED.
+- Behaviour with a real model: UNVERIFIED.
 - Project-scoped `.codex/config.toml` is honored only for trusted projects,
-  per learn.chatgpt.com/docs/extend/mcp.
+  per learn.chatgpt.com/docs/extend/mcp (UNVERIFIED).
 - The `AGENTS.md` lookup order above comes from a search snippet of the Codex
   AGENTS.md guide and was not read in full or tested.
 - The server implements MCP revision 2025-11-25 and answers older
   handshake-based revisions. It has been tested against its own test suite,
-  not against a running Codex CLI: UNVERIFIED with Codex itself.
+  against a running Codex CLI only as listed above (0.163.0, scripted model).
