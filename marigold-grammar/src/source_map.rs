@@ -748,6 +748,12 @@ mod tests {
                 "n={n}: {steps} steps, bound {}",
                 5 * n * log_n
             );
+            // Real value is about 2.4 n log2 n. A lower bound too, or removing the counters
+            // from the sorts would leave a test that can only pass.
+            assert!(
+                steps >= n * (log_n - 1),
+                "n={n}: only {steps} steps counted"
+            );
             assert_eq!(map.segments().len(), n);
         }
     }
@@ -817,13 +823,9 @@ mod tests {
     #[test]
     fn lookups_scale_to_many_segments() {
         let n = 100_000;
-        let segments: Vec<Segment> = (0..n)
-            .map(|i| {
-                let g = i * 10;
-                let s = (n - 1 - i) * 10; // reversed: generated order != source order
-                seg((g, g + 8), (s, s + 8), SegmentKind::ReturningStream, i)
-            })
-            .collect();
+        // Scrambled input order, so an uncounted insertion sort in `new` is quadratic here
+        // too; source order is the reverse of generated order.
+        let segments = scrambled(n);
         // Timed from before construction: building the indexes must be fast too.
         let t = std::time::Instant::now();
         let m = SourceMap::new(segments);
