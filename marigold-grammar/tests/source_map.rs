@@ -10,7 +10,7 @@
 mod common;
 
 use marigold_grammar::diagnostics::ByteRange;
-use marigold_grammar::source_map::{GeneratedProgram, Segment, SegmentKind as K};
+use marigold_grammar::source_map::{GeneratedProgram, Segment, SegmentKind as K, SourceMap};
 use marigold_grammar::symbols::SymbolKind;
 use marigold_grammar::{
     marigold_generate, marigold_parse, marigold_stream_complexities, marigold_symbols,
@@ -1109,7 +1109,24 @@ fn json_shape_is_stable() {
             "name": "x",
         })
     );
-    assert!(segs[1]["name"].is_null());
+    // `Value` indexing yields Null for a missing key too, so look at the key sets themselves:
+    // `name` is present (as null) for streams, and no lookup index leaks into the output.
+    let keys = |v: &serde_json::Value| {
+        let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        keys
+    };
+    assert_eq!(keys(&v), ["map", "rust"]);
+    assert_eq!(keys(&v["map"]), ["segments"]);
+    for s in segs {
+        assert_eq!(
+            keys(s),
+            ["expr_index", "generated", "kind", "name", "source"]
+        );
+        assert_eq!(keys(&s["generated"]), ["end", "start"]);
+        assert_eq!(keys(&s["source"]), ["end", "start"]);
+    }
+    assert!(segs[1].as_object().unwrap()["name"].is_null());
     for k in [K::Struct, K::Enum, K::Function, K::NonReturningStream] {
         let s = serde_json::to_value(k).unwrap();
         assert!(
@@ -1161,23 +1178,99 @@ fn assert_invariants_cheap(src: &str, g: &GeneratedProgram) {
 }
 
 #[test]
-fn generation_time_grows_linearly_with_program_size() {
+fn generating_the_map_costs_about_as_much_as_parsing() {
     use std::time::Instant;
-    let best = |n: usize| {
-        let src = many_exprs(n);
+    // Both calls run the same pipeline; `marigold_generate` adds only the source map. Comparing
+    // the two on the same input, interleaved, cancels out machine load (a ratio between sizes
+    // does not: a noisy neighbour during one size but not the other flips it). A map built in
+    // quadratic time would dwarf parsing for 32_000 segments. The O(n log n) bound on
+    // `SourceMap::new` itself is `source_map_construction_scales_subquadratically`.
+    let src = many_exprs(8_000);
+    let (mut parse, mut generate) = (f64::INFINITY, f64::INFINITY);
+    for _ in 0..5 {
+        let t = Instant::now();
+        std::hint::black_box(marigold_parse(&src).unwrap());
+        parse = parse.min(t.elapsed().as_secs_f64());
+        let t = Instant::now();
+        std::hint::black_box(marigold_generate(&src).unwrap());
+        generate = generate.min(t.elapsed().as_secs_f64());
+    }
+    assert!(
+        generate < parse * 3.0 + 0.05,
+        "parse {parse:.4}s, generate {generate:.4}s"
+    );
+}
+
+fn seg(generated: (usize, usize), source: (usize, usize), kind: K, expr_index: usize) -> Segment {
+    let range = |(start, end)| ByteRange { start, end };
+    Segment::new(range(generated), range(source), kind, expr_index, None)
+}
+
+/// `SourceMap::new` sorts and indexes: O(n log n). 16x more segments must not cost anywhere near
+/// 16^2 = 256x. Generated order is the reverse of source order, the worst case for the indexes.
+#[test]
+fn source_map_construction_scales_subquadratically() {
+    let build = |n: usize| {
+        let segments: Vec<Segment> = (0..n)
+            .map(|i| {
+                let g = i * 10;
+                let s = (n - 1 - i) * 10;
+                seg((g, g + 8), (s, s + 8), K::Struct, i)
+            })
+            .collect();
         (0..3)
             .map(|_| {
-                let t = Instant::now();
-                let g = marigold_generate(&src).unwrap();
-                std::hint::black_box(&g);
+                let input = segments.clone();
+                let t = std::time::Instant::now();
+                std::hint::black_box(SourceMap::new(input));
                 t.elapsed().as_secs_f64()
             })
             .fold(f64::INFINITY, f64::min)
     };
-    let (small, large) = (best(500), best(2_000));
-    // linear => ~4x, quadratic => ~16x. 10x leaves room for noise on shared CI machines.
+    let (small, large) = (build(10_000), build(160_000));
+    // n log n: about 16-20x. Quadratic: about 256x. 80x leaves room for noise.
     assert!(
-        large < small * 10.0,
-        "500 exprs: {small:.4}s, 2000 exprs: {large:.4}s"
+        large < small.max(1e-4) * 80.0,
+        "10_000 segments: {small:.5}s, 160_000 segments: {large:.5}s"
     );
+}
+
+/// The bytes between segments are exactly the glue code generation writes: the preamble before
+/// the first segment, a blank line after each declaration and a newline after each statement.
+/// This pins the exact start and end of every segment (a segment that skipped the leading
+/// whitespace of a struct, or swallowed its separator, would change a gap).
+fn assert_glue_is_exact(src: &str) {
+    let g = generate(src);
+    let mut previous: Option<(usize, K)> = None;
+    for s in g.map.segments() {
+        let gap = match previous {
+            None => &g.rust[..s.generated.start],
+            Some((end, _)) => &g.rust[end..s.generated.start],
+        };
+        match previous {
+            None => assert_eq!(gap, PREAMBLE, "{src:?}"),
+            Some((_, K::Struct | K::Enum | K::Function | K::StreamVariable)) => {
+                assert_eq!(gap, "\n\n", "{src:?}")
+            }
+            Some(_) => assert_eq!(gap, "\n", "{src:?}"),
+        }
+        previous = Some((s.generated.end, s.kind));
+    }
+}
+
+#[test]
+fn gaps_between_segments_are_exactly_the_separators() {
+    assert_glue_is_exact(
+        "struct S { a: u8 }\nenum E { A }\nfn f(x: i32) -> i32 { x }\nx = range(0, 3)\nx.return",
+    );
+    assert_glue_is_exact("range(0, 1).return\nrange(0, 2).write_file(\"o.csv\", csv)");
+    let mut checked = 0;
+    for path in common::corpus() {
+        let src = std::fs::read_to_string(&path).unwrap();
+        if marigold_generate(&src).is_ok() {
+            assert_glue_is_exact(&src);
+            checked += 1;
+        }
+    }
+    assert!(checked >= 30, "only {checked} corpus programs checked");
 }

@@ -469,6 +469,20 @@ mod tests {
     }
 
     #[test]
+    fn new_puts_the_outer_segment_first_even_when_the_inner_one_is_listed_first() {
+        // Same start, so only the tie-break on the larger end puts the outer one first;
+        // a plain stable sort on `generated.start` would keep the input order.
+        let m = SourceMap::new(vec![
+            seg((0, 4), (2, 3), SegmentKind::Struct, 1),
+            seg((0, 10), (0, 10), SegmentKind::Function, 2),
+        ]);
+        let order: Vec<_> = m.segments().iter().map(|s| s.expr_index).collect();
+        assert_eq!(order, vec![2, 1]);
+        assert_eq!(m.source_for_generated(2).map(|s| s.expr_index), Some(1));
+        assert_eq!(m.source_for_generated(6).map(|s| s.expr_index), Some(2));
+    }
+
+    #[test]
     fn source_for_generated_flat_boundaries() {
         let m = flat();
         let at = |o| m.source_for_generated(o).map(|s| s.expr_index);
@@ -614,8 +628,9 @@ mod tests {
                 seg((g, g + 8), (s, s + 8), SegmentKind::ReturningStream, i)
             })
             .collect();
-        let m = SourceMap::new(segments);
+        // Timed from before construction: building the indexes must be fast too.
         let t = std::time::Instant::now();
+        let m = SourceMap::new(segments);
         let mut hits = 0;
         for i in 0..n {
             hits += m.source_for_generated(i * 10 + 3).is_some() as usize;
