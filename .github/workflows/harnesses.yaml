@@ -1,0 +1,69 @@
+name:                harnesses
+
+on:
+  pull_request:
+    paths:
+    - 'integrations/**'
+    - 'marigold-lsp/**'
+    - 'marigold-grammar/**'
+    - '.github/workflows/harnesses.yaml'
+  push:
+    paths:
+    - 'integrations/**'
+    - 'marigold-lsp/**'
+    - 'marigold-grammar/**'
+    - '.github/workflows/harnesses.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents:          read
+
+concurrency:
+  group:             harnesses-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR:  always
+
+jobs:
+  build:
+    name:            build marigold-lsp
+    runs-on:         ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses:          actions/checkout@v4
+    - uses:          dtolnay/rust-toolchain@stable
+    - uses:          Swatinem/rust-cache@v2
+    - run:           cargo build -p marigold-lsp --release
+    - uses:          actions/upload-artifact@v4
+      with:
+        name:        marigold-lsp
+        path:        target/release/marigold-lsp
+        if-no-files-found: error
+        retention-days: 3
+
+  harness:
+    name:            harness-${{ matrix.harness }}
+    needs:           build
+    runs-on:         ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast:     false
+      matrix:
+        harness:     [claude, codex, opencode]
+    steps:
+    - uses:          actions/checkout@v4
+    - uses:          actions/setup-node@v4
+      with:
+        node-version: 22
+    - uses:          actions/download-artifact@v4
+      with:
+        name:        marigold-lsp
+        path:        ${{ runner.temp }}/bin
+    - run:           chmod +x "$RUNNER_TEMP/bin/marigold-lsp"
+    - run:           command -v podman || (sudo apt-get update && sudo apt-get install -y podman)
+    - run:           podman --version && podman info
+    - run:           node --test integrations/ci/mock-model/test*.mjs integrations/ci/assert/test*.mjs
+    - run:           bash integrations/ci/${{ matrix.harness }}/run.sh
+      env:
+        MARIGOLD_LSP_BIN: ${{ runner.temp }}/bin/marigold-lsp
