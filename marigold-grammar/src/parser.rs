@@ -71,15 +71,7 @@ impl PestParser {
     ) -> Result<Vec<crate::complexity::NodeComplexity>, MarigoldParseError> {
         let pairs = MarigoldPestParser::parse(Rule::program, input)
             .map_err(|e| MarigoldParseError(format!("Parse error: {}", e)))?;
-        let ranges: Vec<crate::diagnostics::ByteRange> = pairs
-            .clone()
-            .flatten()
-            .filter(|p| p.as_rule() == Rule::expr)
-            .map(|p| crate::diagnostics::ByteRange {
-                start: p.as_span().start(),
-                end: p.as_span().start() + p.as_str().trim_end().len(),
-            })
-            .collect();
+        let ranges = Self::expr_ranges(&pairs);
         let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)
             .map_err(MarigoldParseError)?;
         Self::resolve_enum_range_counts(&mut expressions).map_err(MarigoldParseError)?;
@@ -95,6 +87,26 @@ impl PestParser {
                 },
             )
             .collect())
+    }
+
+    /// Source range of every top-level expression, in source order.
+    ///
+    /// `Rule::expr` never nests and `PestAstBuilder::build_program` produces one
+    /// `TypedExpression` per `Rule::expr`, so this list is parallel to the builder's
+    /// output: the range of `expressions[i]` is `ranges[i]`. A stream variable's
+    /// `expr` pair includes its trailing whitespace, which is trimmed here.
+    fn expr_ranges(
+        pairs: &pest::iterators::Pairs<'_, Rule>,
+    ) -> Vec<crate::diagnostics::ByteRange> {
+        pairs
+            .clone()
+            .flatten()
+            .filter(|p| p.as_rule() == Rule::expr)
+            .map(|p| crate::diagnostics::ByteRange {
+                start: p.as_span().start(),
+                end: p.as_span().start() + p.as_str().trim_end().len(),
+            })
+            .collect()
     }
 
     pub(crate) fn check(input: &str) -> Vec<crate::diagnostics::Diagnostic> {
