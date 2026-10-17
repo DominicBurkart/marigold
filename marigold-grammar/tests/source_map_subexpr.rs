@@ -95,17 +95,27 @@ fn pt_up(src: &str, points: impl Iterator<Item = usize>) -> Vec<usize> {
 const BUF: &str =
     "buffered(std::cmp::max(2 * (::marigold::marigold_impl::num_cpus::get() - 1), 2))";
 
-/// `name(arg, arg)` -> ("name", ["arg", "arg"]). Marigold stream-function arguments never contain
-/// commas or parentheses.
+/// `name(arg, arg)` -> ("name", ["arg", "arg"]). Commas inside a double-quoted path (which may
+/// also contain parentheses) do not separate arguments; no other argument contains one.
 fn call_parts(slice: &str) -> (&str, Vec<&str>) {
     match slice.find('(') {
         Some(open) => {
             let inner = &slice[open + 1..slice.len() - 1];
-            let args = if inner.trim().is_empty() {
-                vec![]
-            } else {
-                inner.split(',').map(str::trim).collect()
-            };
+            let mut args = vec![];
+            if !inner.trim().is_empty() {
+                let (mut quoted, mut from) = (false, 0);
+                for (i, c) in inner.char_indices() {
+                    match c {
+                        '"' => quoted = !quoted,
+                        ',' if !quoted => {
+                            args.push(inner[from..i].trim());
+                            from = i + 1;
+                        }
+                        _ => {}
+                    }
+                }
+                args.push(inner[from..].trim());
+            }
             (&slice[..open], args)
         }
         None => (slice, vec![]),
@@ -190,11 +200,17 @@ fn check_input_text(kind: K, slice: &str, text: &str) {
         K::InputReadFile => {
             let (_, a) = call_parts(slice);
             let path = a[0];
-            let strukt = a[2].strip_prefix("struct=").unwrap().trim();
+            // the grammar allows blanks around the `=` signs
+            let squash = |x: &str| x.split_whitespace().collect::<String>();
+            let strukt = squash(a[2]).strip_prefix("struct=").unwrap().to_string();
             let infer = a
                 .get(3)
-                .and_then(|x| x.strip_prefix("infer_compression="))
-                .map(|v| v.trim() == "true");
+                .and_then(|x| {
+                    squash(x)
+                        .strip_prefix("infer_compression=")
+                        .map(str::to_string)
+                })
+                .map(|v| v == "true");
             let gz = match infer {
                 Some(false) => false,
                 _ => path.trim_matches('"').ends_with(".gz"),
@@ -1186,6 +1202,42 @@ fn t2_g07_variable_from_prior_variable() {
             .count(),
         2
     );
+}
+
+/// Found by the one-character mutation property test: the grammar allows blanks around the `=`
+/// of `struct=` and `infer_compression=`, and the restated formula of the oracle must too.
+#[test]
+fn t2_g08b_read_file_arguments_may_have_blanks_around_equals_signs() {
+    for src in [
+        "read_file(\"a.csv.gz\", csv, struct =R, infer_compression = true).ok().return",
+        "read_file(\"a.csv.gz\", csv, struct= R, infer_compression =false).return",
+        "read_file(\"a.csv\",csv,struct\r\n=\tR)\n.return",
+    ] {
+        let g = generate(src);
+        assert_nested(src, &g);
+        let input = g
+            .map
+            .segments()
+            .iter()
+            .find(|s| s.kind == K::InputReadFile)
+            .unwrap();
+        assert!(gtext(&g, input).contains("::<R>"), "{src}");
+    }
+}
+
+/// Found by the one-character mutation property test: a quoted path may contain a comma or a
+/// parenthesis, which the oracle's argument splitter must not split at.
+#[test]
+fn t2_g08c_paths_may_contain_commas_and_parentheses() {
+    for src in [
+        "range(0, 3).write_file(\"o,1.csv\", csv)",
+        "range(0, 3).write_file(\"o(1).csv.gz\", csv, compression=none)",
+        "read_file(\"a,b.csv\", csv, struct=R).ok().return",
+        "read_file(\"a),(b.csv.gz\", csv, struct=R, infer_compression=true).return",
+    ] {
+        let g = generate(src);
+        assert_nested(src, &g);
+    }
 }
 
 #[test]
