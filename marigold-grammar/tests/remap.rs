@@ -3754,6 +3754,11 @@ fn n08_the_function_on_the_second_line_is_not_shifted_by_a_one_line_prefix() {
             "{unit:?}"
         );
     }
+    // rustc's own numbers for a span on the second line do not include the prefix either
+    let file = format!("    {rust}");
+    let one = file.find('1').unwrap();
+    let m = r.map_span(&rustc_span("gen.rs", &file, one, one + 1, true));
+    assert_mapped(src, &m, Exact, "1", (1, src.find('1').unwrap() + 1));
     // and on the first line the four spaces are columns
     let m = r.locate("gen.rs", 1, Some(5), ColumnUnit::ScalarValues);
     assert_unmapped(&m, UnmappedReason::Glue);
@@ -4187,20 +4192,18 @@ fn n21_the_api_exposes_what_the_next_stages_need() {
     assert!(std::ptr::eq(r.program(), &program));
     assert_eq!(r.source(), src);
     assert_eq!((r.prefix_len(), r.unusable_segments()), (5, 0));
-    // a segment index names the segment in the map
+    // a segment index names the segment in the map, for every segment
     let f = seg_of(&program, SegmentKind::Function, 0);
     let plus = f.generated.start + program.rust[f.generated.start..].find('+').unwrap();
-    let m = r
-        .map_span(&rustc_span(
-            "gen.rs",
-            &format!("ab\n  {}", program.rust),
-            plus + 5,
-            plus + 6,
-            true,
-        ))
-        .segment
-        .unwrap();
-    assert_eq!(program.map.segments()[m.index], f);
+    let file = format!("ab\n  {}", program.rust);
+    for (i, segment) in program.map.segments().iter().enumerate() {
+        let mid = segment.generated.start + (segment.generated.end - segment.generated.start) / 2;
+        let m = r
+            .map_span(&rustc_span("gen.rs", &file, mid + 5, mid + 6, true))
+            .segment
+            .unwrap();
+        assert_eq!((m.index, &program.map.segments()[m.index]), (i, segment));
+    }
     // segments that do not fit the program are counted, and their bytes read as glue
     let bad = Segment::new(
         br(0, program.rust.len() + 10),
@@ -4309,4 +4312,25 @@ fn n22_every_real_span_agrees_with_the_frozen_output_of_the_independent_oracle()
         total += got.len();
     }
     assert!(total >= 160, "{total}");
+}
+
+#[test]
+fn n23_only_the_at_line_under_a_numbered_frame_is_a_backtrace_location() {
+    let (src, program) = mini();
+    let any = |_: &str| true;
+    let r = Remapper::new(&program, &src, &any);
+    for (text, unit) in [
+        ("   0: f\n             at a.rs:1:1", ColumnUnit::Utf8Bytes),
+        ("10: f\n at a.rs:1:1", ColumnUnit::Utf8Bytes),
+        (":\n at a.rs:1:1", ColumnUnit::DisplayWidth),
+        ("  : f\n at a.rs:1:1", ColumnUnit::DisplayWidth),
+        ("12 f\n at a.rs:1:1", ColumnUnit::DisplayWidth),
+        ("f\n at a.rs:1:1", ColumnUnit::DisplayWidth),
+        ("at a.rs:1:1", ColumnUnit::DisplayWidth),
+        ("0: f at a.rs:1:1", ColumnUnit::DisplayWidth),
+    ] {
+        let hits = r.remap_trace(text);
+        assert_eq!(hits.len(), 1, "{text:?}");
+        assert_eq!(hits[0].unit, unit, "{text:?}");
+    }
 }
