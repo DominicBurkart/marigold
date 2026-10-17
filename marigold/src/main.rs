@@ -66,8 +66,9 @@ enum MarigoldCommand {
     },
     /// Print the Rust code generated from a program, or that code with a source map.
     ///
-    /// With `--format rust` (the default) prints the generated Rust code exactly as
-    /// `m!` would expand it, so it can be written to a file and compiled. With
+    /// With `--format rust` (the default) prints the Rust code `m!` generates for the
+    /// program (without the braces `m!` wraps around it), so it can be written to a
+    /// file and compiled. With
     /// `--format json` prints one JSON document with the program, the Rust code and a
     /// list of segments, each mapping an expression of the program to the code
     /// generated for it.
