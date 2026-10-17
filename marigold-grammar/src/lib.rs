@@ -44,6 +44,10 @@
 //! - Code generation: Internal function that transforms AST to Rust code
 //! - [`pest_ast_builder`]: Transforms Pest parse trees into the AST
 //! - [`source_map`]: Maps the generated Rust back to the Marigold expressions it came from
+//! - [`emit`]: The JSON document (program, generated Rust and source map with line and
+//!   column positions) printed by `marigold emit --format json`
+//! - [`line_index`]: Converts byte offsets to 1-based line and column positions (bytes,
+//!   Unicode scalar values or UTF-16 units) and back
 //!
 //! ## Testing & Validation
 //!
