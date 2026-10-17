@@ -1,0 +1,2 @@
+{"diag": [0], "end_lc": [3, 45], "label": "not found in this scope", "precision": "segment", "range": [58, 102], "reason": null, "role": "primary", "segment": ["non_returning_stream", 2, null], "slice": "xs.map(not_defined).write_file(\"a.csv\", csv)", "start_lc": [3, 1], "suggestion": null, "via_macro": null}
+{"diag": [1], "end_lc": null, "label": null, "precision": "unmapped", "range": null, "reason": "no_span", "role": "none", "segment": null, "slice": null, "start_lc": null, "suggestion": null, "via_macro": null}

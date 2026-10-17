@@ -120,30 +120,61 @@ fn find<'a>(fx: &'a Fx, needle: &str) -> &'a RustcDiagnostic {
     hits[0]
 }
 
-fn slice<'a>(src: &'a str, s: &MappedSpan) -> &'a str {
-    let r = s.marigold.as_ref().expect("mapped").range;
+/// What a mapped span and a located line have in common.
+trait Mapped: std::fmt::Debug {
+    fn precision(&self) -> Precision;
+    fn marigold(&self) -> Option<&MarigoldLocation>;
+    fn segment(&self) -> Option<&SegmentRef>;
+}
+
+impl Mapped for MappedSpan {
+    fn precision(&self) -> Precision {
+        self.precision
+    }
+    fn marigold(&self) -> Option<&MarigoldLocation> {
+        self.marigold.as_ref()
+    }
+    fn segment(&self) -> Option<&SegmentRef> {
+        self.segment.as_ref()
+    }
+}
+
+impl Mapped for Located {
+    fn precision(&self) -> Precision {
+        self.precision
+    }
+    fn marigold(&self) -> Option<&MarigoldLocation> {
+        self.marigold.as_ref()
+    }
+    fn segment(&self) -> Option<&SegmentRef> {
+        self.segment.as_ref()
+    }
+}
+
+fn slice<'a>(src: &'a str, s: &impl Mapped) -> &'a str {
+    let r = s.marigold().expect("mapped").range;
     &src[r.start..r.end]
 }
 
 /// Expected: precision, Marigold slice, 1-based start (line, column).
-fn assert_mapped(src: &str, s: &MappedSpan, p: Precision, text: &str, at: (usize, usize)) {
-    assert_eq!(s.precision, p, "{s:?}");
+fn assert_mapped(src: &str, s: &impl Mapped, p: Precision, text: &str, at: (usize, usize)) {
+    assert_eq!(s.precision(), p, "{s:?}");
     assert_eq!(slice(src, s), text, "{s:?}");
-    let loc = s.marigold.as_ref().unwrap();
+    let loc = s.marigold().unwrap();
     assert_eq!((loc.start.line, loc.start.column), at, "{s:?}");
 }
 
-fn assert_unmapped(s: &MappedSpan, reason: UnmappedReason) {
-    assert_eq!(s.precision, Precision::Unmapped { reason }, "{s:?}");
+fn assert_unmapped(s: &impl Mapped, reason: UnmappedReason) {
+    assert_eq!(s.precision(), Precision::Unmapped { reason }, "{s:?}");
     assert!(
-        s.marigold.is_none(),
+        s.marigold().is_none(),
         "unmapped span must carry no range: {s:?}"
     );
 }
 
 /// Invariants that hold for EVERY mapped span, whatever the input (used by goldens and properties).
-fn assert_span_invariants(src: &str, rust: &str, s: &MappedSpan) {
-    match (&s.precision, &s.marigold) {
+fn assert_span_invariants(src: &str, s: &impl Mapped) {
+    match (&s.precision(), &s.marigold()) {
         (Precision::Unmapped { .. }, None) => {}
         (Precision::Unmapped { .. }, Some(_)) => panic!("unmapped but has a range: {s:?}"),
         (_, None) => panic!("mapped precision without a range: {s:?}"),
@@ -166,8 +197,11 @@ fn assert_span_invariants(src: &str, rust: &str, s: &MappedSpan) {
             };
             assert_eq!(lc(r.start), (loc.start.line, loc.start.column), "{s:?}");
             assert_eq!(lc(r.end), (loc.end.line, loc.end.column), "{s:?}");
-            assert!(s.segment.is_some(), "mapped span names its segment: {s:?}");
-            let _ = (p, rust);
+            assert!(
+                s.segment().is_some(),
+                "mapped span names its segment: {s:?}"
+            );
+            let _ = p;
         }
     }
 }
@@ -961,7 +995,7 @@ fn g19_lints_in_the_wrapper_file_are_foreign() {
     assert!(m.likely_generated_noise());
     // preamble `use` is glue-or-segment but never exact
     let imp = r.remap(find(&fx, "unused import"));
-    assert_ne!(imp.primary.as_ref().unwrap().precision, Exact);
+    assert_eq!(imp.primary.as_ref().unwrap().precision, Seg);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1035,7 +1069,7 @@ fn research_samples_never_panic_and_foreign_or_stale_spans_are_honest() {
     ] {
         let m = r.remap(&sample(name));
         for s in all_spans(&m) {
-            assert_span_invariants(&src, &program.rust, s);
+            assert_span_invariants(&src, s);
         }
     }
 }
@@ -1428,11 +1462,9 @@ fn d08_invalid_spans_are_reported_never_panicked_on() {
         UnmappedReason::InvalidSpan,
     );
     // a span ending exactly at the end of the program is fine
-    assert_ne!(
-        map_one(&src, &program, "", &set(len - 1, len)).precision,
-        Precision::Unmapped {
-            reason: UnmappedReason::InvalidSpan
-        }
+    assert_unmapped(
+        &map_one(&src, &program, "", &set(len - 1, len)),
+        UnmappedReason::Glue,
     );
     // not on a char boundary
     let src2 =
@@ -1463,14 +1495,9 @@ fn d09_a_stale_marigold_source_is_detected_instead_of_fabricating_a_range() {
     // a source where a segment boundary falls inside a multibyte char
     let weird = "é".repeat(60);
     let r = Remapper::new(&program, &weird, &is_gen);
-    let m = r.map_span(&sp);
-    assert!(
-        matches!(m.precision, Precision::Unmapped { .. } | Seg | Exact),
-        "{m:?}"
-    );
-    if let Some(l) = &m.marigold {
-        assert!(weird.is_char_boundary(l.range.start) && weird.is_char_boundary(l.range.end));
-    }
+    // the function's source range ends inside a two-byte character of that text
+    assert!(!weird.is_char_boundary(src.find('}').unwrap() + 1));
+    assert_unmapped(&r.map_span(&sp), UnmappedReason::StaleSourceMap);
 }
 
 #[test]
@@ -1539,11 +1566,10 @@ fn d11_expansion_chains_are_bounded() {
         Exact,
         "a tiny chain resolves"
     );
-    assert_ne!(
+    assert_eq!(
         map_one(&src, &program, "", &chain(64)).precision,
-        Precision::Unmapped {
-            reason: UnmappedReason::ForeignFile
-        }
+        Exact,
+        "64 hops are still followed"
     );
     assert_unmapped(
         &map_one(&src, &program, "", &chain(65)),
@@ -1631,12 +1657,8 @@ fn d13_other_files_are_foreign_and_the_file_test_decides() {
         f.generated.start + 7,
         true,
     );
-    assert_ne!(
-        r.map_span(&sp).precision,
-        Precision::Unmapped {
-            reason: UnmappedReason::ForeignFile
-        }
-    );
+    // the byte after `const `: the `f` of `fn`
+    assert_eq!(r.map_span(&sp).precision, Exact);
     assert!(seen.borrow().iter().any(|s| s == "./src/gen.rs"));
 }
 
@@ -2019,7 +2041,8 @@ fn e07_trace_scanner_is_lenient_and_never_panics() {
     assert_eq!(h[0].file, "C:\\proj\\src\\gen.rs");
     // documented limitation: a path containing a space is not recognised (no partial/guessed match)
     let h = r.remap_trace("at /path with spaces/gen.rs:3:4");
-    assert!(h.iter().all(|x| x.file == "spaces/gen.rs"), "{h:?}");
+    assert_eq!(h.len(), 1, "{h:?}");
+    assert_eq!(h[0].file, "spaces/gen.rs");
 }
 
 #[test]
@@ -2085,9 +2108,10 @@ fn e09_errors_are_never_noise_and_trace_hits_come_in_text_order() {
 // ---------------------------------------------------------------------------------------------
 
 /// outer expression 0 with two inner pieces, plus a second expression; synthetic but self-consistent.
+/// The generated text of a piece must not equal its Marigold text, or the piece is provably exact.
 fn nested() -> (String, GeneratedProgram) {
     let src = "xs = range(0, 3).map(f)\nys.return".to_string();
-    let rust = "async {\n    let xs = G(range(0, 3)).M(map(f));\nlet r0 = ys;\n}\n".to_string();
+    let rust = "async {\n    let xs = G(range(0,3)).M(mapx(f));\nlet r0 = ys;\n}\n".to_string();
     let g = |needle: &str| {
         let a = rust.find(needle).unwrap();
         ByteRange {
@@ -2102,7 +2126,7 @@ fn nested() -> (String, GeneratedProgram) {
             end: a + needle.len(),
         }
     };
-    let outer = g("let xs = G(range(0, 3)).M(map(f));");
+    let outer = g("let xs = G(range(0,3)).M(mapx(f));");
     let segs = vec![
         Segment::new(
             outer,
@@ -2112,14 +2136,14 @@ fn nested() -> (String, GeneratedProgram) {
             Some("xs".into()),
         ),
         Segment::new(
-            g("range(0, 3)"),
+            g("range(0,3)"),
             s("range(0, 3)"),
             SegmentKind::StreamVariable,
             0,
             None,
         ),
         Segment::new(
-            g("map(f)"),
+            g("mapx(f)"),
             s("map(f)"),
             SegmentKind::StreamVariable,
             0,
@@ -2155,25 +2179,25 @@ fn h01_innermost_segment_wins_and_straddling_siblings_fall_back_to_the_enclosing
         (a, a + needle.len())
     };
     // inside an inner piece: the inner piece's source (finer than the expression)
-    let (a, b) = rg("range(0, 3)");
+    let (a, b) = rg("range(0,3)");
     let m = at(a + 2, b - 1);
     assert_eq!(m.precision, Seg);
     assert_eq!(slice(&src, &m), "range(0, 3)");
     // the whole inner piece, and a piece-sized span in the other piece
-    let (a, b) = rg("map(f)");
+    let (a, b) = rg("mapx(f)");
     assert_eq!(slice(&src, &at(a, b)), "map(f)");
     // spans two sibling pieces, contained in the outer segment: the outer one
-    let (a, _) = rg("range(0, 3)");
-    let (_, b) = rg("map(f)");
+    let (a, _) = rg("range(0,3)");
+    let (_, b) = rg("mapx(f)");
     let m = at(a + 1, b - 1);
     assert_eq!(m.precision, Seg);
     assert_eq!(slice(&src, &m), "xs = range(0, 3).map(f)");
     // glue inside the outer segment (between the pieces) is the outer segment, not unmapped
-    let (_, e1) = rg("range(0, 3)");
+    let (_, e1) = rg("range(0,3)");
     let m = at(e1, e1 + 1);
     assert_eq!(slice(&src, &m), "xs = range(0, 3).map(f)");
     // leaves the outer segment into trailing glue but stays in expression 0: Expression
-    let (_, oe) = rg("let xs = G(range(0, 3)).M(map(f));");
+    let (_, oe) = rg("let xs = G(range(0,3)).M(mapx(f));");
     let m = at(oe - 3, oe + 1);
     assert_eq!(m.precision, Expression);
     assert_eq!(slice(&src, &m), "xs = range(0, 3).map(f)");
@@ -2205,12 +2229,12 @@ fn h02_zero_width_insertion_at_boundaries_prefers_the_segment_that_starts_there(
             &rustc_span("gen.rs", &program.rust, a, a, true),
         )
     };
-    let a = program.rust.find("range(0, 3)").unwrap();
+    let a = program.rust.find("range(0,3)").unwrap();
     // exactly at the start of the inner piece: the inner piece
     assert_eq!(slice(&src, &at(a)), "range(0, 3)");
     // exactly at the end of the inner piece (next byte is outer-only text): the outer segment
     assert_eq!(
-        slice(&src, &at(a + "range(0, 3)".len())),
+        slice(&src, &at(a + "range(0,3)".len())),
         "xs = range(0, 3).map(f)"
     );
     // at the end of the whole second segment, followed by glue: attributed to that segment (insertion after its last byte)
@@ -2339,7 +2363,7 @@ fn h04_corrupted_maps_degrade_to_unmapped_never_to_a_wrong_range() {
             (rust.len(), rust.len()),
         ] {
             let m = r.map_span(&sp(a, b));
-            assert_span_invariants(src, rust, &m);
+            assert_span_invariants(src, &m);
             if name.starts_with("source") {
                 if let Some(l) = &m.marigold {
                     assert!(l.range.end <= src.len(), "{name}: {m:?}");
@@ -2421,7 +2445,7 @@ fn f01_every_real_diagnostic_of_every_fixture_satisfies_all_invariants_and_none_
             let m = r.remap(d);
             for s in all_spans(&m) {
                 spans += 1;
-                assert_span_invariants(&fx.src, &fx.program.rust, s);
+                assert_span_invariants(&fx.src, s);
                 assert!(
                     !matches!(
                         s.precision,
@@ -2492,7 +2516,7 @@ proptest! {
         let is_gen = |f: &str| f == "gen.rs";
         let r = Remapper::new(&program, &src, &is_gen);
         let m = r.map_span(&rustc_span("gen.rs", &program.rust, a, b, true));
-        assert_span_invariants(&src, &program.rust, &m);
+        assert_span_invariants(&src, &m);
         let loc = m.marigold.as_ref().expect("inside a segment => mapped");
         prop_assert!(seg.source.start <= loc.range.start && loc.range.end <= seg.source.end);
         prop_assert_eq!(m.segment.as_ref().unwrap().expr_index, seg.expr_index);
@@ -2520,7 +2544,7 @@ proptest! {
         let m = r.map_span(&rustc_span("gen.rs", &program.rust, a, b, true));
         let loc = m.marigold.as_ref().unwrap();
         prop_assert!(seg.source.start <= loc.range.start && loc.range.end <= seg.source.end, "{:?}", path);
-        assert_span_invariants(&src, &program.rust, &m);
+        assert_span_invariants(&src, &m);
     }
 
     /// Arbitrary offsets, line/column numbers and text: never panics; any range returned is in bounds.
@@ -2541,7 +2565,7 @@ proptest! {
                 "text": [{"text": text, "highlight_start": c1, "highlight_end": c2}],
             })).unwrap();
             let m = r.map_span(&sp);
-            assert_span_invariants(&src, &program.rust, &m);
+            assert_span_invariants(&src, &m);
             // honest: arbitrary numbers essentially never describe the generated file
             if let Some(l) = &m.marigold { prop_assert!(l.range.end <= src.len()); }
         }
@@ -2556,7 +2580,7 @@ proptest! {
         let u = [ColumnUnit::ScalarValues, ColumnUnit::DisplayWidth, ColumnUnit::Utf8Bytes][unit as usize];
         for (l, c) in [(line, col), (sl, Some(sc)), (sl, None)] {
             let m = r.locate("gen.rs", l, c, u);
-            assert_span_invariants(&src, &program.rust, &m);
+            assert_span_invariants(&src, &m);
         }
     }
 
@@ -2577,9 +2601,9 @@ proptest! {
         let r = Remapper::new(&program, src, &is_gen);
         for (a, b) in spans {
             let sp: RustcSpan = serde_json::from_value(json!({"file_name": "gen.rs", "byte_start": a, "byte_end": b})).unwrap();
-            assert_span_invariants(src, rust, &r.map_span(&sp));
+            assert_span_invariants(src, &r.map_span(&sp));
             let u = [ColumnUnit::ScalarValues, ColumnUnit::DisplayWidth, ColumnUnit::Utf8Bytes][unit as usize];
-            assert_span_invariants(src, rust, &r.locate("gen.rs", a % 9, Some(b), u));
+            assert_span_invariants(src, &r.locate("gen.rs", a % 9, Some(b), u));
         }
     }
 
@@ -2613,7 +2637,7 @@ proptest! {
         }
         let diag: RustcDiagnostic = serde_json::from_value(d).unwrap();
         let m = r.remap(&diag);
-        for s in all_spans(&m) { assert_span_invariants(&src, &program.rust, s); }
+        for s in all_spans(&m) { assert_span_invariants(&src, s); }
     }
 }
 
@@ -2669,11 +2693,12 @@ fn g01_two_hundred_thousand_diagnostics_in_linear_time() {
         }
     }
     assert_eq!(n_exact, 200_000);
-    // Generous absolute bound (debug build ~1 s): this only catches a remapper that is accidentally
-    // quadratic; the exact cost of a lookup is pinned by the deterministic work counters in
-    // `src/remap.rs` (`complexity_tests`).
+    // Absolute bound with a wide margin (debug build ~1 s, 16 busy CPUs ~15 s): it only catches a
+    // remapper that is accidentally quadratic. What a lookup costs is pinned without a clock by
+    // the counters and search logs in `src/remap.rs` (`lookups_do_the_same_work_whatever_the_number_of_segments`,
+    // `every_search_is_a_binary_search_and_a_lookup_makes_the_same_searches_at_any_size`).
     assert!(
-        start.elapsed() < std::time::Duration::from_secs(120),
+        start.elapsed() < std::time::Duration::from_secs(20),
         "{:?}",
         start.elapsed()
     );
@@ -2732,13 +2757,12 @@ fn lookup_time(n: usize) -> std::time::Duration {
 
 #[test]
 fn g02_lookup_cost_does_not_grow_with_the_number_of_segments() {
-    // Functional check on a 40 000-segment map plus a generous absolute bound. How much WORK a lookup
-    // does is asserted deterministically (no clock) by `src/remap.rs::complexity_tests`.
-    let small = lookup_time(2_000);
+    // Functional check on a 40 000-segment map plus an absolute bound with a wide margin. How much
+    // WORK a lookup does is asserted without a clock in `src/remap.rs` (see g01).
     let large = lookup_time(40_000);
     assert!(
-        large < std::time::Duration::from_secs(120),
-        "small={small:?} large={large:?}"
+        large < std::time::Duration::from_secs(20),
+        "large={large:?}"
     );
 }
 
@@ -2806,7 +2830,10 @@ fn x01_json_shapes_have_exactly_these_keys() {
     assert_eq!(key_set(&p["marigold"]), ["end", "range", "start"]);
     assert_eq!(key_set(&p["marigold"]["range"]), ["end", "start"]);
     assert_eq!(key_set(&p["marigold"]["start"]), ["column", "line"]);
-    assert_eq!(key_set(&p["segment"]), ["expr_index", "kind", "name"]);
+    assert_eq!(
+        key_set(&p["segment"]),
+        ["expr_index", "index", "kind", "name"]
+    );
     assert_eq!(
         key_set(&p["raw"]),
         [
@@ -2825,7 +2852,17 @@ fn x01_json_shapes_have_exactly_these_keys() {
     let help = &v["children"][1]["primary"]["suggestion"];
     assert_eq!(
         key_set(help),
-        ["applicability", "applicable_to_marigold", "replacement"]
+        [
+            "applicability",
+            "applicable_to_marigold",
+            "part",
+            "parts",
+            "replacement"
+        ]
+    );
+    assert_eq!(
+        (help["part"].clone(), help["parts"].clone()),
+        (json!(0), json!(1))
     );
     assert_eq!(help["applicable_to_marigold"], json!(true));
     // unmapped span: same keys, nulls for what is missing
@@ -2834,27 +2871,14 @@ fn x01_json_shapes_have_exactly_these_keys() {
         serde_json::to_value(r.locate("other.rs", 1, None, ColumnUnit::Utf8Bytes)).unwrap();
     assert_eq!(unmapped["marigold"], Value::Null);
     assert_eq!(unmapped["segment"], Value::Null);
-    assert_eq!(unmapped["raw"], Value::Null);
     assert_eq!(
         unmapped["precision"],
         json!({"kind": "unmapped", "reason": "foreign_file"})
     );
-    assert_eq!(
-        key_set(&unmapped),
-        [
-            "is_primary",
-            "label",
-            "marigold",
-            "precision",
-            "raw",
-            "segment",
-            "suggestion",
-            "via_macro"
-        ]
-    );
+    // a located line has the fields that need no rustc span, and only those
+    assert_eq!(key_set(&unmapped), ["marigold", "precision", "segment"]);
     // every reason and unit has a stable name
     for (reason, name) in [
-        (UnmappedReason::NoSpan, "no_span"),
         (UnmappedReason::ForeignFile, "foreign_file"),
         (
             UnmappedReason::OutsideGeneratedRegion,
@@ -3020,27 +3044,31 @@ fn x05_trace_scanner_consumes_a_whole_location_even_when_it_is_not_ours() {
     assert!(r.remap_trace("a.rs:99999999999999999999999").is_empty());
     // the unit follows the context
     let hits = r
-        .remap_trace("panicked at a.rs:1:1:\nat b.rs:2:2\n  at c.rs:3:3\nbat d.rs:4:4\n(e.rs:5:5)");
+        .remap_trace("panicked at a.rs:1:1:\n   0: f\n             at b.rs:2:2\n  1: g\n  at c.rs:3:3\nat d.rs:4:4\nbat e.rs:5:5\n(f.rs:6:6) foo at g.rs:7:7");
     let units: Vec<_> = hits.iter().map(|h| (h.file.as_str(), h.unit)).collect();
     assert_eq!(
         units,
         [
             ("a.rs", ColumnUnit::DisplayWidth),
+            // only the `at` line under a numbered frame is a backtrace location (DWARF bytes)
             ("b.rs", ColumnUnit::Utf8Bytes),
             ("c.rs", ColumnUnit::Utf8Bytes),
+            // an `at` that follows a location, a word ending in `at`, a message: display width
             ("d.rs", ColumnUnit::DisplayWidth),
             ("e.rs", ColumnUnit::DisplayWidth),
+            ("f.rs", ColumnUnit::DisplayWidth),
+            ("g.rs", ColumnUnit::DisplayWidth),
         ]
     );
 }
 
 #[test]
 fn x06_a_column_after_an_unverified_width_never_points_across_expressions() {
-    // line 2 is `AAA<U+0F00>BBB`: two expressions on one line, a character of unknown display width between
+    // line 2 is `aaa<U+0F00>bbb` (the generated text differs from the Marigold text): two expressions on one line, a character of unknown display width between
     let src = "AAA BBB".to_string();
-    let rust = "async {\nAAA\u{0f00}BBB\n}\n".to_string();
-    let a = rust.find("AAA").unwrap();
-    let b = rust.find("BBB").unwrap();
+    let rust = "async {\naaa\u{0f00}bbb\n}\n".to_string();
+    let a = rust.find("aaa").unwrap();
+    let b = rust.find("bbb").unwrap();
     let program = GeneratedProgram::new(
         rust.clone(),
         SourceMap::new(vec![
@@ -3142,7 +3170,7 @@ fn x09_for_every_program_of_the_corpus_every_byte_agrees_with_the_t1_lookup() {
             s.byte_start = off;
             s.byte_end = off + 1;
             let m = r.map_span(&s);
-            assert_span_invariants(&src, &program.rust, &m);
+            assert_span_invariants(&src, &m);
             match program.map.source_for_generated(off) {
                 None => assert_unmapped(&m, UnmappedReason::Glue),
                 Some(seg) => {
@@ -3322,4 +3350,963 @@ fn x15_an_empty_code_is_no_code() {
     }))
     .unwrap();
     assert_eq!(r.remap(&d).code, None);
+}
+
+// ---------------------------------------------------------------------------------------------
+// N. review round 1: data-driven exactness, noise by kind, multipart suggestions, widths,
+//    prefixes on later lines, the byte order mark, and the gaps that mutation testing found
+// ---------------------------------------------------------------------------------------------
+
+fn jdiag(v: Value) -> RustcDiagnostic {
+    serde_json::from_value(v).unwrap()
+}
+
+fn jspan(file: &str, a: usize, b: usize) -> Value {
+    json!({"file_name": file, "byte_start": a, "byte_end": b, "is_primary": true})
+}
+
+fn br(start: usize, end: usize) -> ByteRange {
+    ByteRange { start, end }
+}
+
+/// The mini program with one segment of `kind` nested in its `fn f`. `g` and `s` are offsets
+/// of the child from the start of the function's generated text (`const fn f(..) { .. }`) and
+/// of its Marigold text (`fn f(..) { .. }`).
+fn nested_in_f(
+    kind: SegmentKind,
+    g: (usize, usize),
+    s: (usize, usize),
+) -> (String, GeneratedProgram, Segment, Segment) {
+    let (src, program) = mini();
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let child = Segment::new(
+        br(f.generated.start + g.0, f.generated.start + g.1),
+        br(f.source.start + s.0, f.source.start + s.1),
+        kind,
+        f.expr_index,
+        None,
+    );
+    let mut segments = program.map.segments().to_vec();
+    segments.push(child.clone());
+    (
+        src,
+        GeneratedProgram::new(program.rust.clone(), SourceMap::new(segments)),
+        f,
+        child,
+    )
+}
+
+/// Offsets of the body `{ x + 1 }` in the generated and the Marigold text of `fn f`.
+fn body_offsets(
+    program: &GeneratedProgram,
+    src: &str,
+    f: &Segment,
+) -> ((usize, usize), (usize, usize)) {
+    let g = program.rust[f.generated.start..f.generated.end]
+        .find("{ x + 1 }")
+        .unwrap();
+    let s = src[f.source.start..f.source.end].find("{ x + 1 }").unwrap();
+    ((g, g + 9), (s, s + 9))
+}
+
+#[test]
+fn n01_a_nested_segment_whose_bytes_equal_the_source_is_exact_whatever_its_kind() {
+    // The body of a function, as the finer-grained segments of a later release will have it:
+    // innermost wins, and its generated text is its source, byte for byte.
+    let (src, program) = mini();
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let (g, s) = body_offsets(&program, &src, &f);
+    let (_, nested, _, body) = nested_in_f(SegmentKind::StreamVariable, g, s);
+    let is_gen = |name: &str| name == "gen.rs";
+    let flat = Remapper::new(&program, &src, &is_gen);
+    let deep = Remapper::new(&nested, &src, &is_gen);
+    let sp = |a: usize, b: usize| rustc_span("gen.rs", &program.rust, a, b, true);
+
+    let plus = body.generated.start + "{ x ".len();
+    let m = deep.map_span(&sp(plus, plus + 1));
+    assert_mapped(&src, &m, Exact, "+", (1, src.find('+').unwrap() + 1));
+    assert_eq!(
+        m.segment.as_ref().unwrap().kind,
+        SegmentKind::StreamVariable
+    );
+    // the whole body, an insertion point at its start and one at its end
+    let whole = deep.map_span(&sp(body.generated.start, body.generated.end));
+    assert_mapped(&src, &whole, Exact, "{ x + 1 }", (1, body.source.start + 1));
+    for at in [body.generated.start, body.generated.end] {
+        let m = deep.map_span(&sp(at, at));
+        assert_eq!(m.precision, Exact, "{at}: {m:?}");
+        assert_eq!(slice(&src, &m), "", "{at}");
+    }
+    // The nesting changes nothing for any byte of the function after `const `.
+    for off in f.generated.start..f.generated.end {
+        let (a, b) = (
+            flat.map_span(&sp(off, off + 1)),
+            deep.map_span(&sp(off, off + 1)),
+        );
+        let want = if off < f.generated.start + "const ".len() {
+            Seg
+        } else {
+            Exact
+        };
+        assert_eq!((a.precision, b.precision), (want, want), "byte {off}");
+        if want == Exact {
+            assert_eq!(a.marigold, b.marigold, "byte {off}");
+        }
+    }
+}
+
+#[test]
+fn n02_a_shared_last_byte_is_not_exactness_unless_the_kind_says_the_generated_text_ends_with_the_source(
+) {
+    // A signature-like child: generated `const fn f(x: i32) -> i32`, Marigold `fn f(x: i32) -> i32`.
+    // Their last bytes (`i32`) agree, but only for a `Function` is that known to be the whole story.
+    let (src, program) = mini();
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let sig_g = program.rust[f.generated.start..].find(" {").unwrap();
+    let sig_s = src.find(" {").unwrap();
+    for (kind, want) in [
+        (SegmentKind::StreamVariable, Seg),
+        (SegmentKind::Struct, Seg),
+        (SegmentKind::Enum, Seg),
+        (SegmentKind::Function, Exact),
+    ] {
+        let (_, nested, _, child) = nested_in_f(kind, (0, sig_g), (0, sig_s));
+        let at = child.generated.end - 3;
+        let m = map_one(
+            &src,
+            &nested,
+            "",
+            &rustc_span("gen.rs", &nested.rust, at, at + 3, true),
+        );
+        assert_eq!(m.precision, want, "{kind:?}: {m:?}");
+        match want {
+            Exact => assert_eq!(slice(&src, &m), "i32"),
+            _ => assert_eq!(slice(&src, &m), "fn f(x: i32) -> i32"),
+        }
+    }
+}
+
+#[test]
+fn n03_exactness_in_a_nested_segment_carries_to_suggestions_and_to_the_noise_decision() {
+    let (src, program) = mini();
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let (g, s) = body_offsets(&program, &src, &f);
+    let (_, nested, _, body) = nested_in_f(SegmentKind::StreamVariable, g, s);
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&nested, &src, &is_gen);
+    let plus = body.generated.start + "{ x ".len();
+    let mut at_plus = rustc_span("gen.rs", &nested.rust, plus, plus + 1, true);
+    at_plus.suggested_replacement = Some("-".into());
+    let warning = jdiag(json!({
+        "message": "unused", "level": "warning", "children": [],
+        "spans": [span_to_json(&rustc_span("gen.rs", &nested.rust, plus, plus + 1, true))],
+    }));
+    let w = r.remap(&warning);
+    assert_eq!(w.primary.as_ref().unwrap().precision, Exact);
+    assert!(!w.likely_generated_noise(), "{w:?}");
+    let help = jdiag(json!({
+        "message": "use minus", "level": "help", "children": [], "spans": [span_to_json(&at_plus)],
+    }));
+    let h = r.remap(&help);
+    let sg = h.primary.unwrap().suggestion.unwrap();
+    assert!(sg.applicable_to_marigold, "{sg:?}");
+}
+
+#[test]
+fn n04_a_warning_in_a_function_signature_is_the_users_even_when_it_is_only_segment_precise() {
+    // The signature is rewritten by the generator (`string_10`, references), so a lint on a
+    // parameter or on the name is attributed to the whole function: Segment, not Exact.
+    for (func, needle) in [
+        ("fn f(unused: i32, s: string_10) -> i32 { 1 }", "unused"),
+        ("fn f(x: i32, y:&str) -> i32 { 1 }", "y:"),
+        ("fn myFunc(x:i32, s:string_10) -> i32 { 1 }", "myFunc"),
+    ] {
+        let src = format!("{func}\nrange(0, 2).return");
+        let program = marigold_generate(&src).unwrap();
+        let f = seg_of(&program, SegmentKind::Function, 0);
+        let at = f.generated.start + program.rust[f.generated.start..].find(needle).unwrap();
+        let sp = rustc_span("gen.rs", &program.rust, at, at + 1, true);
+        let is_gen = |name: &str| name == "gen.rs";
+        let r = Remapper::new(&program, &src, &is_gen);
+        let warning = jdiag(json!({
+            "message": "unused variable", "level": "warning", "children": [], "spans": [span_to_json(&sp)],
+        }));
+        let m = r.remap(&warning);
+        let p = m.primary.as_ref().unwrap();
+        assert_eq!(p.precision, Seg, "{func}: {p:?}");
+        assert_eq!(p.segment.as_ref().unwrap().kind, SegmentKind::Function);
+        assert!(!m.likely_generated_noise(), "{func}");
+        // the same position as an error is, of course, not noise either
+        let error = jdiag(json!({
+            "message": "e", "level": "error", "children": [], "spans": [span_to_json(&sp)],
+        }));
+        assert!(!r.remap(&error).likely_generated_noise());
+    }
+}
+
+#[test]
+fn n05_a_warning_in_stream_glue_stays_noise_at_any_precision() {
+    let (src, program) = mini();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen);
+    for kind in [
+        SegmentKind::StreamVariable,
+        SegmentKind::StreamVariableRunner,
+        SegmentKind::ReturningStream,
+        SegmentKind::NonReturningStream,
+    ] {
+        let Some(seg) = program.map.segments().iter().find(|s| s.kind == kind) else {
+            continue;
+        };
+        let sp = rustc_span(
+            "gen.rs",
+            &program.rust,
+            seg.generated.start + 1,
+            seg.generated.start + 2,
+            true,
+        );
+        let w = jdiag(
+            json!({"message": "m", "level": "warning", "children": [], "spans": [span_to_json(&sp)]}),
+        );
+        let m = r.remap(&w);
+        assert_eq!(m.primary.as_ref().unwrap().precision, Seg, "{kind:?}");
+        assert!(m.likely_generated_noise(), "{kind:?}");
+    }
+}
+
+fn suggestion_part(text: &str, file: &str, a: usize, b: usize, replacement: &str) -> RustcSpan {
+    let mut s = rustc_span(file, text, a, b, true);
+    s.suggested_replacement = Some(replacement.to_string());
+    s.suggestion_applicability = Some("MaybeIncorrect".to_string());
+    s
+}
+
+fn applicable_flags(d: &MappedDiagnostic) -> Vec<(usize, usize, bool, String)> {
+    d.suggestion_spans()
+        .iter()
+        .map(|s| {
+            let g = s.suggestion.as_ref().unwrap();
+            (
+                g.part,
+                g.parts,
+                g.applicable_to_marigold,
+                g.replacement.clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn n06_a_multipart_suggestion_is_applicable_only_if_every_part_is() {
+    // rustc's "try wrapping the expression in `Some`": insert `Some(` before and `)` after.
+    let (src, program) = mini();
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let ftext = &program.rust[f.generated.start..f.generated.end];
+    let x = f.generated.start + ftext.find("x + 1").unwrap();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen);
+    let help = |spans: Vec<RustcSpan>| {
+        let spans: Vec<Value> = spans.iter().map(span_to_json).collect();
+        r.remap(&jdiag(
+            json!({"message": "try wrapping", "level": "help", "children": [], "spans": spans}),
+        ))
+    };
+    let t = &program.rust;
+
+    // both parts exact: applicable, numbered in rustc's order
+    let d = help(vec![
+        suggestion_part(t, "gen.rs", x, x, "Some("),
+        suggestion_part(t, "gen.rs", x + 5, x + 5, ")"),
+    ]);
+    assert_eq!(
+        applicable_flags(&d),
+        [
+            (0, 2, true, "Some(".to_string()),
+            (1, 2, true, ")".to_string())
+        ]
+    );
+
+    // the second part in glue: the first part alone would break the program
+    let d = help(vec![
+        suggestion_part(t, "gen.rs", x, x, "Some("),
+        suggestion_part(t, "gen.rs", 3, 3, ")"),
+    ]);
+    assert_eq!(d.primary.as_ref().unwrap().precision, Exact);
+    assert_eq!(
+        applicable_flags(&d),
+        [
+            (0, 2, false, "Some(".to_string()),
+            (1, 2, false, ")".to_string())
+        ]
+    );
+
+    // the second part only segment-precise (before the verbatim tail)
+    let d = help(vec![
+        suggestion_part(t, "gen.rs", f.generated.start, f.generated.start, ")"),
+        suggestion_part(t, "gen.rs", x, x, "Some("),
+    ]);
+    assert_eq!(
+        applicable_flags(&d),
+        [
+            (0, 2, false, ")".to_string()),
+            (1, 2, false, "Some(".to_string())
+        ]
+    );
+
+    // a part found through a macro call site is not a part of the user's text
+    let foreign: RustcSpan =
+        serde_json::from_value(jspan("/rustc/x/library/core/src/a.rs", 5, 9)).unwrap();
+    let mut via = with_expansion(foreign, rustc_span("gen.rs", t, x + 5, x + 5, true), "m!");
+    via.suggested_replacement = Some(")".to_string());
+    let d = help(vec![suggestion_part(t, "gen.rs", x, x, "Some("), via]);
+    assert_eq!(
+        applicable_flags(&d),
+        [
+            (0, 2, false, "Some(".to_string()),
+            (1, 2, false, ")".to_string())
+        ]
+    );
+
+    // spans without a replacement are not parts; one exact replacement is a whole suggestion
+    let d = help(vec![
+        rustc_span("gen.rs", t, 3, 4, true),
+        suggestion_part(t, "gen.rs", x, x + 1, "y"),
+    ]);
+    assert_eq!(applicable_flags(&d), [(0, 1, true, "y".to_string())]);
+    assert_eq!(d.suggestion_spans().len(), 1);
+
+    // a single span mapped on its own is part 0 of 1
+    let single = r.map_span(&suggestion_part(t, "gen.rs", x, x + 1, "y"));
+    let g = single.suggestion.unwrap();
+    assert_eq!((g.part, g.parts, g.applicable_to_marigold), (0, 1, true));
+
+    // children are their own diagnostics: a bad part in a child does not spoil the parent
+    let parent = r.remap(&jdiag(json!({
+        "message": "m", "level": "error", "spans": [span_to_json(&suggestion_part(t, "gen.rs", x, x + 1, "y"))],
+        "children": [{"message": "c", "level": "help", "children": [],
+                      "spans": [span_to_json(&suggestion_part(t, "gen.rs", 3, 3, "z"))]}],
+    })));
+    assert!(applicable_flags(&parent)[0].2);
+    assert!(!applicable_flags(&parent.children[0])[0].2);
+}
+
+#[test]
+fn n07_a_runtime_column_after_a_prefix_is_shifted_on_the_first_line_only() {
+    // The realistic inline layout: the generated code starts after `fn main() {` and four spaces.
+    let (src, program) = mini();
+    let prefix = "fn main() {\n    ";
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen).with_prefix(prefix);
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let plus = f.generated.start + program.rust[f.generated.start..].find('+').unwrap();
+    let before = &program.rust[..plus];
+    let index = before.matches('\n').count();
+    assert!(index >= 1, "the function is not on the first program line");
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    let file_line = 1 + prefix.matches('\n').count() + index;
+    for (unit, column) in [
+        (ColumnUnit::Utf8Bytes, plus - line_start + 1),
+        (
+            ColumnUnit::ScalarValues,
+            program.rust[line_start..plus].chars().count() + 1,
+        ),
+        (
+            ColumnUnit::DisplayWidth,
+            program.rust[line_start..plus].chars().count() + 1,
+        ),
+    ] {
+        let m = r.locate("gen.rs", file_line, Some(column), unit);
+        assert_eq!(m.precision, Exact, "{unit:?}");
+        assert_eq!(
+            m.marigold.unwrap().range.start,
+            src.find('+').unwrap(),
+            "{unit:?}"
+        );
+    }
+}
+
+#[test]
+fn n08_the_function_on_the_second_line_is_not_shifted_by_a_one_line_prefix() {
+    let src = "fn f() { 1 }";
+    let rust = "async {\nconst fn f() { 1 }\n}\n";
+    let g0 = rust.find("const").unwrap();
+    let seg = Segment::new(
+        br(g0, g0 + "const fn f() { 1 }".len()),
+        br(0, src.len()),
+        SegmentKind::Function,
+        0,
+        Some("f".into()),
+    );
+    let program = GeneratedProgram::new(rust.to_string(), SourceMap::new(vec![seg]));
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, src, &is_gen).with_prefix("    ");
+    let column = "const fn f() { ".len() + 1;
+    for unit in [
+        ColumnUnit::ScalarValues,
+        ColumnUnit::Utf8Bytes,
+        ColumnUnit::DisplayWidth,
+    ] {
+        let m = r.locate("gen.rs", 2, Some(column), unit);
+        assert_eq!(m.precision, Exact, "{unit:?}");
+        assert_eq!(
+            m.marigold.unwrap().range.start,
+            src.find('1').unwrap(),
+            "{unit:?}"
+        );
+    }
+    // and on the first line the four spaces are columns
+    let m = r.locate("gen.rs", 1, Some(5), ColumnUnit::ScalarValues);
+    assert_unmapped(&m, UnmappedReason::Glue);
+    let m = r.locate("gen.rs", 1, Some(2), ColumnUnit::ScalarValues);
+    assert_unmapped(&m, UnmappedReason::OutsideGeneratedRegion);
+}
+
+#[test]
+fn n09_a_byte_order_mark_in_the_prefix_is_bytes_but_not_a_column() {
+    // rustc 1.97 (measured): the BOM counts in byte offsets, not in columns or in the line text.
+    let prefix = "\u{feff}fn main() { ";
+    let rust = "let x: u8 = \"a\"; }\n";
+    let program = GeneratedProgram::new(rust.to_string(), SourceMap::new(vec![]));
+    let visible = format!("{}{rust}", &prefix[3..]);
+    let a = visible.find("\"a\"").unwrap();
+    let mut sp = rustc_span("bom.rs", &visible, a, a + 3, true);
+    sp.byte_start += 3;
+    sp.byte_end += 3;
+    let is_gen = |name: &str| name == "bom.rs";
+    let r = Remapper::new(&program, "", &is_gen).with_prefix(prefix);
+    let m = r.map_span(&sp);
+    assert_unmapped(&m, UnmappedReason::Glue);
+    // without the mark in the declared prefix the same numbers describe another file
+    let r = Remapper::new(&program, "", &is_gen).with_prefix("fn main() { ");
+    assert_unmapped(&r.map_span(&sp), UnmappedReason::StaleGeneratedFile);
+    // a run-time column on the first line does not count the mark either
+    let src = "fn f() {}";
+    let seg_rust = "fn f() {}\n";
+    let seg = Segment::new(
+        br(0, 9),
+        br(0, 9),
+        SegmentKind::Function,
+        0,
+        Some("f".into()),
+    );
+    let p2 = GeneratedProgram::new(seg_rust.to_string(), SourceMap::new(vec![seg]));
+    let r = Remapper::new(&p2, src, &is_gen).with_prefix("\u{feff}  ");
+    for (unit, column) in [
+        (ColumnUnit::ScalarValues, 3 + 3),
+        (ColumnUnit::DisplayWidth, 3 + 3),
+        (ColumnUnit::Utf8Bytes, 3 + 3),
+    ] {
+        let m = r.locate("bom.rs", 1, Some(column), unit);
+        assert_eq!(m.precision, Exact, "{unit:?}");
+        assert_eq!(m.marigold.unwrap().range.start, 3, "{unit:?}");
+    }
+}
+
+#[test]
+fn n10_a_display_column_after_an_unassigned_combining_range_character_is_not_trusted() {
+    // U+20F5 is outside the combining marks (U+20D0..=U+20F0); rustc counts it as one column.
+    let src = "fn f(x: i32) -> i32 { let _s = \"a\u{20f5}bc\"; x }\nrange(0, 1).map(f).return";
+    let program = marigold_generate(src).unwrap();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, src, &is_gen);
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let line_start = program.rust[..f.generated.start]
+        .rfind('\n')
+        .map_or(0, |i| i + 1);
+    let b = f.generated.start + program.rust[f.generated.start..].find('b').unwrap();
+    let line = program.rust[..b].matches('\n').count() + 1;
+    let scalar = program.rust[line_start..b].chars().count() + 1;
+    let bytes = b - line_start + 1;
+    // the units that need no table point at the `b`
+    assert_eq!(
+        r.locate("gen.rs", line, Some(scalar), ColumnUnit::ScalarValues)
+            .precision,
+        Exact
+    );
+    assert_eq!(
+        r.locate("gen.rs", line, Some(bytes), ColumnUnit::Utf8Bytes)
+            .precision,
+        Exact
+    );
+    // the display column is not trusted after a character outside the table: never Exact
+    let m = r.locate("gen.rs", line, Some(scalar), ColumnUnit::DisplayWidth);
+    assert!(matches!(m.precision, Seg | Expression), "{m:?}");
+    assert_eq!(m.marigold.unwrap().range, f.source);
+}
+
+// --- gaps found by mutation testing ------------------------------------------------------------
+
+fn pair_program(
+    rust: &str,
+    a: (&str, (usize, usize)),
+    b: (&str, (usize, usize)),
+) -> GeneratedProgram {
+    let g = |needle: &str| {
+        let s = rust.find(needle).unwrap();
+        br(s, s + needle.len())
+    };
+    let piece = |n: &str, s: (usize, usize)| {
+        Segment::new(g(n), br(s.0, s.1), SegmentKind::StreamVariable, 0, None)
+    };
+    GeneratedProgram::new(
+        rust.to_string(),
+        SourceMap::new(vec![piece(a.0, a.1), piece(b.0, b.1)]),
+    )
+}
+
+/// Maps the span from the last byte of `a` to the first byte of `b`.
+fn across(
+    rust: &str,
+    program: &GeneratedProgram,
+    src: &str,
+    a: &str,
+    b: &str,
+) -> (Precision, String) {
+    let s = rust.find(a).unwrap() + a.len() - 1;
+    let e = rust.find(b).unwrap() + 1;
+    let m = map_one(src, program, "", &rustc_span("gen.rs", rust, s, e, true));
+    let text = m.marigold.map_or(String::new(), |l| {
+        src[l.range.start..l.range.end].to_string()
+    });
+    (m.precision, text)
+}
+
+#[test]
+fn n11_an_expression_span_takes_the_earliest_of_equally_wide_pieces_measured_in_marigold() {
+    let src = "AA BB";
+    let rust = "async {\n  aa\n  bb\n}\n";
+    let program = pair_program(rust, ("aa", (0, 2)), ("bb", (3, 5)));
+    assert_eq!(
+        across(rust, &program, src, "aa", "bb"),
+        (Expression, "AA".to_string())
+    );
+    // the width is the width of the Marigold text, whatever the generated text looks like
+    let src = "AA BBBBBB";
+    let rust = "async {\n  aaaaaa\n  bb\n}\n";
+    let program = pair_program(rust, ("aaaaaa", (0, 2)), ("bb", (3, 9)));
+    assert_eq!(
+        across(rust, &program, src, "aaaaaa", "bb"),
+        (Expression, "BBBBBB".to_string())
+    );
+}
+
+#[test]
+fn n12_the_anchor_searches_every_child_and_grandchild_and_accepts_any_precision() {
+    let (src, program) = mini();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen);
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let inside = jspan("gen.rs", f.generated.end - 3, f.generated.end - 2);
+    let d = jdiag(
+        json!({"message": "m", "level": "error", "spans": [jspan("other.rs", 1, 2)], "children": [
+            {"message": "c1", "level": "note", "spans": [jspan("other.rs", 1, 2)], "children": []},
+            {"message": "c2", "level": "note", "spans": [], "children": [
+                {"message": "g", "level": "help", "spans": [jspan("other.rs", 3, 4), inside], "children": []}]},
+            {"message": "c3", "level": "note", "spans": [jspan("gen.rs", 0, 1)], "children": []}
+        ]}),
+    );
+    let anchor_owner = r.remap(&d);
+    let anchor = anchor_owner.anchor().expect("the grandchild's span maps");
+    assert_eq!(anchor.precision, Exact);
+    assert_eq!(
+        anchor.marigold.as_ref().unwrap().range.end,
+        f.source.end - 2
+    );
+
+    // a Segment-precise primary span is an anchor too (the anchor is not "the best span")
+    let seg = program
+        .map
+        .segments()
+        .iter()
+        .find(|s| s.kind == SegmentKind::NonReturningStream)
+        .unwrap()
+        .clone();
+    let d = jdiag(json!({"message": "m", "level": "error", "children": [],
+        "spans": [jspan("gen.rs", seg.generated.start + 2, seg.generated.start + 4)]}));
+    let mapped = r.remap(&d);
+    let anchor = mapped.anchor().unwrap();
+    assert_eq!(anchor.precision, Seg);
+    assert_eq!(
+        anchor.marigold.as_ref().unwrap().range.start,
+        seg.source.start
+    );
+}
+
+#[test]
+fn n13_only_warnings_can_be_noise() {
+    let (src, program) = mini();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen);
+    for level in [
+        "error",
+        "note",
+        "help",
+        "failure-note",
+        "error: internal compiler error",
+        "future-level",
+    ] {
+        let d = jdiag(
+            json!({"message": "m", "level": level, "spans": [jspan("other.rs", 1, 2)], "children": []}),
+        );
+        assert!(!r.remap(&d).likely_generated_noise(), "{level}");
+    }
+    let d = jdiag(
+        json!({"message": "m", "level": "warning", "spans": [jspan("other.rs", 1, 2)], "children": []}),
+    );
+    assert!(r.remap(&d).likely_generated_noise());
+}
+
+#[test]
+fn n14_is_primary_is_copied_per_span() {
+    let (src, program) = mini();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen);
+    let sp =
+        |p: bool| json!({"file_name": "gen.rs", "byte_start": 10, "byte_end": 11, "is_primary": p});
+    let d = jdiag(json!({"message": "m", "level": "error", "children": [],
+        "spans": [sp(false), sp(true), sp(false), sp(true)]}));
+    let m = r.remap(&d);
+    assert!(m.primary.as_ref().unwrap().is_primary);
+    let flags: Vec<bool> = m.secondary.iter().map(|s| s.is_primary).collect();
+    assert_eq!(flags, [false, false, true]);
+    // no flagged span: the first one stands in as primary but keeps what rustc said
+    let d = jdiag(
+        json!({"message": "m", "level": "error", "children": [], "spans": [sp(false), sp(false)]}),
+    );
+    let m = r.remap(&d);
+    assert!(!m.primary.as_ref().unwrap().is_primary && !m.secondary[0].is_primary);
+}
+
+#[test]
+fn n15_the_raw_span_keeps_all_the_numbers_rustc_reported() {
+    let mut n = 0;
+    let mut multi_line = 0;
+    fn walk(d: &RustcDiagnostic, f: &mut impl FnMut(&RustcSpan)) {
+        d.spans.iter().for_each(&mut *f);
+        d.children.iter().for_each(|c| walk(c, f));
+    }
+    for name in fixture_names() {
+        let fx = load(&name);
+        remapper!(fx, r);
+        for d in &fx.diags {
+            walk(d, &mut |s| {
+                let raw = r.map_span(s).raw.unwrap();
+                assert_eq!(
+                    (
+                        raw.file_name.as_str(),
+                        raw.byte_start,
+                        raw.byte_end,
+                        raw.line_start,
+                        raw.line_end,
+                        raw.column_start,
+                        raw.column_end
+                    ),
+                    (
+                        s.file_name.as_str(),
+                        s.byte_start,
+                        s.byte_end,
+                        s.line_start,
+                        s.line_end,
+                        s.column_start,
+                        s.column_end
+                    ),
+                    "{name}"
+                );
+                n += 1;
+                multi_line += usize::from(s.line_start != s.line_end);
+            });
+        }
+    }
+    assert!(
+        n > 100 && multi_line > 0,
+        "{n} spans, {multi_line} multi-line"
+    );
+}
+
+fn lc(text: &str, off: usize) -> (usize, usize) {
+    let before = &text[..off];
+    (
+        before.matches('\n').count() + 1,
+        before[before.rfind('\n').map_or(0, |i| i + 1)..]
+            .chars()
+            .count()
+            + 1,
+    )
+}
+
+#[test]
+fn n16_the_checksum_compares_the_end_column_the_text_and_every_reported_number() {
+    let (src, program) = mini();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen);
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let plus = f.generated.start + program.rust[f.generated.start..].find('+').unwrap();
+    let (line, col) = lc(&program.rust, plus);
+    let line_text = program.rust.lines().nth(line - 1).unwrap().to_string();
+    let stale = Precision::Unmapped {
+        reason: UnmappedReason::StaleGeneratedFile,
+    };
+    // the highlight's end must be the recomputed end column, text and numbers agreeing otherwise
+    let with = |highlight_end: usize, text: &str| {
+        jdiag(
+            json!({"message": "m", "level": "error", "children": [], "spans": [{
+            "file_name": "gen.rs", "byte_start": plus, "byte_end": plus + 1,
+            "line_start": line, "line_end": line, "column_start": col, "column_end": col + 1,
+            "is_primary": true,
+            "text": [{"text": text, "highlight_start": col, "highlight_end": highlight_end}]}]}),
+        )
+    };
+    assert_eq!(
+        r.remap(&with(col + 1, &line_text))
+            .primary
+            .unwrap()
+            .precision,
+        Exact
+    );
+    assert_eq!(
+        r.remap(&with(col + 2, &line_text))
+            .primary
+            .unwrap()
+            .precision,
+        stale
+    );
+    // the text is compared exactly, trailing and leading white space included
+    for text in [format!("{line_text}  "), format!(" {line_text}")] {
+        assert_eq!(
+            r.remap(&with(col + 1, &text)).primary.unwrap().precision,
+            stale,
+            "{text:?}"
+        );
+    }
+    // any non-zero reported number switches the whole check on: a lone number is not enough
+    for field in ["line_start", "line_end"] {
+        for value in [line, line + 1] {
+            let d = jdiag(
+                json!({"message": "m", "level": "error", "children": [], "spans": [{
+                "file_name": "gen.rs", "byte_start": plus, "byte_end": plus + 1, field: value}]}),
+            );
+            assert_eq!(
+                r.remap(&d).primary.unwrap().precision,
+                stale,
+                "{field}={value}"
+            );
+        }
+    }
+    // all four zero: not provided, bytes alone decide
+    let d = jdiag(
+        json!({"message": "m", "level": "error", "children": [], "spans": [
+        {"file_name": "gen.rs", "byte_start": plus, "byte_end": plus + 1}]}),
+    );
+    assert_eq!(r.remap(&d).primary.unwrap().precision, Exact);
+}
+
+#[test]
+fn n17_a_multi_line_span_starting_on_the_prefixed_first_line_is_consistent() {
+    let (src, program) = mini();
+    let prefix = "fn main() {\n    ";
+    let file = format!("{prefix}{}", program.rust);
+    let (a, b) = (
+        prefix.len(),
+        prefix.len() + program.rust.find("\n\n").unwrap() + 1,
+    );
+    let sp = rustc_span("gen.rs", &file, a, b, true);
+    assert!(sp.line_end > sp.line_start);
+    let m = map_one(&src, &program, prefix, &sp);
+    assert!(
+        !matches!(
+            m.precision,
+            Precision::Unmapped {
+                reason: UnmappedReason::StaleGeneratedFile
+            }
+        ),
+        "{m:?}"
+    );
+    // ... and a first line that is not highlighted to its end is not
+    let mut short = sp.clone();
+    short.text[0].highlight_end -= 1;
+    assert_unmapped(
+        &map_one(&src, &program, prefix, &short),
+        UnmappedReason::StaleGeneratedFile,
+    );
+}
+
+#[test]
+fn n18_a_lone_carriage_return_is_an_ordinary_column() {
+    // rustc 1.97 (measured): only `\r\n` loses its `\r`; a lone one stays in `text` and is a column.
+    let rust = "fn main() { let a = 1;\r let _b: u8 = \"x\"; let _ = a; }\nfn z() {}\n";
+    let program = GeneratedProgram::new(rust.to_string(), SourceMap::new(vec![]));
+    let is_gen = |name: &str| name == "cr.rs";
+    let r = Remapper::new(&program, "", &is_gen);
+    let d = jdiag(
+        json!({"message": "m", "level": "error", "children": [], "spans": [{
+        "file_name": "cr.rs", "byte_start": 37, "byte_end": 40,
+        "line_start": 1, "line_end": 1, "column_start": 38, "column_end": 41, "is_primary": true,
+        "text": [{"text": "fn main() { let a = 1;\r let _b: u8 = \"x\"; let _ = a; }",
+                  "highlight_start": 38, "highlight_end": 41}]}]}),
+    );
+    assert_unmapped(r.remap(&d).primary.as_ref().unwrap(), UnmappedReason::Glue);
+}
+
+#[test]
+fn n19_the_old_rustc_shape_needs_both_spans_and_level() {
+    for (line, is_diagnostic) in [
+        (r#"{"spans":[]}"#, false),
+        (r#"{"level":"error"}"#, false),
+        (r#"{"message":"m","children":[]}"#, false),
+        (r#"{"spans":[],"level":"error","message":"m"}"#, true),
+    ] {
+        let got = parse_message_line(line).unwrap();
+        assert_eq!(got.is_some(), is_diagnostic, "{line}");
+    }
+}
+
+#[test]
+fn n20_trace_delimiters_cut_the_file_name_exactly() {
+    let (src, program) = mini();
+    let is_gen = |name: &str| name == "src/gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen);
+    for d in ['"', '\'', '(', '[', '<', '`', ' ', '\t', '\n'] {
+        let text = format!("x{d}src/gen.rs:3:4 tail");
+        let hits = r.remap_trace(&text);
+        assert_eq!(hits.len(), 1, "{d:?}");
+        assert_eq!(
+            &text[hits[0].token.start..hits[0].token.end],
+            "src/gen.rs:3:4",
+            "{d:?}"
+        );
+    }
+    // no delimiter: the file would be `xsrc/gen.rs`, which is not ours
+    assert!(r.remap_trace("xsrc/gen.rs:3:4").is_empty());
+}
+
+#[test]
+fn n21_the_api_exposes_what_the_next_stages_need() {
+    let (src, program) = mini();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen).with_prefix("ab\n  ");
+    assert!(std::ptr::eq(r.program(), &program));
+    assert_eq!(r.source(), src);
+    assert_eq!((r.prefix_len(), r.unusable_segments()), (5, 0));
+    // a segment index names the segment in the map
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let plus = f.generated.start + program.rust[f.generated.start..].find('+').unwrap();
+    let m = r
+        .map_span(&rustc_span(
+            "gen.rs",
+            &format!("ab\n  {}", program.rust),
+            plus + 5,
+            plus + 6,
+            true,
+        ))
+        .segment
+        .unwrap();
+    assert_eq!(program.map.segments()[m.index], f);
+    // segments that do not fit the program are counted, and their bytes read as glue
+    let bad = Segment::new(
+        br(0, program.rust.len() + 10),
+        br(0, 3),
+        SegmentKind::Struct,
+        9,
+        None,
+    );
+    let empty = Segment::new(br(4, 4), br(0, 0), SegmentKind::Struct, 9, None);
+    let mut segments = program.map.segments().to_vec();
+    segments.push(bad);
+    segments.push(empty);
+    let broken = GeneratedProgram::new(program.rust.clone(), SourceMap::new(segments));
+    let r = Remapper::new(&broken, &src, &is_gen);
+    assert_eq!(r.unusable_segments(), 2);
+    // a located line is the classification of the line alone
+    let line = program.rust[..plus].matches('\n').count() + 1;
+    let located = r.locate_line("gen.rs", line);
+    assert_eq!(
+        located,
+        r.locate("gen.rs", line, None, ColumnUnit::Utf8Bytes)
+    );
+    assert!(located.marigold.is_some(), "{located:?}");
+    assert_unmapped(
+        &r.locate_line("other.rs", line),
+        UnmappedReason::ForeignFile,
+    );
+}
+
+/// One row per span of a mapped diagnostic and of its children, in the shape of `expected.jsonl`.
+fn golden_rows(m: &MappedDiagnostic, path: Vec<usize>, src: &str, out: &mut Vec<Value>) {
+    let mut spans: Vec<(&str, &MappedSpan)> = vec![];
+    if let Some(p) = &m.primary {
+        spans.push(("primary", p));
+    }
+    spans.extend(m.secondary.iter().map(|s| ("secondary", s)));
+    if spans.is_empty() {
+        out.push(json!({
+            "diag": path, "role": "none", "precision": "unmapped", "reason": "no_span", "range": null,
+            "slice": null, "start_lc": null, "end_lc": null, "segment": null, "via_macro": null,
+            "label": null, "suggestion": null
+        }));
+    }
+    for (role, s) in spans {
+        let (precision, reason) = match s.precision {
+            Precision::Unmapped { reason } => (
+                "unmapped".to_string(),
+                serde_json::to_value(reason).unwrap(),
+            ),
+            p => (
+                serde_json::to_value(p).unwrap()["kind"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+                Value::Null,
+            ),
+        };
+        let mut row = json!({
+            "diag": path, "role": role, "precision": precision, "reason": reason, "range": null,
+            "slice": null, "start_lc": null, "end_lc": null, "segment": null, "via_macro": s.via_macro,
+            "label": s.label, "suggestion": s.suggestion.as_ref().map(|g| g.replacement.clone()),
+        });
+        if let Some(loc) = &s.marigold {
+            row["range"] = json!([loc.range.start, loc.range.end]);
+            row["slice"] = json!(&src[loc.range.start..loc.range.end]);
+            row["start_lc"] = json!([loc.start.line, loc.start.column]);
+            row["end_lc"] = json!([loc.end.line, loc.end.column]);
+            let sg = s.segment.as_ref().unwrap();
+            row["segment"] = json!([
+                serde_json::to_value(sg.kind).unwrap(),
+                sg.expr_index,
+                sg.name
+            ]);
+        }
+        out.push(row);
+    }
+    for (i, c) in m.children.iter().enumerate() {
+        let mut p = path.clone();
+        p.push(i);
+        golden_rows(c, p, src, out);
+    }
+}
+
+#[test]
+fn n22_every_real_span_agrees_with_the_frozen_output_of_the_independent_oracle() {
+    // `expected.jsonl` is the output of a separate implementation of the mapping rules (a Python
+    // script written from the specification, never from this crate), frozen once per fixture.
+    let mut total = 0;
+    for name in fixture_names() {
+        let fx = load(&name);
+        remapper!(fx, r);
+        let mut got = vec![];
+        for (n, d) in fx.diags.iter().enumerate() {
+            golden_rows(&r.remap(d), vec![n], &fx.src, &mut got);
+        }
+        let mut want: Vec<Value> = read(&name, "expected.jsonl")
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        got.sort_by_key(|v| v.to_string());
+        want.sort_by_key(|v| v.to_string());
+        assert_eq!(got.len(), want.len(), "{name}");
+        for (g, w) in got.iter().zip(&want) {
+            assert_eq!(g, w, "{name}");
+        }
+        total += got.len();
+    }
+    assert!(total >= 160, "{total}");
 }

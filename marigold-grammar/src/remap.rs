@@ -14,9 +14,14 @@
 //! [`Precision`], from best to worst:
 //!
 //! * [`Precision::Exact`]: the generated text is proven byte-for-byte identical to the
-//!   Marigold text. Today that is the body of a Marigold `fn`, which is copied through
-//!   (the generated `const ` before `fn` is not part of it). The range is the exact
-//!   same text in the Marigold source, and a zero-width insertion point stays zero-width.
+//!   Marigold text. Two things are proven that way (see `verbatim_len`): a segment whose
+//!   whole generated text equals its Marigold text (any kind: the finer-grained body of a
+//!   function is one), and, for a `fn` ([`SegmentKind::Function`]) alone, the common tail of
+//!   its generated and Marigold text, because the generated code is `const ` plus the source.
+//!   The range is the exact same text in the Marigold source, and a zero-width insertion
+//!   point stays zero-width. A kind that is only *partly* verbatim (a function signature
+//!   that is generated as `const fn <signature>`) is [`Precision::Segment`], never a guessed
+//!   sub-range: a shared last byte such as `)` proves nothing.
 //! * [`Precision::Segment`]: the span lies inside one [`Segment`];
 //!   the range is that segment's whole source (never a guessed sub-range).
 //! * [`Precision::Expression`]: the span leaves its segment into generated glue or into
@@ -45,6 +50,79 @@
 //!
 //! Compile-time and run-time positions use different column units; see [`ColumnUnit`].
 //!
+//! # Recipes
+//!
+//! **Compile errors.** Read cargo's stream with [`rustc_json::parse_messages`](crate::rustc_json::parse_messages),
+//! keep the records of your package (`package_id`, or `manifest_path` of the record), decide
+//! "is this the generated file" with a closure over [`lexical_path_matches`], build one
+//! [`Remapper`] per generated program, call [`Remapper::remap`] on each diagnostic and show
+//! [`MappedDiagnostic::anchor`] (skipping [`MappedDiagnostic::likely_generated_noise`]):
+//!
+//! ```
+//! use marigold_grammar::marigold_generate;
+//! use marigold_grammar::remap::{lexical_path_matches, Precision, Remapper};
+//! use marigold_grammar::rustc_json::parse_messages;
+//! use std::path::Path;
+//!
+//! let src = "fn f(x: i32) -> i32 { x }\nrange(0, 1).map(f).return";
+//! let program = marigold_generate(src).unwrap();
+//! let at = program.rust.find("{ x }").unwrap() + 2;
+//! // What `cargo build --message-format=json` printed (shortened).
+//! let stream = format!(
+//!     "{{\"reason\":\"compiler-message\",\"package_id\":\"app 0.1.0\",\"message\":{{\"message\":\"m\",\"level\":\"error\",\"children\":[],\"spans\":[{{\"file_name\":\"src/gen.rs\",\"byte_start\":{at},\"byte_end\":{},\"is_primary\":true}}]}}}}\n",
+//!     at + 1,
+//! );
+//! let root = Path::new("/work/app");
+//! let generated = Path::new("/work/app/src/gen.rs");
+//! let is_generated = |file: &str| lexical_path_matches(root, file, generated);
+//! let remapper = Remapper::new(&program, src, &is_generated);
+//! let parsed = parse_messages(&stream);
+//! let shown: Vec<_> = parsed.messages.iter()
+//!     .filter(|m| m.package_id.as_deref() == Some("app 0.1.0"))
+//!     .map(|m| remapper.remap(&m.diagnostic))
+//!     .filter(|d| !d.likely_generated_noise())
+//!     .filter_map(|d| d.anchor().map(|a| a.precision))
+//!     .collect();
+//! assert_eq!(shown, [Precision::Exact]);
+//! ```
+//!
+//! **Panics.** [`Remapper::remap_trace`] returns the `file:line:column` tokens of a panic
+//! message or backtrace with their byte range in the text. Splice the Marigold position in
+//! place of each token, last to first so the earlier ranges stay valid:
+//!
+//! ```
+//! use marigold_grammar::marigold_generate;
+//! use marigold_grammar::remap::Remapper;
+//!
+//! let src = "fn f(x: i32) -> i32 { x }\nrange(0, 1).map(f).return";
+//! let program = marigold_generate(src).unwrap();
+//! let is_generated = |file: &str| file == "src/gen.rs";
+//! let remapper = Remapper::new(&program, src, &is_generated);
+//! let at = program.rust.find("{ x }").unwrap() + 2;
+//! let line = program.rust[..at].matches('\n').count() + 1;
+//! let column = at - program.rust[..at].rfind('\n').map_or(0, |i| i + 1) + 1;
+//! let mut text = format!("thread 'main' panicked at src/gen.rs:{line}:{column}:\nboom");
+//! for hit in remapper.remap_trace(&text.clone()).iter().rev() {
+//!     if let Some(m) = hit.mapped.marigold.as_ref() {
+//!         text.replace_range(hit.token.start..hit.token.end, &format!("<marigold>:{}:{}", m.start.line, m.start.column));
+//!     }
+//! }
+//! assert!(text.contains("panicked at <marigold>:1:23:"), "{text}");
+//! ```
+//!
+//! # Limits, honestly
+//!
+//! * Today's `marigold::m!(..)` macro hands rustc one expansion; an error in it has a single
+//!   span that points into the macro call, which is a file that is not the generated one:
+//!   such errors are [`UnmappedReason::ForeignFile`]. Mapping needs the generated code to be
+//!   a real file (`include!`, or a wrapper declared with [`Remapper::with_prefix`]).
+//! * [`Remapper::locate`] and [`Remapper::remap_trace`] work on bare line and column numbers
+//!   and cannot check them against rustc's source text, so they have no staleness check:
+//!   they believe that the file they were given is the one that ran.
+//! * The display-width table used for panic columns (`DisplayWidth`) was measured with
+//!   rustc 1.97 for a set of ranges and is not total: a character outside it makes the
+//!   column untrusted (at best [`Precision::Segment`]).
+//!
 //! # What is not translated
 //!
 //! * `rendered`, the `raw` span and the *message text* talk about generated code (names
@@ -52,9 +130,11 @@
 //!   if they were Marigold.
 //! * Suggestions (`suggested_replacement`) edit generated text. They are carried
 //!   along and flagged with [`Suggestion::applicable_to_marigold`], which is true only
-//!   for a replacement of an [`Precision::Exact`] span.
+//!   when *every* replacement of the diagnostic (a multipart suggestion has several) is
+//!   for an [`Precision::Exact`] span reached directly.
 //! * Warnings from glue the user never wrote (rustc reports 1-3 `unused_mut` warnings
-//!   for every program) are recognisable with [`MappedDiagnostic::likely_generated_noise`].
+//!   for every program) are recognisable with [`MappedDiagnostic::likely_generated_noise`]:
+//!   a warning is not noise when it points into code the user wrote, at any precision.
 //!
 //! ```
 //! use marigold_grammar::marigold_generate;
@@ -172,10 +252,14 @@ pub struct MarigoldLocation {
 /// let line = program.rust[..program.rust.find("const fn").unwrap()].matches('\n').count() + 1;
 /// let segment = remapper.locate("x.rs", line, None, ColumnUnit::ScalarValues).segment.unwrap();
 /// assert_eq!((segment.kind, segment.expr_index, segment.name.as_deref()), (SegmentKind::Function, 0, Some("f")));
+/// assert_eq!(program.map.segments()[segment.index].kind, SegmentKind::Function);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct SegmentRef {
+    /// Index of the segment in [`SourceMap::segments`](crate::source_map::SourceMap::segments)
+    /// of the program given to the remapper.
+    pub index: usize,
     /// What kind of expression produced the code.
     pub kind: SegmentKind,
     /// Index of the expression among the top-level expressions of the program.
@@ -197,9 +281,6 @@ pub struct SegmentRef {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum UnmappedReason {
-    /// The diagnostic has no span. The library reports this as `primary: None`; the
-    /// variant exists for consumers that need a value for "no span".
-    NoSpan,
     /// The span is in a file that is not the generated one (the standard library, the
     /// hand-written wrapper around the generated code, ...) and no macro expansion leads
     /// back into the generated file.
@@ -305,6 +386,7 @@ pub struct ReportedSpan {
 /// let suggestion = remapper.map_span(&span).suggestion.unwrap();
 /// assert_eq!(suggestion.replacement, "");
 /// assert_eq!(suggestion.applicability.as_deref(), Some("MachineApplicable"));
+/// assert_eq!((suggestion.part, suggestion.parts), (0, 1));
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
@@ -313,11 +395,20 @@ pub struct Suggestion {
     pub replacement: String,
     /// rustc's applicability (`MachineApplicable`, `MaybeIncorrect`, ...).
     pub applicability: Option<String>,
-    /// Whether the replacement can be applied to the Marigold source at
-    /// [`MappedSpan::marigold`]: only when that span is [`Precision::Exact`] and rustc
-    /// pointed at it directly (not through a macro call site). A suggestion that edits
-    /// generated text, like "a tuple variant with a similar name exists: `Ok`", is
-    /// never applicable.
+    /// Position of this replacement among the replacements of its diagnostic, in rustc's
+    /// span order, from 0. A single mapped span ([`Remapper::map_span`]) is part 0 of 1.
+    pub part: usize,
+    /// How many spans of the diagnostic carry a replacement. More than one is a multipart
+    /// suggestion (like "try wrapping the expression in `Some`": insert `Some(` here and
+    /// `)` there), which is only meaningful as a whole.
+    pub parts: usize,
+    /// Whether the suggestion can be applied to the Marigold source. It is decided for the
+    /// whole diagnostic and is the same on every part: true only when *every* span of the
+    /// diagnostic that carries a replacement is [`Precision::Exact`] and was reached
+    /// directly (not through a macro call site). Applying one half of a multipart
+    /// suggestion would break the program, so one inexact part makes all of them false. A
+    /// suggestion that edits generated text, like "a tuple variant with a similar name
+    /// exists: `Ok`", is never applicable.
     pub applicable_to_marigold: bool,
 }
 
@@ -439,13 +530,47 @@ impl MappedDiagnostic {
             .or_else(|| self.children.iter().find_map(MappedDiagnostic::anchor))
     }
 
+    /// The spans of this diagnostic (not its children) that carry a suggested replacement,
+    /// in rustc's order. A multipart suggestion has several; see [`Suggestion::parts`].
+    ///
+    /// ```
+    /// use marigold_grammar::marigold_generate;
+    /// use marigold_grammar::remap::Remapper;
+    /// use marigold_grammar::rustc_json::parse_message_line;
+    ///
+    /// let src = "range(0, 1).return";
+    /// let program = marigold_generate(src).unwrap();
+    /// let is_generated = |file: &str| file == "gen.rs";
+    /// let remapper = Remapper::new(&program, src, &is_generated);
+    /// let line = r#"{"$message_type":"diagnostic","message":"m","level":"help","children":[],"spans":[
+    ///     {"file_name":"gen.rs","byte_start":0,"byte_end":0,"suggested_replacement":"Some("},
+    ///     {"file_name":"gen.rs","byte_start":3,"byte_end":3,"suggested_replacement":")"}]}"#;
+    /// let mapped = remapper.remap(&parse_message_line(line).unwrap().unwrap().diagnostic);
+    /// let parts: Vec<_> = mapped.suggestion_spans().iter().map(|s| s.suggestion.as_ref().unwrap().replacement.as_str()).collect();
+    /// assert_eq!(parts, ["Some(", ")"]);
+    /// ```
+    pub fn suggestion_spans(&self) -> Vec<&MappedSpan> {
+        let mut spans: Vec<&MappedSpan> = self
+            .primary
+            .iter()
+            .chain(self.secondary.iter())
+            .filter(|s| s.suggestion.is_some())
+            .collect();
+        spans.sort_by_key(|s| s.suggestion.as_ref().map_or(0, |g| g.part));
+        spans
+    }
+
     /// Whether this is probably a warning about code the user did not write.
     ///
-    /// True for a warning whose [`anchor`](Self::anchor) is missing or not
-    /// [`Precision::Exact`]: a lint that is not provably about the user's own text (rustc
-    /// emits one to three `unused_mut` warnings for every program, from generated glue).
-    /// Errors are never noise. This is a heuristic for filtering; it does not look at the
-    /// lint's name.
+    /// True for a warning whose [`anchor`](Self::anchor) is missing, or is not in code the
+    /// user wrote (stream wiring, the preamble, glue): a lint that is not provably about the
+    /// user's own text (rustc emits one to three `unused_mut` warnings for every program,
+    /// from generated glue). Text is the user's when it is a Marigold `fn` (by the *kind* of
+    /// the anchor's segment, at any precision: `unused variable` on a parameter in a
+    /// signature that is only [`Precision::Segment`] is shown) or when it is proven
+    /// byte-identical to the Marigold text ([`Precision::Exact`], of any kind). Errors,
+    /// notes and help are never noise. This is a heuristic for filtering; it does not look
+    /// at the lint's name.
     ///
     /// ```
     /// use marigold_grammar::marigold_generate;
@@ -466,9 +591,13 @@ impl MappedDiagnostic {
     /// ```
     pub fn likely_generated_noise(&self) -> bool {
         self.level == Level::Warning
-            && self
-                .anchor()
-                .is_none_or(|s| s.precision != Precision::Exact)
+            && !self.anchor().is_some_and(|anchor| {
+                anchor.precision == Precision::Exact
+                    || anchor
+                        .segment
+                        .as_ref()
+                        .is_some_and(|segment| is_user_authored(segment.kind))
+            })
     }
 }
 
@@ -477,12 +606,15 @@ impl MappedDiagnostic {
 /// | where the column comes from | unit |
 /// |---|---|
 /// | rustc's JSON diagnostics (`column_start`, ...) | [`ScalarValues`](Self::ScalarValues) |
-/// | the panic message `panicked at src/gen.rs:4:43`, `Location::caller()`, `column!()` | [`DisplayWidth`](Self::DisplayWidth) |
+/// | the `column!()` macro | [`ScalarValues`](Self::ScalarValues) |
+/// | the panic message `panicked at src/gen.rs:4:43`, `Location::caller().column()` | [`DisplayWidth`](Self::DisplayWidth) |
 /// | a backtrace frame `at ./src/gen.rs:4:48` (DWARF) | [`Utf8Bytes`](Self::Utf8Bytes) |
 ///
 /// On a line with text outside ASCII they disagree: for a `panic!` after `"héllo→日本"`
 /// the scalar column is 41, the display column 43 and the byte column 48. Rows were
-/// measured with rustc 1.97; see [`Remapper::locate`] for how unknown characters are treated.
+/// measured with rustc 1.97 (`column!()` 63 and `Location::caller().column()` 76 on one
+/// line, where the byte column was 67); see [`Remapper::locate`] for how unknown characters
+/// are treated.
 ///
 /// ```
 /// use marigold_grammar::remap::ColumnUnit;
@@ -531,7 +663,36 @@ pub struct TracedLocation {
     /// The unit the column is in, from the context it was found in.
     pub unit: ColumnUnit,
     /// The result of [`Remapper::locate`] for this location.
-    pub mapped: MappedSpan,
+    pub mapped: Located,
+}
+
+/// Where a run-time location (a line, optionally a column) in the generated file is in
+/// the Marigold source: the result of [`Remapper::locate`].
+///
+/// It has the fields of a [`MappedSpan`] that make sense without a rustc span: no flags,
+/// label, raw span, macro or suggestion.
+///
+/// ```
+/// use marigold_grammar::marigold_generate;
+/// use marigold_grammar::remap::{Precision, Remapper};
+///
+/// let src = "range(0, 1).return";
+/// let program = marigold_generate(src).unwrap();
+/// let is_generated = |file: &str| file == "gen.rs";
+/// let remapper = Remapper::new(&program, src, &is_generated);
+/// let located = remapper.locate_line("gen.rs", 1);
+/// assert!(matches!(located.precision, Precision::Unmapped { .. }) && located.marigold.is_none());
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct Located {
+    /// Where it is in the Marigold source; `None` exactly when
+    /// [`precision`](Self::precision) is [`Precision::Unmapped`].
+    pub marigold: Option<MarigoldLocation>,
+    /// How far to trust `marigold`.
+    pub precision: Precision,
+    /// The segment the location was attributed to; present exactly when mapped.
+    pub segment: Option<SegmentRef>,
 }
 
 /// One usable segment of the source map, with the data needed to look spans up.
@@ -548,7 +709,7 @@ struct Slot {
     /// Whether the Marigold range fits the source (in bounds, on character boundaries).
     source_ok: bool,
     /// Length in bytes of the part at the end of the generated range that is byte-identical
-    /// to the end of the Marigold range. Zero unless this is a `Function`.
+    /// to the end of the Marigold range (see `verbatim_len`); zero when nothing is proven.
     verbatim: usize,
 }
 
@@ -567,6 +728,29 @@ thread_local! {
     static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Parent links followed while looking for the innermost segment around a position.
     static WALKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// One entry per binary search: the length of the searched slice and how often the
+    /// predicate was called.
+    static SEARCHES: std::cell::RefCell<Vec<(usize, usize)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The first index of `items` at which `pred` is false, for a `pred` that is true on a prefix.
+///
+/// Every binary search of the remapper goes through here, so that the tests can count the
+/// searches and their predicate calls.
+#[cfg(test)]
+fn search<T>(items: &[T], mut pred: impl FnMut(&T) -> bool) -> usize {
+    let mut probes = 0;
+    let at = items.partition_point(|item| {
+        probes += 1;
+        pred(item)
+    });
+    SEARCHES.with(|log| log.borrow_mut().push((items.len(), probes)));
+    at
+}
+
+#[cfg(not(test))]
+fn search<T>(items: &[T], pred: impl FnMut(&T) -> bool) -> usize {
+    items.partition_point(pred)
 }
 
 #[cfg(test)]
@@ -625,6 +809,8 @@ pub struct Remapper<'a> {
     rust_lines: Vec<usize>,
     /// Byte offsets where the lines of the Marigold source start.
     source_lines: Vec<usize>,
+    /// Segments whose generated range does not fit the program.
+    unusable: usize,
 }
 
 impl<'a> Remapper<'a> {
@@ -659,10 +845,12 @@ impl<'a> Remapper<'a> {
         let mut slots: Vec<Slot> = Vec::new();
         let mut open: Vec<usize> = Vec::new();
         let mut max_end = 0;
+        let mut unusable = 0;
         for (index, segment) in program.map.segments().iter().enumerate() {
             let g = segment.generated;
             // A segment that does not fit the program cannot be placed.
             if g.start >= g.end || g.end > rust.len() {
+                unusable += 1;
                 continue;
             }
             while let Some(&top) = open.last() {
@@ -674,8 +862,8 @@ impl<'a> Remapper<'a> {
             }
             max_end = max_end.max(g.end);
             let source_ok = source_range_fits(source, segment.source);
-            let verbatim = if source_ok && segment.kind == SegmentKind::Function {
-                verbatim_len(rust, g, source, segment.source)
+            let verbatim = if source_ok {
+                verbatim_len(segment.kind, rust, g, source, segment.source)
             } else {
                 0
             };
@@ -701,14 +889,49 @@ impl<'a> Remapper<'a> {
             slots,
             rust_lines: line_starts(rust),
             source_lines: line_starts(source),
+            unusable,
         }
+    }
+
+    /// The generated program this remapper was built for.
+    pub fn program(&self) -> &'a GeneratedProgram {
+        self.program
+    }
+
+    /// The Marigold source this remapper was built for.
+    pub fn source(&self) -> &'a str {
+        self.source
+    }
+
+    /// Bytes of the generated file before the program, as declared with
+    /// [`with_prefix`](Self::with_prefix); 0 when none was.
+    pub fn prefix_len(&self) -> usize {
+        self.prefix_len
+    }
+
+    /// How many segments of the source map cannot be used because their generated range is
+    /// empty or does not lie inside the program. Their bytes read as glue; a non-zero count
+    /// means the source map and the generated text do not belong together.
+    ///
+    /// ```
+    /// use marigold_grammar::marigold_generate;
+    /// use marigold_grammar::remap::Remapper;
+    ///
+    /// let src = "range(0, 1).return";
+    /// let program = marigold_generate(src).unwrap();
+    /// let is_generated = |_: &str| true;
+    /// assert_eq!(Remapper::new(&program, src, &is_generated).unusable_segments(), 0);
+    /// ```
+    pub fn unusable_segments(&self) -> usize {
+        self.unusable
     }
 
     /// Declare the bytes of the generated file that come before `program.rust`.
     ///
     /// A wrapper like `#[tokio::main]\nasync fn main() {\n    ` followed by the program
     /// shifts every byte offset, every line number and, on the program's first line,
-    /// every column. After this call rustc's numbers for the *file* are understood;
+    /// every column. A leading byte order mark counts as bytes but not as a column, like
+    /// in rustc. After this call rustc's numbers for the *file* are understood;
     /// spans that touch the prefix, or run past the end of the program, are
     /// [`UnmappedReason::OutsideGeneratedRegion`]. Text after the program needs no
     /// declaration.
@@ -739,9 +962,12 @@ impl<'a> Remapper<'a> {
     pub fn with_prefix(mut self, prefix: &str) -> Self {
         self.prefix_len = prefix.len();
         self.prefix_newlines = prefix.bytes().filter(|&b| b == b'\n').count();
-        self.prefix_tail = prefix
+        // rustc drops a byte order mark from the text it reports: its bytes count in
+        // offsets, but they are neither a column nor part of the first line's text.
+        let visible = prefix.strip_prefix('\u{feff}').unwrap_or(prefix);
+        self.prefix_tail = visible
             .rsplit_once('\n')
-            .map_or(prefix, |(_, tail)| tail)
+            .map_or(visible, |(_, tail)| tail)
             .to_string();
         self
     }
@@ -774,6 +1000,25 @@ impl<'a> Remapper<'a> {
             .iter()
             .position(|s| s.is_primary)
             .or(if d.spans.is_empty() { None } else { Some(0) });
+        let mut spans: Vec<MappedSpan> = d.spans.iter().map(|s| self.map_span(s)).collect();
+        // A suggestion is applied as a whole: all of its parts or none.
+        let parts = spans.iter().filter(|s| s.suggestion.is_some()).count();
+        let applicable = spans
+            .iter()
+            .filter(|s| s.suggestion.is_some())
+            .all(|s| s.precision == Precision::Exact && s.via_macro.is_none());
+        for (part, span) in spans
+            .iter_mut()
+            .filter(|s| s.suggestion.is_some())
+            .enumerate()
+        {
+            if let Some(suggestion) = span.suggestion.as_mut() {
+                suggestion.part = part;
+                suggestion.parts = parts;
+                suggestion.applicable_to_marigold = applicable;
+            }
+        }
+        let primary = primary_index.map(|i| spans.remove(i));
         MappedDiagnostic {
             level: d.level.clone(),
             code: d
@@ -782,14 +1027,8 @@ impl<'a> Remapper<'a> {
                 .map(|c| c.code.clone())
                 .filter(|c| !c.is_empty()),
             message: d.message.clone(),
-            primary: primary_index.map(|i| self.map_span(&d.spans[i])),
-            secondary: d
-                .spans
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| Some(i) != primary_index)
-                .map(|(_, s)| self.map_span(s))
-                .collect(),
+            primary,
+            secondary: spans,
             children: d.children.iter().map(|c| self.remap(c)).collect(),
             rendered: d.rendered.clone(),
         }
@@ -863,6 +1102,8 @@ impl<'a> Remapper<'a> {
             .map(|replacement| Suggestion {
                 replacement: replacement.clone(),
                 applicability: s.suggestion_applicability.clone(),
+                part: 0,
+                parts: 1,
                 applicable_to_marigold: mapped.precision == Precision::Exact && via_macro.is_none(),
             });
         mapped.via_macro = via_macro;
@@ -875,19 +1116,23 @@ impl<'a> Remapper<'a> {
     /// `file` goes through the file test as given, `line` is the 1-based line in the
     /// *file* (lines of a declared prefix are subtracted; lines outside the program are
     /// [`UnmappedReason::OutsideGeneratedRegion`]). With `column` `None` or `Some(0)` the
-    /// whole line's text is classified as a span, so a line wholly inside a Marigold `fn` is
-    /// [`Precision::Exact`]. With a column, the position is converted to a byte offset in the
+    /// whole line's text is classified as a span: a line that is only the text of a Marigold
+    /// `fn` is [`Precision::Exact`], and one that also holds generated indentation before
+    /// it is [`Precision::Expression`] (it leaves the segment into glue). With a column, the position is converted to a byte offset in the
     /// unit given and classified as a zero-width position: a column inside a character, or
     /// more than one past the end of the line, is [`UnmappedReason::InvalidSpan`]. On the
     /// program's first line, columns include the declared prefix's last partial line.
     ///
-    /// Display widths come from a table verified against rustc 1.97 (ASCII, Latin, Cyrillic,
-    /// arrows, CJK, Hangul, fullwidth forms, emoji, combining marks, zero-width characters).
-    /// If a character before the column is outside that table, the column is not trusted and
-    /// the result is the classification of the whole line, at best [`Precision::Segment`].
-    /// Within a run of zero-width characters the position after them is used.
+    /// Display widths come from a table sampled against rustc 1.97 (ASCII, Latin, Cyrillic,
+    /// arrows, CJK, Hangul, fullwidth forms, emoji, combining marks, zero-width characters);
+    /// it is pinned to that version and not total. If a character before the column is
+    /// outside it, the column is not trusted and the result is the classification of the
+    /// whole line, at best [`Precision::Segment`]. Within a run of zero-width characters the
+    /// position after them is used. There is no staleness check: nothing in a bare line and
+    /// column says what the file looked like.
     ///
-    /// The result has `raw: None`, `is_primary: true`, and no label, macro or suggestion.
+    /// The result is a [`Located`]: the fields of a [`MappedSpan`] that make sense without
+    /// a rustc span.
     ///
     /// ```
     /// use marigold_grammar::marigold_generate;
@@ -915,13 +1160,35 @@ impl<'a> Remapper<'a> {
         line: usize,
         column: Option<usize>,
         unit: ColumnUnit,
-    ) -> MappedSpan {
+    ) -> Located {
         let outcome = if (self.is_generated)(file) {
             self.place_location(line, column.unwrap_or(0), unit)
         } else {
             Err(UnmappedReason::ForeignFile)
         };
-        self.assemble(true, None, outcome)
+        self.located(outcome)
+    }
+
+    /// [`locate`](Self::locate) for a line without a column, like the `file:line` of a
+    /// log record or a tracing event: the classification of the whole line's text.
+    ///
+    /// ```
+    /// use marigold_grammar::marigold_generate;
+    /// use marigold_grammar::remap::{Precision, Remapper};
+    ///
+    /// let src = "fn f(x: i32) -> i32 { x }\nrange(0, 1).map(f).write_file(\"o\", csv)";
+    /// let program = marigold_generate(src).unwrap();
+    /// let is_generated = |file: &str| file == "src/gen.rs";
+    /// let remapper = Remapper::new(&program, src, &is_generated);
+    /// let line = program.rust[..program.rust.find("{ x }").unwrap()].matches('\n').count() + 1;
+    /// // the generated line is indented, so it is the `fn` and some glue: the whole `fn`
+    /// let located = remapper.locate_line("src/gen.rs", line);
+    /// assert_eq!(located.precision, Precision::Expression);
+    /// let range = located.marigold.unwrap().range;
+    /// assert_eq!(&src[range.start..range.end], "fn f(x: i32) -> i32 { x }");
+    /// ```
+    pub fn locate_line(&self, file: &str, line: usize) -> Located {
+        self.locate(file, line, None, ColumnUnit::ScalarValues)
     }
 
     /// Find every `file:line` and `file:line:column` in `text` whose file is the
@@ -930,10 +1197,12 @@ impl<'a> Remapper<'a> {
     /// For panic output and backtraces. Hits come in text order and do not overlap.
     /// A file is the text before the location, back to the nearest whitespace, quote,
     /// `(`, `[`, `<` or backtick; a path that contains a space is therefore not
-    /// recognised, rather than guessed. The column unit follows the context: after
-    /// `panicked at` it is [`ColumnUnit::DisplayWidth`] (the panic message prints
-    /// `Location`), after a backtrace frame's `at` it is [`ColumnUnit::Utf8Bytes`], and
-    /// anywhere else [`ColumnUnit::DisplayWidth`].
+    /// recognised, rather than guessed. The column unit follows the context: the `at`
+    /// line under a numbered backtrace frame (`   2: name`) is [`ColumnUnit::Utf8Bytes`]
+    /// (DWARF), and anything else, `panicked at` and an `at file:line:col` in a message the
+    /// program formatted from a `Location`, is [`ColumnUnit::DisplayWidth`]. The
+    /// context is a guess from the text, so a program that prints its own numbered lines
+    /// followed by an `at` line can still be misread.
     ///
     /// ```
     /// use marigold_grammar::marigold_generate;
@@ -987,13 +1256,13 @@ impl<'a> Remapper<'a> {
             let file = &text[token_start..colon];
             if !file.is_empty() && (self.is_generated)(file) {
                 let before = text[..token_start].trim_end_matches([' ', '\t']);
-                let after_at = before
+                let frame = before
                     .strip_suffix("at")
-                    .is_some_and(|rest| rest.is_empty() || rest.ends_with(char::is_whitespace));
-                let unit = if before.ends_with("panicked at") || !after_at {
-                    ColumnUnit::DisplayWidth
-                } else {
+                    .is_some_and(is_frame_header_before);
+                let unit = if frame {
                     ColumnUnit::Utf8Bytes
+                } else {
+                    ColumnUnit::DisplayWidth
                 };
                 hits.push(TracedLocation {
                     token: ByteRange {
@@ -1067,22 +1336,8 @@ impl Remapper<'_> {
         label: Option<String>,
         outcome: Result<Placement, UnmappedReason>,
     ) -> MappedSpan {
-        let (precision, marigold, segment) = match outcome {
-            Ok(placement) => {
-                let slot = &self.slots[placement.slot];
-                let segment: &Segment = &self.program.map.segments()[slot.segment];
-                (
-                    placement.precision,
-                    Some(self.source_location(placement.range)),
-                    Some(SegmentRef {
-                        kind: segment.kind,
-                        expr_index: segment.expr_index,
-                        name: segment.name.clone(),
-                    }),
-                )
-            }
-            Err(reason) => (Precision::Unmapped { reason }, None, None),
-        };
+        let located = self.located(outcome);
+        let (precision, marigold, segment) = (located.precision, located.marigold, located.segment);
         MappedSpan {
             is_primary,
             label,
@@ -1092,6 +1347,30 @@ impl Remapper<'_> {
             raw: None,
             via_macro: None,
             suggestion: None,
+        }
+    }
+
+    fn located(&self, outcome: Result<Placement, UnmappedReason>) -> Located {
+        match outcome {
+            Ok(placement) => {
+                let slot = &self.slots[placement.slot];
+                let segment: &Segment = &self.program.map.segments()[slot.segment];
+                Located {
+                    marigold: Some(self.source_location(placement.range)),
+                    precision: placement.precision,
+                    segment: Some(SegmentRef {
+                        index: slot.segment,
+                        kind: segment.kind,
+                        expr_index: segment.expr_index,
+                        name: segment.name.clone(),
+                    }),
+                }
+            }
+            Err(reason) => Located {
+                marigold: None,
+                precision: Precision::Unmapped { reason },
+                segment: None,
+            },
         }
     }
 
@@ -1214,10 +1493,7 @@ impl Remapper<'_> {
 
     /// The innermost slot around position `pos` (`start <= pos < end`).
     fn innermost_at(&self, pos: usize) -> Option<usize> {
-        let mut candidate = self
-            .slots
-            .partition_point(|s| s.start <= pos)
-            .checked_sub(1);
+        let mut candidate = search(&self.slots, |s| s.start <= pos).checked_sub(1);
         while let Some(i) = candidate {
             if pos < self.slots[i].end {
                 return Some(i);
@@ -1231,7 +1507,7 @@ impl Remapper<'_> {
 
     /// The innermost slot that contains all of the non-empty `[a, b)`.
     fn innermost_containing(&self, a: usize, b: usize) -> Option<usize> {
-        let mut candidate = self.slots.partition_point(|s| s.start <= a).checked_sub(1);
+        let mut candidate = search(&self.slots, |s| s.start <= a).checked_sub(1);
         while let Some(i) = candidate {
             if b <= self.slots[i].end {
                 return Some(i);
@@ -1249,8 +1525,8 @@ impl Remapper<'_> {
         }
         // Collect the slots overlapping [a, b). Slots starting before `b` form a prefix of
         // the sorted slots; since `max_end` never decreases, none before `lower` ends after `a`.
-        let upper = self.slots.partition_point(|s| s.start < b);
-        let lower = self.slots.partition_point(|s| s.max_end <= a);
+        let upper = search(&self.slots, |s| s.start < b);
+        let lower = search(&self.slots, |s| s.max_end <= a);
         let segments = self.program.map.segments();
         let width = |i: usize| {
             let r = segments[self.slots[i].segment].source;
@@ -1403,6 +1679,18 @@ impl Remapper<'_> {
 // helpers
 // ---------------------------------------------------------------------------------------------
 
+/// Whether `before`, the text in front of an `at` that ends right before a location, is a
+/// backtrace frame's second line: the `at` starts its line, and the line above it is a frame
+/// header, `<number>:`.
+fn is_frame_header_before(before: &str) -> bool {
+    let Some(above) = before.trim_end_matches([' ', '\t']).strip_suffix('\n') else {
+        return false;
+    };
+    let header = above.rsplit('\n').next().unwrap_or("").trim_start();
+    let digits = header.bytes().take_while(u8::is_ascii_digit).count();
+    digits > 0 && header.as_bytes().get(digits) == Some(&b':')
+}
+
 /// Byte offsets where the lines of `text` start; always begins with 0.
 fn line_starts(text: &str) -> Vec<usize> {
     let mut starts = vec![0];
@@ -1417,7 +1705,7 @@ fn line_starts(text: &str) -> Vec<usize> {
 
 /// The 0-based line containing `offset`.
 fn line_index(starts: &[usize], offset: usize) -> usize {
-    starts.partition_point(|&s| s <= offset) - 1
+    search(starts, |&s| s <= offset) - 1
 }
 
 fn source_range_fits(source: &str, range: ByteRange) -> bool {
@@ -1427,14 +1715,46 @@ fn source_range_fits(source: &str, range: ByteRange) -> bool {
         && source.is_char_boundary(range.end)
 }
 
-/// Length of the longest common suffix, in bytes, of the generated and the Marigold text of a
-/// segment, shortened until it starts on a character boundary on both sides.
-fn verbatim_len(rust: &str, generated: ByteRange, source: &str, range: ByteRange) -> usize {
+/// Whether the generated text of a segment of this kind is known to *end* with the Marigold
+/// text: the generated `const fn name(..) { .. }` is the user's `fn name(..) { .. }` plus a
+/// prefix. This is a property of the kind, never of the bytes: two texts that merely share a
+/// last `)` prove nothing, so every other kind needs its whole generated text to equal its
+/// Marigold text. A function signature that is generated as `const fn <signature>` is
+/// therefore only [`Precision::Segment`] until its kind is added here.
+fn suffix_is_verbatim(kind: SegmentKind) -> bool {
+    matches!(kind, SegmentKind::Function)
+}
+
+/// Segment kinds whose text the user wrote: a warning anchored in one of them is the user's
+/// own, at any precision (see [`MappedDiagnostic::likely_generated_noise`]). Text that is
+/// proven identical to the Marigold text counts too, whatever its kind, and does not need to
+/// be listed. The finer-grained kinds of a function, a struct and an enum that are not
+/// verbatim join this list when they exist.
+fn is_user_authored(kind: SegmentKind) -> bool {
+    matches!(kind, SegmentKind::Function)
+}
+
+/// Length in bytes of the part, at the end of a segment's generated text, that is proven to be
+/// byte-identical to the end of its Marigold text, on a character boundary on both sides.
+///
+/// Two rules prove it. If the whole generated text equals the whole Marigold text, all of it
+/// is verbatim (any kind: that is data, not an assumption). If the kind is
+/// [`suffix_is_verbatim`], the longest common suffix is.
+fn verbatim_len(
+    kind: SegmentKind,
+    rust: &str,
+    generated: ByteRange,
+    source: &str,
+    range: ByteRange,
+) -> usize {
     if !rust.is_char_boundary(generated.end) {
         return 0;
     }
     let g = &rust.as_bytes()[generated.start..generated.end];
     let s = &source.as_bytes()[range.start..range.end];
+    if g != s && !suffix_is_verbatim(kind) {
+        return 0;
+    }
     let mut len = g
         .iter()
         .rev()
@@ -1460,8 +1780,10 @@ fn read_number(text: &str, from: usize) -> Option<(usize, usize)> {
     text[from..from + len].parse().ok().map(|n| (n, from + len))
 }
 
-/// Display width of `c` as `Location::caller().column()` counts it, for the characters that
-/// were verified against rustc 1.97; `None` for every other non-ASCII character.
+/// Display width of `c` as `Location::caller().column()` counts it, for the ranges that were
+/// sampled against rustc 1.97 (see the tests for the characters measured at the edges of each
+/// range); `None` for every other non-ASCII character. The table is not total and not a
+/// proof for every code point of a range: the sampling is what makes a range trusted.
 fn display_width(c: char) -> Option<usize> {
     let cp = c as u32;
     Some(match cp {
@@ -1476,7 +1798,7 @@ fn display_width(c: char) -> Option<usize> {
         0xE31 => 0,
         0x1100..=0x115F => 2,
         0x200B..=0x200D => 0,
-        0x20D0..=0x20FF => 0,
+        0x20D0..=0x20F0 => 0,
         0x2190..=0x21FF => 1,
         0x2605 => 1,
         0x3000 => 2,
@@ -1489,6 +1811,13 @@ fn display_width(c: char) -> Option<usize> {
         0x20000..=0x2FFFD | 0x30000..=0x3FFFD => 2,
         _ => return None,
     })
+}
+
+/// The display width of `c`, counting a character outside the verified table as one column.
+/// For callers that need a number whatever the trust; the remapper itself tracks the trust.
+#[allow(dead_code)]
+pub(crate) fn display_width_or_1(c: char) -> usize {
+    display_width(c).unwrap_or(1)
 }
 
 /// The width of `c` in `unit`, and whether it is trusted.
@@ -1756,19 +2085,46 @@ mod tests {
         let source = "fn f() { 1 }";
         let g = range(4, rust.len());
         assert_eq!(
-            verbatim_len(rust, g, source, range(0, source.len())),
+            verbatim_len(
+                SegmentKind::Function,
+                rust,
+                g,
+                source,
+                range(0, source.len())
+            ),
             source.len()
         );
         // nothing in common
-        assert_eq!(verbatim_len("abc", range(0, 3), "xyz", range(0, 3)), 0);
+        assert_eq!(
+            verbatim_len(
+                SegmentKind::Function,
+                "abc",
+                range(0, 3),
+                "xyz",
+                range(0, 3)
+            ),
+            0
+        );
         // the last byte of two different characters is not a region
         assert_eq!(
-            verbatim_len("\u{e9}", range(0, 2), "\u{a9}", range(0, 2)),
+            verbatim_len(
+                SegmentKind::Function,
+                "\u{e9}",
+                range(0, 2),
+                "\u{a9}",
+                range(0, 2)
+            ),
             0
         );
         // the region does not start inside a character on either side
         assert_eq!(
-            verbatim_len("a\u{e9}", range(0, 3), "\u{a9}", range(0, 2)),
+            verbatim_len(
+                SegmentKind::Function,
+                "a\u{e9}",
+                range(0, 3),
+                "\u{a9}",
+                range(0, 2)
+            ),
             0
         );
     }
@@ -1885,5 +2241,175 @@ mod tests {
             range(s0 + depth - 5, s0 + depth + 5)
         );
         assert_eq!(counters().1, 4);
+
+        // a point on the last byte of the outermost segment only: every one of the `depth - 1`
+        // inner segments that start before it is left through its parent link
+        reset();
+        let last = g0 + 2 * depth - 1;
+        let mapped = remapper.map_span(&span(last, last));
+        let location = mapped.marigold.unwrap();
+        assert_eq!(location.range, range(s0, s0 + 2 * depth));
+        assert_eq!(counters().1, depth - 1);
+    }
+
+    fn clear_searches() {
+        SEARCHES.with(|log| log.borrow_mut().clear());
+    }
+
+    fn searches() -> Vec<(usize, usize)> {
+        SEARCHES.with(|log| log.borrow().clone())
+    }
+
+    /// The most predicate calls a binary search over `len` items needs.
+    fn most_probes(len: usize) -> usize {
+        (usize::BITS - len.leading_zeros()) as usize + 1
+    }
+
+    #[test]
+    fn every_search_is_a_binary_search_and_a_lookup_makes_the_same_searches_at_any_size() {
+        for n in [10, 2_000, 40_000] {
+            let (src, program) = flat(n);
+            let is_generated = |f: &str| f == "gen.rs";
+            let remapper = Remapper::new(&program, &src, &is_generated);
+            let segment = &program.map.segments()[n / 2];
+            let at = segment.generated.end - 3;
+            // (span, number of searches): two line lookups for the checksum, then for a span
+            // the two ends of the overlapping slots and the container, for a point the
+            // innermost slot, and two line lookups in the Marigold source for the range.
+            for ((a, b), expected) in [
+                ((at, at + 1), 7),
+                ((at, at), 5),
+                ((at, segment.generated.end + 1), 7),
+            ] {
+                clear_searches();
+                let mapped = remapper.map_span(&span(a, b));
+                assert!(mapped.marigold.is_some(), "n={n} {a}..{b}: {mapped:?}");
+                let log = searches();
+                assert_eq!(log.len(), expected, "n={n} {a}..{b}: {log:?}");
+                for &(len, probes) in &log {
+                    assert!(
+                        probes <= most_probes(len),
+                        "n={n} {a}..{b}: {probes} probes over {len} items"
+                    );
+                }
+                // the searches really run over the whole index, not over a small part of it
+                assert!(log.iter().any(|&(len, _)| len >= n), "n={n}: {log:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn display_width_never_contradicts_rustc_and_knows_where_each_range_ends() {
+        // (code point, width): `Location::caller().column()` after the character minus the column
+        // after an `a`, plus one; measured with rustc 1.97.0 at the edges of every range.
+        #[rustfmt::skip]
+        const MEASURED: &[(u32, usize)] = &[
+            (0x41, 1), (0x7f, 1), (0x9f, 1), (0xa0, 1), (0xac, 1), (0xad, 0), (0xff, 1), (0x100, 1),
+            (0x24f, 1), (0x250, 1), (0x2ff, 1), (0x300, 0), (0x36f, 0), (0x370, 1), (0x482, 1),
+            (0x483, 0), (0x489, 0), (0x48a, 1), (0x4ff, 1), (0x500, 1), (0x626, 1), (0x627, 1),
+            (0x628, 1), (0xe30, 1), (0xe31, 0), (0xe32, 1), (0x1100, 2), (0x115f, 2), (0x1160, 0),
+            (0x200a, 1), (0x200b, 0), (0x200d, 0), (0x200e, 0), (0x20cf, 1), (0x20d0, 0), (0x20dd, 0),
+            (0x20f0, 0), (0x20f1, 1), (0x20f5, 1), (0x20ff, 1), (0x2100, 1), (0x218f, 1), (0x2190, 1),
+            (0x21ff, 1), (0x2200, 1), (0x2605, 1), (0x2fff, 2), (0x3000, 2), (0x3001, 2), (0x3040, 1),
+            (0x3041, 2), (0x3096, 2), (0x3097, 1), (0x30a0, 2), (0x30a1, 2), (0x30fa, 2), (0x30fb, 2),
+            (0x3399, 2), (0x33ff, 2), (0x3400, 2), (0x4dbf, 2), (0x4dc0, 2), (0x4dff, 2), (0x4e00, 2),
+            (0x9fff, 2), (0xa000, 2), (0xabff, 1), (0xac00, 2), (0xd7a3, 2), (0xd7a4, 1), (0xfdff, 1),
+            (0xfe00, 0), (0xfe0f, 0), (0xfe10, 2), (0xfeff, 0), (0xff00, 1), (0xff01, 2), (0xff60, 2),
+            (0xff61, 1), (0xffdc, 1), (0x1f321, 1), (0x1f5ff, 2), (0x1f600, 2), (0x1f64f, 2),
+            (0x1f650, 1), (0x1f680, 2), (0x1ffff, 1), (0x20000, 2), (0x2fffd, 2), (0x2fffe, 1),
+            (0x30000, 2), (0x3fffd, 2),
+        ];
+        // The first and last character of each range of the table.
+        const ENDS: &[u32] = &[
+            0x41, 0x7f, 0xa0, 0xad, 0xff, 0x100, 0x24f, 0x300, 0x36f, 0x482, 0x48a, 0x4ff, 0x627,
+            0xe31, 0x1100, 0x115f, 0x200b, 0x200d, 0x20d0, 0x20dd, 0x20f0, 0x2190, 0x21ff, 0x2605,
+            0x3000, 0x3041, 0x3096, 0x30a1, 0x30fa, 0x3400, 0x4dbf, 0x4e00, 0x9fff, 0xac00, 0xd7a3,
+            0xfe00, 0xfe0f, 0xff01, 0xff60, 0x1f600, 0x1f64f, 0x20000, 0x2fffd, 0x30000, 0x3fffd,
+        ];
+        for &(cp, width) in MEASURED {
+            let c = char::from_u32(cp).unwrap();
+            match display_width(c) {
+                Some(w) => assert_eq!(w, width, "U+{cp:04X}"),
+                None => assert!(!ENDS.contains(&cp), "U+{cp:04X} is an edge of a range"),
+            }
+            assert_eq!(display_width_or_1(c), display_width(c).unwrap_or(1));
+        }
+        for &cp in ENDS {
+            assert!(
+                display_width(char::from_u32(cp).unwrap()).is_some(),
+                "U+{cp:04X}"
+            );
+            assert!(
+                MEASURED.iter().any(|&(m, _)| m == cp),
+                "U+{cp:04X} unmeasured"
+            );
+        }
+        // One step beyond a range is not claimed (the combining marks of U+20D0 end at U+20F0,
+        // and the unassigned U+20F1..U+20FF are one column wide).
+        for cp in [
+            0x250, 0x370, 0x483, 0x1160, 0x20f1, 0x20f5, 0x20ff, 0x2100, 0x3001, 0xa000, 0x1f650,
+        ] {
+            assert_eq!(
+                display_width(char::from_u32(cp).unwrap()),
+                None,
+                "U+{cp:04X}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_segment_is_verbatim_when_its_bytes_are_the_source_or_its_kind_ends_with_it() {
+        let rust = "pre const fn f() { 1 }";
+        let source = "fn f() { 1 }";
+        let tail = range(4, rust.len());
+        // `const ` makes the whole text unequal; a Function's tail is the source
+        assert_eq!(
+            verbatim_len(
+                SegmentKind::Function,
+                rust,
+                tail,
+                source,
+                range(0, source.len())
+            ),
+            source.len()
+        );
+        // any other kind needs the whole text to be the source
+        for kind in [
+            SegmentKind::StreamVariable,
+            SegmentKind::Struct,
+            SegmentKind::Enum,
+        ] {
+            assert_eq!(
+                verbatim_len(kind, rust, tail, source, range(0, source.len())),
+                0,
+                "{kind:?}"
+            );
+            assert_eq!(
+                verbatim_len(
+                    kind,
+                    source,
+                    range(0, source.len()),
+                    source,
+                    range(0, source.len())
+                ),
+                source.len(),
+                "{kind:?}"
+            );
+        }
+        // whole equality on a character boundary only
+        assert_eq!(
+            verbatim_len(
+                SegmentKind::Struct,
+                "a\u{e9}",
+                range(1, 3),
+                "\u{e9}",
+                range(0, 2)
+            ),
+            2
+        );
+        assert!(suffix_is_verbatim(SegmentKind::Function));
+        assert!(!suffix_is_verbatim(SegmentKind::Struct));
+        assert!(is_user_authored(SegmentKind::Function));
+        assert!(!is_user_authored(SegmentKind::StreamVariable));
     }
 }
