@@ -577,10 +577,13 @@ fn count(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>) {
 /// Maps rustc diagnostics and run-time locations in generated Rust to the Marigold source.
 ///
 /// Build it once per generated program ([`Remapper::new`] indexes the generated text, the
-/// Marigold source and the source map in `O(n log n)`); every diagnostic is then mapped in
-/// `O(log n + k)` for `k` segments the span touches (plus the length of the lines it
-/// sits on). All methods take `&self`. The remapper borrows the program, the source and
-/// the file test, and is not `Send` or `Sync` because the file test is not required to be.
+/// Marigold source and the source map in time linear in their sizes); every diagnostic is
+/// then mapped in `O(log n + k)` for `n` segments and the `k` segments the span touches,
+/// plus the length of the lines it sits on (to count columns). For segments that nest, as
+/// the finer-grained segments of a later release will, `k` also counts the segments inside
+/// the enclosing one that end before the span starts. All methods take `&self`. The remapper
+/// borrows the program, the source and the file test, and is not `Send` or `Sync` because
+/// the file test is not required to be.
 ///
 /// The generated code does not have to be the whole file: declare what comes before it
 /// with [`with_prefix`](Self::with_prefix); anything after it is simply outside.
@@ -884,7 +887,7 @@ impl<'a> Remapper<'a> {
     /// the result is the classification of the whole line, at best [`Precision::Segment`].
     /// Within a run of zero-width characters the position after them is used.
     ///
-    /// The result has `raw: None`.
+    /// The result has `raw: None`, `is_primary: true`, and no label, macro or suggestion.
     ///
     /// ```
     /// use marigold_grammar::marigold_generate;
