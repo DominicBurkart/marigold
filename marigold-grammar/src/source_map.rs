@@ -52,6 +52,23 @@ use crate::diagnostics::ByteRange;
 use serde::Serialize;
 use std::cmp::Reverse;
 
+// Work counters for the complexity tests, in the style of `resolver.rs`: the tests assert
+// how much work construction and lookups do, which does not depend on how loaded the machine is.
+#[cfg(test)]
+thread_local! {
+    /// Key evaluations in the two sorts plus the steps of the parent-link pass.
+    static BUILD_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Parent links followed by `source_for_generated`.
+    static WALK_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Segments `generated_for_source` looked at beyond the two binary searches.
+    static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn count(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>) {
+    counter.with(|c| c.set(c.get() + 1));
+}
+
 /// What kind of Marigold expression a [`Segment`] stands for.
 ///
 /// A stream variable (`x = range(0, 5)`) is written to the generated code twice, so
@@ -210,24 +227,36 @@ impl SourceMap {
     /// assert!(SourceMap::new(Vec::new()).segments().is_empty());
     /// ```
     pub fn new(mut segments: Vec<Segment>) -> SourceMap {
-        segments.sort_by_key(|s| (s.generated.start, Reverse(s.generated.end)));
+        segments.sort_by_key(|s| {
+            #[cfg(test)]
+            count(&BUILD_STEPS);
+            (s.generated.start, Reverse(s.generated.end))
+        });
 
         let mut parents = Vec::with_capacity(segments.len());
         let mut open: Vec<usize> = Vec::new();
         for (i, segment) in segments.iter().enumerate() {
             while let Some(&top) = open.last() {
+                #[cfg(test)]
+                count(&BUILD_STEPS);
                 if segments[top].generated.end <= segment.generated.start {
                     open.pop();
                 } else {
                     break;
                 }
             }
+            #[cfg(test)]
+            count(&BUILD_STEPS);
             parents.push(open.last().copied());
             open.push(i);
         }
 
         let mut by_source: Vec<usize> = (0..segments.len()).collect();
-        by_source.sort_by_key(|&i| segments[i].source.start);
+        by_source.sort_by_key(|&i| {
+            #[cfg(test)]
+            count(&BUILD_STEPS);
+            segments[i].source.start
+        });
         let mut largest_end = 0;
         let max_source_end = by_source
             .iter()
@@ -298,6 +327,8 @@ impl SourceMap {
             if offset < segment.generated.end {
                 return Some(segment);
             }
+            #[cfg(test)]
+            count(&WALK_STEPS);
             candidate = self.parents[i];
         }
         None
@@ -361,7 +392,11 @@ impl SourceMap {
             .unwrap_or_default()
             .iter()
             .copied()
-            .filter(|&i| self.segments[i].source.end > start)
+            .filter(|&i| {
+                #[cfg(test)]
+                count(&SCANNED);
+                self.segments[i].source.end > start
+            })
             .collect();
         hits.sort_unstable();
         hits.into_iter().map(|i| &self.segments[i]).collect()
@@ -666,6 +701,109 @@ mod tests {
         let order: Vec<_> = m.segments().iter().map(|s| s.expr_index).collect();
         assert_eq!(order, vec![0, 1]);
         assert_eq!(m.source_for_generated(15).map(|s| s.expr_index), Some(1));
+    }
+
+    /// `n` disjoint segments in a deterministic scrambled input order, so that neither sort
+    /// can take its already-sorted shortcut. Source order is the reverse of generated order.
+    fn scrambled(n: usize) -> Vec<Segment> {
+        let mut order: Vec<usize> = (0..n).collect();
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        for i in (1..n).rev() {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            order.swap(i, (state >> 33) as usize % (i + 1));
+        }
+        order
+            .into_iter()
+            .map(|i| {
+                let (g, s) = (i * 10, (n - 1 - i) * 10);
+                seg((g, g + 8), (s, s + 8), SegmentKind::Struct, i)
+            })
+            .collect()
+    }
+
+    fn reset_counters() {
+        BUILD_STEPS.with(|c| c.set(0));
+        WALK_STEPS.with(|c| c.set(0));
+        SCANNED.with(|c| c.set(0));
+    }
+
+    fn counter(c: &'static std::thread::LocalKey<std::cell::Cell<usize>>) -> usize {
+        c.with(|c| c.get())
+    }
+
+    #[test]
+    fn construction_work_is_n_log_n() {
+        for n in [4_000_usize, 16_000, 64_000] {
+            let segments = scrambled(n);
+            reset_counters();
+            let map = SourceMap::new(segments);
+            let steps = counter(&BUILD_STEPS);
+            let log_n = usize::BITS as usize - n.leading_zeros() as usize;
+            // Two sorts at about 2 n log n key evaluations each, plus about 2 n for the parent
+            // pass. Quadratic work at n = 4_000 is already 16_000_000, 15 times the bound.
+            assert!(
+                steps <= 5 * n * log_n,
+                "n={n}: {steps} steps, bound {}",
+                5 * n * log_n
+            );
+            assert_eq!(map.segments().len(), n);
+        }
+    }
+
+    #[test]
+    fn lookups_do_constant_work_beyond_the_binary_searches_for_disjoint_segments() {
+        let n = 50_000;
+        let map = SourceMap::new(scrambled(n));
+        reset_counters();
+        let mut hits = 0;
+        for s in map.segments() {
+            // first and last byte of a segment, found without following any parent link
+            assert!(map.source_for_generated(s.generated.start).is_some());
+            assert!(map.source_for_generated(s.generated.end - 1).is_some());
+            hits += map.generated_for_source(s.source).len();
+        }
+        assert_eq!(counter(&WALK_STEPS), 0);
+        assert_eq!(hits, n);
+        assert_eq!(
+            counter(&SCANNED),
+            n,
+            "scanned exactly the segments returned"
+        );
+
+        // a byte in the gap after a segment follows that segment's (absent) parent once
+        reset_counters();
+        for s in map.segments().iter().take(1_000) {
+            assert!(map.source_for_generated(s.generated.end).is_none());
+        }
+        assert_eq!(counter(&WALK_STEPS), 1_000);
+    }
+
+    #[test]
+    fn nested_lookups_follow_at_most_the_nesting_depth() {
+        // a chain: segment i contains segment i + 1
+        let depth = 200;
+        let map = SourceMap::new(
+            (0..depth)
+                .map(|i| {
+                    seg(
+                        (i, 2 * depth - i),
+                        (i, 2 * depth - i),
+                        SegmentKind::Struct,
+                        i,
+                    )
+                })
+                .collect(),
+        );
+        reset_counters();
+        // just inside the outermost segment, past the end of every deeper one
+        assert_eq!(
+            map.source_for_generated(2 * depth - 1)
+                .map(|s| s.expr_index),
+            Some(0)
+        );
+        assert!(counter(&WALK_STEPS) <= depth);
     }
 
     #[test]

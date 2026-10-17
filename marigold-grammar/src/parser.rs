@@ -251,6 +251,17 @@ impl PestParser {
         // Stage 3: Validate bounded types (if any)
         let resolved_bounds = Self::validate_bounded_types(&expressions)?;
 
+        // Stages 4 and 5
+        Self::generate_mapped(expressions, resolved_bounds, &ranges)
+    }
+
+    /// Stages 4 and 5 of [`Self::generate_input`], split out so tests can time exactly the
+    /// work the source map adds on top of parsing.
+    fn generate_mapped(
+        expressions: Vec<crate::nodes::TypedExpression>,
+        resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
+        ranges: &[crate::diagnostics::ByteRange],
+    ) -> Result<crate::source_map::GeneratedProgram, String> {
         // Stage 4: Generate Rust code (replicating LALRPOP logic)
         let (rust, generated) = Self::generate_rust_code_mapped(expressions, resolved_bounds)?;
 
@@ -258,7 +269,7 @@ impl PestParser {
         // because both are parallel to the top-level expressions.
         let segments = generated
             .into_iter()
-            .map(|g| g.attach_source(&ranges))
+            .map(|g| g.attach_source(ranges))
             .collect();
         Ok(crate::source_map::GeneratedProgram {
             rust,
@@ -2147,5 +2158,45 @@ mod function_grammar_tests {
             .expect("Simple fn should still parse after grammar change");
         assert!(code.contains("x: i32"), "param type i32 should be present");
         assert!(code.contains("-> i32"), "return type i32 should be present");
+    }
+
+    fn many_expressions(n: usize) -> String {
+        (0..n)
+            .map(|i| format!("v{i} = range(0, 5).map(f)\nv{i}.return\nstruct S{i} {{ a: u8 }}\n"))
+            .collect()
+    }
+
+    /// Seconds spent on everything `marigold_generate` does after the syntax tree is built:
+    /// source ranges, code generation with segment recording, attaching ranges and building
+    /// the map. The tree is built before the clock starts and the pest parse is not part of it.
+    fn after_parse_seconds(pairs: &pest::iterators::Pairs<'_, Rule>) -> f64 {
+        let expressions =
+            crate::pest_ast_builder::PestAstBuilder::build_program(pairs.clone()).unwrap();
+        let start = std::time::Instant::now();
+        let ranges = PestParser::expr_ranges(pairs);
+        let generated = PestParser::generate_mapped(expressions, None, &ranges).unwrap();
+        std::hint::black_box(&generated);
+        start.elapsed().as_secs_f64()
+    }
+
+    /// Guards the cost of the source map end to end: 4x more expressions must cost about 4x,
+    /// not 16x. Machine load cannot be subtracted from one measurement, so each round times the
+    /// small and the large program back to back (load hits both alike), and the test passes if
+    /// any round shows near-linear growth. Linear growth is about 4x; the bound leaves 2x of
+    /// noise. The work counters in `source_map.rs` pin the map's own complexity exactly.
+    #[test]
+    fn mapped_code_generation_grows_linearly_with_program_size() {
+        let (small_src, large_src) = (many_expressions(2_000), many_expressions(8_000));
+        let small = MarigoldPestParser::parse(Rule::program, &small_src).unwrap();
+        let large = MarigoldPestParser::parse(Rule::program, &large_src).unwrap();
+        let mut best = f64::INFINITY;
+        for _ in 0..9 {
+            let (s, l) = (after_parse_seconds(&small), after_parse_seconds(&large));
+            best = best.min(l / s);
+            if best < 6.0 {
+                return;
+            }
+        }
+        panic!("8000 expressions cost {best:.1}x as much as 2000; linear is about 4x");
     }
 }

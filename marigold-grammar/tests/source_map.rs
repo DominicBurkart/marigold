@@ -10,7 +10,7 @@
 mod common;
 
 use marigold_grammar::diagnostics::ByteRange;
-use marigold_grammar::source_map::{GeneratedProgram, Segment, SegmentKind as K, SourceMap};
+use marigold_grammar::source_map::{GeneratedProgram, Segment, SegmentKind as K};
 use marigold_grammar::symbols::SymbolKind;
 use marigold_grammar::{
     marigold_generate, marigold_parse, marigold_stream_complexities, marigold_symbols,
@@ -1175,64 +1175,6 @@ fn assert_invariants_cheap(src: &str, g: &GeneratedProgram) {
     for w in g.map.segments().windows(2) {
         assert!(w[0].generated.end < w[1].generated.start);
     }
-}
-
-#[test]
-fn generating_the_map_costs_about_as_much_as_parsing() {
-    use std::time::Instant;
-    // Both calls run the same pipeline; `marigold_generate` adds only the source map. Comparing
-    // the two on the same input, interleaved, cancels out machine load (a ratio between sizes
-    // does not: a noisy neighbour during one size but not the other flips it). A map built in
-    // quadratic time would dwarf parsing for 32_000 segments. The O(n log n) bound on
-    // `SourceMap::new` itself is `source_map_construction_scales_subquadratically`.
-    let src = many_exprs(8_000);
-    let (mut parse, mut generate) = (f64::INFINITY, f64::INFINITY);
-    for _ in 0..5 {
-        let t = Instant::now();
-        std::hint::black_box(marigold_parse(&src).unwrap());
-        parse = parse.min(t.elapsed().as_secs_f64());
-        let t = Instant::now();
-        std::hint::black_box(marigold_generate(&src).unwrap());
-        generate = generate.min(t.elapsed().as_secs_f64());
-    }
-    assert!(
-        generate < parse * 3.0 + 0.05,
-        "parse {parse:.4}s, generate {generate:.4}s"
-    );
-}
-
-fn seg(generated: (usize, usize), source: (usize, usize), kind: K, expr_index: usize) -> Segment {
-    let range = |(start, end)| ByteRange { start, end };
-    Segment::new(range(generated), range(source), kind, expr_index, None)
-}
-
-/// `SourceMap::new` sorts and indexes: O(n log n). 16x more segments must not cost anywhere near
-/// 16^2 = 256x. Generated order is the reverse of source order, the worst case for the indexes.
-#[test]
-fn source_map_construction_scales_subquadratically() {
-    let build = |n: usize| {
-        let segments: Vec<Segment> = (0..n)
-            .map(|i| {
-                let g = i * 10;
-                let s = (n - 1 - i) * 10;
-                seg((g, g + 8), (s, s + 8), K::Struct, i)
-            })
-            .collect();
-        (0..3)
-            .map(|_| {
-                let input = segments.clone();
-                let t = std::time::Instant::now();
-                std::hint::black_box(SourceMap::new(input));
-                t.elapsed().as_secs_f64()
-            })
-            .fold(f64::INFINITY, f64::min)
-    };
-    let (small, large) = (build(10_000), build(160_000));
-    // n log n: about 16-20x. Quadratic: about 256x. 80x leaves room for noise.
-    assert!(
-        large < small.max(1e-4) * 80.0,
-        "10_000 segments: {small:.5}s, 160_000 segments: {large:.5}s"
-    );
 }
 
 /// The bytes between segments are exactly the glue code generation writes: the preamble before
