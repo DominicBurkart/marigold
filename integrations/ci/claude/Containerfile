@@ -1,0 +1,8 @@
+FROM docker.io/library/node:22-slim
+ARG CLAUDE_CODE_VERSION
+RUN test -n "$CLAUDE_CODE_VERSION" \
+ && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+ && npm cache clean --force \
+ && claude --version
+ENV HOME=/work/home
+WORKDIR /work
