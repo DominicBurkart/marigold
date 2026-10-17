@@ -105,6 +105,26 @@ pub enum SegmentKind {
     ReturningStream,
     /// A stream that ends in a sink, like `x.write_file("out.csv", csv)`.
     NonReturningStream,
+    InputRange,
+    InputReadFile,
+    InputSelectAll,
+    InputVariable,
+    SelectAllBranch,
+    StreamMap,
+    StreamFilter,
+    StreamFilterMap,
+    StreamPermutations,
+    StreamPermutationsWithReplacement,
+    StreamCombinations,
+    StreamKeepFirstN,
+    StreamFold,
+    StreamOk,
+    StreamOkOrPanic,
+    OutputWriteFile,
+    FunctionSignature,
+    FunctionBody,
+    StructField,
+    EnumVariant,
 }
 
 /// One piece of generated code and the Marigold expression it came from.
@@ -142,9 +162,14 @@ pub struct Segment {
     /// The name the expression declares: the struct, enum, function or stream variable.
     /// `None` for output streams, including a named one like `x.return`.
     pub name: Option<String>,
+    pub ident: Option<String>,
 }
 
 impl Segment {
+    pub fn with_ident(self, _ident: Option<String>) -> Segment {
+        unimplemented!()
+    }
+
     /// Build a segment, for example to hand-build a [`SourceMap`] in a test.
     ///
     /// Segments are expected to gain fields in later releases (finer-grained segments),
@@ -178,6 +203,7 @@ impl Segment {
             kind,
             expr_index,
             name,
+            ident: None,
         }
     }
 }
@@ -287,6 +313,30 @@ impl SourceMap {
     /// ```
     pub fn segments(&self) -> &[Segment] {
         &self.segments
+    }
+
+    pub fn parent(&self, _index: usize) -> Option<usize> {
+        unimplemented!()
+    }
+
+    pub fn children(&self, _index: usize) -> Vec<usize> {
+        unimplemented!()
+    }
+
+    pub fn top_level(&self) -> impl Iterator<Item = &Segment> + '_ {
+        self.segments.iter().filter(|_| unimplemented!())
+    }
+
+    pub fn index_of(&self, _segment: &Segment) -> Option<usize> {
+        unimplemented!()
+    }
+
+    pub fn segments_for_ident(&self, _ident: &str) -> Vec<&Segment> {
+        unimplemented!()
+    }
+
+    pub fn generated_for_source_innermost(&self, _range: ByteRange) -> Vec<&Segment> {
+        unimplemented!()
     }
 
     /// The segment that produced the byte at `offset` of the generated code, with its
@@ -472,6 +522,7 @@ impl GeneratedSegment {
             kind: self.kind,
             expr_index: self.expr_index,
             name: self.name,
+            ident: None,
         }
     }
 }
@@ -838,5 +889,281 @@ mod tests {
         assert_eq!(hits, n + n);
         // O(n log n): milliseconds. O(n^2) would need ~2*10^10 comparisons.
         assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
+    }
+
+    fn named(gen: (usize, usize), src: (usize, usize), kind: SegmentKind, ident: &str) -> Segment {
+        seg(gen, src, kind, 0).with_ident(Some(ident.to_string()))
+    }
+
+    /// stmt(0..100) > [input(10..20), fn(20..30) > [x(22..25)], fn(30..40)], other stmt(110..120)
+    fn tree() -> SourceMap {
+        SourceMap::new(vec![
+            seg((110, 120), (60, 70), SegmentKind::NonReturningStream, 1),
+            seg((10, 20), (5, 10), SegmentKind::InputRange, 0),
+            seg((0, 100), (0, 50), SegmentKind::ReturningStream, 0),
+            seg((30, 40), (20, 30), SegmentKind::StreamFilter, 0),
+            seg((22, 25), (16, 17), SegmentKind::StreamOk, 0),
+            seg((20, 30), (10, 20), SegmentKind::StreamMap, 0),
+        ])
+    }
+
+    #[test]
+    fn parent_links_cover_nesting_touching_siblings_and_roots() {
+        let m = tree();
+        // pre-order of the generated side
+        let order: Vec<(usize, usize)> = m
+            .segments()
+            .iter()
+            .map(|s| (s.generated.start, s.generated.end))
+            .collect();
+        assert_eq!(
+            order,
+            vec![(0, 100), (10, 20), (20, 30), (22, 25), (30, 40), (110, 120)]
+        );
+        let parents: Vec<Option<usize>> = (0..6).map(|i| m.parent(i)).collect();
+        assert_eq!(
+            parents,
+            vec![None, Some(0), Some(0), Some(2), Some(0), None]
+        );
+        assert_eq!(m.children(0), vec![1, 2, 4]);
+        assert_eq!(m.children(2), vec![3]);
+        assert!(m.children(3).is_empty() && m.children(5).is_empty());
+        assert_eq!(m.top_level().count(), 2);
+        assert_eq!(m.parent(6), None);
+        assert_eq!(m.parent(usize::MAX), None);
+        assert!(m.children(99).is_empty());
+    }
+
+    #[test]
+    fn source_for_generated_walks_out_of_touching_siblings_and_nested_children() {
+        let m = tree();
+        let at = |o| {
+            m.source_for_generated(o)
+                .map(|s| (s.generated.start, s.generated.end))
+        };
+        assert_eq!(at(19), Some((10, 20)));
+        assert_eq!(
+            at(20),
+            Some((20, 30)),
+            "touching sibling starts exactly where the previous ends"
+        );
+        assert_eq!(at(21), Some((20, 30)));
+        assert_eq!(at(22), Some((22, 25)));
+        assert_eq!(at(24), Some((22, 25)));
+        assert_eq!(
+            at(25),
+            Some((20, 30)),
+            "back in the parent after the grandchild"
+        );
+        assert_eq!(at(30), Some((30, 40)));
+        assert_eq!(at(40), Some((0, 100)), "glue inside the root");
+        assert_eq!(at(99), Some((0, 100)));
+        assert_eq!(at(100), None);
+        assert_eq!(at(115), Some((110, 120)));
+    }
+
+    #[test]
+    fn innermost_drops_every_ancestor_that_has_a_hit_below_it() {
+        let m = tree();
+        let q = |a, b| -> Vec<(usize, usize)> {
+            m.generated_for_source_innermost(r(a, b))
+                .iter()
+                .map(|s| (s.generated.start, s.generated.end))
+                .collect()
+        };
+        // inside the grandchild's source: only the grandchild (its ancestors have a hit below them)
+        assert_eq!(q(16, 17), vec![(22, 25)]);
+        // the fn's own source but not the grandchild's: the fn
+        assert_eq!(q(10, 12), vec![(20, 30)]);
+        // spans the input, the first fn (with its grandchild) and the second fn: the leaves only
+        assert_eq!(q(5, 25), vec![(10, 20), (22, 25), (30, 40)]);
+        // only the root's source: the root is its own leaf
+        assert_eq!(q(45, 49), vec![(0, 100)]);
+        // nothing
+        assert!(q(80, 90).is_empty());
+        assert!(q(7, 3).is_empty());
+        assert!(q(usize::MAX - 1, usize::MAX).is_empty());
+        // point query
+        assert_eq!(q(6, 6), vec![(10, 20)]);
+        assert_eq!(q(65, 65), vec![(110, 120)]);
+        // plain overlap is the superset in generated order
+        let all: Vec<_> = m
+            .generated_for_source(r(16, 17))
+            .iter()
+            .map(|s| s.generated.start)
+            .collect();
+        assert_eq!(all, vec![0, 20, 22]);
+    }
+
+    #[test]
+    fn a_child_with_the_same_source_as_its_parent_is_the_leaf() {
+        // select_all(range(0, 3)): the branch and its only input are the same source text
+        let m = SourceMap::new(vec![
+            seg((0, 50), (0, 30), SegmentKind::ReturningStream, 0),
+            seg((10, 40), (11, 22), SegmentKind::SelectAllBranch, 0),
+            seg((15, 35), (11, 22), SegmentKind::InputRange, 0),
+        ]);
+        let kinds = |v: Vec<&Segment>| v.into_iter().map(|s| s.kind).collect::<Vec<_>>();
+        assert_eq!(
+            kinds(m.generated_for_source(r(12, 13))),
+            vec![
+                SegmentKind::ReturningStream,
+                SegmentKind::SelectAllBranch,
+                SegmentKind::InputRange
+            ]
+        );
+        assert_eq!(
+            kinds(m.generated_for_source_innermost(r(12, 13))),
+            vec![SegmentKind::InputRange]
+        );
+    }
+
+    #[test]
+    fn segments_for_ident_returns_definitions_in_generated_order() {
+        let m = SourceMap::new(vec![
+            named(
+                (50, 60),
+                (0, 5),
+                SegmentKind::ReturningStream,
+                "returning_stream_0",
+            ),
+            named(
+                (0, 10),
+                (10, 15),
+                SegmentKind::StreamVariable,
+                "returning_stream_0",
+            ),
+            seg((12, 14), (11, 12), SegmentKind::InputRange, 0),
+            named((70, 80), (20, 25), SegmentKind::Struct, "S"),
+        ]);
+        let hits = m.segments_for_ident("returning_stream_0");
+        assert_eq!(
+            hits.iter().map(|s| s.kind).collect::<Vec<_>>(),
+            vec![SegmentKind::StreamVariable, SegmentKind::ReturningStream]
+        );
+        assert_eq!(m.segments_for_ident("S").len(), 1);
+        assert!(m.segments_for_ident("s").is_empty(), "case sensitive");
+        assert!(m.segments_for_ident("").is_empty());
+        assert!(
+            m.segments_for_ident("returning_stream_00").is_empty(),
+            "no extension matching"
+        );
+        assert!(
+            m.segments_for_ident("returning_stream_").is_empty(),
+            "no prefix matching"
+        );
+        assert!(m.segments_for_ident("S_").is_empty() && m.segments_for_ident("Struct").is_empty());
+    }
+
+    #[test]
+    fn construction_never_panics_on_overlapping_duplicate_or_degenerate_segments() {
+        let m = SourceMap::new(vec![
+            seg((0, 10), (0, 10), SegmentKind::Struct, 0),
+            seg((5, 15), (0, 10), SegmentKind::Enum, 0), // partial overlap: unspecified nesting, no panic
+            seg((5, 15), (0, 10), SegmentKind::Function, 0), // duplicate range
+            seg((7, 7), (3, 3), SegmentKind::StreamMap, 0), // zero width
+            seg((9, 2), (9, 2), SegmentKind::StreamMap, 0), // inverted
+            seg(
+                (usize::MAX - 1, usize::MAX),
+                (usize::MAX - 1, usize::MAX),
+                SegmentKind::Struct,
+                0,
+            ),
+        ]);
+        for o in [0, 5, 7, 9, 14, 15, usize::MAX - 1, usize::MAX] {
+            let _ = m.source_for_generated(o);
+        }
+        for q in [r(0, 100), r(3, 3), r(9, 2), r(usize::MAX - 1, usize::MAX)] {
+            let _ = m.generated_for_source(q);
+            let _ = m.generated_for_source_innermost(q);
+        }
+        for i in 0..8 {
+            let _ = (m.parent(i), m.children(i));
+        }
+    }
+
+    #[test]
+    fn very_deep_nesting_is_handled_without_recursion() {
+        let depth = 100_000;
+        let segs: Vec<Segment> = (0..depth)
+            .map(|i| {
+                seg(
+                    (i, 2 * depth - i),
+                    (i, 2 * depth - i),
+                    SegmentKind::SelectAllBranch,
+                    0,
+                )
+            })
+            .collect();
+        let m = SourceMap::new(segs);
+        assert_eq!(m.parent(0), None);
+        assert_eq!(m.parent(depth - 1), Some(depth - 2));
+        assert_eq!(
+            m.source_for_generated(depth).unwrap().generated.start,
+            depth - 1
+        );
+        assert_eq!(
+            m.generated_for_source_innermost(r(depth - 1, depth)).len(),
+            1
+        );
+        assert_eq!(m.children(depth - 2), vec![depth - 1]);
+    }
+
+    #[test]
+    fn nested_lookups_scale_to_many_segments() {
+        // 30_000 statements with 3 children each, source order reversed against generated order
+        let n = 30_000usize;
+        let mut segs = Vec::with_capacity(4 * n);
+        for i in 0..n {
+            let g = i * 100;
+            let s = (n - 1 - i) * 100;
+            segs.push(seg(
+                (g, g + 90),
+                (s, s + 90),
+                SegmentKind::ReturningStream,
+                i,
+            ));
+            for c in 0..3 {
+                segs.push(seg(
+                    (g + 10 + c * 20, g + 25 + c * 20),
+                    (s + 10 + c * 20, s + 25 + c * 20),
+                    SegmentKind::StreamMap,
+                    i,
+                ));
+            }
+        }
+        let m = SourceMap::new(segs);
+        let t = std::time::Instant::now();
+        let mut hits = 0usize;
+        for i in 0..n {
+            hits += m
+                .source_for_generated(i * 100 + 12)
+                .map(|s| s.generated.end - s.generated.start)
+                .unwrap_or(0);
+            hits += m
+                .generated_for_source_innermost(r((n - 1 - i) * 100 + 12, (n - 1 - i) * 100 + 13))
+                .len();
+            hits += m
+                .generated_for_source(r((n - 1 - i) * 100 + 12, (n - 1 - i) * 100 + 13))
+                .len();
+        }
+        assert_eq!(hits, n * (15 + 1 + 2));
+        assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn index_of_is_by_address_not_by_value() {
+        let m = tree();
+        for (i, s) in m.segments().iter().enumerate() {
+            assert_eq!(m.index_of(s), Some(i));
+        }
+        let copy = m.segments()[2].clone();
+        assert_eq!(copy, m.segments()[2]);
+        assert_eq!(
+            m.index_of(&copy),
+            None,
+            "equal by value, but not stored in the map"
+        );
+        assert_eq!(SourceMap::new(Vec::new()).index_of(&copy), None);
     }
 }

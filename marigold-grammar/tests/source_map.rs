@@ -1,5 +1,9 @@
 //! Integration tests for `marigold_generate` and the `source_map` module (issue #400, task T1).
 //!
+//! T2 note: since T2 the map also holds nested segments. Everything below that talks about
+//! "the segments" of a program means the STATEMENT-LEVEL (parent-less) segments, i.e. what T1
+//! produced; the nested ones are covered by `source_map_subexpr.rs`.
+//!
 //! Oracles used here:
 //! * `marigold_parse`            -- generated Rust must match byte for byte;
 //! * `common::expr_ranges`       -- independent per-expression source range convention;
@@ -29,6 +33,18 @@ fn generate(src: &str) -> GeneratedProgram {
     marigold_generate(src).unwrap_or_else(|e| panic!("{src:?} should generate: {e}"))
 }
 
+/// T2: statement-level segments (no parent) in generated order -- exactly what T1 produced.
+fn top_segments(g: &GeneratedProgram) -> Vec<&Segment> {
+    g.map.top_level().collect()
+}
+
+/// T2: keep only the statement-level segments of a lookup result.
+fn only_top<'a>(g: &'a GeneratedProgram, hits: Vec<&'a Segment>) -> Vec<&'a Segment> {
+    hits.into_iter()
+        .filter(|h| g.map.top_level().any(|t| std::ptr::eq(t, *h)))
+        .collect()
+}
+
 fn gen_text<'a>(g: &'a GeneratedProgram, s: &Segment) -> &'a str {
     &g.rust[s.generated.start..s.generated.end]
 }
@@ -41,9 +57,8 @@ fn src_text<'a>(src: &'a str, s: &Segment) -> &'a str {
 type Row = (K, usize, Option<&'static str>, &'static str);
 
 fn rows(src: &str, g: &GeneratedProgram) -> Vec<(K, usize, Option<String>, String)> {
-    g.map
-        .segments()
-        .iter()
+    top_segments(g)
+        .into_iter()
         .map(|s| {
             (
                 s.kind,
@@ -112,7 +127,10 @@ fn probe_points(text: &str, edges: impl Iterator<Item = usize>) -> Vec<usize> {
 /// property tests alike.
 fn assert_invariants(src: &str, g: &GeneratedProgram) {
     let ctx = || format!("program {src:?}");
-    let segs = g.map.segments();
+    // T2: (b)-(e) are about the statement-level segments; (f) (lookups) uses the whole map.
+    let all = g.map.segments();
+    let segs: Vec<Segment> = g.map.top_level().cloned().collect();
+    let segs = &segs[..];
 
     // (a) hard invariant: identical to marigold_parse, byte for byte.
     assert_eq!(g.rust, marigold_parse(src).unwrap(), "{}", ctx());
@@ -311,43 +329,35 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
     // (f) lookups agree with brute force, on every interesting offset / range.
     for off in probe_points(
         &g.rust,
-        segs.iter()
+        all.iter()
             .flat_map(|s| [s.generated.start, s.generated.end]),
     ) {
         assert_eq!(
             g.map.source_for_generated(off),
-            naive_at(segs, off),
+            naive_at(all, off),
             "offset {off} {}",
             ctx()
         );
     }
     assert_eq!(g.map.source_for_generated(g.rust.len()), None);
     assert_eq!(g.map.source_for_generated(usize::MAX), None);
-    let pts = probe_points(
-        src,
-        segs.iter().flat_map(|s| [s.source.start, s.source.end]),
-    );
+    let pts = probe_points(src, all.iter().flat_map(|s| [s.source.start, s.source.end]));
     let pts: Vec<usize> = pts.into_iter().take(48).collect();
     for &a in &pts {
         for &b in &pts {
             let q = ByteRange { start: a, end: b };
             assert_eq!(
                 g.map.generated_for_source(q),
-                naive_for_source(segs, q),
+                naive_for_source(all, q),
                 "query {q:?} {}",
                 ctx()
             );
         }
     }
-    for s in segs {
-        // forward/inverse consistency: the segment is found from every byte it covers ...
-        for off in [
-            s.generated.start,
-            (s.generated.start + s.generated.end) / 2,
-            s.generated.end - 1,
-        ] {
-            assert_eq!(g.map.source_for_generated(off), Some(s));
-        }
+    for s in all {
+        // forward/inverse consistency: the segment is found from its first byte (T2: and from
+        // every byte not covered by one of its children, checked by `assert_nested`) ...
+        assert_eq!(g.map.source_for_generated(s.generated.start), Some(s));
         // ... and querying its own source range returns it, in generated order.
         let hits = g.map.generated_for_source(s.source);
         assert!(hits.contains(&s));
@@ -590,9 +600,7 @@ fn g14_multiline_expressions_cover_the_whole_expression() {
 fn g15_ordinals_follow_generated_order_not_source_order() {
     let src = "a = range(0, 2)\nb = range(2, 4)\na.return\nrange(9, 10).write_file(\"p.csv\", csv)\nb.return\nrange(7, 8).return\na.write_file(\"q.csv\", csv)\nrange(1, 2).write_file(\"r.csv\", csv)";
     let g = generate(src);
-    let got: Vec<_> = g
-        .map
-        .segments()
+    let got: Vec<_> = top_segments(&g)
         .iter()
         .map(|s| (s.kind, s.expr_index))
         .collect();
@@ -612,7 +620,7 @@ fn g15_ordinals_follow_generated_order_not_source_order() {
         ]
     );
     // returning_stream_1 is the *second* returning stream in source order: `b.return`.
-    let second_ret = &g.map.segments()[3];
+    let second_ret = top_segments(&g)[3];
     assert!(gen_text(&g, second_ret).starts_with("let returning_stream_1 = "));
     assert_eq!(src_text(src, second_ret), "b.return");
     assert!(gen_text(&g, second_ret).contains("b.get()"));
@@ -666,7 +674,11 @@ fn g16_multibyte_characters_keep_byte_offsets_exact() {
     // (enum values are not emitted into the Rust, so use the fn body's literal.)
     let at = g.rust.find('\u{65e5}').unwrap() + 1;
     assert!(!g.rust.is_char_boundary(at));
-    assert_eq!(g.map.source_for_generated(at).unwrap().kind, K::Function);
+    // (T2: the literal sits in the function body, which is a nested region of the function)
+    assert_eq!(
+        g.map.source_for_generated(at).unwrap().kind,
+        K::FunctionBody
+    );
 }
 
 #[test]
@@ -791,7 +803,7 @@ fn g23_realistic_multiline_program_from_examples_bounded_types() {
 fn source_for_generated_is_half_open_and_none_in_glue() {
     let src = "x = range(0, 5)\nx.return";
     let g = generate(src);
-    let [decl, ret, runner] = g.map.segments() else {
+    let [decl, ret, runner] = top_segments(&g)[..] else {
         panic!("{:?}", g.map)
     };
 
@@ -804,7 +816,8 @@ fn source_for_generated_is_half_open_and_none_in_glue() {
     assert_eq!(g.map.source_for_generated(decl.generated.start), Some(decl));
     assert_eq!(
         g.map.source_for_generated(decl.generated.end - 1),
-        Some(decl)
+        Some(decl),
+        "the `;` that closes the declaration"
     );
     assert_eq!(
         g.map.source_for_generated(decl.generated.end),
@@ -846,10 +859,11 @@ fn source_for_generated_is_half_open_and_none_in_glue() {
 fn generated_for_source_returns_all_overlaps_in_generated_order() {
     let src = "x = range(0, 5)\nx.return";
     let g = generate(src);
-    let [decl, ret, runner] = g.map.segments() else {
+    let [decl, ret, runner] = top_segments(&g)[..] else {
         panic!()
     };
-    let q = |start, end| g.map.generated_for_source(ByteRange { start, end });
+    // T2: nested segments overlap too; this T1 test looks at the statement-level ones.
+    let q = |start, end| only_top(&g, g.map.generated_for_source(ByteRange { start, end }));
 
     // inside the declaration: its decl and its runner, but not the stream that merely uses `x`.
     assert_eq!(q(0, 1), vec![decl, runner]);
@@ -881,15 +895,21 @@ fn lookups_work_on_the_out_of_order_program() {
     let src = "range(0, 2).return\nfn f(x: i32) -> i32 { x }\nx = range(0, 3).map(f)\nx.return";
     let g = generate(src);
     // the first source expression is emitted *after* the function and the variable.
-    let first = g.map.generated_for_source(ByteRange { start: 0, end: 5 });
+    let first = only_top(
+        &g,
+        g.map.generated_for_source(ByteRange { start: 0, end: 5 }),
+    );
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].kind, K::ReturningStream);
     assert_eq!(first[0].expr_index, 0);
     assert!(
         first[0].generated.start
-            > g.map.generated_for_source(ByteRange { start: 19, end: 20 })[0]
-                .generated
-                .start
+            > only_top(
+                &g,
+                g.map.generated_for_source(ByteRange { start: 19, end: 20 })
+            )[0]
+            .generated
+            .start
     );
     // the function's generated text maps back to the function's source.
     let at = g.rust.find("const fn f").unwrap();
@@ -926,12 +946,7 @@ fn corpus_programs_with_several_expressions_produce_expected_segment_counts() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/programs/multi_consumer.marigold");
     let src = std::fs::read_to_string(path).unwrap();
-    let kinds: Vec<K> = generate(&src)
-        .map
-        .segments()
-        .iter()
-        .map(|s| s.kind)
-        .collect();
+    let kinds: Vec<K> = generate(&src).map.top_level().map(|s| s.kind).collect();
     assert_eq!(
         kinds,
         vec![
@@ -1088,13 +1103,16 @@ fn json_shape_is_stable() {
     let v = serde_json::to_value(&g).unwrap();
     assert_eq!(v["rust"], g.rust);
     let segs = v["map"]["segments"].as_array().unwrap();
-    assert_eq!(segs.len(), 3);
+    // T2: decl, its input, the stream, its input, runner (nested ones are pinned in source_map_subexpr.rs)
+    assert_eq!(segs.len(), 5);
     let kinds: Vec<_> = segs.iter().map(|s| s["kind"].as_str().unwrap()).collect();
     assert_eq!(
         kinds,
         [
             "stream_variable",
+            "input_range",
             "returning_stream",
+            "input_variable",
             "stream_variable_runner"
         ]
     );
@@ -1107,6 +1125,7 @@ fn json_shape_is_stable() {
             "kind": "stream_variable",
             "expr_index": 0,
             "name": "x",
+            "ident": "x",
         })
     );
     // `Value` indexing yields Null for a missing key too, so look at the key sets themselves:
@@ -1121,12 +1140,13 @@ fn json_shape_is_stable() {
     for s in segs {
         assert_eq!(
             keys(s),
-            ["expr_index", "generated", "kind", "name", "source"]
+            ["expr_index", "generated", "ident", "kind", "name", "source"]
         );
         assert_eq!(keys(&s["generated"]), ["end", "start"]);
         assert_eq!(keys(&s["source"]), ["end", "start"]);
     }
-    assert!(segs[1].as_object().unwrap()["name"].is_null());
+    assert!(segs[2].as_object().unwrap()["name"].is_null());
+    assert_eq!(segs[2]["ident"], "returning_stream_0");
     for k in [K::Struct, K::Enum, K::Function, K::NonReturningStream] {
         let s = serde_json::to_value(k).unwrap();
         assert!(
@@ -1154,8 +1174,9 @@ fn many_expressions_get_exactly_the_expected_segments() {
     let n = 1_500;
     let src = many_exprs(n);
     let g = generate(&src);
-    // per i: var decl + runner + returning stream + struct
-    assert_eq!(g.map.segments().len(), 4 * n);
+    // per i: var decl + runner + returning stream + struct (T2: plus 4 nested segments each: input, fn, variable input, field)
+    assert_eq!(g.map.top_level().count(), 4 * n);
+    assert_eq!(g.map.segments().len(), 8 * n);
     let count = |k| g.map.segments().iter().filter(|s| s.kind == k).count();
     assert_eq!(count(K::StreamVariable), n);
     assert_eq!(count(K::StreamVariableRunner), n);
@@ -1168,11 +1189,12 @@ fn many_expressions_get_exactly_the_expected_segments() {
 fn assert_invariants_cheap(src: &str, g: &GeneratedProgram) {
     assert_eq!(g.rust, marigold_parse(src).unwrap());
     let exprs = common::expr_ranges(src).unwrap();
-    for s in g.map.segments() {
+    for s in g.map.top_level() {
         assert_eq!(s.source, exprs[s.expr_index]);
         assert!(g.rust.is_char_boundary(s.generated.end));
     }
-    for w in g.map.segments().windows(2) {
+    let top: Vec<&Segment> = g.map.top_level().collect();
+    for w in top.windows(2) {
         assert!(w[0].generated.end < w[1].generated.start);
     }
 }
