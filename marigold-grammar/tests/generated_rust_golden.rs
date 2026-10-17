@@ -56,6 +56,7 @@ macro_rules! programs {
             snapshot_g14_multiline: "g14_multiline", "x = range(0, 5)\n  .map(f)\n  .filter(g)\nx\n  .return";
             snapshot_g15_two_of_each: "g15_two_of_each", "a = range(0, 2)\nb = range(2, 4)\na.return\nrange(9, 10).write_file(\"p.csv\", csv)\nb.return\nrange(7, 8).return\na.write_file(\"q.csv\", csv)\nrange(1, 2).write_file(\"r.csv\", csv)";
             snapshot_g16_unicode: "g16_unicode", "struct R { a: i32 }\nenum Mood { Happy = \"😀\", Sad = \"ünï\" }\nfn pick(x: &str) -> bool { /* é */ x == \"日本語}\" }\nread_file(\"dät€.csv\", csv, struct=R).ok().return\nrange(0, 1).write_file(\"日本語/ö.csv\", csv)";
+            snapshot_g17_crlf: "g17_crlf", "x = range(0, 5)  \r\n\r\n  y = x.map(f)\r\nfn f(x: i32) -> i32 {\r\n  x\r\n}\r\n\r\ny.return  \r\n";
             snapshot_g18_trailing_ws_between_vars: "g18_trailing_ws_between_vars", "  x = range(0, 5)   \n\n   \n\n y = x.map(f)   \t\ny.return   ";
             snapshot_g19_empty: "g19_empty", "";
             snapshot_g20_whitespace_only: "g20_whitespace_only", "   \n\t\n ";
@@ -85,3 +86,11 @@ mod io_and_async_runtime {
     use super::*;
     programs!("io_and_async_runtime");
 }
+
+/// `io` without an async runtime emits yet another variant that the CI matrix never builds, so
+/// there is no snapshot set for it. This ignored test shows up in the output of
+/// `cargo test --features io` so the gap is visible instead of silent.
+#[cfg(all(feature = "io", not(any(feature = "tokio", feature = "async-std"))))]
+#[test]
+#[ignore = "no snapshots for the io feature without tokio or async-std"]
+fn snapshots_for_io_without_an_async_runtime() {}
