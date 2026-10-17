@@ -34,11 +34,11 @@
 //!
 //! # Cost
 //!
-//! [`LineIndex::new`] is `O(n)`. A query takes `O(log lines)` for ASCII text and for
-//! [`ColumnUnit::Bytes`]; for other units on a text that contains non-ASCII characters
-//! it also scans the line that holds the offset, so a very long non-ASCII line makes
-//! many queries quadratic. Programs that consist of one huge line of non-ASCII text are
-//! not expected: only string literals and comments can contain non-ASCII characters.
+//! [`LineIndex::new`] is `O(n)` time and `O(lines + n / 256)` extra memory. A query takes
+//! `O(log lines)` for [`ColumnUnit::Bytes`] and for lines that are pure ASCII. On a line
+//! with non-ASCII characters the index remembers the character counts at about every
+//! 256th byte, so a query takes a binary search plus a scan of at most a few hundred
+//! bytes, however long the line is.
 //!
 //! ```
 //! use marigold_grammar::line_index::{ColumnUnit, LineCol, LineIndex};
@@ -54,6 +54,9 @@
 //! assert_eq!(index.offset(1, 3, ColumnUnit::Utf16), None);   // inside the emoji
 //! assert_eq!(index.offset(3, 1, ColumnUnit::Chars), None);   // no such line
 //! ```
+
+use crate::diagnostics::ByteRange;
+use std::collections::BTreeMap;
 
 /// What a column counts. See the [module documentation](self) for who uses which unit.
 ///
@@ -100,6 +103,37 @@ pub struct LineCol {
     pub column: usize,
 }
 
+/// Distance in bytes between the character counts remembered for a long non-ASCII line.
+const STRIDE: usize = 256;
+
+// Work counter for the complexity test, in the style of `source_map.rs`: how many characters
+// the column conversions looked at, which does not depend on how loaded the machine is.
+#[cfg(test)]
+thread_local! {
+    static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Character counts at a char boundary of a long non-ASCII line.
+#[derive(Debug, Clone, Copy)]
+struct Checkpoint {
+    /// Byte offset from the start of the line.
+    byte: usize,
+    /// Unicode scalar values before it, from the start of the line.
+    chars: usize,
+    /// UTF-16 code units before it, from the start of the line.
+    utf16: usize,
+}
+
+impl Checkpoint {
+    fn units(&self, unit: ColumnUnit) -> usize {
+        match unit {
+            ColumnUnit::Bytes => self.byte,
+            ColumnUnit::Chars => self.chars,
+            ColumnUnit::Utf16 => self.utf16,
+        }
+    }
+}
+
 /// Line starts of a text, for converting between byte offsets and line/column positions.
 ///
 /// Borrows the text. See the [module documentation](self) for the exact semantics.
@@ -117,8 +151,10 @@ pub struct LineIndex<'a> {
     text: &'a str,
     /// Byte offset of the first byte of each line; the first entry is always 0.
     line_starts: Vec<usize>,
-    /// All of `text` is ASCII, so every unit equals the byte distance.
-    ascii: bool,
+    /// The lines that contain a non-ASCII character, by 0-based line number, with
+    /// checkpoints about every [`STRIDE`] bytes (none for a line shorter than that).
+    /// A line without an entry is pure ASCII: every unit is the byte distance.
+    non_ascii: BTreeMap<usize, Vec<Checkpoint>>,
 }
 
 impl<'a> LineIndex<'a> {
@@ -131,13 +167,32 @@ impl<'a> LineIndex<'a> {
     /// assert_eq!(LineIndex::new("a\nb\n").line_count(), 3);
     /// ```
     pub fn new(text: &'a str) -> Self {
-        let line_starts = std::iter::once(0)
+        let line_starts: Vec<usize> = std::iter::once(0)
             .chain(text.match_indices('\n').map(|(i, _)| i + 1))
             .collect();
+        let mut non_ascii = BTreeMap::new();
+        for (index, &start) in line_starts.iter().enumerate() {
+            let end = Self::end_of(text, &line_starts, index);
+            let line = &text[start..end];
+            if line.is_ascii() {
+                continue;
+            }
+            let mut checkpoints = Vec::new();
+            let (mut chars, mut utf16, mut next) = (0, 0, STRIDE);
+            for (byte, c) in line.char_indices() {
+                if byte >= next {
+                    checkpoints.push(Checkpoint { byte, chars, utf16 });
+                    next = byte + STRIDE;
+                }
+                chars += 1;
+                utf16 += c.len_utf16();
+            }
+            non_ascii.insert(index, checkpoints);
+        }
         LineIndex {
             text,
             line_starts,
-            ascii: text.is_ascii(),
+            non_ascii,
         }
     }
 
@@ -150,13 +205,30 @@ impl<'a> LineIndex<'a> {
     /// assert_eq!(LineIndex::new("a\r\nb").line_count(), 2);
     /// assert_eq!(LineIndex::new("a\rb").line_count(), 1);
     /// ```
-    pub fn line_range(&self, _line: usize) -> Option<crate::diagnostics::ByteRange> {
-        None // red stub
-    }
-
-    /// Stub.
     pub fn line_count(&self) -> usize {
         self.line_starts.len()
+    }
+
+    /// The bytes of a 1-based `line`, without the `\n` that ends it (a `\r` before it
+    /// belongs to the line). `None` if `line` is 0 or past [`line_count`](Self::line_count).
+    ///
+    /// ```
+    /// use marigold_grammar::line_index::LineIndex;
+    ///
+    /// let src = "ab\r\ncd";
+    /// let index = LineIndex::new(src);
+    /// let second = index.line_range(2).unwrap();
+    /// assert_eq!(&src[second.start..second.end], "cd");
+    /// let first = index.line_range(1).unwrap();
+    /// assert_eq!(&src[first.start..first.end], "ab\r");
+    /// assert!(index.line_range(3).is_none());
+    /// ```
+    pub fn line_range(&self, line: usize) -> Option<ByteRange> {
+        let index = line.checked_sub(1).filter(|&i| i < self.line_count())?;
+        Some(ByteRange {
+            start: self.line_starts[index],
+            end: Self::end_of(self.text, &self.line_starts, index),
+        })
     }
 
     /// The 1-based line and column of the byte at `offset`.
@@ -188,8 +260,24 @@ impl<'a> LineIndex<'a> {
         }
         let line = self.line_starts.partition_point(|&start| start <= offset);
         let start = self.line_starts[line - 1];
-        let column = 1 + self.width(&self.text[start..offset], unit);
-        LineCol { line, column }
+        let relative = offset - start;
+        let before_offset = match self.checkpoints(line - 1, unit) {
+            // `Bytes` and pure ASCII lines: the byte distance is the answer.
+            None => relative,
+            // Count from the last checkpoint at or before the offset.
+            Some(checkpoints) => {
+                let before = checkpoints.partition_point(|c| c.byte <= relative);
+                let (byte, units) = match before.checked_sub(1).map(|i| checkpoints[i]) {
+                    Some(c) => (c.byte, c.units(unit)),
+                    None => (0, 0),
+                };
+                units + Self::width(&self.text[start + byte..offset], unit)
+            }
+        };
+        LineCol {
+            line,
+            column: 1 + before_offset,
+        }
     }
 
     /// The byte offset of a 1-based position: the exact inverse of
@@ -214,39 +302,61 @@ impl<'a> LineIndex<'a> {
     /// assert_eq!(index.offset(2, usize::MAX, ColumnUnit::Chars), None);
     /// ```
     pub fn offset(&self, line: usize, col: usize, unit: ColumnUnit) -> Option<usize> {
-        if line == 0 || col == 0 || line > self.line_count() {
+        if col == 0 {
             return None;
         }
-        let start = self.line_starts[line - 1];
-        let end = match self.line_starts.get(line) {
-            Some(next_start) => next_start - 1, // the '\n' that ends this line
-            None => self.text.len(),
-        };
+        let range = self.line_range(line)?;
         let want = col - 1;
-        if unit == ColumnUnit::Bytes || self.ascii {
-            // `want` is a byte distance. Without the `then` closure the sum would be
-            // evaluated for `usize::MAX` columns too and overflow.
-            return (want <= end - start)
-                .then(|| start + want)
+        let Some(checkpoints) = self.checkpoints(line - 1, unit) else {
+            // The unit is the byte distance. `then` rather than `then_some`: the sum would
+            // be evaluated for `usize::MAX` columns too and overflow.
+            return (want <= range.end - range.start)
+                .then(|| range.start + want)
                 .filter(|&at| self.text.is_char_boundary(at));
-        }
-        let mut seen = 0;
-        for (at, c) in self.text[start..end].char_indices() {
+        };
+        // Resume from the last checkpoint that is not past the wanted column.
+        let before = checkpoints.partition_point(|c| c.units(unit) <= want);
+        let (mut at, mut seen) = match before.checked_sub(1).map(|i| checkpoints[i]) {
+            Some(c) => (range.start + c.byte, c.units(unit)),
+            None => (range.start, 0),
+        };
+        for c in self.text[at..range.end].chars() {
+            #[cfg(test)]
+            SCANNED.with(|s| s.set(s.get() + 1));
             if seen >= want {
-                return (seen == want).then_some(start + at);
+                break;
             }
             seen += Self::char_width(c, unit);
+            at += c.len_utf8();
         }
-        (seen == want).then_some(end)
+        (seen == want).then_some(at)
+    }
+
+    /// Where line `index` (0-based) ends, before its `\n`.
+    fn end_of(text: &str, line_starts: &[usize], index: usize) -> usize {
+        match line_starts.get(index + 1) {
+            Some(next_start) => next_start - 1,
+            None => text.len(),
+        }
+    }
+
+    /// The checkpoints of line `index` if its columns in `unit` are not the byte distance.
+    fn checkpoints(&self, index: usize, unit: ColumnUnit) -> Option<&[Checkpoint]> {
+        if unit == ColumnUnit::Bytes {
+            return None;
+        }
+        self.non_ascii.get(&index).map(Vec::as_slice)
     }
 
     /// Columns taken by `text` (a part of one line) in `unit`.
-    fn width(&self, text: &str, unit: ColumnUnit) -> usize {
-        match unit {
-            ColumnUnit::Bytes => text.len(),
-            _ if self.ascii => text.len(),
-            unit => text.chars().map(|c| Self::char_width(c, unit)).sum(),
-        }
+    fn width(text: &str, unit: ColumnUnit) -> usize {
+        text.chars()
+            .map(|c| {
+                #[cfg(test)]
+                SCANNED.with(|s| s.set(s.get() + 1));
+                Self::char_width(c, unit)
+            })
+            .sum()
     }
 
     fn char_width(c: char, unit: ColumnUnit) -> usize {
@@ -255,5 +365,53 @@ impl<'a> LineIndex<'a> {
             ColumnUnit::Chars => 1,
             ColumnUnit::Utf16 => c.len_utf16(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scanned(work: impl FnOnce()) -> usize {
+        SCANNED.with(|s| s.set(0));
+        work();
+        SCANNED.with(|s| s.get())
+    }
+
+    /// A query looks at the characters between two checkpoints, never at the whole line.
+    #[test]
+    fn queries_on_a_long_non_ascii_line_scan_one_stride() {
+        let line = format!("é{}日{}", "a".repeat(100_000), "b".repeat(100_000));
+        let index = LineIndex::new(&line);
+        let mut worst = 0;
+        for offset in (0..line.len()).step_by(997) {
+            for unit in [ColumnUnit::Chars, ColumnUnit::Utf16] {
+                let mut position = None;
+                worst = worst.max(scanned(|| position = Some(index.line_col(offset, unit))));
+                let position = position.unwrap();
+                // an offset inside a character is moved back to its start
+                let start = (0..=offset).rev().find(|&i| line.is_char_boundary(i));
+                worst = worst.max(scanned(|| {
+                    assert_eq!(index.offset(position.line, position.column, unit), start)
+                }));
+            }
+        }
+        // a stride plus the width of the character that crosses it
+        assert!(worst <= STRIDE + 4, "a query scanned {worst} characters");
+    }
+
+    #[test]
+    fn building_keeps_one_checkpoint_per_stride() {
+        let line = "é".repeat(10 * STRIDE);
+        let index = LineIndex::new(&line);
+        let checkpoints = &index.non_ascii[&0];
+        // 5120 bytes of two-byte characters: a checkpoint at every multiple of 256 below that
+        assert_eq!(checkpoints.len(), 19);
+        assert_eq!(checkpoints[0].byte, STRIDE);
+        assert_eq!(checkpoints[0].chars, STRIDE / 2);
+        // ASCII lines get no entry at all, and short non-ASCII lines get an empty one
+        let index = LineIndex::new("plain\né\nplain");
+        assert_eq!(index.non_ascii.keys().copied().collect::<Vec<_>>(), [1]);
+        assert!(index.non_ascii[&1].is_empty());
     }
 }
