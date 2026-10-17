@@ -98,11 +98,40 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
 }
 
-/// Red-phase stub.
+/// Generate Rust code together with a map from it back to the Marigold source.
+///
+/// `rust` is byte-for-byte what [`marigold_parse`] returns, and this fails exactly when
+/// [`marigold_parse`] fails, with the same message. Unlike [`marigold_check`], input
+/// size is not limited, because [`marigold_parse`] has no limit either.
+///
+/// ```
+/// use marigold_grammar::source_map::SegmentKind;
+/// use marigold_grammar::{marigold_generate, marigold_parse};
+///
+/// let src = "x = range(0, 5)\nx.return";
+/// let program = marigold_generate(src).unwrap();
+/// assert_eq!(program.rust, marigold_parse(src).unwrap());
+///
+/// // Generated order differs from source order: the stream variable is declared,
+/// // then the output stream, and its runner comes last.
+/// let kinds: Vec<_> = program.map.segments().iter().map(|s| s.kind).collect();
+/// assert_eq!(
+///     kinds,
+///     [SegmentKind::StreamVariable, SegmentKind::ReturningStream, SegmentKind::StreamVariableRunner]
+/// );
+///
+/// let output = &program.map.segments()[1];
+/// assert_eq!(&src[output.source.start..output.source.end], "x.return");
+/// assert!(program.rust[output.generated.start..output.generated.end]
+///     .starts_with("let returning_stream_0"));
+/// assert_eq!(program.map.source_for_generated(output.generated.start), Some(output));
+///
+/// assert!(marigold_generate("range(0,").is_err());
+/// ```
 pub fn marigold_generate(
-    _s: &str,
+    s: &str,
 ) -> Result<source_map::GeneratedProgram, parser::MarigoldParseError> {
-    todo!()
+    parser::PestParser::generate_input(s).map_err(parser::MarigoldParseError)
 }
 
 /// Check Marigold source and return every diagnostic found, with byte ranges.

@@ -95,9 +95,7 @@ impl PestParser {
     /// `TypedExpression` per `Rule::expr`, so this list is parallel to the builder's
     /// output: the range of `expressions[i]` is `ranges[i]`. A stream variable's
     /// `expr` pair includes its trailing whitespace, which is trimmed here.
-    fn expr_ranges(
-        pairs: &pest::iterators::Pairs<'_, Rule>,
-    ) -> Vec<crate::diagnostics::ByteRange> {
+    fn expr_ranges(pairs: &pest::iterators::Pairs<'_, Rule>) -> Vec<crate::diagnostics::ByteRange> {
         pairs
             .clone()
             .flatten()
@@ -226,9 +224,23 @@ impl PestParser {
 
     /// Internal function: parse input and build AST
     fn parse_input(input: &str) -> Result<String, String> {
+        Self::generate_input(input).map(|generated| generated.rust)
+    }
+
+    /// Parse input, generate Rust code and map every generated item back to the
+    /// Marigold source expression it came from.
+    ///
+    /// This is the single code path behind both [`MarigoldParser::parse`] and
+    /// [`crate::marigold_generate`], so the generated code and the errors are
+    /// identical between them.
+    pub(crate) fn generate_input(
+        input: &str,
+    ) -> Result<crate::source_map::GeneratedProgram, String> {
         // Stage 1: Parse with Pest grammar
         let pairs = MarigoldPestParser::parse(Rule::program, input)
             .map_err(|e| format!("Parse error: {}", e))?;
+        // Ranges must be taken before the builder consumes the pairs.
+        let ranges = Self::expr_ranges(&pairs);
 
         // Stage 2: Build AST from parse tree
         let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)?;
@@ -240,7 +252,18 @@ impl PestParser {
         let resolved_bounds = Self::validate_bounded_types(&expressions)?;
 
         // Stage 4: Generate Rust code (replicating LALRPOP logic)
-        Self::generate_rust_code(expressions, resolved_bounds)
+        let (rust, generated) = Self::generate_rust_code_mapped(expressions, resolved_bounds)?;
+
+        // Stage 5: Attach each item's source range. `expr_index` indexes `ranges`
+        // because both are parallel to the top-level expressions.
+        let segments = generated
+            .into_iter()
+            .map(|g| g.attach_source(&ranges))
+            .collect();
+        Ok(crate::source_map::GeneratedProgram {
+            rust,
+            map: crate::source_map::SourceMap::new(segments),
+        })
     }
 
     /// Resolve `InputCount::Enum(name)` placeholders produced by `range(EnumName)`.
@@ -317,122 +340,115 @@ impl PestParser {
         expressions: Vec<crate::nodes::TypedExpression>,
         resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
     ) -> Result<String, String> {
+        Self::generate_rust_code_mapped(expressions, resolved_bounds).map(|(rust, _)| rust)
+    }
+
+    /// Generate Rust code from AST expressions and record, for every top-level
+    /// expression that produces a standalone item or statement, where in the
+    /// generated code it was written.
+    ///
+    /// The returned code is the same code [`Self::generate_rust_code`] returns; the
+    /// separators between items and statements are glue and belong to no segment.
+    /// `expr_index` is the position in `expressions`, which is not the position in
+    /// the filtered per-section lists that name the generated variables.
+    fn generate_rust_code_mapped(
+        expressions: Vec<crate::nodes::TypedExpression>,
+        resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
+    ) -> Result<(String, Vec<crate::source_map::GeneratedSegment>), String> {
+        use crate::nodes::TypedExpression;
+        use crate::source_map::{CodeBuilder, SegmentKind};
+
         let struct_bounds = Self::build_struct_bounds_map(&resolved_bounds);
-        let mut output = "async {\n    use ::marigold::marigold_impl::*;\n    ".to_string();
+        let mut out = CodeBuilder::new("async {\n    use ::marigold::marigold_impl::*;\n    ");
 
         // 1. Generate enums and structs
-        let enums_and_structs = expressions
-            .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::StructDeclaration(s) => {
+        for (i, expr) in expressions.iter().enumerate() {
+            match expr {
+                TypedExpression::StructDeclaration(s) => {
                     let field_bounds = struct_bounds.get(&s.name);
-                    Some(s.code_with_bounds(field_bounds))
+                    let code = s.code_with_bounds(field_bounds);
+                    out.segment(SegmentKind::Struct, i, Some(s.name.clone()), &code);
                 }
-                crate::nodes::TypedExpression::EnumDeclaration(e) => Some(e.code()),
-                _ => None,
-            })
-            .map(|s| format!("{s}\n\n"))
-            .collect::<Vec<_>>()
-            .join("");
-
-        output.push_str(&enums_and_structs);
+                TypedExpression::EnumDeclaration(e) => {
+                    out.segment(SegmentKind::Enum, i, Some(e.name.clone()), &e.code());
+                }
+                _ => continue,
+            }
+            out.glue("\n\n");
+        }
 
         // 2. Generate functions
-        let functions = expressions
-            .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::FnDeclaration(f) => Some(f.code()),
-                _ => None,
-            })
-            .map(|s| format!("{s}\n\n"))
-            .collect::<Vec<_>>()
-            .join("");
-
-        output.push_str(&functions);
+        for (i, expr) in expressions.iter().enumerate() {
+            if let TypedExpression::FnDeclaration(f) = expr {
+                out.segment(SegmentKind::Function, i, Some(f.name.clone()), &f.code());
+                out.glue("\n\n");
+            }
+        }
 
         // 3. Generate stream variable declarations
-        let stream_variable_declarations = expressions
-            .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::StreamVariable(v) => Some(v.declaration_code()),
-                crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                    Some(v.declaration_code())
+        for (i, expr) in expressions.iter().enumerate() {
+            let (name, code) = match expr {
+                TypedExpression::StreamVariable(v) => (&v.variable_name, v.declaration_code()),
+                TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
+                    (&v.variable_name, v.declaration_code())
                 }
-                _ => None,
-            })
-            .map(|s| format!("{s}\n\n"))
-            .collect::<Vec<_>>()
-            .join("");
+                _ => continue,
+            };
+            out.segment(SegmentKind::StreamVariable, i, Some(name.clone()), &code);
+            out.glue("\n\n");
+        }
 
-        output.push_str(&stream_variable_declarations);
+        // 4. Generate returning streams
+        let mut n_returning_streams = 0;
+        for (i, expr) in expressions.iter().enumerate() {
+            let code = match expr {
+                TypedExpression::UnnamedReturningStream(s) => s.code(),
+                TypedExpression::NamedReturningStream(s) => s.code(),
+                _ => continue,
+            };
+            let stmt = format!("let returning_stream_{n_returning_streams} = Box::pin({code});");
+            out.segment(SegmentKind::ReturningStream, i, None, &stmt);
+            out.glue("\n");
+            n_returning_streams += 1;
+        }
 
-        // 4. Collect returning streams
-        let returning_stream_vec = expressions
-            .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::UnnamedReturningStream(s) => Some(s.code()),
-                crate::nodes::TypedExpression::NamedReturningStream(s) => Some(s.code()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        // 5. Generate non-returning streams
+        let mut n_non_returning_streams = 0;
+        for (i, expr) in expressions.iter().enumerate() {
+            let code = match expr {
+                TypedExpression::UnnamedNonReturningStream(s) => s.code(),
+                TypedExpression::NamedNonReturningStream(s) => s.code(),
+                _ => continue,
+            };
+            let stmt =
+                format!("let non_returning_stream_{n_non_returning_streams} = Box::pin({code});");
+            out.segment(SegmentKind::NonReturningStream, i, None, &stmt);
+            out.glue("\n");
+            n_non_returning_streams += 1;
+        }
 
-        let n_returning_streams = returning_stream_vec.len();
-
-        // Generate returning stream variables
-        output.push_str(
-            &returning_stream_vec
-                .iter()
-                .zip(0..n_returning_streams)
-                .map(|(stream_def, i)| {
-                    format!("let returning_stream_{i} = Box::pin({stream_def});\n")
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        );
-
-        // 5. Collect non-returning streams
-        let non_returning_streams = expressions
-            .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::UnnamedNonReturningStream(s) => Some(s.code()),
-                crate::nodes::TypedExpression::NamedNonReturningStream(s) => Some(s.code()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        output.push_str(
-            &non_returning_streams
-                .iter()
-                .enumerate()
-                .map(|(i, stream_def)| {
-                    format!("let non_returning_stream_{i} = Box::pin({stream_def});\n")
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        );
-
-        // 6. Collect stream variable runners
-        let stream_variable_runners = expressions
-            .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::StreamVariable(v) => Some(v.runner_code()),
-                crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                    Some(v.runner_code())
+        // 6. Generate stream variable runners
+        let mut n_stream_variable_runners = 0;
+        for (i, expr) in expressions.iter().enumerate() {
+            let (name, code) = match expr {
+                TypedExpression::StreamVariable(v) => (&v.variable_name, v.runner_code()),
+                TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
+                    (&v.variable_name, v.runner_code())
                 }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        output.push_str(
-            &stream_variable_runners
-                .iter()
-                .enumerate()
-                .map(|(i, stream_def)| {
-                    format!("let stream_variable_runners_{i} = Box::pin({stream_def});\n")
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        );
+                _ => continue,
+            };
+            let stmt = format!(
+                "let stream_variable_runners_{n_stream_variable_runners} = Box::pin({code});"
+            );
+            out.segment(
+                SegmentKind::StreamVariableRunner,
+                i,
+                Some(name.clone()),
+                &stmt,
+            );
+            out.glue("\n");
+            n_stream_variable_runners += 1;
+        }
 
         // 7. Build streams array
         let mut streams_string = "vec![\n".to_string();
@@ -445,14 +461,14 @@ impl PestParser {
         );
 
         streams_string.push_str(
-            &(0..non_returning_streams.len())
+            &(0..n_non_returning_streams)
                 .map(|i| format!("non_returning_stream_{i},\n"))
                 .collect::<Vec<_>>()
                 .join(""),
         );
 
         streams_string.push_str(
-            &(0..stream_variable_runners.len())
+            &(0..n_stream_variable_runners)
                 .map(|i| format!("stream_variable_runners_{i},\n"))
                 .collect::<Vec<_>>()
                 .join(""),
@@ -462,7 +478,7 @@ impl PestParser {
 
         // 8. Generate stream array with type inference helper if needed
         if n_returning_streams > 0 {
-            output.push_str(
+            out.glue(
                 "
         /// silly function that uses generics to infer the output type (StreamItem) via generics, so that
         /// we can provide the streams as an array of Pin<Box<dyn Stream<Item=StreamItem>>>.
@@ -472,27 +488,27 @@ impl PestParser {
         }
         "
             );
-            output.push_str(&format!(
+            out.glue(&format!(
                 "let streams_array = typed_stream_vec({streams_string});"
             ));
         } else {
-            output.push_str(&format!(
+            out.glue(&format!(
                 "let streams_array:  Vec<core::pin::Pin<Box<dyn futures::Stream<Item=()>>>> = {streams_string};"
             ));
         }
 
         // 9. Generate select_all and collect/return
-        output.push_str("let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array);");
+        out.glue("let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array);");
 
         if n_returning_streams == 0 {
-            output.push_str("all_streams.collect::<Vec<()>>().await;\n");
+            out.glue("all_streams.collect::<Vec<()>>().await;\n");
         } else {
-            output.push_str("all_streams\n");
+            out.glue("all_streams\n");
         }
 
-        output.push_str("}\n");
+        out.glue("}\n");
 
-        Ok(output)
+        Ok(out.finish())
     }
 
     fn build_struct_bounds_map(
