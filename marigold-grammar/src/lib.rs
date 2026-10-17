@@ -79,6 +79,7 @@ pub mod symbols;
 mod type_aggregation;
 
 pub mod pest_ast_builder;
+pub mod source_map;
 
 /// Convenience function for parsing Marigold code
 ///
@@ -95,6 +96,13 @@ pub mod pest_ast_builder;
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
+}
+
+/// Red-phase stub.
+pub fn marigold_generate(
+    _s: &str,
+) -> Result<source_map::GeneratedProgram, parser::MarigoldParseError> {
+    todo!()
 }
 
 /// Check Marigold source and return every diagnostic found, with byte ranges.
