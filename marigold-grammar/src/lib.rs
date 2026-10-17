@@ -55,6 +55,7 @@
 //! - `io`: I/O features (available in other crates)
 //! - `tokio`: Tokio runtime integration (available in other crates)
 //! - `async-std`: async-std runtime integration (available in other crates)
+//! - `otel`: [`marigold_parse_instrumented`] generates OpenTelemetry-instrumented code
 //!
 //! ## Performance Characteristics
 //!
@@ -69,6 +70,9 @@ pub use itertools;
 pub mod bound_resolution;
 pub mod complexity;
 pub mod diagnostics;
+#[cfg(feature = "otel")]
+pub mod instrument;
+pub mod node_ids;
 pub mod nodes;
 pub mod parser;
 mod recovery;
@@ -95,6 +99,32 @@ pub mod pest_ast_builder;
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
+}
+
+/// Generate Rust code in which every input, stream function and output is wrapped with the
+/// OpenTelemetry adapters of `marigold_impl::telemetry`.
+///
+/// Available with the `otel` feature. [`marigold_parse`] is unaffected by the feature. The node
+/// ids embedded in the code are the ones [`marigold_node_ids`] returns for
+/// [`instrument::CodegenOptions::program`].
+///
+/// ```
+/// use marigold_grammar::instrument::CodegenOptions;
+/// use marigold_grammar::{marigold_node_ids, marigold_parse_instrumented};
+///
+/// let src = "range(0, 5).map(double).return";
+/// let code = marigold_parse_instrumented(src, &CodegenOptions::new("demo")).unwrap();
+/// for node in marigold_node_ids(src, "demo") {
+///     assert!(code.contains(node.id.as_str()));
+/// }
+/// assert!(code.contains("telemetry::instrument("));
+/// ```
+#[cfg(feature = "otel")]
+pub fn marigold_parse_instrumented(
+    s: &str,
+    options: &instrument::CodegenOptions,
+) -> Result<String, parser::MarigoldParseError> {
+    parser::PestParser::parse_instrumented(s, options).map_err(parser::MarigoldParseError)
 }
 
 /// Check Marigold source and return every diagnostic found, with byte ranges.
@@ -155,6 +185,31 @@ pub fn marigold_check(s: &str) -> Vec<diagnostics::Diagnostic> {
 /// ```
 pub fn marigold_symbols(s: &str) -> symbols::SymbolIndex {
     symbols::SymbolIndex::from_source(s)
+}
+
+pub use node_ids::{NodeId, NodeInfo, NodeKind};
+
+/// Stable ids and content hashes for every input, stream function and output of every stream
+/// expression, and for every stream variable declaration, in source order.
+///
+/// `program` namespaces the ids, so the same source in two programs yields different ids. Broken
+/// files are recovered chunk by chunk, so intact expressions still get ids. See [`node_ids`] for
+/// the hash algorithm and the identity rules.
+///
+/// ```
+/// use marigold_grammar::marigold_node_ids;
+///
+/// let src = "x = range(0, 5).map(f)\nx.return";
+/// let nodes = marigold_node_ids(src, "demo");
+/// assert_eq!(nodes.len(), 5);
+///
+/// let spaced = "x = range(0, 5)\n  .map(f)\nx.return";
+/// let again = marigold_node_ids(spaced, "demo");
+/// let ids = |n: &[marigold_grammar::NodeInfo]| n.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+/// assert_eq!(ids(&nodes), ids(&again));
+/// ```
+pub fn marigold_node_ids(s: &str, program: &str) -> Vec<NodeInfo> {
+    node_ids::node_infos(s, program)
 }
 
 /// Complexity of every variable declaration and output stream, with its name and source range.

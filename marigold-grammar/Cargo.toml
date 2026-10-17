@@ -12,6 +12,7 @@ default = []
 io = []
 tokio = []
 async-std = []
+otel = []
 
 [dependencies]
 num-traits = "0.2"

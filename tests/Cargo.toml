@@ -7,6 +7,10 @@ license = "Apache-2.0 OR MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+otel = ["marigold/otel"]
+otel-otlp = ["otel", "marigold/otel-otlp"]
+
 [dependencies.marigold]
 path = "../marigold"
 version = "=0.2.0"
@@ -16,6 +20,7 @@ path = "../marigold-grammar"
 
 [dev-dependencies]
 futures = "0.3"
+opentelemetry_sdk = { version = "=0.33.0", default-features = false, features = ["trace", "metrics", "testing"] }
 num-bigint = "0.4"
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
 
