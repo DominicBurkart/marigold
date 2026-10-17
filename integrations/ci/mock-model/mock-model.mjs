@@ -161,7 +161,7 @@ const anthropic = {
 export const PROTOCOLS = {
   anthropic,
   "openai-chat": null,
-  "openai-responses": null,
+  "openai-responses": (await import("./protocol-openai-responses.mjs")).default,
 };
 
 export function createServer({ protocol, script, vars = {}, logPath }) {

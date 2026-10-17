@@ -146,7 +146,7 @@ test("invalid scripts are rejected", () => {
   }
 });
 
-for (const protocol of ["openai-chat", "openai-responses"]) {
+for (const protocol of ["openai-chat"]) {
   test(`${protocol} is a NotImplemented stub that exits non-zero`, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mm-"));
     const script = path.join(dir, "s.json");

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { check, parseArgs } from "./assert-diagnostic.mjs";
+import { check, parseArgs, toolOutputs } from "./assert-diagnostic.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const entries = [
@@ -45,4 +45,25 @@ test("CLI exit codes", () => {
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /FAIL/);
   assert.equal(run("--after", "1", "--contains", "undefined-fn", "--absent", "undefined-fn").status, 1);
+});
+
+test("outputs-only ignores tool definitions and instructions", () => {
+  const mk = (turn, output) => ({
+    index: turn,
+    turn,
+    request: {
+      instructions: "mentions undefined-fn",
+      tools: [{ description: "undefined-fn information" }],
+      input: [
+        { type: "message", content: "undefined-fn" },
+        { type: "function_call_output", call_id: "c", output },
+      ],
+    },
+  });
+  const hit = toolOutputs([mk(1, "x"), mk(2, '{"code":"undefined-fn"}')]);
+  assert.equal(check(hit, { after: 1, contains: "undefined-fn" }).ok, true);
+  const miss = toolOutputs([mk(1, "x"), mk(2, '{"ok":true}')]);
+  assert.equal(check(miss, { after: 1, contains: "ok", absent: "undefined-fn" }).ok, true);
+  assert.equal(check(miss, { after: 1, contains: "undefined-fn" }).ok, false);
+  assert.equal(parseArgs(["f", "--after", "1", "--contains", "x", "--outputs-only"]).outputsOnly, true);
 });
