@@ -115,9 +115,23 @@ fn borrowed<'a>(env: &'a [(&'static str, String)]) -> Vec<(&'a str, &'a str)> {
 }
 
 fn assert_clean(label: &str, text: &str) {
-    for secret in [API, APP, BODY] {
-        assert!(!text.contains(secret), "{label} leaked {secret}: {text}");
+    for (name, value) in [
+        ("API key", API),
+        ("APP key", APP),
+        ("response body marker", BODY),
+    ] {
+        if let Some(offset) = text.find(value) {
+            panic!("{label} leaked the {name} at byte {offset}");
+        }
     }
+}
+
+fn scrub(text: &str) -> String {
+    [API, APP, BODY]
+        .iter()
+        .fold(text.to_string(), |acc, value| {
+            acc.replace(value, "[redacted]")
+        })
 }
 
 fn finish(child: Child) -> (std::process::ExitStatus, String) {
@@ -191,7 +205,7 @@ fn mcp_session(env: &[(&str, &str)], path: &str, calls_tool: bool) -> (Vec<Value
         seen.push(v);
     }
     let (status, stderr) = finish(child);
-    assert!(status.success(), "{status:?} {stderr}");
+    assert!(status.success(), "{status:?} {}", scrub(&stderr));
     (seen, stderr)
 }
 
@@ -214,11 +228,17 @@ fn mcp_tool_failures_never_echo_keys_or_backend_bodies() {
         assert_clean(&format!("{mode:?} stdout"), &all);
         assert_clean(&format!("{mode:?} stderr"), &stderr);
         let call = &seen[2];
-        assert_eq!(call["result"]["isError"], true, "{mode:?} {call}");
+        assert_eq!(
+            call["result"]["isError"],
+            true,
+            "{mode:?} {}",
+            scrub(&call.to_string())
+        );
         let head = proxy.seen.recv_timeout(Duration::from_secs(30)).unwrap();
         assert!(
             head.starts_with(&format!("CONNECT api.{SITE}:443")),
-            "{mode:?} {head}"
+            "{mode:?} {}",
+            scrub(&head)
         );
         assert_clean(&format!("{mode:?} proxy request"), &head);
     }
@@ -263,7 +283,8 @@ fn lsp_failures_never_echo_keys_or_backend_bodies() {
         let head = proxy.seen.recv_timeout(Duration::from_secs(30)).unwrap();
         assert!(
             head.starts_with(&format!("CONNECT api.{SITE}:443")),
-            "{head}"
+            "{}",
+            scrub(&head)
         );
         send(json!({"jsonrpc":"2.0","id":4,"method":"shutdown"}));
         send(json!({"jsonrpc":"2.0","method":"exit"}));
@@ -273,11 +294,11 @@ fn lsp_failures_never_echo_keys_or_backend_bodies() {
             messages.push(message);
         }
         let (status, stderr) = finish(child);
-        assert!(status.success(), "{mode:?} {status:?} {stderr}");
+        assert!(status.success(), "{mode:?} {status:?} {}", scrub(&stderr));
         let all = serde_json::to_string(&messages).unwrap();
         assert_clean(&format!("{mode:?} lsp stdout"), &all);
         assert_clean(&format!("{mode:?} lsp stderr"), &stderr);
-        assert!(all.contains("cardinality:"), "{all}");
+        assert!(all.contains("cardinality:"), "{}", scrub(&all));
         assert!(!all.contains("observed:"));
     }
 }
@@ -309,11 +330,63 @@ fn refused_sites_and_bad_keys_report_without_keys_and_send_nothing() {
         let all = serde_json::to_string(&seen).unwrap();
         assert_clean(&format!("{site} stdout"), &all);
         assert_clean(&format!("{site} stderr"), &stderr);
-        assert!(stderr.contains("telemetry disabled"), "{site}: {stderr}");
+        assert!(
+            stderr.contains("telemetry disabled"),
+            "{site}: {}",
+            scrub(&stderr)
+        );
         assert!(!all.contains("marigold_telemetry"), "{site}");
         assert!(
             proxy.seen.try_recv().is_err(),
             "{site} contacted the network"
         );
     }
+}
+
+fn panic_message(f: impl FnOnce() + std::panic::UnwindSafe) -> Option<String> {
+    let payload = std::panic::catch_unwind(f).err()?;
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+}
+
+#[test]
+fn assert_clean_passes_on_clean_text() {
+    assert_clean("clean", "nothing sensitive here");
+    assert_clean("empty", "");
+}
+
+#[test]
+fn assert_clean_failure_message_names_the_secret_without_revealing_it() {
+    let surrounding = "NEIGHBOUR_CONTEXT_ONLY";
+    for (name, secret) in [("API key", API), ("APP key", APP), ("response body", BODY)] {
+        let text = format!("{surrounding} {secret} {surrounding}");
+        let offset = surrounding.len() + 1;
+        let message = panic_message(|| assert_clean("probe", &text))
+            .unwrap_or_else(|| panic!("assert_clean accepted text containing the {name}"));
+        assert!(message.contains("probe"), "label missing");
+        assert!(message.contains(name), "secret name missing");
+        assert!(
+            message.contains(&format!("byte {offset}")),
+            "offset missing"
+        );
+        assert!(!message.contains(secret), "message revealed the {name}");
+        assert!(
+            !message.contains(surrounding),
+            "message echoed the checked text"
+        );
+    }
+}
+
+#[test]
+fn scrub_removes_every_secret_and_keeps_other_text() {
+    let text = format!("a {API} b {APP} c {BODY} d {API}");
+    let scrubbed = scrub(&text);
+    assert_clean("scrubbed", &scrubbed);
+    assert_eq!(
+        scrubbed,
+        "a [redacted] b [redacted] c [redacted] d [redacted]"
+    );
+    assert_eq!(scrub("plain"), "plain");
 }
