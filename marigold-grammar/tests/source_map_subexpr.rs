@@ -2321,7 +2321,7 @@ fn many_expressions_get_exactly_the_expected_nested_segments() {
 // `src/source_map.rs` (`construction_work_is_n_log_n`,
 // `pairing_parts_with_pieces_does_linear_work_in_the_chain_length`) and by the paired-round
 // timing test `mapped_code_generation_grows_linearly_with_program_size` in `src/parser.rs`,
-// whose program contains nested segments of every statement kind.
+// whose program contains nested segments (inputs, stream functions, struct fields).
 
 #[test]
 fn nested_lookups_are_fast_on_a_big_program() {

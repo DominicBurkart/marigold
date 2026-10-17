@@ -540,11 +540,12 @@ impl SourceMap {
     /// assert_eq!(program.map.index_of(&input.clone()), None);
     /// ```
     pub fn index_of(&self, segment: &Segment) -> Option<usize> {
-        let size = std::mem::size_of::<Segment>();
+        // A `&Segment` points at a whole segment, so if it points into `self.segments`
+        // the offset is a multiple of the segment size.
         let offset =
             (segment as *const Segment as usize).checked_sub(self.segments.as_ptr() as usize)?;
-        let index = offset / size;
-        (offset % size == 0 && index < self.segments.len()).then_some(index)
+        let index = offset / std::mem::size_of::<Segment>();
+        (index < self.segments.len()).then_some(index)
     }
 
     /// The segments that define the Rust identifier `ident` (see [`Segment::ident`]), in
@@ -633,13 +634,13 @@ impl SourceMap {
     /// it, so editors should also query the position before the cursor). An inverted
     /// range (`start > end`) and a range outside the source match nothing.
     ///
-    /// Takes `O(log n + k + s)` for `k` results, where `s` is the number of segments
-    /// scanned that end before `range` starts: segments of one statement are scanned
-    /// while a later-starting one is queried inside the statement, so a statement with a
-    /// very long chain makes queries inside it slower. For hand-built maps whose source
-    /// ranges nest in long chains it degrades to a scan of the segments that start before
-    /// the query ends. A stream variable's range finds both its declaration
-    /// and its runner, but not the streams that merely use the variable.
+    /// Takes `O(log n + k + s)` for `k` results, where `s` counts the segments that start
+    /// before the query ends and lie, with it, inside the same enclosing statement but end
+    /// before the query starts: a query late in a statement with a very long chain scans
+    /// the earlier parts of the chain. For hand-built maps whose source ranges nest in
+    /// long chains it degrades to a scan of the segments that start before the query ends.
+    /// A stream variable's range finds both its declaration and its runner, but not the
+    /// streams that merely use the variable.
     ///
     /// ```
     /// use marigold_grammar::diagnostics::ByteRange;
