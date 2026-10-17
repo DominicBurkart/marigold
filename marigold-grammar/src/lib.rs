@@ -72,6 +72,8 @@ pub use itertools;
 pub mod bound_resolution;
 pub mod complexity;
 pub mod diagnostics;
+pub mod emit;
+pub mod line_index;
 pub mod nodes;
 pub mod parser;
 mod recovery;

@@ -1,0 +1,1 @@
+select_all(range(0, 3), range(5, 8).map(f)).filter_map(g).return

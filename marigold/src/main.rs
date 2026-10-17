@@ -12,6 +12,14 @@ enum CheckFormat {
 }
 
 #[cfg(feature = "cli")]
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum EmitFormat {
+    #[default]
+    Rust,
+    Json,
+}
+
+#[cfg(feature = "cli")]
 #[derive(Subcommand, Debug)]
 enum MarigoldCommand {
     /// Run the program.
@@ -56,6 +64,15 @@ enum MarigoldCommand {
         /// Path of the Marigold file to read
         file: Option<String>,
     },
+    /// Emit the generated Rust (red stub).
+    Emit {
+        /// Output format
+        #[arg(long, value_enum, default_value_t = EmitFormat::Rust)]
+        format: EmitFormat,
+
+        /// Path of the Marigold file to read
+        file: Option<String>,
+    },
 }
 
 #[cfg(feature = "cli")]
@@ -86,6 +103,7 @@ fn get_file_name_argument(args: &Args) -> Option<String> {
         Some(Clean { file }) => file.clone(),
         Some(Analyze { file }) => file.clone(),
         Some(Check { format: _, file }) => file.clone(),
+        Some(Emit { format: _, file }) => file.clone(),
         Some(CleanAll) => None,
         None => None,
     }
@@ -172,6 +190,10 @@ fn main() -> Result<()> {
     if let Some(Check { format, file }) = &args.command {
         std::process::exit(run_check(*format, file.as_deref()));
     }
+    if let Some(Emit { .. }) = &args.command {
+        eprintln!("error: emit is not implemented yet");
+        std::process::exit(2);
+    }
 
     let marigold_cache_directory = home::home_dir()
         .expect("could not locate user's home directory for marigold cache")
@@ -235,6 +257,7 @@ fn main() -> Result<()> {
                 std::process::exit(0);
             }
             Check { .. } => unreachable!("check is handled before cache setup"),
+            Emit { .. } => unreachable!("emit is handled before cache setup"),
             Analyze { file: _ } => {
                 let program_contents = match &file_name_argument {
                     Some(path) => std::fs::read_to_string(path)?.trim().to_string(),

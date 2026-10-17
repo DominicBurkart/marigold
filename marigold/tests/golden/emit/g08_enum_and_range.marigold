@@ -1,0 +1,2 @@
+enum E { A, B = "b", default Z }
+range(E).return

@@ -1,0 +1,8 @@
+x = range(0, 5)  
+
+  y = x.map(f)
+fn f(x: i32) -> i32 {
+  x
+}
+
+y.return  
