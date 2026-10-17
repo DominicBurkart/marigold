@@ -697,6 +697,19 @@ fn human_diagnostic_positions_are_line_and_scalar_column() {
 }
 
 #[test]
+fn human_diagnostics_include_the_help_line_literally() {
+    // `emit` and `check` share the human renderer, so comparing one with the other cannot
+    // notice a line they both drop: pin the exact text.
+    let path = write_temp("help.marigold", "range(Color).return");
+    let want = format!(
+        "{}:1:7: error[undefined-enum]: range(Color): 'Color' is not a declared enum in this program\n  help: no enums are declared in this program\n",
+        path.display()
+    );
+    assert_eq!(s(&emit_file(&[], &path).stderr), want);
+    assert_eq!(s(&check_file(&[], &path).stdout), want);
+}
+
+#[test]
 fn exit_codes_always_agree_with_check_on_every_input_we_have() {
     let mut paths: Vec<PathBuf> = golden_programs().into_iter().map(|(_, p, _)| p).collect();
     paths.extend(corpus());
