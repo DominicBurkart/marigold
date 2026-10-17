@@ -44,3 +44,15 @@ error counts.
 Run `marigold analyze <file>` to get JSON with each stream's cardinality and
 time/space complexity before choosing between `permutations`, `combinations`,
 and filters on large inputs.
+
+## Generated Rust and source map
+
+Run `marigold emit <file>` to print the Rust code the `m!` macro generates for
+a program, and `marigold emit --format json <file>` for a JSON document that
+maps each top-level Marigold expression to the generated code (byte offsets,
+1-based lines, columns in Unicode scalar values, the `source` and `rust` texts
+embedded). If the program does not compile, stdout stays empty and the errors
+go to stderr as `marigold check` prints them. Offsets refer to the file as it
+is on disk, not to the text `m!()` sees. The output of the `cargo install
+marigold -F cli` build matches `marigold run`; a build with `-F cli,tokio`
+generates different code.

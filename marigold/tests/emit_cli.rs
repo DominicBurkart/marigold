@@ -682,10 +682,13 @@ fn emit_does_not_trim_so_offsets_index_the_original_file() {
 }
 
 #[test]
-fn non_grammar_whitespace_is_a_syntax_error_for_emit_and_check_unlike_run() {
-    // PINNED DIVERGENCE (see TESTSPEC-T3 section 5): `run` trims with `str::trim`, which strips
-    // Unicode White_Space such as U+00A0, but the grammar's WHITESPACE is only " \t\r\n".
-    // `emit` follows `check` (no trim). If a later task makes them agree, update this test on purpose.
+fn characters_outside_the_grammar_around_a_program_are_a_syntax_error_for_emit_and_check() {
+    // PINNED DIVERGENCE (see TESTSPEC-T3 section 5): `run` and `analyze` trim with `str::trim`,
+    // which strips Unicode White_Space such as U+00A0 (no-break space) and U+000C (form feed),
+    // but the grammar's WHITESPACE is only " \t\r\n". `emit` follows `check` (no trim), so
+    // those two are accepted by `run` and rejected here. A byte order mark (U+FEFF) is not
+    // White_Space: `run` rejects it too. If a later task makes `run` agree with `emit`,
+    // update this test on purpose.
     for (name, src) in [
         ("nbsp", "\u{a0}range(0, 1).return"),
         ("bom", "\u{feff}range(0, 1).return"),
