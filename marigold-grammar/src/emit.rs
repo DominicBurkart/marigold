@@ -11,10 +11,11 @@
 //!
 //! ```text
 //! Document := { "version": 1,                        // integer, EMIT_SCHEMA_VERSION
+//!               "features": [ string ],              // grammar features in effect, sorted, e.g. ["io"]
 //!               "source":  string,                   // the Marigold program, verbatim
 //!               "rust":    string,                   // the generated code, == marigold_parse(source)
 //!               "segments": [ Segment ] }            // generated order, outer segments first
-//! Segment  := { "kind": string,                      // snake_case of SegmentKind, e.g. "stream_variable"
+//! Segment  := { "kind": string,                      // snake_case of SegmentKind, see "Kinds" below
 //!               "name": string | null,               // declared name; null for output streams
 //!               "expr_index": integer,               // position of the top-level expression in the source
 //!               "parent": integer | null,            // index into "segments"; always less than this index
@@ -31,6 +32,13 @@
 //! `document.rust[seg.generated.start..seg.generated.end]`, as byte slices of the
 //! UTF-8 strings, are the expression and the code it produced.
 //!
+//! * **`features` says which code `rust` is.** The generated Rust depends on the cargo
+//!   features of `marigold-grammar` that were compiled in: `io` adds the I/O code,
+//!   `tokio` and `async-std` switch stream functions to their async forms. `features` lists
+//!   the ones in effect for the program that produced the document (`"async-std"`, `"io"`,
+//!   `"tokio"`, sorted), so a tool that pairs the document with a compilation can notice
+//!   that it was produced for another feature set. The `marigold` command line tool is
+//!   built with `["io"]`, which is what the `m!` macro sees under `marigold run`.
 //! * **Offsets are bytes, columns are scalar values.** A column counts Unicode scalar
 //!   values like `rustc` does, so a multibyte character takes one column but several
 //!   offsets. The `\r` of a `\r\n` line ending takes a column; a line ends at `\n`.
@@ -51,11 +59,21 @@
 //! * The Rust code of a segment can span several lines, and can start in the middle of a
 //!   line (the code after the preamble is indented).
 //!
+//! # Kinds
+//!
+//! `kind` is the snake_case name of a [`SegmentKind`]: `"struct"`, `"enum"`, `"function"`,
+//! `"stream_variable"` (the declaration of `x = ...`), `"stream_variable_runner"` (the task
+//! that drives it; same `source` as its declaration), `"returning_stream"` (ends in
+//! `.return`) and `"non_returning_stream"` (ends in a sink such as `.write_file`). More kinds
+//! may be added without changing the version.
+//!
 //! # Compatibility
 //!
 //! * Producers (this module) write exactly the keys above for `"version": 1`. Adding a
 //!   key or a `kind` does not change the version; removing or renaming a key, changing a
 //!   unit or changing the meaning of a field does.
+//! * The types in this module only implement [`serde::Serialize`]; consumers in Rust define
+//!   their own types for the layout above.
 //! * Consumers must check `"version"`, ignore keys they do not know, treat unknown
 //!   `kind` strings as opaque and not rely on the order of keys. They should not assume
 //!   `parent` is always `null`.
@@ -87,6 +105,21 @@ use serde::Serialize;
 /// ```
 pub const EMIT_SCHEMA_VERSION: u32 = 1;
 
+/// The features of this crate that change the generated code, sorted.
+fn enabled_features() -> Vec<&'static str> {
+    let mut features = Vec::new();
+    if cfg!(feature = "async-std") {
+        features.push("async-std");
+    }
+    if cfg!(feature = "io") {
+        features.push("io");
+    }
+    if cfg!(feature = "tokio") {
+        features.push("tokio");
+    }
+    features
+}
+
 /// A byte range with the line and column of both ends. See the
 /// [module documentation](self) for the units.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -107,9 +140,22 @@ pub struct EmitRange {
 }
 
 impl EmitRange {
-    /// Offsets past the end of the text are reported as they are, but their line and
-    /// column are those of the end of the text (see [`LineIndex::line_col`]).
-    fn new(range: ByteRange, index: &LineIndex<'_>) -> EmitRange {
+    /// Describe `range` of the text `index` was built from. Offsets past the end of the
+    /// text are reported as they are, but their line and column are those of the end of
+    /// the text (see [`LineIndex::line_col`]).
+    ///
+    /// ```
+    /// use marigold_grammar::diagnostics::ByteRange;
+    /// use marigold_grammar::emit::EmitRange;
+    /// use marigold_grammar::line_index::LineIndex;
+    ///
+    /// let text = "ab\n\u{e9}d";
+    /// let range = EmitRange::new(ByteRange { start: 1, end: text.len() }, &LineIndex::new(text));
+    /// assert_eq!((range.start, range.end), (1, 6));
+    /// assert_eq!((range.start_line, range.start_column), (1, 2));
+    /// assert_eq!((range.end_line, range.end_column), (2, 3));
+    /// ```
+    pub fn new(range: ByteRange, index: &LineIndex<'_>) -> EmitRange {
         let start = index.line_col(range.start, ColumnUnit::Chars);
         let end = index.line_col(range.end, ColumnUnit::Chars);
         EmitRange {
@@ -155,6 +201,9 @@ pub struct EmitSegment {
 pub struct EmitDocument {
     /// Always [`EMIT_SCHEMA_VERSION`].
     pub version: u32,
+    /// The cargo features of this crate that were compiled in, sorted: `"async-std"`,
+    /// `"io"` and `"tokio"`. They change the generated Rust.
+    pub features: Vec<&'static str>,
     /// The Marigold program the map's source ranges refer to, verbatim.
     pub source: String,
     /// The generated Rust the map's generated ranges refer to.
@@ -218,6 +267,7 @@ impl EmitDocument {
 
         EmitDocument {
             version: EMIT_SCHEMA_VERSION,
+            features: enabled_features(),
             source: source.to_string(),
             rust: rust.to_string(),
             segments,

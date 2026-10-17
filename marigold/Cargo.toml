@@ -11,7 +11,9 @@ repository = "https://github.com/DominicBurkart/marigold"
 tokio = ["marigold-impl/tokio", "marigold-grammar/tokio"]
 async-std = ["marigold-impl/async-std", "marigold-grammar/async-std"]
 io = ["marigold-impl/io", "marigold-grammar/io", "marigold-macros/io"]
-cli = ["clap", "convert_case", "home", "serde_json"]
+# `marigold-grammar/io`: `marigold emit` must generate the code the `m!` macro generates under
+# `marigold run` (the macro is built with grammar feature `io`, see `marigold emit --help`).
+cli = ["clap", "convert_case", "home", "serde_json", "marigold-grammar/io"]
 
 [dependencies]
 anyhow = "1.0"

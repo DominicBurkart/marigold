@@ -66,19 +66,31 @@ enum MarigoldCommand {
     },
     /// Print the Rust code generated from a program, or that code with a source map.
     ///
-    /// With `--format rust` (the default) prints the Rust code `m!` generates for the
-    /// program (without the braces `m!` wraps around it), so it can be written to a
-    /// file and compiled. With
-    /// `--format json` prints one JSON document with the program, the Rust code and a
-    /// list of segments, each mapping an expression of the program to the code
-    /// generated for it.
+    /// With `--format rust` (the default) prints the Rust code the `m!` macro generates
+    /// for the program (without the braces `m!` wraps around it). With `--format json`
+    /// prints one JSON document with the program, the Rust code and a list of segments,
+    /// each mapping an expression of the program to the code generated for it.
     ///
-    /// Offsets are byte offsets into the text as read from the file (nothing is
-    /// trimmed). Lines and columns are 1-based and columns count Unicode scalar
-    /// values, like rustc. If the program does not compile, nothing is written to
-    /// stdout, the errors are printed to stderr as `marigold check` prints them (JSON
-    /// diagnostics with `--format json`) and the exit code is 1. Exits 2 if the input
-    /// cannot be read.
+    /// The generated code depends on the build features of this tool. `cargo install
+    /// marigold -F cli` builds the grammar with the `io` feature, which is what the `m!`
+    /// macro has under `marigold run` (so the output compiles there), and a tool built
+    /// with `-F cli,tokio` or `-F cli,async-std` generates different code. The JSON
+    /// document lists the features in effect under `features`.
+    ///
+    /// To compile the output, write it to a file next to the `main.rs` of a project that
+    /// depends on marigold with the features `tokio` and `io`, and run it with
+    /// `let _ = include!("gen.rs").await;` inside `#[tokio::main] async fn main()`.
+    ///
+    /// Offsets are byte offsets into the text of FILE as it is on disk (nothing is
+    /// trimmed and line endings are kept). They do not refer to the re-spaced
+    /// TokenStream that `m!()` sees. Lines and columns are 1-based and columns count
+    /// Unicode scalar values, like rustc.
+    ///
+    /// Stdout is either a complete document or empty. If the program does not compile,
+    /// the errors are printed to stderr as `marigold check` prints them (as its JSON
+    /// array with `--format json`) and the exit code is 1. Exits 2 if the input cannot
+    /// be read. Without FILE, the program is read from stdin; a file named `-` is not
+    /// stdin.
     Emit {
         /// Output format
         #[arg(long, value_enum, default_value_t = EmitFormat::Rust)]
@@ -205,6 +217,50 @@ fn run_check(format: CheckFormat, file: Option<&str>) -> i32 {
     i32::from(diagnostics.iter().any(|d| d.is_error()))
 }
 
+/// Longest message printed for a program that `marigold check` would not look at.
+#[cfg(feature = "cli")]
+const MAX_SUMMARY_BYTES: usize = 2048;
+
+/// `(line, column, byte offset, message)` for the parse error pest reported as `message`:
+/// the position it names (` --> line:column`, columns in characters; `1:1` / 0 if there is
+/// none), its last line (`= expected ...`) and no excerpt of the program. At most
+/// [`MAX_SUMMARY_BYTES`] long, control characters other than newlines escaped.
+#[cfg(feature = "cli")]
+fn summarize_parse_error(source: &str, message: &str) -> (usize, usize, usize, String) {
+    use marigold_grammar::line_index::{ColumnUnit, LineIndex};
+
+    let position = message.split_once(" --> ").and_then(|(_, rest)| {
+        let (line, rest) = rest.split_once(':')?;
+        let column = rest.split(|c: char| !c.is_ascii_digit()).next()?;
+        Some((line.parse::<usize>().ok()?, column.parse::<usize>().ok()?))
+    });
+    let (line, column, offset) = position
+        .and_then(|(line, column)| {
+            let offset = LineIndex::new(source).offset(line, column, ColumnUnit::Chars)?;
+            Some((line, column, offset))
+        })
+        .unwrap_or((1, 1, 0));
+
+    let summary = match message.rsplit_once("\n  = ") {
+        Some((_, expected)) => format!("Parse error: {expected}"),
+        None => message.to_string(),
+    };
+    let mut safe = String::new();
+    for c in summary.chars() {
+        let escaped = if c.is_control() && c != '\n' {
+            c.escape_debug().to_string()
+        } else {
+            c.to_string()
+        };
+        if safe.len() + escaped.len() > MAX_SUMMARY_BYTES {
+            safe.push_str(" [message truncated]");
+            break;
+        }
+        safe.push_str(&escaped);
+    }
+    (line, column, offset, safe)
+}
+
 /// Print why `source` did not compile to stderr, as `marigold check` would (errors
 /// only), and return the exit status.
 #[cfg(feature = "cli")]
@@ -227,10 +283,12 @@ fn report_emit_failure(
         Vec::new()
     };
 
-    let message = parse_error.to_string();
+    // Over the limit there are no diagnostics of `check`: summarize pest's message, which
+    // embeds the offending line (twice) and whatever control characters it holds.
+    let (line, column, offset, message) = summarize_parse_error(source, &parse_error.0);
     let rendered = match format {
         EmitFormat::Rust if errors.is_empty() => {
-            format!("{path}:1:1: error[syntax-error]: {message}\n")
+            format!("{path}:{line}:{column}: error[syntax-error]: {message}\n")
         }
         EmitFormat::Rust => render_human(path, source, &errors),
         // Serialize the typed values: going through `serde_json::Value` would sort the keys.
@@ -240,7 +298,7 @@ fn report_emit_failure(
                 // no way to construct a `Diagnostic`: same keys, order and indentation.
                 let message = serde_json::Value::String(message).to_string();
                 format!(
-                    "[\n  {{\n    \"range\": {{\n      \"start\": 0,\n      \"end\": 0\n    }},\n    \
+                    "[\n  {{\n    \"range\": {{\n      \"start\": {offset},\n      \"end\": {offset}\n    }},\n    \
                      \"severity\": \"error\",\n    \"code\": \"syntax-error\",\n    \
                      \"message\": {message}\n  }}\n]\n"
                 )

@@ -467,6 +467,29 @@ fn expected_features() -> Vec<&'static str> {
     features
 }
 
+/// The features the golden documents of `variant` were written with. The runtime part is not
+/// part of what a golden pins (`tokio` and `async-std` generate the same code), so the test
+/// swaps it for the features of this build before comparing; `expected_features` pins those.
+fn golden_features(variant: &str) -> Vec<&'static str> {
+    match variant {
+        "io" => vec!["io"],
+        _ => vec!["io", "tokio"],
+    }
+}
+
+/// `text` (a pretty-printed document) with its `"features"` replaced by `features`.
+fn with_features(text: &str, features: &[&str]) -> String {
+    let start = text.find("  \"features\": [").expect("a features key");
+    let end = start + text[start..].find("],\n").expect("end of features") + 3;
+    let list = if features.is_empty() {
+        "  \"features\": [],\n".to_string()
+    } else {
+        let items: Vec<_> = features.iter().map(|f| format!("    \"{f}\"")).collect();
+        format!("  \"features\": [\n{}\n  ],\n", items.join(",\n"))
+    };
+    format!("{}{list}{}", &text[..start], &text[end..])
+}
+
 fn snapshot_path(variant: &str, name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../marigold-grammar/tests/golden_rust")
@@ -486,19 +509,30 @@ fn golden_json_documents_are_stable() {
         assert_eq!(out.status.code(), Some(0), "{name}");
         if update {
             std::fs::create_dir_all(golden.parent().unwrap()).unwrap();
-            std::fs::write(&golden, &out.stdout).unwrap();
+            std::fs::write(
+                &golden,
+                with_features(s(&out.stdout), &golden_features(variant)),
+            )
+            .unwrap();
             continue;
         }
-        let want = std::fs::read(&golden)
+        let written = std::fs::read_to_string(&golden)
             .unwrap_or_else(|_| panic!("missing {}; run with UPDATE_GOLDEN=1", golden.display()));
+        let document: Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(
+            document["features"],
+            json!(golden_features(variant)),
+            "{name}: golden written for other features"
+        );
+        let want = with_features(&written, &expected_features());
         assert!(
-            out.stdout == want,
+            s(&out.stdout) == want,
             "{name}: output differs from {}\nrerun with UPDATE_GOLDEN=1 if the change is intended and review the diff\n--- got ---\n{}",
             golden.display(),
             s(&out.stdout)
         );
         // a golden file must itself be a valid v1 document for its input ...
-        let document: Value = serde_json::from_slice(&want).unwrap();
+        let document: Value = serde_json::from_str(&want).unwrap();
         assert_document_ok(&document, &std::fs::read_to_string(&input).unwrap());
         // ... whose Rust is the snapshot captured from `main` before the source map existed
         let snapshot = snapshot_path(variant, name);
