@@ -14,6 +14,8 @@
 //! - **Code generation**: Transforms Marigold programs into valid Rust code
 //! - **Source maps**: [`marigold_generate`] returns that code together with a
 //!   [`source_map::SourceMap`] from generated Rust back to Marigold source and forward
+//! - **Diagnostic remapping**: [`remap::Remapper`] maps rustc's JSON diagnostics
+//!   ([`rustc_json`]) and run-time locations in the generated Rust back to Marigold source
 //!
 //! ## Quick Start
 //!
@@ -44,6 +46,8 @@
 //! - Code generation: Internal function that transforms AST to Rust code
 //! - [`pest_ast_builder`]: Transforms Pest parse trees into the AST
 //! - [`source_map`]: Maps the generated Rust back to the Marigold expressions it came from
+//! - [`rustc_json`]: Reads the JSON diagnostics of rustc and cargo
+//! - [`remap`]: Maps those diagnostics (and panic locations) to Marigold source ranges
 //!
 //! ## Testing & Validation
 //!

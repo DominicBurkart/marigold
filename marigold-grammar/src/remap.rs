@@ -1336,10 +1336,12 @@ impl Remapper<'_> {
     ) -> Result<Placement, UnmappedReason> {
         let outside = UnmappedReason::OutsideGeneratedRegion;
         let index = line.checked_sub(1 + self.prefix_newlines).ok_or(outside)?;
-        if index >= self.rust_lines.len() {
+        // A line that starts at the end of the program (after its final `\n`) holds only
+        // whatever follows the program in the file.
+        let start = *self.rust_lines.get(index).ok_or(outside)?;
+        if start >= self.program.rust.len() {
             return Err(outside);
         }
-        let start = self.rust_lines[index];
         let (content, _) = self.generated_line(index);
         let end = start + content.len();
         // The text of the line that column counting sees: all of it, including a `\r`.
@@ -1594,4 +1596,290 @@ fn normalize(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source_map::SourceMap;
+    use std::path::Path;
+
+    fn counters() -> (usize, usize) {
+        (SCANNED.with(|c| c.get()), WALKED.with(|c| c.get()))
+    }
+
+    fn reset() {
+        SCANNED.with(|c| c.set(0));
+        WALKED.with(|c| c.set(0));
+    }
+
+    fn span(start: usize, end: usize) -> RustcSpan {
+        let mut s = RustcSpan::default();
+        s.file_name = "gen.rs".to_string();
+        s.byte_start = start;
+        s.byte_end = end;
+        s
+    }
+
+    fn range(start: usize, end: usize) -> ByteRange {
+        ByteRange { start, end }
+    }
+
+    /// `n` single-line functions, one expression each, separated by glue.
+    fn flat(n: usize) -> (String, GeneratedProgram) {
+        let mut src = String::new();
+        let mut rust = String::from("async {\n");
+        let mut segments = Vec::new();
+        for i in 0..n {
+            let f = format!("fn f{i}() -> i32 {{ {i} }}");
+            let (s0, g0) = (src.len(), rust.len());
+            src.push_str(&f);
+            rust.push_str("const ");
+            rust.push_str(&f);
+            segments.push(Segment::new(
+                range(g0, rust.len()),
+                range(s0, src.len()),
+                SegmentKind::Function,
+                i,
+                None,
+            ));
+            src.push('\n');
+            rust.push_str("\n\n");
+        }
+        rust.push_str("}\n");
+        (src, GeneratedProgram::new(rust, SourceMap::new(segments)))
+    }
+
+    #[test]
+    fn display_width_table_is_what_rustc_reported_and_nothing_else() {
+        // (character, width) = (scalar delta measured with `Location::caller().column()`) + 1
+        let verified: &[(char, usize)] = &[
+            ('a', 1),
+            ('\u{e9}', 1),
+            ('\u{2192}', 1),
+            ('\u{65e5}', 2),
+            ('\u{1F600}', 2),
+            ('\u{0301}', 0),
+            ('\u{200b}', 0),
+            ('\t', 4),
+            ('\u{ff01}', 2),
+            ('\u{ac00}', 2),
+            ('\u{0627}', 1),
+            ('\u{3042}', 2),
+            ('\u{00a0}', 1),
+            ('\u{200d}', 0),
+            ('\u{fe0f}', 0),
+            ('\u{2605}', 1),
+            ('\u{20000}', 2),
+            ('\u{00ad}', 0),
+            ('\u{0007}', 1),
+            ('\u{0e31}', 0),
+            ('\u{0436}', 1),
+            ('\u{1100}', 2),
+            ('\u{3000}', 2),
+            ('\u{20dd}', 0),
+        ];
+        for &(c, w) in verified {
+            assert_eq!(display_width(c), Some(w), "U+{:04X}", c as u32);
+        }
+        // Not in the verified set: the width is unknown, never a guess.
+        for c in [
+            '\u{0f00}',
+            '\u{0080}',
+            '\u{1f321}',
+            '\u{e000}',
+            '\u{10ffff}',
+        ] {
+            assert_eq!(display_width(c), None, "U+{:04X}", c as u32);
+        }
+        // units that do not depend on a table
+        assert_eq!(char_width('日', ColumnUnit::ScalarValues), (1, true));
+        assert_eq!(char_width('日', ColumnUnit::Utf8Bytes), (3, true));
+        assert_eq!(char_width('\u{0f00}', ColumnUnit::DisplayWidth), (1, false));
+    }
+
+    #[test]
+    fn advance_converts_columns_and_rejects_positions_inside_characters() {
+        let line = "a日\u{0301}b";
+        // scalar: a=0 日=1 U+0301=4 b=6
+        assert_eq!(advance(line, 0, ColumnUnit::ScalarValues), (Ok(0), true));
+        assert_eq!(advance(line, 2, ColumnUnit::ScalarValues), (Ok(4), true));
+        assert_eq!(advance(line, 4, ColumnUnit::ScalarValues), (Ok(7), true));
+        assert_eq!(
+            advance(line, 5, ColumnUnit::ScalarValues),
+            (Err(UnmappedReason::InvalidSpan), true)
+        );
+        // bytes: 日 occupies 1..4
+        assert_eq!(advance(line, 4, ColumnUnit::Utf8Bytes), (Ok(4), true));
+        assert_eq!(
+            advance(line, 2, ColumnUnit::Utf8Bytes),
+            (Err(UnmappedReason::InvalidSpan), true)
+        );
+        // display: a=1, 日=2, U+0301=0, b=1; width 3 sits after 日 and after the combining mark
+        assert_eq!(advance(line, 3, ColumnUnit::DisplayWidth), (Ok(6), true));
+        assert_eq!(advance(line, 4, ColumnUnit::DisplayWidth), (Ok(7), true));
+        // the middle of a wide character
+        assert_eq!(
+            advance(line, 2, ColumnUnit::DisplayWidth),
+            (Err(UnmappedReason::InvalidSpan), true)
+        );
+        // a width that is not in the table is reported as unknown
+        assert!(!advance("\u{0f00}x", 1, ColumnUnit::DisplayWidth).1);
+        // the end of the line is a valid position, one past it is not
+        assert_eq!(advance("ab", 2, ColumnUnit::ScalarValues), (Ok(2), true));
+        assert_eq!(
+            advance("ab", 3, ColumnUnit::ScalarValues),
+            (Err(UnmappedReason::InvalidSpan), true)
+        );
+        assert_eq!(
+            advance("ab", usize::MAX, ColumnUnit::Utf8Bytes),
+            (Err(UnmappedReason::InvalidSpan), true)
+        );
+    }
+
+    #[test]
+    fn read_number_rejects_what_does_not_fit_or_is_not_there() {
+        assert_eq!(read_number("x:12:3", 2), Some((12, 4)));
+        assert_eq!(read_number("x:", 2), None);
+        assert_eq!(read_number("x:a", 2), None);
+        assert_eq!(read_number("1", 5), None);
+        assert_eq!(read_number("99999999999999999999999", 0), None);
+    }
+
+    #[test]
+    fn verbatim_region_is_the_common_suffix_on_character_boundaries() {
+        let rust = "pre const fn f() { 1 }";
+        let source = "fn f() { 1 }";
+        let g = range(4, rust.len());
+        assert_eq!(
+            verbatim_len(rust, g, source, range(0, source.len())),
+            source.len()
+        );
+        // nothing in common
+        assert_eq!(verbatim_len("abc", range(0, 3), "xyz", range(0, 3)), 0);
+        // the last byte of two different characters is not a region
+        assert_eq!(
+            verbatim_len("\u{e9}", range(0, 2), "\u{a9}", range(0, 2)),
+            0
+        );
+        // the region does not start inside a character on either side
+        assert_eq!(
+            verbatim_len("a\u{e9}", range(0, 3), "\u{a9}", range(0, 2)),
+            0
+        );
+    }
+
+    #[test]
+    fn lexical_normalisation_resolves_dots_in_order_and_never_climbs_above_the_root() {
+        let n = |p: &str| normalize(Path::new(p));
+        assert_eq!(n("/a/./b/../c"), Path::new("/a/c"));
+        assert_eq!(n("/a/b/../../c"), Path::new("/c"));
+        assert_eq!(n("/../a"), Path::new("/a"));
+        assert_eq!(n("a/../../b"), Path::new("../b"));
+        assert_eq!(n("a//b"), Path::new("a/b"));
+        // `./..` and `../.` are the same step
+        assert_eq!(n("/a/./../b"), n("/a/.././b"));
+        assert_eq!(n("/a/./../b"), Path::new("/b"));
+    }
+
+    #[test]
+    fn lookups_do_the_same_work_whatever_the_number_of_segments() {
+        for n in [10, 2_000, 40_000] {
+            let (src, program) = flat(n);
+            let is_generated = |f: &str| f == "gen.rs";
+            let remapper = Remapper::new(&program, &src, &is_generated);
+            let segments = program.map.segments();
+            reset();
+            let lookups = 500;
+            for k in 0..lookups {
+                let segment = &segments[(k * 7919) % n];
+                let at = segment.generated.end - 3;
+                // a one-byte span, a point, and a span that leaves the segment into glue
+                for (a, b) in [(at, at + 1), (at, at), (at, segment.generated.end + 1)] {
+                    let mapped = remapper.map_span(&span(a, b));
+                    assert!(mapped.marigold.is_some(), "n={n} {a}..{b}: {mapped:?}");
+                }
+            }
+            let (scanned, walked) = counters();
+            // Exactly the one segment each non-empty span overlaps (a point scans nothing), and
+            // one parent link for the span that leaves its segment (no container is found).
+            assert_eq!((scanned, walked), (2 * lookups, lookups), "n={n}");
+        }
+    }
+
+    #[test]
+    fn a_span_over_the_whole_program_stops_at_the_second_expression() {
+        for n in [3, 5_000] {
+            let (src, program) = flat(n);
+            let is_generated = |f: &str| f == "gen.rs";
+            let remapper = Remapper::new(&program, &src, &is_generated);
+            reset();
+            let mapped = remapper.map_span(&span(0, program.rust.len()));
+            assert_eq!(
+                mapped.precision,
+                Precision::Unmapped {
+                    reason: UnmappedReason::MultipleExpressions
+                }
+            );
+            assert_eq!(counters().0, 2, "n={n}");
+        }
+    }
+
+    #[test]
+    fn nesting_costs_the_depth_and_not_the_number_of_segments() {
+        // 3 000 flat segments, then one expression nested 40 deep.
+        let depth = 40;
+        let mut segments = Vec::new();
+        let mut rust = String::new();
+        let mut src = String::new();
+        for i in 0..3_000 {
+            let (g0, s0) = (rust.len(), src.len());
+            rust.push_str("xxxx\n");
+            src.push_str("yyyy\n");
+            segments.push(Segment::new(
+                range(g0, g0 + 4),
+                range(s0, s0 + 4),
+                SegmentKind::StreamVariable,
+                i,
+                None,
+            ));
+        }
+        let (g0, s0) = (rust.len(), src.len());
+        rust.push_str(&"z".repeat(2 * depth));
+        src.push_str(&"w".repeat(2 * depth));
+        for d in 0..depth {
+            segments.push(Segment::new(
+                range(g0 + d, g0 + 2 * depth - d),
+                range(s0 + d, s0 + 2 * depth - d),
+                SegmentKind::StreamVariable,
+                3_000,
+                None,
+            ));
+        }
+        let program = GeneratedProgram::new(rust, SourceMap::new(segments));
+        let is_generated = |f: &str| f == "gen.rs";
+        let remapper = Remapper::new(&program, &src, &is_generated);
+
+        // a point in the middle: the innermost segment is the last one starting at or before it
+        reset();
+        let middle = g0 + depth;
+        let mapped = remapper.map_span(&span(middle, middle));
+        let location = mapped.marigold.unwrap();
+        assert_eq!(
+            (location.range.start, location.range.end),
+            (s0 + depth - 1, s0 + depth + 1)
+        );
+        assert_eq!(counters().1, 0);
+
+        // a span that the innermost candidate (the segment starting last) does not contain:
+        // the lookup walks up the parent links, one per segment too small, and no further
+        reset();
+        let (a, b) = (g0 + depth - 1, g0 + depth + 5);
+        let mapped = remapper.map_span(&span(a, b));
+        assert_eq!(
+            mapped.marigold.unwrap().range,
+            range(s0 + depth - 5, s0 + depth + 5)
+        );
+        assert_eq!(counters().1, 4);
+    }
 }
