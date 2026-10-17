@@ -77,6 +77,7 @@ pub mod parser;
 mod recovery;
 mod resolver;
 mod span_index;
+mod sub_spans;
 pub mod symbol_table;
 pub mod symbols;
 mod type_aggregation;

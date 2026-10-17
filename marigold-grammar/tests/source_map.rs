@@ -1206,7 +1206,8 @@ fn assert_invariants_cheap(src: &str, g: &GeneratedProgram) {
 fn assert_glue_is_exact(src: &str) {
     let g = generate(src);
     let mut previous: Option<(usize, K)> = None;
-    for s in g.map.segments() {
+    // statement-level segments only: the nested ones lie inside them
+    for s in g.map.top_level() {
         let gap = match previous {
             None => &g.rust[..s.generated.start],
             Some((end, _)) => &g.rust[end..s.generated.start],

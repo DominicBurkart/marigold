@@ -674,6 +674,7 @@ impl PestAstBuilder {
                 variability: InputVariability::Constant,
                 input_count: InputCount::Known(count),
                 code: range_expr,
+                layout: Vec::new(),
             })
         } else {
             let enum_name = first.as_str();
@@ -681,6 +682,7 @@ impl PestAstBuilder {
                 variability: InputVariability::Constant,
                 input_count: InputCount::Enum(enum_name.to_string()),
                 code: format!("::marigold::marigold_impl::futures::stream::iter({enum_name}::__marigold_variants())"),
+                layout: Vec::new(),
             })
         }
     }
@@ -742,6 +744,7 @@ impl PestAstBuilder {
             variability: InputVariability::Variable,
             input_count: InputCount::Unknown,
             code,
+            layout: Vec::new(),
         })
     }
 
@@ -767,23 +770,27 @@ impl PestAstBuilder {
             streams.iter().map(|s| s.inp.input_count.clone()),
         );
 
-        let stream_code = streams
-            .iter()
-            .map(|stream| {
-                let code = stream.code();
-                format!("::marigold::marigold_impl::run_stream::run_stream({code})")
-            })
-            .collect::<Vec<_>>()
-            .join(",\n");
-
-        let code = format!(
-            "::marigold::marigold_impl::futures::prelude::stream::select_all::select_all([{stream_code}])"
-        );
+        // Each argument is a piece, so that the parts of the code that stand for the
+        // arguments (and, inside them, for their inputs and stream functions) are known.
+        let mut emit = crate::source_map::Emit::default();
+        emit.push("::marigold::marigold_impl::futures::prelude::stream::select_all::select_all([");
+        for (index, stream) in streams.iter().enumerate() {
+            if index > 0 {
+                emit.push(",\n");
+            }
+            emit.piece(crate::source_map::Role::Branch(index), |e| {
+                e.push("::marigold::marigold_impl::run_stream::run_stream(");
+                e.splice(stream.emit());
+                e.push(")");
+            });
+        }
+        emit.push("])");
 
         Ok(InputFunctionNode {
             variability,
             input_count,
-            code,
+            code: emit.s,
+            layout: emit.pieces,
         })
     }
 

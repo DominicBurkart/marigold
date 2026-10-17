@@ -239,8 +239,10 @@ impl PestParser {
         // Stage 1: Parse with Pest grammar
         let pairs = MarigoldPestParser::parse(Rule::program, input)
             .map_err(|e| format!("Parse error: {}", e))?;
-        // Ranges must be taken before the builder consumes the pairs.
+        // Ranges and the parts of each expression must be taken before the builder
+        // consumes the pairs.
         let ranges = Self::expr_ranges(&pairs);
+        let parts = crate::sub_spans::skeletons(&pairs);
 
         // Stage 2: Build AST from parse tree
         let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)?;
@@ -252,7 +254,7 @@ impl PestParser {
         let resolved_bounds = Self::validate_bounded_types(&expressions)?;
 
         // Stages 4 and 5
-        Self::generate_mapped(expressions, resolved_bounds, &ranges)
+        Self::generate_mapped(expressions, resolved_bounds, &ranges, &parts)
     }
 
     /// Stages 4 and 5 of [`Self::generate_input`], split out so tests can time exactly the
@@ -261,16 +263,18 @@ impl PestParser {
         expressions: Vec<crate::nodes::TypedExpression>,
         resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
         ranges: &[crate::diagnostics::ByteRange],
+        parts: &[Vec<crate::sub_spans::SubSpan>],
     ) -> Result<crate::source_map::GeneratedProgram, String> {
         // Stage 4: Generate Rust code (replicating LALRPOP logic)
         let (rust, generated) = Self::generate_rust_code_mapped(expressions, resolved_bounds)?;
 
-        // Stage 5: Attach each item's source range. `expr_index` indexes `ranges`
-        // because both are parallel to the top-level expressions.
-        let segments = generated
-            .into_iter()
-            .map(|g| g.attach_source(ranges))
-            .collect();
+        // Stage 5: Attach each item's source range, and the source ranges of its parts.
+        // `expr_index` indexes `ranges` and `parts` because all are parallel to the
+        // top-level expressions.
+        let mut segments = Vec::new();
+        for g in generated {
+            g.attach_source(ranges, parts, &mut segments);
+        }
         Ok(crate::source_map::GeneratedProgram {
             rust,
             map: crate::source_map::SourceMap::new(segments),
@@ -367,7 +371,7 @@ impl PestParser {
         resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
     ) -> Result<(String, Vec<crate::source_map::GeneratedSegment>), String> {
         use crate::nodes::TypedExpression;
-        use crate::source_map::{CodeBuilder, SegmentKind};
+        use crate::source_map::{CodeBuilder, Emit, SegmentKind};
 
         let struct_bounds = Self::build_struct_bounds_map(&resolved_bounds);
         let mut out = CodeBuilder::new("async {\n    use ::marigold::marigold_impl::*;\n    ");
@@ -377,11 +381,23 @@ impl PestParser {
             match expr {
                 TypedExpression::StructDeclaration(s) => {
                     let field_bounds = struct_bounds.get(&s.name);
-                    let code = s.code_with_bounds(field_bounds);
-                    out.segment(SegmentKind::Struct, i, Some(s.name.clone()), &code);
+                    let code = s.emit_with_bounds(field_bounds);
+                    out.segment(
+                        SegmentKind::Struct,
+                        i,
+                        Some(s.name.clone()),
+                        Some(s.name.clone()),
+                        code,
+                    );
                 }
                 TypedExpression::EnumDeclaration(e) => {
-                    out.segment(SegmentKind::Enum, i, Some(e.name.clone()), &e.code());
+                    out.segment(
+                        SegmentKind::Enum,
+                        i,
+                        Some(e.name.clone()),
+                        Some(e.name.clone()),
+                        e.emit(),
+                    );
                 }
                 _ => continue,
             }
@@ -391,7 +407,13 @@ impl PestParser {
         // 2. Generate functions
         for (i, expr) in expressions.iter().enumerate() {
             if let TypedExpression::FnDeclaration(f) = expr {
-                out.segment(SegmentKind::Function, i, Some(f.name.clone()), &f.code());
+                out.segment(
+                    SegmentKind::Function,
+                    i,
+                    Some(f.name.clone()),
+                    Some(f.name.clone()),
+                    f.emit(),
+                );
                 out.glue("\n\n");
             }
         }
@@ -399,13 +421,19 @@ impl PestParser {
         // 3. Generate stream variable declarations
         for (i, expr) in expressions.iter().enumerate() {
             let (name, code) = match expr {
-                TypedExpression::StreamVariable(v) => (&v.variable_name, v.declaration_code()),
+                TypedExpression::StreamVariable(v) => (&v.variable_name, v.declaration_emit()),
                 TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                    (&v.variable_name, v.declaration_code())
+                    (&v.variable_name, v.declaration_emit())
                 }
                 _ => continue,
             };
-            out.segment(SegmentKind::StreamVariable, i, Some(name.clone()), &code);
+            out.segment(
+                SegmentKind::StreamVariable,
+                i,
+                Some(name.clone()),
+                Some(name.clone()),
+                code,
+            );
             out.glue("\n\n");
         }
 
@@ -413,12 +441,13 @@ impl PestParser {
         let mut n_returning_streams = 0;
         for (i, expr) in expressions.iter().enumerate() {
             let code = match expr {
-                TypedExpression::UnnamedReturningStream(s) => s.code(),
-                TypedExpression::NamedReturningStream(s) => s.code(),
+                TypedExpression::UnnamedReturningStream(s) => s.emit(),
+                TypedExpression::NamedReturningStream(s) => s.emit(),
                 _ => continue,
             };
-            let stmt = format!("let returning_stream_{n_returning_streams} = Box::pin({code});");
-            out.segment(SegmentKind::ReturningStream, i, None, &stmt);
+            let ident = format!("returning_stream_{n_returning_streams}");
+            let stmt = Self::boxed_statement(&ident, code);
+            out.segment(SegmentKind::ReturningStream, i, None, Some(ident), stmt);
             out.glue("\n");
             n_returning_streams += 1;
         }
@@ -427,13 +456,13 @@ impl PestParser {
         let mut n_non_returning_streams = 0;
         for (i, expr) in expressions.iter().enumerate() {
             let code = match expr {
-                TypedExpression::UnnamedNonReturningStream(s) => s.code(),
-                TypedExpression::NamedNonReturningStream(s) => s.code(),
+                TypedExpression::UnnamedNonReturningStream(s) => s.emit(),
+                TypedExpression::NamedNonReturningStream(s) => s.emit(),
                 _ => continue,
             };
-            let stmt =
-                format!("let non_returning_stream_{n_non_returning_streams} = Box::pin({code});");
-            out.segment(SegmentKind::NonReturningStream, i, None, &stmt);
+            let ident = format!("non_returning_stream_{n_non_returning_streams}");
+            let stmt = Self::boxed_statement(&ident, code);
+            out.segment(SegmentKind::NonReturningStream, i, None, Some(ident), stmt);
             out.glue("\n");
             n_non_returning_streams += 1;
         }
@@ -448,14 +477,16 @@ impl PestParser {
                 }
                 _ => continue,
             };
-            let stmt = format!(
-                "let stream_variable_runners_{n_stream_variable_runners} = Box::pin({code});"
-            );
+            let ident = format!("stream_variable_runners_{n_stream_variable_runners}");
+            let mut runner = Emit::default();
+            runner.push(&code);
+            let stmt = Self::boxed_statement(&ident, runner);
             out.segment(
                 SegmentKind::StreamVariableRunner,
                 i,
                 Some(name.clone()),
-                &stmt,
+                Some(ident),
+                stmt,
             );
             out.glue("\n");
             n_stream_variable_runners += 1;
@@ -520,6 +551,15 @@ impl PestParser {
         out.glue("}\n");
 
         Ok(out.finish())
+    }
+
+    /// `let {ident} = Box::pin({code});`, keeping the layout of `code`.
+    fn boxed_statement(ident: &str, code: crate::source_map::Emit) -> crate::source_map::Emit {
+        let mut stmt = crate::source_map::Emit::default();
+        stmt.push(&format!("let {ident} = Box::pin("));
+        stmt.splice(code);
+        stmt.push(");");
+        stmt
     }
 
     fn build_struct_bounds_map(
@@ -2174,7 +2214,8 @@ mod function_grammar_tests {
             crate::pest_ast_builder::PestAstBuilder::build_program(pairs.clone()).unwrap();
         let start = std::time::Instant::now();
         let ranges = PestParser::expr_ranges(pairs);
-        let generated = PestParser::generate_mapped(expressions, None, &ranges).unwrap();
+        let parts = crate::sub_spans::skeletons(pairs);
+        let generated = PestParser::generate_mapped(expressions, None, &ranges, &parts).unwrap();
         std::hint::black_box(&generated);
         start.elapsed().as_secs_f64()
     }

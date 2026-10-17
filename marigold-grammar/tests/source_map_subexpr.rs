@@ -2316,27 +2316,12 @@ fn many_expressions_get_exactly_the_expected_nested_segments() {
     }
 }
 
-#[test]
-fn generation_time_with_nested_segments_still_grows_linearly() {
-    use std::time::Instant;
-    let best = |n: usize| {
-        let src = many_chain_exprs(n);
-        (0..5)
-            .map(|_| {
-                let t = Instant::now();
-                let g = marigold_generate(&src).unwrap();
-                std::hint::black_box(&g);
-                t.elapsed().as_secs_f64()
-            })
-            .fold(f64::INFINITY, f64::min)
-    };
-    let (small, large) = (best(250), best(1_000));
-    // linear => ~4x, quadratic => ~16x. 12x leaves room for noise when the test binary runs in parallel.
-    assert!(
-        large < small * 12.0,
-        "250 exprs: {small:.4}s, 1000 exprs: {large:.4}s"
-    );
-}
+// There is deliberately no wall-clock ratio test here: a fixed-margin ratio of two timings is
+// flaky on a loaded machine. The linearity of the work is pinned by deterministic counters in
+// `src/source_map.rs` (`construction_work_is_n_log_n`,
+// `pairing_parts_with_pieces_does_linear_work_in_the_chain_length`) and by the paired-round
+// timing test `mapped_code_generation_grows_linearly_with_program_size` in `src/parser.rs`,
+// whose program contains nested segments of every statement kind.
 
 #[test]
 fn nested_lookups_are_fast_on_a_big_program() {
