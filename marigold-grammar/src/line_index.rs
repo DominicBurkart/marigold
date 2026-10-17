@@ -30,7 +30,7 @@
 //! [`LineIndex::line_col`] never panics: an offset past the end of the text is clamped
 //! to the end and an offset inside a multibyte character is moved back to the start of
 //! that character. [`LineIndex::offset`] is its exact inverse: for every char boundary
-//! `b` and every unit, `offset(line_col(b).line, line_col(b).col)` is `Some(b)`.
+//! `b` and every unit, `offset(line_col(b).line, line_col(b).column)` is `Some(b)`.
 //!
 //! # Cost
 //!
@@ -46,10 +46,10 @@
 //! let src = "a\u{1F600}b\r\nx";                  // 'a', emoji (4 bytes, 2 UTF-16 units), 'b', CRLF, 'x'
 //! let index = LineIndex::new(src);
 //! let b = src.find('b').unwrap();
-//! assert_eq!(index.line_col(b, ColumnUnit::Bytes), LineCol { line: 1, col: 6 });
-//! assert_eq!(index.line_col(b, ColumnUnit::Chars), LineCol { line: 1, col: 3 });   // rustc's unit
-//! assert_eq!(index.line_col(b, ColumnUnit::Utf16), LineCol { line: 1, col: 4 });
-//! assert_eq!(index.line_col(src.len() - 1, ColumnUnit::Chars), LineCol { line: 2, col: 1 });
+//! assert_eq!(index.line_col(b, ColumnUnit::Bytes), LineCol { line: 1, column: 6 });
+//! assert_eq!(index.line_col(b, ColumnUnit::Chars), LineCol { line: 1, column: 3 });   // rustc's unit
+//! assert_eq!(index.line_col(b, ColumnUnit::Utf16), LineCol { line: 1, column: 4 });
+//! assert_eq!(index.line_col(src.len() - 1, ColumnUnit::Chars), LineCol { line: 2, column: 1 });
 //! assert_eq!(index.offset(1, 3, ColumnUnit::Chars), Some(b));
 //! assert_eq!(index.offset(1, 3, ColumnUnit::Utf16), None);   // inside the emoji
 //! assert_eq!(index.offset(3, 1, ColumnUnit::Chars), None);   // no such line
@@ -62,12 +62,13 @@
 ///
 /// let index = LineIndex::new("日本語 x"); // three characters of three bytes each
 /// let x = "日本語 ".len();
-/// assert_eq!(index.line_col(x, ColumnUnit::Bytes).col, 11);
-/// assert_eq!(index.line_col(x, ColumnUnit::Chars).col, 5);
-/// assert_eq!(index.line_col(x, ColumnUnit::Utf16).col, 5);
-/// assert_eq!(index.line_col(x, ColumnUnit::Chars), LineCol { line: 1, col: 5 });
+/// assert_eq!(index.line_col(x, ColumnUnit::Bytes).column, 11);
+/// assert_eq!(index.line_col(x, ColumnUnit::Chars).column, 5);
+/// assert_eq!(index.line_col(x, ColumnUnit::Utf16).column, 5);
+/// assert_eq!(index.line_col(x, ColumnUnit::Chars), LineCol { line: 1, column: 5 });
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ColumnUnit {
     /// UTF-8 bytes.
@@ -89,14 +90,14 @@ pub enum ColumnUnit {
 /// ```
 /// use marigold_grammar::line_index::LineCol;
 ///
-/// assert!(LineCol { line: 1, col: 80 } < LineCol { line: 2, col: 1 });
+/// assert!(LineCol { line: 1, column: 80 } < LineCol { line: 2, column: 1 });
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 pub struct LineCol {
     /// Line number, starting at 1.
     pub line: usize,
     /// Column number in the requested [`ColumnUnit`], starting at 1.
-    pub col: usize,
+    pub column: usize,
 }
 
 /// Line starts of a text, for converting between byte offsets and line/column positions.
@@ -108,7 +109,7 @@ pub struct LineCol {
 ///
 /// let index = LineIndex::new("range(0, 3)\n  .return");
 /// assert_eq!(index.line_count(), 2);
-/// assert_eq!(index.line_col(15, ColumnUnit::Chars), LineCol { line: 2, col: 4 });
+/// assert_eq!(index.line_col(15, ColumnUnit::Chars), LineCol { line: 2, column: 4 });
 /// assert_eq!(index.offset(2, 4, ColumnUnit::Chars), Some(15));
 /// ```
 #[derive(Debug, Clone)]
@@ -149,6 +150,11 @@ impl<'a> LineIndex<'a> {
     /// assert_eq!(LineIndex::new("a\r\nb").line_count(), 2);
     /// assert_eq!(LineIndex::new("a\rb").line_count(), 1);
     /// ```
+    pub fn line_range(&self, _line: usize) -> Option<crate::diagnostics::ByteRange> {
+        None // red stub
+    }
+
+    /// Stub.
     pub fn line_count(&self) -> usize {
         self.line_starts.len()
     }
@@ -166,14 +172,14 @@ impl<'a> LineIndex<'a> {
     ///
     /// let index = LineIndex::new("ab\r\ncd");
     /// let at = |offset| index.line_col(offset, ColumnUnit::Chars);
-    /// assert_eq!(at(0), LineCol { line: 1, col: 1 });
-    /// assert_eq!(at(2), LineCol { line: 1, col: 3 }); // the '\r'
-    /// assert_eq!(at(3), LineCol { line: 1, col: 4 }); // the '\n'
-    /// assert_eq!(at(4), LineCol { line: 2, col: 1 });
-    /// assert_eq!(at(1_000), LineCol { line: 2, col: 3 }); // clamped to the end
+    /// assert_eq!(at(0), LineCol { line: 1, column: 1 });
+    /// assert_eq!(at(2), LineCol { line: 1, column: 3 }); // the '\r'
+    /// assert_eq!(at(3), LineCol { line: 1, column: 4 }); // the '\n'
+    /// assert_eq!(at(4), LineCol { line: 2, column: 1 });
+    /// assert_eq!(at(1_000), LineCol { line: 2, column: 3 }); // clamped to the end
     ///
     /// let index = LineIndex::new("é!");
-    /// assert_eq!(index.line_col(1, ColumnUnit::Chars), LineCol { line: 1, col: 1 }); // inside 'é'
+    /// assert_eq!(index.line_col(1, ColumnUnit::Chars), LineCol { line: 1, column: 1 }); // inside 'é'
     /// ```
     pub fn line_col(&self, offset: usize, unit: ColumnUnit) -> LineCol {
         let mut offset = offset.min(self.text.len());
@@ -182,8 +188,8 @@ impl<'a> LineIndex<'a> {
         }
         let line = self.line_starts.partition_point(|&start| start <= offset);
         let start = self.line_starts[line - 1];
-        let col = 1 + self.width(&self.text[start..offset], unit);
-        LineCol { line, col }
+        let column = 1 + self.width(&self.text[start..offset], unit);
+        LineCol { line, column }
     }
 
     /// The byte offset of a 1-based position: the exact inverse of

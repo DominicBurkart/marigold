@@ -464,3 +464,145 @@ fn chars_columns_and_byte_offsets_agree_with_rustc() {
     assert!(checked >= 6, "expected several rustc spans, got {checked}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ---------------------------------------------------------------------------------------------
+// line terminators, combining marks, serialization, line ranges
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn only_lf_ends_a_line_whatever_unicode_says() {
+    // NEL, VT, FF, FS/GS/RS, LS, PS are all ordinary one-column characters.
+    for c in [
+        '\u{85}', '\u{b}', '\u{c}', '\u{1c}', '\u{1d}', '\u{1e}', '\u{2028}', '\u{2029}',
+    ] {
+        let src = format!("a{c}b\nc");
+        let idx = LineIndex::new(&src);
+        assert_eq!(idx.line_count(), 2, "{c:?}");
+        let b = src.find('b').unwrap();
+        for unit in [ColumnUnit::Chars, ColumnUnit::Utf16] {
+            assert_eq!(idx.line_col(b, unit), lc(1, 3), "{c:?} {unit:?}");
+        }
+        assert_eq!(
+            idx.offset(2, 1, ColumnUnit::Chars),
+            Some(src.find('c').unwrap())
+        );
+    }
+}
+
+#[test]
+fn a_combining_mark_is_a_column_of_its_own() {
+    // No grapheme clustering: "e" + U+0301 are two scalar values.
+    let src = "e\u{301}x";
+    let idx = LineIndex::new(src);
+    let x = src.find('x').unwrap();
+    assert_eq!(idx.line_col(x, ColumnUnit::Chars), lc(1, 3));
+    assert_eq!(idx.line_col(x, ColumnUnit::Utf16), lc(1, 3));
+    assert_eq!(idx.line_col(x, ColumnUnit::Bytes), lc(1, 4));
+    assert_eq!(idx.offset(1, 2, ColumnUnit::Chars), Some(1));
+}
+
+#[test]
+fn positions_serialize_with_the_json_key_names_of_the_emit_document() {
+    assert_eq!(
+        serde_json::to_string(&lc(3, 7)).unwrap(),
+        r#"{"line":3,"column":7}"#
+    );
+    let units: Vec<_> = UNITS
+        .iter()
+        .map(|u| serde_json::to_string(u).unwrap())
+        .collect();
+    assert_eq!(units, [r#""bytes""#, r#""chars""#, r#""utf16""#]);
+}
+
+#[test]
+fn line_range_covers_a_line_without_its_newline() {
+    let idx = LineIndex::new("ab\r\ncd\n\nlast");
+    let range = |line| idx.line_range(line).map(|r| (r.start, r.end));
+    assert_eq!(range(1), Some((0, 3))); // the '\r' belongs to the line
+    assert_eq!(range(2), Some((4, 6)));
+    assert_eq!(range(3), Some((7, 7))); // empty line
+    assert_eq!(range(4), Some((8, 12))); // last line has no '\n'
+    assert_eq!(range(0), None);
+    assert_eq!(range(5), None);
+    assert_eq!(range(usize::MAX), None);
+    let idx = LineIndex::new("");
+    assert_eq!(idx.line_range(1).map(|r| (r.start, r.end)), Some((0, 0)));
+    let idx = LineIndex::new("a\n");
+    assert_eq!(idx.line_range(2).map(|r| (r.start, r.end)), Some((2, 2)));
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(300))]
+
+    #[test]
+    fn line_range_agrees_with_offset_and_line_col(src in mixed_text()) {
+        let idx = LineIndex::new(&src);
+        for line in 1..=idx.line_count() {
+            let r = idx.line_range(line).unwrap();
+            prop_assert_eq!(idx.offset(line, 1, ColumnUnit::Chars), Some(r.start));
+            prop_assert_eq!(idx.line_col(r.start, ColumnUnit::Chars), lc(line, 1));
+            prop_assert_eq!(idx.line_col(r.end, ColumnUnit::Chars).line, line);
+            prop_assert!(!src[r.start..r.end].contains('\n'));
+            prop_assert!(r.end == src.len() || src.as_bytes()[r.end] == b'\n');
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// long non-ASCII lines (checkpoints)
+// ---------------------------------------------------------------------------------------------
+
+/// Lines much longer than the checkpoint stride, full of multibyte characters, so every
+/// checkpoint and every stride boundary is exercised (the shorter `mixed_text` never reaches one).
+fn long_line_text() -> impl Strategy<Value = String> {
+    proptest::collection::vec(
+        prop_oneof![
+            30 => Just("a".to_string()),
+            2 => Just("é".to_string()),
+            2 => Just("日".to_string()),
+            1 => Just("😀".to_string()),
+            1 => Just("\n".to_string()),
+        ],
+        0..1500,
+    )
+    .prop_map(|v| v.concat())
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(60))]
+
+    #[test]
+    fn long_lines_match_the_naive_oracle_everywhere(src in long_line_text()) {
+        let idx = LineIndex::new(&src);
+        for b in boundaries(&src) {
+            for unit in UNITS {
+                let got = idx.line_col(b, unit);
+                prop_assert_eq!(got, naive(&src, b, unit), "{:?} at {}", unit, b);
+                prop_assert_eq!(idx.offset(got.line, got.column, unit), Some(b));
+            }
+        }
+    }
+}
+
+#[test]
+fn a_long_line_with_one_multibyte_character_is_cheap() {
+    use std::time::{Duration, Instant};
+    // 909 KB on one line and a single `é`: with a whole-text ASCII flag every query rescans the line
+    // (17 s for the emit document of such a file). The clock is checked inside the loop.
+    let line = format!("é{}", "a".repeat(909_000));
+    let idx = LineIndex::new(&line);
+    let budget = Duration::from_secs(10);
+    let t = Instant::now();
+    for i in 0..100_000usize {
+        let b = 2 + (i * 9) % 909_000;
+        let want = lc(1, b); // one `é` of two bytes: chars = bytes - 1
+        assert_eq!(idx.line_col(b, ColumnUnit::Chars), want);
+        assert_eq!(idx.line_col(b, ColumnUnit::Utf16), want);
+        assert_eq!(idx.offset(1, b, ColumnUnit::Chars), Some(b));
+        assert!(
+            i % 500 != 0 || t.elapsed() < budget,
+            "non-ASCII line lookups are not bounded: {:?}",
+            t.elapsed()
+        );
+    }
+}

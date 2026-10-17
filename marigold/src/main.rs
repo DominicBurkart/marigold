@@ -168,7 +168,7 @@ fn render_human(
             out,
             "{path}:{}:{}: {}[{}]: {}",
             position.line,
-            position.col,
+            position.column,
             d.severity.as_str(),
             d.code,
             d.message

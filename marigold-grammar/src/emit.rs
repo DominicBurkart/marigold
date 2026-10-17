@@ -116,9 +116,9 @@ impl EmitRange {
             start: range.start,
             end: range.end,
             start_line: start.line,
-            start_column: start.col,
+            start_column: start.column,
             end_line: end.line,
-            end_column: end.col,
+            end_column: end.column,
         }
     }
 
