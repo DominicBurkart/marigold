@@ -3206,3 +3206,120 @@ fn x10_the_last_program_line_may_continue_into_text_after_the_program() {
         assert_eq!(m.precision, Exact, "{a}..{b}: {m:?}");
     }
 }
+
+#[test]
+fn x11_only_function_text_is_ever_exact_even_when_a_struct_or_enum_ends_in_the_same_byte() {
+    // Generated structs/enums end in `}` just like their Marigold source does, so a byte-suffix
+    // coincidence exists; it must not be reported as a proven-identical text.
+    let src = "struct S { a: u8 }\nenum E { A, B }\nrange(0, 1).write_file(\"o.csv\", csv)";
+    let program = marigold_generate(src).unwrap();
+    for kind in [SegmentKind::Struct, SegmentKind::Enum] {
+        let seg = program
+            .map
+            .segments()
+            .iter()
+            .find(|s| s.kind == kind)
+            .unwrap()
+            .clone();
+        assert_eq!(program.rust.as_bytes()[seg.generated.end - 1], b'}');
+        assert_eq!(src.as_bytes()[seg.source.end - 1], b'}');
+        let end = seg.generated.end;
+        for (a, b) in [(end - 1, end), (end, end)] {
+            let m = map_one(
+                src,
+                &program,
+                "",
+                &rustc_span("gen.rs", &program.rust, a, b, true),
+            );
+            assert_eq!(m.precision, Seg, "{kind:?} {a}..{b}: {m:?}");
+            assert_eq!(slice(src, &m), &src[seg.source.start..seg.source.end]);
+        }
+    }
+}
+
+#[test]
+fn x12_the_declared_prefix_is_part_of_the_first_line_text_rustc_reports() {
+    let (src, program) = mini();
+    let prefix = "    ";
+    let file = format!("{prefix}{}", program.rust);
+    // bytes 4..9 are `async` on the first program line
+    let sp = rustc_span("gen.rs", &file, 4, 9, true);
+    assert_eq!(sp.text[0].text, format!("{prefix}async {{"));
+    assert_unmapped(&map_one(&src, &program, prefix, &sp), UnmappedReason::Glue);
+    // the same highlight numbers over a line text that lacks the prefix describe another file
+    let mut other = sp.clone();
+    other.text[0].text = "async {".to_string();
+    assert_unmapped(
+        &map_one(&src, &program, prefix, &other),
+        UnmappedReason::StaleGeneratedFile,
+    );
+}
+
+#[test]
+fn x13_an_expression_span_takes_the_widest_segment_not_the_first_one() {
+    // two pieces of expression 0 (no enclosing segment), the second one wider in Marigold
+    let src = "AA BBBBBB";
+    let rust = "async {\n  aa\n  bbbbbb\n}\n";
+    let (a, b) = (rust.find("aa").unwrap(), rust.find("bbbbbb").unwrap());
+    let piece = |g0: usize, g1: usize, s0: usize, s1: usize| {
+        Segment::new(
+            ByteRange { start: g0, end: g1 },
+            ByteRange { start: s0, end: s1 },
+            SegmentKind::StreamVariable,
+            0,
+            None,
+        )
+    };
+    let program = GeneratedProgram::new(
+        rust.to_string(),
+        SourceMap::new(vec![piece(a, a + 2, 0, 2), piece(b, b + 6, 3, 9)]),
+    );
+    // from the last byte of the first piece to the first byte of the second one
+    let m = map_one(
+        src,
+        &program,
+        "",
+        &rustc_span("gen.rs", rust, a + 1, b + 1, true),
+    );
+    assert_eq!(m.precision, Expression, "{m:?}");
+    assert_eq!(slice(src, &m), "BBBBBB");
+}
+
+#[test]
+fn x14_a_prefix_with_an_unverified_display_width_is_not_trusted_either() {
+    let src = "fn a() {}";
+    let rust = "fn a() {}\n";
+    let program = GeneratedProgram::new(
+        rust.to_string(),
+        SourceMap::new(vec![Segment::new(
+            ByteRange { start: 0, end: 9 },
+            ByteRange { start: 0, end: 9 },
+            SegmentKind::Function,
+            0,
+            Some("a".into()),
+        )]),
+    );
+    let is_gen = |f: &str| f == "gen.rs";
+    let r = Remapper::new(&program, src, &is_gen).with_prefix("\u{0f00}");
+    // the `a`: after the 3-byte prefix and `fn ` (6 bytes, 5 scalars)
+    let bytes = r.locate("gen.rs", 1, Some(7), ColumnUnit::Utf8Bytes);
+    assert_mapped(src, &bytes, Exact, "", (1, 4));
+    let scalar = r.locate("gen.rs", 1, Some(5), ColumnUnit::ScalarValues);
+    assert_mapped(src, &scalar, Exact, "", (1, 4));
+    // U+0F00 is not in the verified table: the column cannot be trusted
+    let display = r.locate("gen.rs", 1, Some(5), ColumnUnit::DisplayWidth);
+    assert_eq!(display.precision, Seg, "{display:?}");
+    assert_eq!(slice(src, &display), "fn a() {}");
+}
+
+#[test]
+fn x15_an_empty_code_is_no_code() {
+    let (src, program) = mini();
+    let is_gen = |f: &str| f == "gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen);
+    let d: RustcDiagnostic = serde_json::from_value(json!({
+        "message": "m", "code": {"code": ""}, "level": "warning", "spans": [], "children": []
+    }))
+    .unwrap();
+    assert_eq!(r.remap(&d).code, None);
+}
