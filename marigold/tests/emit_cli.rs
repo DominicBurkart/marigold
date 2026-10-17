@@ -407,15 +407,42 @@ fn golden_inputs_have_the_bytes_the_tests_rely_on() {
     assert!(read("g18_trailing_ws_between_vars").contains("   \t\n"));
 }
 
+/// The generated Rust, and with it every golden document, depends on the features the binary
+/// is built with (`io` adds I/O code, `tokio` / `async-std` switch stream functions to their
+/// async forms): one set of golden documents per combination CI runs, named like the snapshot
+/// sets of `marigold-grammar/tests/generated_rust_golden.rs`, which also serve as an independent
+/// oracle for the `rust` field of every golden document.
+fn golden_variant() -> &'static str {
+    match (
+        cfg!(feature = "io"),
+        cfg!(any(feature = "tokio", feature = "async-std")),
+    ) {
+        (false, false) => "default",
+        (false, true) => "async_runtime",
+        (true, true) => "io_and_async_runtime",
+        (true, false) => unreachable!("no golden documents for io without an async runtime"),
+    }
+}
+
+/// `io` without an async runtime emits yet another variant that the CI matrix never builds, so
+/// there are no golden documents for it. This ignored test makes the gap visible.
+#[cfg(all(feature = "io", not(any(feature = "tokio", feature = "async-std"))))]
+#[test]
+#[ignore = "no golden documents for the io feature without tokio or async-std"]
+fn golden_json_documents_are_stable() {}
+
+#[cfg(not(all(feature = "io", not(any(feature = "tokio", feature = "async-std")))))]
 #[test]
 fn golden_json_documents_are_stable() {
     let update = std::env::var_os("UPDATE_GOLDEN").is_some();
+    let variant = golden_variant();
     for name in GOLDEN_JSON {
         let input = golden_dir().join(format!("{name}.marigold"));
-        let golden = golden_dir().join(format!("{name}.json"));
+        let golden = golden_dir().join(variant).join(format!("{name}.json"));
         let out = emit_file(&["--format", "json"], &input);
         assert_eq!(out.status.code(), Some(0), "{name}");
         if update {
+            std::fs::create_dir_all(golden.parent().unwrap()).unwrap();
             std::fs::write(&golden, &out.stdout).unwrap();
             continue;
         }
@@ -427,10 +454,19 @@ fn golden_json_documents_are_stable() {
             golden.display(),
             s(&out.stdout)
         );
-        // a golden file must itself be a valid v1 document for its input
-        assert_document_ok(
-            &serde_json::from_slice(&want).unwrap(),
-            &std::fs::read_to_string(&input).unwrap(),
+        // a golden file must itself be a valid v1 document for its input ...
+        let document: Value = serde_json::from_slice(&want).unwrap();
+        assert_document_ok(&document, &std::fs::read_to_string(&input).unwrap());
+        // ... whose Rust is the snapshot captured from `main` before the source map existed
+        let snapshot = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../marigold-grammar/tests/golden_rust")
+            .join(variant)
+            .join(format!("{name}.rs"));
+        assert_eq!(
+            document["rust"],
+            json!(std::fs::read_to_string(&snapshot).unwrap()),
+            "{name}: golden `rust` differs from {}",
+            snapshot.display()
         );
     }
 }
@@ -807,6 +843,28 @@ fn oversized_invalid_input_still_exits_one_and_prints_nothing_on_stdout() {
     assert_eq!(err[0]["severity"], "error");
     assert_ne!(err[0]["code"], "input-too-large");
     assert!(err[0]["message"].as_str().unwrap().contains("Parse error"));
+    // the synthetic diagnostic has the shape and key order of `check`'s
+    assert_eq!(err.as_array().unwrap().len(), 1);
+    assert_eq!(err[0]["code"], "syntax-error");
+    assert_eq!(err[0]["range"], json!({"start": 0, "end": 0}));
+    assert_eq!(err[0].as_object().unwrap().len(), 4);
+    assert!(
+        s(&out.stderr).starts_with("[\n  {\n    \"range\": {\n      \"start\": 0,\n      \"end\": 0\n    },\n    \"severity\": \"error\",\n    \"code\": \"syntax-error\",\n    \"message\": \"Parse error"),
+        "layout of the diagnostic differs from `check --format json`"
+    );
+
+    // human format: one line with the usual prefix, position 1:1
+    let out = emit_file(&[], &path);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert!(
+        s(&out.stderr).starts_with(&format!(
+            "{}:1:1: error[syntax-error]: Parse error",
+            path.display()
+        )),
+        "{}",
+        &s(&out.stderr)[..200.min(out.stderr.len())]
+    );
 }
 
 // ---------------------------------------------------------------------------------------------

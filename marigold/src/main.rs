@@ -516,12 +516,27 @@ mod tests {
     /// Unlike `cargo install`, this does not write to `~/.cargo/bin/`
     /// and works in sandboxed environments.
     /// Note: assumes the default debug build profile (target/debug/).
+    ///
+    /// The binary is built with the features these tests were built with. It is the
+    /// same file as `CARGO_BIN_EXE_marigold` in the integration tests (`emit_cli`
+    /// compares its output with `marigold_parse`, which depends on the features), so a
+    /// build with fewer features would replace the binary they test.
     static BINARY: LazyLock<PathBuf> = LazyLock::new(|| {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap();
+        let mut features = vec!["cli"];
+        if cfg!(feature = "tokio") {
+            features.push("tokio");
+        }
+        if cfg!(feature = "async-std") {
+            features.push("async-std");
+        }
+        if cfg!(feature = "io") {
+            features.push("io");
+        }
         let status = Command::new("cargo")
-            .args(["build", "--features", "cli", "-p", "marigold"])
+            .args(["build", "--features", &features.join(","), "-p", "marigold"])
             .current_dir(workspace_root)
             .status()
             .expect("could not build marigold");
