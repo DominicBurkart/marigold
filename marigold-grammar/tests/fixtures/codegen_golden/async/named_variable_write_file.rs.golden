@@ -1,0 +1,97 @@
+async {
+    use ::marigold::marigold_impl::*;
+    let mut rows = {use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new(::marigold::marigold_impl::futures::stream::iter(0..3).map(|v| async move {to_row(v)}).buffered(std::cmp::max(2 * (::marigold::marigold_impl::num_cpus::get() - 1), 2)))};
+
+let returning_stream_0 = Box::pin({use ::marigold::marigold_impl::*; rows.get()});
+let non_returning_stream_0 = Box::pin({use ::marigold::marigold_impl::*; {
+            if let Some(parent) = ::std::path::Path::new("rows.csv").parent() {
+              ::marigold::marigold_impl::tokio::fs::create_dir_all(parent)
+                .await
+                .expect("could not create parent directory for output file");
+            }
+
+            static WRITER: ::marigold::marigold_impl::once_cell::sync::OnceCell<
+              ::marigold::marigold_impl::tokio::sync::Mutex<
+                ::marigold::marigold_impl::csv_async::AsyncSerializer<
+                  ::marigold::marigold_impl::tokio_util::compat::Compat<
+                    ::marigold::marigold_impl::writer::Writer
+                  >
+                >
+              >
+            > = ::marigold::marigold_impl::once_cell::sync::OnceCell::new();
+
+            WRITER.set(
+              ::marigold::marigold_impl::tokio::sync::Mutex::new(
+                ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                  ::marigold::marigold_impl::writer::Writer::file(
+                    ::marigold::marigold_impl::tokio::fs::File::create("rows.csv")
+                       .await
+                       .expect("Could not write to file")
+                  )
+                  .compat_write()
+                )
+              )
+            ).expect("Could not put CSV writer into OnceCell");
+
+            let mut stream_to_write =
+
+           rows.get()
+              ;
+              stream_to_write.filter_map(
+                |v| async move {
+                  WRITER
+                    .get()
+                    .expect("Could not get CSV writer from OnceCell")
+                    .lock()
+                    .await
+                    .serialize(v)
+                    .await
+                    .expect("could not write record to CSV");
+                  None
+                }
+              ).chain(
+                // after the stream is complete, flush the writer.
+                ::marigold::marigold_impl::futures::stream::iter(0..1)
+                  .filter_map(|_v| async {
+                      let mut serializer_guard = WRITER
+                        .get() // gets Mutex<...>
+                        .expect("Could not get CSV writer from OnceCell")
+                        .lock()
+                        .await;
+                      let mut serializer = std::mem::replace(
+                        &mut *serializer_guard,
+                        ::marigold::marigold_impl::csv_async::AsyncSerializer::from_writer(
+                            ::marigold::marigold_impl::writer::Writer::vector()
+                              .compat_write()
+                        )
+                      );
+                      serializer
+                        .into_inner()
+                        .await
+                        .expect("Could not get underlying writer from serializer")
+                        .get_mut()
+                        .shutdown()
+                        .await
+                        .expect("Could not shut down underlying writer");
+                      None
+                  })
+              )
+          }});
+let stream_variable_runners_0 = Box::pin({
+                let runner_future = Box::pin(rows.run());
+                ::marigold::marigold_impl::multi_consumer_stream::RunFutureAsStream::new(runner_future)
+            });
+
+        /// silly function that uses generics to infer the output type (StreamItem) via generics, so that
+        /// we can provide the streams as an array of Pin<Box<dyn Stream<Item=StreamItem>>>.
+        #[inline(always)]
+        fn typed_stream_vec<StreamItem>(v: Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>>) -> Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>> {
+         v
+        }
+        let streams_array = typed_stream_vec(vec![
+returning_stream_0,
+non_returning_stream_0,
+stream_variable_runners_0,
+]
+);let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array);all_streams
+}
