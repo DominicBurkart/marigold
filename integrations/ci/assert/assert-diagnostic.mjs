@@ -2,12 +2,13 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export function parseArgs(argv) {
-  const o = { after: null, contains: null, absent: null, file: null };
+  const o = { after: null, contains: null, absent: null, file: null, outputsOnly: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--after") o.after = Number(argv[++i]);
     else if (a === "--contains") o.contains = argv[++i];
     else if (a === "--absent") o.absent = argv[++i];
+    else if (a === "--outputs-only") o.outputsOnly = true;
     else if (a.startsWith("--")) throw new Error(`unknown argument ${a}`);
     else o.file = a;
   }
@@ -25,7 +26,21 @@ export function readLog(text) {
 }
 
 function bodyOf(entry) {
+  if (typeof entry.request === "string") return entry.request;
   return JSON.stringify(entry.request ?? entry);
+}
+
+export function toolOutputs(entries) {
+  return entries.map((e) => {
+    const items = Array.isArray(e.request?.input) ? e.request.input : [];
+    const text = items
+      .filter((i) => i && typeof i.type === "string" && i.type.endsWith("_output"))
+      .map((i) =>
+        typeof i.output === "string" ? i.output : JSON.stringify(i.output),
+      )
+      .join("\n");
+    return { ...e, request: text };
+  });
 }
 
 export function check(entries, { after, contains, absent }) {
@@ -74,7 +89,8 @@ function main() {
     process.stderr.write(`${e.message}\n`);
     process.exit(2);
   }
-  const entries = readLog(fs.readFileSync(o.file, "utf8"));
+  let entries = readLog(fs.readFileSync(o.file, "utf8"));
+  if (o.outputsOnly) entries = toolOutputs(entries);
   const r = check(entries, o);
   if (r.ok) {
     const h = r.hits[0];
