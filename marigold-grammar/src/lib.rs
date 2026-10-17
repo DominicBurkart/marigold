@@ -12,6 +12,8 @@
 //! - **Pest-based parser**: Fast, maintainable PEG parser
 //! - **AST definitions**: Complete abstract syntax tree for Marigold programs
 //! - **Code generation**: Transforms Marigold programs into valid Rust code
+//! - **Source maps**: [`marigold_generate`] returns that code together with a
+//!   [`source_map::SourceMap`] from generated Rust back to Marigold source and forward
 //!
 //! ## Quick Start
 //!
@@ -41,6 +43,7 @@
 //! - [`nodes`]: AST node definitions for all Marigold constructs
 //! - Code generation: Internal function that transforms AST to Rust code
 //! - [`pest_ast_builder`]: Transforms Pest parse trees into the AST
+//! - [`source_map`]: Maps the generated Rust back to the Marigold expressions it came from
 //!
 //! ## Testing & Validation
 //!
@@ -79,6 +82,7 @@ pub mod symbols;
 mod type_aggregation;
 
 pub mod pest_ast_builder;
+pub mod source_map;
 
 /// Convenience function for parsing Marigold code
 ///
@@ -95,6 +99,51 @@ pub mod pest_ast_builder;
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
+}
+
+/// Generate Rust code together with a map from it back to the Marigold source.
+///
+/// `rust` is byte-for-byte what [`marigold_parse`] returns, and this fails exactly when
+/// [`marigold_parse`] fails, with the same message. Unlike [`marigold_check`], input
+/// size is not limited, because [`marigold_parse`] has no limit either.
+///
+/// # What the offsets refer to
+///
+/// Source offsets in the map are valid only against the exact string passed here, and
+/// generated offsets only against the returned `rust`. Inside `m!()` the macro sees
+/// rustc's re-printed tokens (comments dropped, whitespace normalized), wraps the
+/// generated code in `{\n` ... `\n}\n` and gives every token a call-site span, so rustc
+/// diagnostics cannot be mapped through `m!()`. Mapping them requires writing `rust`
+/// verbatim to a real file and compiling that. See [`source_map`] for details.
+///
+/// ```
+/// use marigold_grammar::source_map::SegmentKind;
+/// use marigold_grammar::{marigold_generate, marigold_parse};
+///
+/// let src = "x = range(0, 5)\nx.return";
+/// let program = marigold_generate(src).unwrap();
+/// assert_eq!(program.rust, marigold_parse(src).unwrap());
+///
+/// // Generated order differs from source order: the stream variable is declared,
+/// // then the output stream, and its runner comes last.
+/// let kinds: Vec<_> = program.map.segments().iter().map(|s| s.kind).collect();
+/// assert_eq!(
+///     kinds,
+///     [SegmentKind::StreamVariable, SegmentKind::ReturningStream, SegmentKind::StreamVariableRunner]
+/// );
+///
+/// let output = &program.map.segments()[1];
+/// assert_eq!(&src[output.source.start..output.source.end], "x.return");
+/// assert!(program.rust[output.generated.start..output.generated.end]
+///     .starts_with("let returning_stream_0"));
+/// assert_eq!(program.map.source_for_generated(output.generated.start), Some(output));
+///
+/// assert!(marigold_generate("range(0,").is_err());
+/// ```
+pub fn marigold_generate(
+    s: &str,
+) -> Result<source_map::GeneratedProgram, parser::MarigoldParseError> {
+    parser::PestParser::generate_input(s).map_err(parser::MarigoldParseError)
 }
 
 /// Check Marigold source and return every diagnostic found, with byte ranges.
