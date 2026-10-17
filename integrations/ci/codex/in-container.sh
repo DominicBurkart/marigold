@@ -71,16 +71,16 @@ step $ASSERT "$LOG" --after 0 --contains "mcp__marigold"
 
 case "$SCENARIO" in
   broken)
-    step $ASSERT "$LOG" --after 2 --outputs-only --contains '"code":"undefined-fn"'
-    step $ASSERT "$LOG" --after 2 --outputs-only --contains '"severity":"information"'
+    step $ASSERT "$LOG" --after 2 --scope tool-results --contains '"code":"undefined-fn"'
+    step $ASSERT "$LOG" --after 2 --scope tool-results --contains '"severity":"information"'
     ;;
   valid)
-    step $ASSERT "$LOG" --after 2 --outputs-only --contains '"ok":true' \
+    step $ASSERT "$LOG" --after 2 --scope tool-results --contains '"ok":true' \
       --absent undefined-fn
     ;;
   error)
-    step $ASSERT "$LOG" --after 2 --outputs-only --contains '"code":"undefined-enum"'
-    step $ASSERT "$LOG" --after 2 --outputs-only --contains '"severity":"error"'
+    step $ASSERT "$LOG" --after 2 --scope tool-results --contains '"code":"undefined-enum"'
+    step $ASSERT "$LOG" --after 2 --scope tool-results --contains '"severity":"error"'
     ;;
   *)
     echo "unknown scenario $SCENARIO" >&2
