@@ -1227,7 +1227,8 @@ fn emit_has_no_side_effects_and_never_touches_the_marigold_cache() {
 fn relative_paths_resolve_against_the_working_directory() {
     let dir = temp_dir().join("relative");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("p.marigold"), "range(0, 3).return").unwrap();
+    let program = TempFile(dir.join("p.marigold"));
+    std::fs::write(&*program, "range(0, 3).return").unwrap();
     let out = marigold()
         .current_dir(&dir)
         .args(["emit", "p.marigold"])
