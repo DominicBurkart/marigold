@@ -621,6 +621,39 @@ mod summary_tests {
     }
 
     #[test]
+    fn truncation_never_splits_a_multibyte_character_and_counts_bytes() {
+        // "Parse error: " is 13 bytes, so the 2048-byte limit falls inside a two-byte character
+        let message = format!("Parse error: {}", "é".repeat(2000));
+        let (_, _, _, text) = summarize_parse_error("", &message);
+        assert!(text.ends_with(" [message truncated]"), "{}", text.len());
+        assert!(text.len() <= MAX_SUMMARY_BYTES + " [message truncated]".len());
+        assert!(text.len() > MAX_SUMMARY_BYTES - 4, "{}", text.len());
+        // and a four-byte one
+        let message = format!("Parse error: {}", "😀".repeat(1000));
+        let (_, _, _, text) = summarize_parse_error("", &message);
+        assert!(text.ends_with(" [message truncated]"));
+        assert!(text.len() <= MAX_SUMMARY_BYTES + " [message truncated]".len());
+        assert!(text.len() > MAX_SUMMARY_BYTES - 4, "{}", text.len());
+    }
+
+    #[test]
+    fn c1_control_characters_are_escaped_too() {
+        // U+009B is a single-character CSI for many terminals, U+0085 is NEL
+        let (_, _, _, text) = summarize_parse_error("", "Parse error: a\u{9b}31mb\u{85}");
+        assert!(
+            !text.contains('\u{9b}') && !text.contains('\u{85}'),
+            "{text:?}"
+        );
+    }
+
+    #[test]
+    fn the_column_after_astral_characters_is_counted_in_characters() {
+        let message = "Parse error:  --> 1:5\n  |\n  = expected x";
+        // 😀😀ab!: column 5 is the `!` = byte 10; in UTF-16 units column 5 would be byte 9
+        assert_eq!(summarize_parse_error("😀😀ab!", message).2, 10);
+    }
+
+    #[test]
     fn escapes_what_the_expectation_line_holds() {
         let message = "Parse error:  --> 1:1\n  |\n  = expected \u{1b}[31m";
         let (_, _, _, text) = summarize_parse_error("", message);

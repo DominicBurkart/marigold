@@ -585,6 +585,40 @@ proptest! {
 }
 
 #[test]
+fn long_ascii_prefix_then_multibyte_text_on_the_same_line() {
+    // Whether a line is pure ASCII must be decided over the whole line, not its first bytes.
+    let texts = [
+        // the first non-ASCII character is far past the first stride
+        format!("{}é{}", "a".repeat(1000), "b".repeat(1000)),
+        format!("{}😀", "a".repeat(600)),
+        // an ASCII line, then a line whose first 300 bytes are ASCII, then ASCII again
+        format!(
+            "{}\n{}日{}\n{}",
+            "x".repeat(400),
+            "y".repeat(700),
+            "z".repeat(700),
+            "w".repeat(400)
+        ),
+        // non-ASCII only at the very end of a long line, before the newline
+        format!("{}ü\n{}", "q".repeat(5000), "r".repeat(300)),
+    ];
+    for text in &texts {
+        let idx = LineIndex::new(text);
+        for b in boundaries(text) {
+            for unit in UNITS {
+                let got = idx.line_col(b, unit);
+                assert_eq!(got, naive(text, b, unit), "{unit:?} at {b}");
+                assert_eq!(
+                    idx.offset(got.line, got.column, unit),
+                    Some(b),
+                    "{unit:?} at {b}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn a_long_line_with_one_multibyte_character_is_cheap() {
     use std::time::{Duration, Instant};
     // 909 KB on one line and a single `é`: with a whole-text ASCII flag every query rescans the line

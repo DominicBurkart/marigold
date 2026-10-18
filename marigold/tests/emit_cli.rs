@@ -572,6 +572,9 @@ fn rust_output_equals_the_snapshots_captured_from_main_for_this_feature_set() {
 
 #[test]
 fn json_lists_the_grammar_features_the_rust_depends_on() {
+    // Run under plain `--features cli` (`cargo test -p marigold --features cli --test emit_cli`):
+    // the only configuration where `cli` itself must provide the `io` feature. CI's
+    // `--all-features` enables `io` anyway.
     let path = write_temp("features.marigold", "range(0, 3).return");
     let doc = stdout_json(&emit_file(&["--format", "json"], &path));
     assert_eq!(doc["features"], json!(expected_features()));

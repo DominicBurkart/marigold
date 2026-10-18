@@ -400,6 +400,23 @@ mod tests {
         assert!(worst <= STRIDE + 4, "a query scanned {worst} characters");
     }
 
+    /// The upper bound above is vacuous if the counter stops counting: both conversions must
+    /// report some work, and no more than a stride.
+    #[test]
+    fn the_work_counter_is_wired_to_both_conversions() {
+        let line = format!("é{}", "a".repeat(5000));
+        let index = LineIndex::new(&line);
+        // an offset in the middle of the line: the scan starts at a checkpoint, never at 0
+        let n = scanned(|| {
+            index.line_col(3000, ColumnUnit::Chars);
+        });
+        assert!((1..=STRIDE + 4).contains(&n), "line_col scanned {n}");
+        let n = scanned(|| {
+            index.offset(1, 3000, ColumnUnit::Chars);
+        });
+        assert!((1..=STRIDE + 4).contains(&n), "offset scanned {n}");
+    }
+
     #[test]
     fn building_keeps_one_checkpoint_per_stride() {
         let line = "é".repeat(10 * STRIDE);
