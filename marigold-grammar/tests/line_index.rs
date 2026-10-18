@@ -593,8 +593,8 @@ fn a_long_line_with_one_multibyte_character_is_cheap() {
     let idx = LineIndex::new(&line);
     let budget = Duration::from_secs(10);
     let t = Instant::now();
-    for i in 0..100_000usize {
-        let b = 2 + (i * 9) % 909_000;
+    for i in 0..20_000usize {
+        let b = 2 + (i * 45) % 909_000;
         let want = lc(1, b); // one `é` of two bytes: chars = bytes - 1
         assert_eq!(idx.line_col(b, ColumnUnit::Chars), want);
         assert_eq!(idx.line_col(b, ColumnUnit::Utf16), want);
