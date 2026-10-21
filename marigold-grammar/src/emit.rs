@@ -240,14 +240,9 @@ impl EmitDocument {
         let rust_index = LineIndex::new(rust);
 
         let mut segments: Vec<EmitSegment> = Vec::with_capacity(map.segments().len());
-        // Indexes of the segments that enclose the segment being added, outermost first.
         let mut open: Vec<usize> = Vec::new();
         for segment in map.segments() {
             let generated = EmitRange::new(segment.generated, &rust_index);
-            // Segments are in pre-order (ascending start), so an open segment that does
-            // not contain this one can be dropped: any later segment inside it would
-            // also be inside this one, which starts earlier and, by not being nested in
-            // it, ends later.
             while open
                 .last()
                 .is_some_and(|&top| !segments[top].generated.contains(&generated))

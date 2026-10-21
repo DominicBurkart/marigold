@@ -106,8 +106,6 @@ pub struct LineCol {
 /// Distance in bytes between the character counts remembered for a long non-ASCII line.
 const STRIDE: usize = 256;
 
-// Work counter for the complexity test, in the style of `source_map.rs`: how many characters
-// the column conversions looked at, which does not depend on how loaded the machine is.
 #[cfg(test)]
 thread_local! {
     static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -262,9 +260,7 @@ impl<'a> LineIndex<'a> {
         let start = self.line_starts[line - 1];
         let relative = offset - start;
         let before_offset = match self.checkpoints(line - 1, unit) {
-            // `Bytes` and pure ASCII lines: the byte distance is the answer.
             None => relative,
-            // Count from the last checkpoint at or before the offset.
             Some(checkpoints) => {
                 let before = checkpoints.partition_point(|c| c.byte <= relative);
                 let (byte, units) = match before.checked_sub(1).map(|i| checkpoints[i]) {
@@ -308,13 +304,10 @@ impl<'a> LineIndex<'a> {
         let range = self.line_range(line)?;
         let want = col - 1;
         let Some(checkpoints) = self.checkpoints(line - 1, unit) else {
-            // The unit is the byte distance. `then` rather than `then_some`: the sum would
-            // be evaluated for `usize::MAX` columns too and overflow.
             return (want <= range.end - range.start)
                 .then(|| range.start + want)
                 .filter(|&at| self.text.is_char_boundary(at));
         };
-        // Resume from the last checkpoint that is not past the wanted column.
         let before = checkpoints.partition_point(|c| c.units(unit) <= want);
         let (mut at, mut seen) = match before.checked_sub(1).map(|i| checkpoints[i]) {
             Some(c) => (range.start + c.byte, c.units(unit)),
@@ -389,14 +382,12 @@ mod tests {
                 let mut position = None;
                 worst = worst.max(scanned(|| position = Some(index.line_col(offset, unit))));
                 let position = position.unwrap();
-                // an offset inside a character is moved back to its start
                 let start = (0..=offset).rev().find(|&i| line.is_char_boundary(i));
                 worst = worst.max(scanned(|| {
                     assert_eq!(index.offset(position.line, position.column, unit), start)
                 }));
             }
         }
-        // a stride plus the width of the character that crosses it
         assert!(worst <= STRIDE + 4, "a query scanned {worst} characters");
     }
 
@@ -406,7 +397,6 @@ mod tests {
     fn the_work_counter_is_wired_to_both_conversions() {
         let line = format!("é{}", "a".repeat(5000));
         let index = LineIndex::new(&line);
-        // an offset in the middle of the line: the scan starts at a checkpoint, never at 0
         let n = scanned(|| {
             index.line_col(3000, ColumnUnit::Chars);
         });
@@ -422,13 +412,88 @@ mod tests {
         let line = "é".repeat(10 * STRIDE);
         let index = LineIndex::new(&line);
         let checkpoints = &index.non_ascii[&0];
-        // 5120 bytes of two-byte characters: a checkpoint at every multiple of 256 below that
         assert_eq!(checkpoints.len(), 19);
         assert_eq!(checkpoints[0].byte, STRIDE);
         assert_eq!(checkpoints[0].chars, STRIDE / 2);
-        // ASCII lines get no entry at all, and short non-ASCII lines get an empty one
         let index = LineIndex::new("plain\né\nplain");
         assert_eq!(index.non_ascii.keys().copied().collect::<Vec<_>>(), [1]);
         assert!(index.non_ascii[&1].is_empty());
+    }
+
+    fn lc(line: usize, column: usize) -> LineCol {
+        LineCol { line, column }
+    }
+
+    #[test]
+    fn many_short_lines_need_no_character_scanning() {
+        let text = "x\n".repeat(200_000);
+        let index = LineIndex::new(&text);
+        let mut worst = 0;
+        for i in 0..200_000usize {
+            worst = worst.max(scanned(|| {
+                assert_eq!(index.line_col(i * 2, ColumnUnit::Chars), lc(i + 1, 1));
+            }));
+        }
+        assert!(worst <= STRIDE + 4, "a query scanned {worst} characters");
+    }
+
+    #[test]
+    fn column_queries_on_a_long_ascii_line_scan_no_characters() {
+        let text = "a".repeat(2_000_000);
+        let index = LineIndex::new(&text);
+        let mut worst = 0;
+        for i in 0..200_000usize {
+            worst = worst.max(scanned(|| {
+                assert_eq!(index.line_col(i * 10, ColumnUnit::Chars), lc(1, i * 10 + 1));
+                assert_eq!(index.offset(1, i * 10 + 1, ColumnUnit::Utf16), Some(i * 10));
+            }));
+        }
+        assert!(worst <= STRIDE + 4, "a query scanned {worst} characters");
+    }
+
+    #[test]
+    fn a_long_line_with_one_multibyte_character_scans_one_stride_per_query() {
+        let text = format!("é{}", "a".repeat(909_000));
+        let index = LineIndex::new(&text);
+        let mut worst = 0;
+        for i in 0..20_000usize {
+            let b = 2 + (i * 45) % 909_000;
+            let want = lc(1, b);
+            worst = worst.max(scanned(|| {
+                assert_eq!(index.line_col(b, ColumnUnit::Chars), want);
+                assert_eq!(index.line_col(b, ColumnUnit::Utf16), want);
+                assert_eq!(index.offset(1, b, ColumnUnit::Chars), Some(b));
+            }));
+        }
+        assert!(
+            worst <= 3 * (STRIDE + 4),
+            "a query scanned {worst} characters"
+        );
+        assert!(worst >= 1, "the counter saw no work");
+    }
+
+    #[test]
+    fn twenty_thousand_expressions_on_one_line_build_with_bounded_scanning() {
+        let n = 20_000;
+        let src: String = (0..n)
+            .map(|i| format!("v{i} = range(0, 1) "))
+            .collect::<String>()
+            + "v0.return";
+        let g = crate::marigold_generate(&src).unwrap();
+        let mut doc = None;
+        let work = scanned(|| {
+            doc = Some(crate::emit::EmitDocument::new(&src, &g.rust, &g.map));
+        });
+        let doc = doc.unwrap();
+        assert_eq!(doc.segments.len(), 2 * n + 1);
+        let last = doc.segments.iter().find(|s| s.expr_index == n).unwrap();
+        assert_eq!(
+            (last.source.start_line, last.source.start_column),
+            (1, src.len() - "v0.return".len() + 1)
+        );
+        assert!(
+            work <= 4 * (STRIDE + 4) * doc.segments.len(),
+            "building the document scanned {work} characters"
+        );
     }
 }

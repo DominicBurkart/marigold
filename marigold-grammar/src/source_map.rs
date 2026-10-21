@@ -52,8 +52,6 @@ use crate::diagnostics::ByteRange;
 use serde::Serialize;
 use std::cmp::Reverse;
 
-// Work counters for the complexity tests, in the style of `resolver.rs`: the tests assert
-// how much work construction and lookups do, which does not depend on how loaded the machine is.
 #[cfg(test)]
 thread_local! {
     /// Key evaluations in the two sorts plus the steps of the parent-link pass.
@@ -62,6 +60,18 @@ thread_local! {
     static WALK_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Segments `generated_for_source` looked at beyond the two binary searches.
     static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Expressions visited by the passes of code generation plus `CodeBuilder` appends.
+    static CODEGEN_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_codegen_steps() {
+    CODEGEN_STEPS.with(|c| c.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn codegen_steps() -> usize {
+    CODEGEN_STEPS.with(|c| c.get())
 }
 
 #[cfg(test)]
@@ -316,8 +326,6 @@ impl SourceMap {
     /// assert!(program.map.source_for_generated(usize::MAX).is_none());
     /// ```
     pub fn source_for_generated(&self, offset: usize) -> Option<&Segment> {
-        // The last segment starting at or before `offset` is the innermost candidate:
-        // every other segment containing `offset` encloses it.
         let after = self
             .segments
             .partition_point(|s| s.generated.start <= offset);
@@ -368,7 +376,6 @@ impl SourceMap {
     /// assert_eq!(program.map.generated_for_source(cursor)[0].kind, SegmentKind::ReturningStream);
     /// ```
     pub fn generated_for_source(&self, range: ByteRange) -> Vec<&Segment> {
-        // A cursor is the one-byte range starting at it.
         let (start, end) = match range.start.cmp(&range.end) {
             std::cmp::Ordering::Greater => return Vec::new(),
             std::cmp::Ordering::Equal => match range.start.checked_add(1) {
@@ -378,12 +385,9 @@ impl SourceMap {
             std::cmp::Ordering::Less => (range.start, range.end),
         };
 
-        // Segments starting before `end` ...
         let upper = self
             .by_source
             .partition_point(|&i| self.segments[i].source.start < end);
-        // ... and, since `max_source_end` never decreases, nothing before `lower` ends
-        // after `start`.
         let lower = self.max_source_end.partition_point(|&m| m <= start);
 
         let mut hits: Vec<usize> = self
@@ -465,9 +469,6 @@ impl GeneratedSegment {
     pub(crate) fn attach_source(self, ranges: &[ByteRange]) -> Segment {
         Segment {
             generated: self.generated,
-            // `ranges` is parallel to the expressions code generation saw: `build_program`
-            // pushes exactly one `TypedExpression` per `Rule::expr`, and `Rule::expr` never
-            // nests. A wrong index would be a silently wrong range, so it must stay a panic.
             source: ranges[self.expr_index],
             kind: self.kind,
             expr_index: self.expr_index,
@@ -495,6 +496,8 @@ impl CodeBuilder {
 
     /// Append code that belongs to no expression: separators and wiring.
     pub(crate) fn glue(&mut self, code: &str) {
+        #[cfg(test)]
+        count(&CODEGEN_STEPS);
         self.out.push_str(code);
     }
 
@@ -506,6 +509,8 @@ impl CodeBuilder {
         name: Option<String>,
         code: &str,
     ) {
+        #[cfg(test)]
+        count(&CODEGEN_STEPS);
         let start = self.out.len();
         self.out.push_str(code);
         self.segments.push(GeneratedSegment {
@@ -517,6 +522,13 @@ impl CodeBuilder {
             expr_index,
             name,
         });
+    }
+
+    pub(crate) fn pass<'a, T>(&self, items: &'a [T]) -> impl Iterator<Item = (usize, &'a T)> {
+        items.iter().enumerate().inspect(|_| {
+            #[cfg(test)]
+            count(&CODEGEN_STEPS);
+        })
     }
 
     pub(crate) fn finish(self) -> (String, Vec<GeneratedSegment>) {
@@ -563,8 +575,6 @@ mod tests {
 
     #[test]
     fn new_puts_the_outer_segment_first_even_when_the_inner_one_is_listed_first() {
-        // Same start, so only the tie-break on the larger end puts the outer one first;
-        // a plain stable sort on `generated.start` would keep the input order.
         let m = SourceMap::new(vec![
             seg((0, 4), (2, 3), SegmentKind::Struct, 1),
             seg((0, 10), (0, 10), SegmentKind::Function, 2),
@@ -664,9 +674,6 @@ mod tests {
 
     #[test]
     fn touching_source_ranges_do_not_overlap_even_inside_a_longer_one() {
-        // `(5, 10)` ends exactly where the query starts; the longer `(0, 50)` before it
-        // in source order keeps the prefix maximum above the query start, so only the
-        // final overlap check can reject it.
         let m = SourceMap::new(vec![
             seg((0, 100), (0, 50), SegmentKind::ReturningStream, 0),
             seg((10, 20), (5, 10), SegmentKind::StreamVariable, 1),
@@ -680,7 +687,6 @@ mod tests {
 
     #[test]
     fn adjacent_generated_ranges_are_siblings_not_a_chain() {
-        // Otherwise every lookup past the last segment would walk all of them.
         let m = SourceMap::new(
             (0..1000)
                 .map(|i| seg((i * 4, i * 4 + 4), (i, i + 1), SegmentKind::Struct, i))
@@ -741,15 +747,11 @@ mod tests {
             let map = SourceMap::new(segments);
             let steps = counter(&BUILD_STEPS);
             let log_n = usize::BITS as usize - n.leading_zeros() as usize;
-            // Two sorts at about 2 n log n key evaluations each, plus about 2 n for the parent
-            // pass. Quadratic work at n = 4_000 is already 16_000_000, 15 times the bound.
             assert!(
                 steps <= 5 * n * log_n,
                 "n={n}: {steps} steps, bound {}",
                 5 * n * log_n
             );
-            // Real value is about 2.4 n log2 n. A lower bound too, or removing the counters
-            // from the sorts would leave a test that can only pass.
             assert!(
                 steps >= n * (log_n - 1),
                 "n={n}: only {steps} steps counted"
@@ -765,7 +767,6 @@ mod tests {
         reset_counters();
         let mut hits = 0;
         for s in map.segments() {
-            // first and last byte of a segment, found without following any parent link
             assert!(map.source_for_generated(s.generated.start).is_some());
             assert!(map.source_for_generated(s.generated.end - 1).is_some());
             hits += map.generated_for_source(s.source).len();
@@ -778,7 +779,6 @@ mod tests {
             "scanned exactly the segments returned"
         );
 
-        // a byte in the gap after a segment follows that segment's (absent) parent once
         reset_counters();
         for s in map.segments().iter().take(1_000) {
             assert!(map.source_for_generated(s.generated.end).is_none());
@@ -788,7 +788,6 @@ mod tests {
 
     #[test]
     fn nested_lookups_follow_at_most_the_nesting_depth() {
-        // a chain: segment i contains segment i + 1
         let depth = 200;
         let map = SourceMap::new(
             (0..depth)
@@ -803,7 +802,6 @@ mod tests {
                 .collect(),
         );
         reset_counters();
-        // just inside the outermost segment, past the end of every deeper one
         assert_eq!(
             map.source_for_generated(2 * depth - 1)
                 .map(|s| s.expr_index),
@@ -823,11 +821,8 @@ mod tests {
     #[test]
     fn lookups_scale_to_many_segments() {
         let n = 100_000;
-        // Scrambled input order, so an uncounted insertion sort in `new` is quadratic here
-        // too; source order is the reverse of generated order.
         let segments = scrambled(n);
-        // Timed from before construction: building the indexes must be fast too.
-        let t = std::time::Instant::now();
+        reset_counters();
         let m = SourceMap::new(segments);
         let mut hits = 0;
         for i in 0..n {
@@ -836,7 +831,14 @@ mod tests {
             hits += m.generated_for_source(r(i * 10, i * 10 + 8)).len();
         }
         assert_eq!(hits, n + n);
-        // O(n log n): milliseconds. O(n^2) would need ~2*10^10 comparisons.
-        assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
+        let log_n = usize::BITS as usize - n.leading_zeros() as usize;
+        let (build, walk, scanned) = (
+            counter(&BUILD_STEPS),
+            counter(&WALK_STEPS),
+            counter(&SCANNED),
+        );
+        assert!(build <= 5 * n * log_n, "{build} build steps");
+        assert!(walk <= 4 * n, "{walk} parent links followed");
+        assert!(scanned <= 4 * n, "{scanned} segments scanned");
     }
 }

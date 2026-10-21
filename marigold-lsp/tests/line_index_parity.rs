@@ -63,7 +63,6 @@ proptest! {
                 continue;
             }
             let at = g.line_col(off, ColumnUnit::Chars);
-            // the LSP index excludes the '\r' of a CRLF from its addressable columns: skip them
             if src.as_bytes().get(off) == Some(&b'\r') && src.as_bytes().get(off + 1) == Some(&b'\n') {
                 continue;
             }

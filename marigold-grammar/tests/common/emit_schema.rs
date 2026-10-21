@@ -235,15 +235,12 @@ pub fn check_semantics(doc: &Value) -> Result<(), String> {
     };
     for i in 1..segments.len() {
         let (a, b) = (rng(i - 1, "generated"), rng(i, "generated"));
-        // pre-order of the generated side: start ascending, outer (larger end) first on ties
         if (a.0, std::cmp::Reverse(a.1)) > (b.0, std::cmp::Reverse(b.1)) {
             return Err(format!(
                 "segments[{i}] is out of generated pre-order: {a:?} then {b:?}"
             ));
         }
     }
-    // `parent` is the innermost earlier segment whose generated range contains the segment;
-    // segments are nest-or-disjoint.
     let mut stack: Vec<usize> = Vec::new();
     for (i, segment) in segments.iter().enumerate() {
         let (s, e) = rng(i, "generated");
