@@ -1,4 +1,4 @@
-use color_palette_picker::compare_contrast;
+use color_palette_picker::{compare_contrast, geometric_palettes};
 use criterion::{criterion_group, criterion_main, Criterion};
 use marigold::m;
 use marigold::marigold_impl::StreamExt;
@@ -59,5 +59,19 @@ pub fn bench_range_8_pipeline(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_color_picker, bench_range_8_pipeline);
+pub fn bench_geometric_picker(c: &mut Criterion) {
+    c.bench_function("bench_geometric_picker", |b| {
+        b.to_async(
+            tokio::runtime::Runtime::new().expect("could not setup up tokio runtime in bench"),
+        )
+        .iter(geometric_palettes)
+    });
+}
+
+criterion_group!(
+    benches,
+    bench_color_picker,
+    bench_range_8_pipeline,
+    bench_geometric_picker
+);
 criterion_main!(benches);
