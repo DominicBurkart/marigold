@@ -87,6 +87,14 @@ Claude Code surfaces them to the model is UNVERIFIED. The plugin ships a
 `cargo install marigold -F cli` (or `cargo install --path marigold -F cli`
 from a clone).
 
+`marigold emit <file>` prints the Rust code that `m!` generates for the
+program, and `marigold emit --format json <file>` prints a JSON document that
+also maps each top-level expression to the code generated for it. Offsets are
+byte offsets into the file; lines are 1-based and columns count Unicode scalar
+values. Errors go to stderr, stdout is a complete document or empty. The
+`cargo install marigold -F cli` build generates the code `marigold run`
+compiles; a build with `-F cli,tokio` generates different code.
+
 The `marigold_check` tool is exposed only by `marigold-lsp mcp`. This plugin
 registers the language server, not the MCP server. To add the MCP server to
 Claude Code as well, run:

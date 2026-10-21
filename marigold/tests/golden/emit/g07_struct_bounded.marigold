@@ -1,0 +1,2 @@
+struct P { v: int[0, 255], w: uint[1, 10] }
+range(0, 1).return
