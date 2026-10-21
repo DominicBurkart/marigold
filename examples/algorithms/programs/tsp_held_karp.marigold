@@ -1,0 +1,55 @@
+fn dist(a: i32, b: i32) -> i32 {
+    let xs: [i32; 10] = [0, 4, 9, 13, 6, 15, 2, 11, 8, 17];
+    let ys: [i32; 10] = [0, 7, 2, 8, 12, 15, 14, 5, 9, 3];
+    (xs[a as usize] - xs[b as usize]).abs() + (ys[a as usize] - ys[b as usize]).abs()
+}
+
+fn empty_table() -> [i32; 4608] {
+    [i32::MAX; 4608]
+}
+
+fn fill_mask(table: [i32; 4608], mask: i32) -> [i32; 4608] {
+    let mut table = table;
+    let row = (mask as usize) * 9;
+    let mut last = 0;
+    while last < 9 {
+        if mask & (1 << last) != 0 {
+            let rest = mask ^ (1 << last);
+            if rest == 0 {
+                table[row + last] = dist(0, last as i32 + 1);
+            } else {
+                let mut best = i32::MAX;
+                let mut prev = 0;
+                while prev < 9 {
+                    if rest & (1 << prev) != 0 {
+                        let before = table[(rest as usize) * 9 + prev];
+                        let candidate = before + dist(prev as i32 + 1, last as i32 + 1);
+                        if candidate < best {
+                            best = candidate;
+                        }
+                    }
+                    prev += 1;
+                }
+                table[row + last] = best;
+            }
+        }
+        last += 1;
+    }
+    table
+}
+
+fn close_tour(table: [i32; 4608]) -> i32 {
+    let row = 511 * 9;
+    let mut best = i32::MAX;
+    let mut last = 0;
+    while last < 9 {
+        let candidate = table[row + last] + dist(last as i32 + 1, 0);
+        if candidate < best {
+            best = candidate;
+        }
+        last += 1;
+    }
+    best
+}
+
+range(1, 512).fold(empty_table, fill_mask).map(close_tour).return

@@ -24,15 +24,9 @@ pub fn tour_length(tour: &[usize]) -> i64 {
 }
 
 pub fn is_valid_tour(tour: &[usize]) -> bool {
-    let mut seen = [false; N];
-    tour.len() == N
-        && tour.iter().all(|&c| {
-            let fresh = c < N && !seen[c];
-            if c < N {
-                seen[c] = true;
-            }
-            fresh
-        })
+    let mut sorted = tour.to_vec();
+    sorted.sort_unstable();
+    sorted == (0..N).collect::<Vec<_>>()
 }
 
 pub fn optimum() -> i64 {
@@ -87,5 +81,33 @@ mod tests {
         assert!(!is_valid_tour(&[0, 0, 2, 3, 4, 5, 6, 7, 8, 9]));
         assert!(!is_valid_tour(&[0, 1, 2]));
         assert!(!is_valid_tour(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 10]));
+    }
+
+    #[test]
+    fn optimum_is_pinned() {
+        assert_eq!(optimum(), 84);
+    }
+
+    #[test]
+    fn identity_tour_length_is_pinned() {
+        let tour: Vec<usize> = (0..N).collect();
+        assert_eq!(tour_length(&tour), 128);
+    }
+
+    #[test]
+    fn tour_length_includes_the_closing_edge() {
+        assert_eq!(tour_length(&[0, 1, 2]), 32);
+    }
+
+    #[test]
+    fn tour_length_changes_when_a_city_moves() {
+        assert_eq!(tour_length(&[0, 1, 8, 3, 4, 5, 6, 7, 2, 9]), 112);
+        assert_eq!(tour_length(&[0, 2, 3, 7, 9, 5, 4, 8, 1, 6]), 96);
+    }
+
+    #[test]
+    fn rejects_out_of_range_city_with_correct_length() {
+        assert!(!is_valid_tour(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+        assert!(is_valid_tour(&[9, 8, 7, 6, 5, 4, 3, 2, 1, 0]));
     }
 }

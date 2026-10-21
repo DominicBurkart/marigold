@@ -11,35 +11,34 @@ fn bench_gcd(c: &mut Criterion) {
     });
 }
 
-fn bench_tsp_nearest_neighbour(c: &mut Criterion) {
+fn bench_tsp_exact(c: &mut Criterion) {
     let rt = runtime();
-    c.bench_function("tsp_nearest_neighbour", |b| {
+    let mut group = c.benchmark_group("tsp_exact");
+    group.sample_size(10);
+    group.bench_function("tsp_brute_force", |b| {
+        b.to_async(&rt).iter(algorithms::tsp_brute_force::run);
+    });
+    group.bench_function("tsp_held_karp", |b| {
+        b.to_async(&rt).iter(algorithms::tsp_held_karp::run);
+    });
+    group.finish();
+}
+
+fn bench_tsp_constructive(c: &mut Criterion) {
+    let rt = runtime();
+    let mut group = c.benchmark_group("tsp_constructive");
+    group.sample_size(10);
+    group.bench_function("tsp_nearest_neighbour", |b| {
         b.to_async(&rt).iter(algorithms::tsp_nearest_neighbour::run);
     });
-}
-
-fn bench_tsp_christofides(c: &mut Criterion) {
-    let rt = runtime();
-    c.bench_function("tsp_christofides", |b| {
+    group.bench_function("tsp_christofides", |b| {
         b.to_async(&rt).iter(algorithms::tsp_christofides::run);
     });
-}
-
-fn bench_tsp_lkh(c: &mut Criterion) {
-    let rt = runtime();
-    let mut group = c.benchmark_group("tsp_lkh");
-    group.sample_size(10);
-    group.bench_function("run", |b| {
+    group.bench_function("tsp_lkh", |b| {
         b.to_async(&rt).iter(algorithms::tsp_lkh::run);
     });
     group.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_gcd,
-    bench_tsp_nearest_neighbour,
-    bench_tsp_christofides,
-    bench_tsp_lkh
-);
+criterion_group!(benches, bench_gcd, bench_tsp_exact, bench_tsp_constructive);
 criterion_main!(benches);
