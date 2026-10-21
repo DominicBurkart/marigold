@@ -1,4 +1,4 @@
-program!("tsp_christofides" => [i64; 11]);
+program!("tsp_christofides" => [i64; 13]);
 
 #[cfg(test)]
 mod tests {
@@ -33,6 +33,31 @@ mod tests {
     #[test]
     fn mst_weight_matches_kruskal() {
         assert_eq!(block_on(run())[0][N], kruskal_weight());
+    }
+
+    fn min_matching(odd: &[usize]) -> i64 {
+        match odd.split_first() {
+            None => 0,
+            Some((&a, rest)) => (0..rest.len())
+                .map(|k| {
+                    let mut others = rest.to_vec();
+                    let b = others.remove(k);
+                    dist(a, b) + min_matching(&others)
+                })
+                .min()
+                .unwrap(),
+        }
+    }
+
+    #[test]
+    fn matching_weight_is_minimum_over_the_odd_vertices() {
+        let out = block_on(run())[0];
+        let odd: Vec<usize> = (0..N).filter(|&v| (out[12] >> v) & 1 == 1).collect();
+        assert_eq!(odd.len() % 2, 0);
+        assert!(!odd.is_empty());
+        assert_eq!(out[11], min_matching(&odd));
+        let tour: Vec<usize> = out[..N].iter().map(|&c| c as usize).collect();
+        assert!(tour_length(&tour) <= out[10] + out[11]);
     }
 
     #[test]

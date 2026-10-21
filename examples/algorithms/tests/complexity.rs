@@ -5,10 +5,7 @@ use marigold_grammar::complexity::{
 };
 
 fn analyze_example(name: &str) -> ProgramComplexity {
-    let path = format!(
-        "{}/../examples/algorithms/programs/{name}.marigold",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    let path = format!("{}/programs/{name}.marigold", env!("CARGO_MANIFEST_DIR"));
     let source =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
     marigold_grammar::marigold_analyze(&source)
@@ -19,13 +16,22 @@ fn analyze_example(name: &str) -> ProgramComplexity {
 fn gcd() {
     let result = analyze_example("gcd");
     assert_eq!(result.streams.len(), 1);
-    assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
     assert_eq!(
-        result.streams[0].exact_time,
+        stream.exact_time,
         ExactComplexity::from_str("O(2)").unwrap()
     );
-    assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
-    assert!(!result.streams[0].collects_input);
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn gcd_diverges_from_canonical_class() {
+    let canonical = ComplexityClass::OLogN;
+    let result = analyze_example("gcd");
+    assert_ne!(result.streams[0].time_class, canonical);
 }
 
 fn assert_constant_fold_pipeline(name: &str, exact: &str, description: &str) {
@@ -54,6 +60,13 @@ fn tsp_nearest_neighbour() {
 }
 
 #[test]
+fn tsp_nearest_neighbour_diverges_from_canonical_class() {
+    let canonical = ComplexityClass::OPolynomial(2);
+    let result = analyze_example("tsp_nearest_neighbour");
+    assert_ne!(result.streams[0].time_class, canonical);
+}
+
+#[test]
 fn tsp_christofides() {
     assert_constant_fold_pipeline(
         "tsp_christofides",
@@ -63,6 +76,20 @@ fn tsp_christofides() {
 }
 
 #[test]
+fn tsp_christofides_diverges_from_canonical_class() {
+    let canonical = ComplexityClass::OPolynomial(3);
+    let result = analyze_example("tsp_christofides");
+    assert_ne!(result.streams[0].time_class, canonical);
+}
+
+#[test]
 fn tsp_lkh() {
     assert_constant_fold_pipeline("tsp_lkh", "O(2)", "input.fold(...).map(...).return");
+}
+
+#[test]
+fn tsp_lkh_diverges_from_canonical_class() {
+    let canonical = ComplexityClass::OPolynomial(2);
+    let result = analyze_example("tsp_lkh");
+    assert_ne!(result.streams[0].time_class, canonical);
 }

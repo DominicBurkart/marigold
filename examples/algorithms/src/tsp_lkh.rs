@@ -17,6 +17,52 @@ mod tests {
         t
     }
 
+    fn reference_best_move(t: &[usize]) -> Vec<usize> {
+        let mut best = t.to_vec();
+        let mut best_len = tour_length(t);
+        let mut consider = |c: Vec<usize>| {
+            let l = tour_length(&c);
+            if l < best_len {
+                best_len = l;
+                best = c;
+            }
+        };
+        for i in 1..N - 1 {
+            for j in i + 1..N {
+                let mut c = t.to_vec();
+                c[i..=j].reverse();
+                consider(c);
+            }
+        }
+        for seg in 1..=3 {
+            for start in 1..=N - seg {
+                for gap in 1..=N - seg {
+                    for rev in [false, true] {
+                        let mut rest = t.to_vec();
+                        let mut moved: Vec<usize> = rest.drain(start..start + seg).collect();
+                        if rev {
+                            moved.reverse();
+                        }
+                        for (k, city) in moved.into_iter().enumerate() {
+                            rest.insert(gap + k, city);
+                        }
+                        consider(rest);
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    #[test]
+    fn matches_reference_best_improvement_search() {
+        let mut t = seeded_start();
+        for _ in 0..30 {
+            t = reference_best_move(&t);
+        }
+        assert_eq!(result().0, t);
+    }
+
     fn result() -> (Vec<usize>, i64) {
         let out = block_on(run());
         assert_eq!(out.len(), 1);

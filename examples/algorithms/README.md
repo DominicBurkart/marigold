@@ -1,24 +1,31 @@
 # Algorithm examples
 
 Each program in `programs/` is a standalone `.marigold` file. `build.rs` turns
-it into Rust with the same parser the `m!` macro uses, so the file that
-`marigold run` executes is the file that the tests, the complexity analysis and
-the benches exercise.
+it into Rust with the same parser the `m!` macro uses, so the same file is what
+the run tests, the complexity analysis and the benches exercise. Programs end
+in `.return` so tests can read their output; `marigold run` wraps a program in
+a `main` that expects no output, so use `marigold analyze` or `marigold check`
+on these files rather than `marigold run`.
 
-Every example has four checks:
+`build.rs` always emits the default (single-future) codegen. Forwarding the
+`tokio`/`async-std` features to `marigold-grammar` would change what `m!`
+generates for every crate in the workspace, so the examples run on the
+requested runtime but do not exercise the parallel codegen paths.
+
+Every example has three checks:
 
 | Check | Where |
 | --- | --- |
-| program runs and returns the right answer | `src/<name>.rs` tests (`cargo test -p algorithms`) |
-| complexity estimate pinned and compared with the canonical class | `marigold-grammar/tests/algorithm_examples_complexity.rs` |
+| program runs and returns the right answer, compared with an independent oracle | `src/<name>.rs` tests (`cargo test -p algorithms`) |
+| analyzer estimate pinned; where it differs from the canonical class, a test asserts the difference so an analyzer fix shows up as a failing test | `tests/complexity.rs` |
 | benchmark | `benches/algorithms_bench.rs`, run by `.github/workflows/bench.yaml` |
-| program parses and analyzes | the two above |
 
 ## Writing a program
 
 - `map`, `filter` and `fold` take function names, not closures. Functions are
   emitted as `const fn`, so bodies cannot allocate or use iterators; use fixed
-  size arrays and `while` loops.
+  size arrays and `while` loops. Array literals need an explicit element type
+  when a method such as `.abs()` is called on their items.
 - There are no comments at top level of a `.marigold` file. References live in
   the table below.
 - Fixed-size inputs are declared inside functions. The analyzer sees only the
@@ -28,10 +35,25 @@ Every example has four checks:
 
 | Program | Issue | Reference | Canonical complexity | Analyzer estimate |
 | --- | --- | --- | --- | --- |
-| `gcd` | [#410](https://github.com/DominicBurkart/marigold/issues/410) | [Euclidean algorithm](https://en.wikipedia.org/wiki/Euclidean_algorithm) | O(log(min(a, b))) | O(1), exact O(2): a fold over the constant `range(0, 48)` (48 bounds the Euclid steps for any `u32` pair by Lame's theorem) and a map. The logarithm lives in the step bound, not the stream shape. |
+| `gcd` | [#410](https://github.com/DominicBurkart/marigold/issues/410) | [Euclidean algorithm](https://en.wikipedia.org/wiki/Euclidean_algorithm) | O(log(min(a, b))) | O(1), exact O(2): a fold over the constant `range(0, 48)` and a map. |
 | `tsp_nearest_neighbour` | [#406](https://github.com/DominicBurkart/marigold/issues/406) | Rosenkrantz, Stearns, Lewis 1977, [Nearest neighbour algorithm](https://en.wikipedia.org/wiki/Nearest_neighbour_algorithm) | O(n^2) time, tour within (ceil(log2 n)+1)/2 of optimal | O(1), exact O(2): `range(0, 9).fold(extend_tour).map(close_tour)`. Each fold step appends the nearest unvisited city (one O(n) scan hidden in the fn body, issue [#416](https://github.com/DominicBurkart/marigold/issues/416)); the city count is a literal, so the n^2 collapses to a constant (issue [#415](https://github.com/DominicBurkart/marigold/issues/415)). |
 | `tsp_christofides` | [#406](https://github.com/DominicBurkart/marigold/issues/406) | Christofides 1976, [Christofides algorithm](https://en.wikipedia.org/wiki/Christofides_algorithm) | O(n^3) time with a polynomial matching, tour within 1.5 of optimal | O(1), exact O(5): `range(0, 9).fold(prim_step)` then `.map(add_matching).map(euler_circuit).map(shortcut).map(finish)`. Prim is the fold (one vertex per step); each later stage is one map. Same collapse and hidden per-item cost as above (#415, #416). |
 | `tsp_lkh` | [#406](https://github.com/DominicBurkart/marigold/issues/406) | Helsgaun 2017, [An Extension of the Lin-Kernighan-Helsgaun TSP Solver for Constrained Traveling Salesman and Vehicle Routing Problems](http://webhotel4.ruc.dk/~keld/research/LKH-3/) | Heuristic local search, no polynomial worst-case bound | O(1), exact O(2): `range(0, 30).fold(improve_once).map(with_length)`. Each fold step applies the single best 2-opt or Or-opt move. Same collapse (#415, #416). |
+
+### GCD
+
+Marigold has no data-dependent termination: a fold runs for the length of its
+source. This Euclid is therefore a fixed-iteration program, O(1) by
+construction, and the analyzer's O(1) is correct for the program as written.
+It is not a demonstration of O(log(min(a, b))).
+
+The 48 rounds bound the Euclid steps for every `u32` pair: the worst case is
+consecutive Fibonacci numbers (Lamé's theorem), and the largest such pair that
+fits in `u32` is (F47, F46), which takes 45 steps. The program runs 64 pairs
+per round, including that worst case, a zero operand and LCG-derived pairs, so
+the bound and the arithmetic are exercised together. Tests compare every pair
+with a reference Euclid and assert that the worst case needs fewer rounds than
+the cap.
 
 ## TSP constructive and local-search programs
 

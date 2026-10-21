@@ -24,13 +24,13 @@ fn match_cost(mask: i64) -> i64 {
     best
 }
 
-fn mst_start() -> [i64;144] {
-    let mut s = [0i64; 144];
+fn mst_start() -> [i64;146] {
+    let mut s = [0i64; 146];
     s[100] = 1;
     s
 }
 
-fn prim_step(state: [i64;144], _round: i32) -> [i64;144] {
+fn prim_step(state: [i64;146], _round: i32) -> [i64;146] {
     let mut s = state;
     let mut best_u = 0usize;
     let mut best_v = 0usize;
@@ -60,7 +60,7 @@ fn prim_step(state: [i64;144], _round: i32) -> [i64;144] {
     s
 }
 
-fn add_matching(state: [i64;144]) -> [i64;144] {
+fn add_matching(state: [i64;146]) -> [i64;146] {
     let mut s = state;
     let mut odd = 0i64;
     let mut v = 0usize;
@@ -76,6 +76,7 @@ fn add_matching(state: [i64;144]) -> [i64;144] {
         }
         v += 1;
     }
+    s[144] = odd;
     let mut mask = odd;
     while mask != 0 {
         let i = mask.trailing_zeros() as usize;
@@ -87,6 +88,7 @@ fn add_matching(state: [i64;144]) -> [i64;144] {
             if (rest >> j) & 1 == 1 && dist(i, j) + match_cost(rest & !(1i64 << j)) == target {
                 s[i * 10 + j] += 1;
                 s[j * 10 + i] += 1;
+                s[143] += dist(i, j);
                 mask = rest & !(1i64 << j);
                 found = true;
             }
@@ -96,7 +98,7 @@ fn add_matching(state: [i64;144]) -> [i64;144] {
     s
 }
 
-fn euler_circuit(state: [i64;144]) -> [i64;144] {
+fn euler_circuit(state: [i64;146]) -> [i64;146] {
     let mut s = state;
     let mut stack = [0usize; 40];
     let mut sp = 1usize;
@@ -126,7 +128,7 @@ fn euler_circuit(state: [i64;144]) -> [i64;144] {
     s
 }
 
-fn shortcut(state: [i64;144]) -> [i64;144] {
+fn shortcut(state: [i64;146]) -> [i64;146] {
     let mut s = state;
     let mut seen = 0i64;
     let mut t = 0usize;
@@ -143,14 +145,16 @@ fn shortcut(state: [i64;144]) -> [i64;144] {
     s
 }
 
-fn finish(state: [i64;144]) -> [i64;11] {
-    let mut out = [0i64; 11];
+fn finish(state: [i64;146]) -> [i64;13] {
+    let mut out = [0i64; 13];
     let mut i = 0usize;
     while i < 10 {
         out[i] = state[133 + i];
         i += 1;
     }
     out[10] = state[101];
+    out[11] = state[143];
+    out[12] = state[144];
     out
 }
 
