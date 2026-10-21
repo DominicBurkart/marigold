@@ -1,0 +1,45 @@
+fn dist(a: usize, b: usize) -> i64 {
+    let xs = [0i64, 4, 9, 13, 6, 15, 2, 11, 8, 17];
+    let ys = [0i64, 7, 2, 8, 12, 15, 14, 5, 9, 3];
+    (xs[a] - xs[b]).abs() + (ys[a] - ys[b]).abs()
+}
+
+fn start() -> [i64;13] {
+    [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+fn extend_tour(state: [i64;13], round: i32) -> [i64;13] {
+    let mut next = state;
+    let current = state[0] as usize;
+    let mut best = 0usize;
+    let mut best_d = i64::MAX;
+    let mut j = 0usize;
+    while j < 10 {
+        if (state[1] >> j) & 1 == 0 {
+            let d = dist(current, j);
+            if d < best_d {
+                best_d = d;
+                best = j;
+            }
+        }
+        j += 1;
+    }
+    next[0] = best as i64;
+    next[1] = state[1] | (1 << best);
+    next[2] = state[2] + best_d;
+    next[3 + (round as usize) + 1] = best as i64;
+    next
+}
+
+fn close_tour(state: [i64;13]) -> [i64;11] {
+    let mut out = [0i64; 11];
+    let mut i = 0usize;
+    while i < 10 {
+        out[i] = state[3 + i];
+        i += 1;
+    }
+    out[10] = state[2] + dist(state[0] as usize, 0);
+    out
+}
+
+range(0, 9).fold(start, extend_tour).map(close_tour).return

@@ -29,3 +29,6 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
 pub mod gcd;
 #[cfg(test)]
 pub mod tsp;
+pub mod tsp_christofides;
+pub mod tsp_lkh;
+pub mod tsp_nearest_neighbour;
