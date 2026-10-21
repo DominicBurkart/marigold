@@ -26,6 +26,8 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
         .block_on(future)
 }
 
+pub mod binary_search;
 pub mod gcd;
+pub mod quicksort;
 #[cfg(test)]
 pub mod tsp;
