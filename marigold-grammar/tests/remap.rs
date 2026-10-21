@@ -2850,12 +2850,18 @@ fn x01_json_shapes_have_exactly_these_keys() {
     assert_eq!(
         key_set(help),
         [
+            "alternative",
+            "alternatives",
             "applicability",
             "applicable_to_marigold",
             "part",
             "parts",
             "replacement"
         ]
+    );
+    assert_eq!(
+        (help["alternative"].clone(), help["alternatives"].clone()),
+        (json!(0), json!(1))
     );
     assert_eq!(
         (help["part"].clone(), help["parts"].clone()),
@@ -4330,4 +4336,316 @@ fn n23_only_the_at_line_under_a_numbered_frame_is_a_backtrace_location() {
         assert_eq!(hits.len(), 1, "{text:?}");
         assert_eq!(hits[0].unit, unit, "{text:?}");
     }
+}
+
+// --- final round: user-written struct and enum, alternatives, ambiguous trace units -------------
+
+#[test]
+fn n24_a_warning_in_a_user_struct_or_enum_is_the_users_even_when_only_segment_precise() {
+    let src = "struct my_s { a: u8 }\nenum my_e { A, B }\nrange(0, 2).return";
+    let program = marigold_generate(src).unwrap();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, src, &is_gen);
+    for kind in [SegmentKind::Struct, SegmentKind::Enum] {
+        let seg = program
+            .map
+            .segments()
+            .iter()
+            .find(|s| s.kind == kind)
+            .unwrap()
+            .clone();
+        let name = if kind == SegmentKind::Struct {
+            "my_s"
+        } else {
+            "my_e"
+        };
+        let at = seg.generated.start + program.rust[seg.generated.start..].find(name).unwrap();
+        let sp = rustc_span("gen.rs", &program.rust, at, at + name.len(), true);
+        for (level, noise) in [("warning", false), ("error", false)] {
+            let d = jdiag(
+                json!({"message": "m", "level": level, "children": [], "spans": [span_to_json(&sp)]}),
+            );
+            let m = r.remap(&d);
+            let p = m.primary.as_ref().unwrap();
+            assert_eq!(p.precision, Seg, "{kind:?}: {p:?}");
+            assert_eq!(p.segment.as_ref().unwrap().kind, kind);
+            assert_eq!(m.likely_generated_noise(), noise, "{kind:?} {level}");
+        }
+    }
+}
+
+#[test]
+fn n25_equal_length_different_text_is_not_verbatim_for_a_non_function_kind() {
+    for kind in [
+        SegmentKind::StreamVariable,
+        SegmentKind::Struct,
+        SegmentKind::Enum,
+    ] {
+        let src = "aYcdef";
+        let rust = "async {\naXcdef\n}\n";
+        let g0 = rust.find("aXcdef").unwrap();
+        let seg = Segment::new(br(g0, g0 + 6), br(0, 6), kind, 0, None);
+        let program = GeneratedProgram::new(rust.to_string(), SourceMap::new(vec![seg]));
+        for (a, b) in [(g0 + 5, g0 + 6), (g0 + 5, g0 + 5), (g0 + 3, g0 + 6)] {
+            let m = map_one(src, &program, "", &rustc_span("gen.rs", rust, a, b, true));
+            assert_eq!(m.precision, Seg, "{kind:?} {a}..{b}: {m:?}");
+        }
+    }
+}
+
+#[test]
+fn n26_a_single_mapped_span_decides_applicability_like_a_diagnostic_of_one_span() {
+    let src = "xs = range(0, 3)\nxs.write_file(\"o.csv\", csv)";
+    let program = marigold_generate(src).unwrap();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, src, &is_gen);
+    let seg = program
+        .map
+        .segments()
+        .iter()
+        .find(|s| s.kind == SegmentKind::StreamVariable)
+        .unwrap();
+    let mut sp = rustc_span(
+        "gen.rs",
+        &program.rust,
+        seg.generated.start + 1,
+        seg.generated.start + 2,
+        true,
+    );
+    sp.suggested_replacement = Some("zz".into());
+    let m = r.map_span(&sp);
+    assert_eq!(m.precision, Seg);
+    assert!(!m.suggestion.unwrap().applicable_to_marigold);
+    // the same span inside a diagnostic gets the same answer
+    let d = r.remap(&diag(vec![sp]));
+    assert!(
+        !d.primary
+            .unwrap()
+            .suggestion
+            .unwrap()
+            .applicable_to_marigold
+    );
+}
+
+#[test]
+fn n27_segment_index_is_the_index_in_the_map_even_when_earlier_segments_are_unusable() {
+    let src = "fn f(x: i32) -> i32 { x + 1 }\nrange(0, 3).write_file(\"o.csv\", csv)";
+    let program = marigold_generate(src).unwrap();
+    let mut segments = vec![Segment::new(
+        br(0, program.rust.len() + 5),
+        br(0, 3),
+        SegmentKind::Struct,
+        9,
+        None,
+    )];
+    segments.extend(program.map.segments().iter().cloned());
+    let broken = GeneratedProgram::new(program.rust.clone(), SourceMap::new(segments));
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&broken, src, &is_gen);
+    assert_eq!(r.unusable_segments(), 1);
+    for (i, segment) in broken.map.segments().iter().enumerate() {
+        if segment.generated.end > broken.rust.len() {
+            continue;
+        }
+        let at = segment.generated.end - 1;
+        let m = map_one(
+            src,
+            &broken,
+            "",
+            &rustc_span("gen.rs", &broken.rust, at, at + 1, true),
+        );
+        let got = m.segment.unwrap();
+        assert_eq!(&broken.map.segments()[got.index], segment, "segment {i}");
+        assert_eq!(got.index, i);
+    }
+}
+
+fn numbered(d: &MappedDiagnostic) -> Vec<(usize, usize, usize, usize, bool, String)> {
+    d.suggestion_spans()
+        .iter()
+        .map(|s| {
+            let g = s.suggestion.as_ref().unwrap();
+            (
+                g.part,
+                g.parts,
+                g.alternative,
+                g.alternatives,
+                g.applicable_to_marigold,
+                g.replacement.clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn n28_alternatives_at_one_place_are_not_the_parts_of_one_edit() {
+    // real rustc 1.97: "consider importing one of these enums" is two spans at the same point
+    let fx = load("f17_alternative_suggestions");
+    remapper!(fx, r);
+    let m = r.remap(find(&fx, "cannot find type `Entry`"));
+    let help = &m.children[0];
+    assert_eq!(
+        numbered(help),
+        [
+            (
+                0,
+                1,
+                0,
+                2,
+                false,
+                "use std::collections::btree_map::Entry;\n\n".to_string()
+            ),
+            (
+                0,
+                1,
+                1,
+                2,
+                false,
+                "use std::collections::hash_map::Entry;\n\n".to_string()
+            ),
+        ]
+    );
+    // a single replacement of the same kind is a whole suggestion
+    let single = r.remap(find(&fx, "cannot find type `Wrapping`"));
+    assert_eq!(
+        numbered(&single.children[0]),
+        [(0, 1, 0, 1, false, "use std::num::Wrapping;\n\n".to_string())]
+    );
+
+    // the same shape inside text that is Exact: still not applicable as a set
+    let (src, program) = mini();
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let x = f.generated.start + program.rust[f.generated.start..].find("x + 1").unwrap();
+    let is_gen = |name: &str| name == "gen.rs";
+    let rm = Remapper::new(&program, &src, &is_gen);
+    let t = &program.rust;
+    let help = |spans: Vec<RustcSpan>| {
+        let spans: Vec<Value> = spans.iter().map(span_to_json).collect();
+        rm.remap(&jdiag(
+            json!({"message": "m", "level": "help", "children": [], "spans": spans}),
+        ))
+    };
+    let d = help(vec![
+        suggestion_part(t, "gen.rs", x, x + 1, "a"),
+        suggestion_part(t, "gen.rs", x, x + 1, "b"),
+    ]);
+    assert_eq!(d.primary.as_ref().unwrap().precision, Exact);
+    assert_eq!(
+        numbered(&d),
+        [
+            (0, 1, 0, 2, false, "a".to_string()),
+            (0, 1, 1, 2, false, "b".to_string())
+        ]
+    );
+    // overlapping ranges are one place too
+    let d = help(vec![
+        suggestion_part(t, "gen.rs", x, x + 3, "a"),
+        suggestion_part(t, "gen.rs", x + 2, x + 5, "b"),
+    ]);
+    assert_eq!(
+        numbered(&d),
+        [
+            (0, 1, 0, 2, false, "a".to_string()),
+            (0, 1, 1, 2, false, "b".to_string())
+        ]
+    );
+    // a place with alternatives next to a plain one: two parts, nothing applicable
+    let d = help(vec![
+        suggestion_part(t, "gen.rs", x, x, "Some("),
+        suggestion_part(t, "gen.rs", x + 5, x + 5, ")"),
+        suggestion_part(t, "gen.rs", x + 5, x + 5, "]"),
+    ]);
+    assert_eq!(
+        numbered(&d),
+        [
+            (0, 2, 0, 1, false, "Some(".to_string()),
+            (1, 2, 0, 2, false, ")".to_string()),
+            (1, 2, 1, 2, false, "]".to_string()),
+        ]
+    );
+    // neighbours and an insertion at the start of a replaced range are different places
+    let d = help(vec![
+        suggestion_part(t, "gen.rs", x, x + 1, "a"),
+        suggestion_part(t, "gen.rs", x + 1, x + 2, "b"),
+        suggestion_part(t, "gen.rs", x + 2, x + 2, "c"),
+        suggestion_part(t, "gen.rs", x + 2, x + 3, "d"),
+    ]);
+    assert_eq!(numbered(&d).len(), 4);
+    assert!(numbered(&d).iter().all(|n| n.1 == 4 && n.3 == 1 && n.4));
+    assert_eq!(
+        numbered(&d).iter().map(|n| n.0).collect::<Vec<_>>(),
+        [0, 1, 2, 3]
+    );
+}
+
+#[test]
+fn n29_an_at_line_that_may_be_a_backtrace_frame_in_an_unknown_form_never_maps_better_than_the_segment(
+) {
+    let (src, program) = mini();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen);
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let plus = f.generated.start + program.rust[f.generated.start..].find('+').unwrap();
+    let line_start = program.rust[..plus].rfind('\n').map_or(0, |i| i + 1);
+    let line = program.rust[..plus].matches('\n').count() + 1;
+    let column = plus - line_start + 1;
+    let at = format!("gen.rs:{line}:{column}");
+    for (text, unit, precision) in [
+        (
+            format!("   0: f\n             at {at}"),
+            TraceColumnUnit::Bytes,
+            Exact,
+        ),
+        (format!("   0: f\n\tat {at}"), TraceColumnUnit::Bytes, Exact),
+        (
+            format!("   0: f\n  at\t{at}"),
+            TraceColumnUnit::Bytes,
+            Exact,
+        ),
+        // coloured numbers, a blank line in between, no header: the unit is a guess
+        (
+            format!("\u{1b}[1m   0: f\u{1b}[0m\n  at {at}"),
+            TraceColumnUnit::DisplayWidth,
+            Seg,
+        ),
+        (
+            format!("   0: f\n\n  at {at}"),
+            TraceColumnUnit::DisplayWidth,
+            Seg,
+        ),
+        (format!("  at {at}"), TraceColumnUnit::DisplayWidth, Seg),
+        // inside a line it is a message: display width, which agrees on this ASCII line
+        (
+            format!("failed at {at}"),
+            TraceColumnUnit::DisplayWidth,
+            Exact,
+        ),
+    ] {
+        let hits = r.remap_trace(&text);
+        assert_eq!(hits.len(), 1, "{text:?}");
+        assert_eq!(hits[0].unit, unit, "{text:?}");
+        assert_eq!(hits[0].mapped.precision, precision, "{text:?}");
+    }
+}
+
+#[test]
+fn n30_only_one_leading_byte_order_mark_is_not_a_column() {
+    // rustc strips one; a second one is an ordinary (zero-width, unknown) character
+    let src = "fn f() {}";
+    let seg = Segment::new(
+        br(0, 9),
+        br(0, 9),
+        SegmentKind::Function,
+        0,
+        Some("f".into()),
+    );
+    let program = GeneratedProgram::new("fn f() {}\n".to_string(), SourceMap::new(vec![seg]));
+    let is_gen = |name: &str| name == "bom.rs";
+    let r = Remapper::new(&program, src, &is_gen).with_prefix("\u{feff}\u{feff}  ");
+    // tail = U+FEFF and two spaces: three characters before the program
+    let m = r.locate("bom.rs", 1, Some(3 + 3 + 1), TraceColumnUnit::Chars);
+    assert_eq!(m.precision, Exact, "{m:?}");
+    assert_eq!(m.marigold.unwrap().range.start, 3);
+    let m = r.locate("bom.rs", 1, Some(3 + 3), TraceColumnUnit::Chars);
+    assert_eq!(m.marigold.unwrap().range.start, 2);
 }

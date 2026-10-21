@@ -1,0 +1,43 @@
+{
+  "segments": [
+    {
+      "generated": {
+        "start": 50,
+        "end": 106
+      },
+      "source": {
+        "start": 0,
+        "end": 50
+      },
+      "kind": "function",
+      "expr_index": 0,
+      "name": "imp"
+    },
+    {
+      "generated": {
+        "start": 108,
+        "end": 163
+      },
+      "source": {
+        "start": 51,
+        "end": 100
+      },
+      "kind": "function",
+      "expr_index": 1,
+      "name": "imp2"
+    },
+    {
+      "generated": {
+        "start": 165,
+        "end": 291
+      },
+      "source": {
+        "start": 101,
+        "end": 119
+      },
+      "kind": "returning_stream",
+      "expr_index": 2,
+      "name": null
+    }
+  ]
+}

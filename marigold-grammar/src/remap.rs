@@ -131,7 +131,8 @@
 //! * Suggestions (`suggested_replacement`) edit generated text. They are carried
 //!   along and flagged with [`Suggestion::applicable_to_marigold`], which is true only
 //!   when *every* replacement of the diagnostic (a multipart suggestion has several) is
-//!   for an [`Precision::Exact`] span reached directly.
+//!   for an [`Precision::Exact`] span reached directly and the diagnostic offers no
+//!   alternatives (several replacements for the same place are a choice, not an edit).
 //! * Warnings from glue the user never wrote (rustc reports 1-3 `unused_mut` warnings
 //!   for every program) are recognisable with [`MappedDiagnostic::likely_generated_noise`]:
 //!   a warning is not noise when it points into code the user wrote, at any precision.
@@ -368,20 +369,30 @@ pub struct Suggestion {
     pub replacement: String,
     /// rustc's applicability (`MachineApplicable`, `MaybeIncorrect`, ...).
     pub applicability: Option<String>,
-    /// Position of this replacement among the replacements of its diagnostic, in rustc's
-    /// span order, from 0. A single mapped span ([`Remapper::map_span`]) is part 0 of 1.
+    /// Position of this replacement among the *places* the diagnostic edits, in rustc's
+    /// span order, from 0. Spans with the same or overlapping byte range are one place
+    /// (see [`alternative`](Self::alternative)). A single mapped span
+    /// ([`Remapper::map_span`]) is part 0 of 1.
     pub part: usize,
-    /// How many spans of the diagnostic carry a replacement. More than one is a multipart
-    /// suggestion (like "try wrapping the expression in `Some`": insert `Some(` here and
-    /// `)` there), which is only meaningful as a whole.
+    /// How many places the diagnostic edits. More than one is a multipart suggestion (like
+    /// "try wrapping the expression in `Some`": insert `Some(` here and `)` there), which
+    /// is only meaningful as a whole.
     pub parts: usize,
+    /// Which of the replacements for this place this is, from 0, in rustc's order. rustc
+    /// lists mutually exclusive choices ("consider importing one of these enums") as several
+    /// spans with the same range; they are alternatives, not parts of one edit.
+    pub alternative: usize,
+    /// How many replacements the diagnostic offers for this place. More than one: choose one.
+    pub alternatives: usize,
     /// Whether the suggestion can be applied to the Marigold source. It is decided for the
-    /// whole diagnostic and is the same on every part: true only when *every* span of the
-    /// diagnostic that carries a replacement is [`Precision::Exact`] and was reached
-    /// directly (not through a macro call site). Applying one half of a multipart
-    /// suggestion would break the program, so one inexact part makes all of them false. A
-    /// suggestion that edits generated text, like "a tuple variant with a similar name
-    /// exists: `Ok`", is never applicable.
+    /// whole diagnostic and is the same on every replacement: true only when *every* span
+    /// of the diagnostic that carries a replacement is [`Precision::Exact`] and was reached
+    /// directly (not through a macro call site), and there are no alternatives to choose
+    /// from. Applying one half of a multipart suggestion would break the program, so one
+    /// inexact part makes all of them false; a set of alternatives is not an edit at all,
+    /// so it is never applicable as a set (to apply one alternative, build that edit from
+    /// the one replacement). A suggestion that edits generated text, like "a tuple variant
+    /// with a similar name exists: `Ok`", is never applicable.
     pub applicable_to_marigold: bool,
 }
 
@@ -529,7 +540,11 @@ impl MappedDiagnostic {
             .chain(self.secondary.iter())
             .filter(|s| s.suggestion.is_some())
             .collect();
-        spans.sort_by_key(|s| s.suggestion.as_ref().map_or(0, |g| g.part));
+        spans.sort_by_key(|s| {
+            s.suggestion
+                .as_ref()
+                .map_or((0, 0), |g| (g.part, g.alternative))
+        });
         spans
     }
 
@@ -986,23 +1001,7 @@ impl<'a> Remapper<'a> {
             .position(|s| s.is_primary)
             .or(if d.spans.is_empty() { None } else { Some(0) });
         let mut spans: Vec<MappedSpan> = d.spans.iter().map(|s| self.map_span(s)).collect();
-        // A suggestion is applied as a whole: all of its parts or none.
-        let parts = spans.iter().filter(|s| s.suggestion.is_some()).count();
-        let applicable = spans
-            .iter()
-            .filter(|s| s.suggestion.is_some())
-            .all(|s| s.precision == Precision::Exact && s.via_macro.is_none());
-        for (part, span) in spans
-            .iter_mut()
-            .filter(|s| s.suggestion.is_some())
-            .enumerate()
-        {
-            if let Some(suggestion) = span.suggestion.as_mut() {
-                suggestion.part = part;
-                suggestion.parts = parts;
-                suggestion.applicable_to_marigold = applicable;
-            }
-        }
+        number_suggestions(&mut spans);
         let primary = primary_index.map(|i| spans.remove(i));
         MappedDiagnostic {
             level: d.level.clone(),
@@ -1089,9 +1088,13 @@ impl<'a> Remapper<'a> {
                 applicability: s.suggestion_applicability.clone(),
                 part: 0,
                 parts: 1,
-                applicable_to_marigold: mapped.precision == Precision::Exact && via_macro.is_none(),
+                alternative: 0,
+                alternatives: 1,
+                applicable_to_marigold: false,
             });
         mapped.via_macro = via_macro;
+        // A span on its own is a whole diagnostic of one span; `remap` redoes this for all.
+        number_suggestions(std::slice::from_mut(&mut mapped));
         mapped
     }
 
@@ -1146,8 +1149,28 @@ impl<'a> Remapper<'a> {
         column: Option<usize>,
         unit: TraceColumnUnit,
     ) -> Located {
+        self.locate_capped(file, line, column, unit, false)
+    }
+
+    /// [`locate`](Self::locate), optionally never better than [`Precision::Segment`]: for a
+    /// column whose unit is a guess.
+    fn locate_capped(
+        &self,
+        file: &str,
+        line: usize,
+        column: Option<usize>,
+        unit: TraceColumnUnit,
+        cap: bool,
+    ) -> Located {
         let outcome = if (self.is_generated)(file) {
             self.place_location(line, column.unwrap_or(0), unit)
+                .and_then(|placement| {
+                    if cap {
+                        self.at_most_segment(placement)
+                    } else {
+                        Ok(placement)
+                    }
+                })
         } else {
             Err(UnmappedReason::ForeignFile)
         };
@@ -1187,7 +1210,9 @@ impl<'a> Remapper<'a> {
     /// (DWARF), and anything else, `panicked at` and an `at file:line:col` in a message the
     /// program formatted from a `Location`, is [`TraceColumnUnit::DisplayWidth`]. The
     /// context is a guess from the text, so a program that prints its own numbered lines
-    /// followed by an `at` line can still be misread.
+    /// followed by an `at` line can still be misread. An `at` that starts its line without such
+    /// a frame above it (coloured output, a blank line in between) is ambiguous: its location is
+    /// mapped no better than [`Precision::Segment`].
     ///
     /// ```
     /// use marigold_grammar::marigold_generate;
@@ -1244,6 +1269,15 @@ impl<'a> Remapper<'a> {
                 let frame = before
                     .strip_suffix("at")
                     .is_some_and(is_frame_header_before);
+                // An `at` that starts its line but is not under a plain numbered frame
+                // (coloured output, a blank line in between) may be a backtrace frame in a form
+                // that is not recognised: its unit is a guess, so it never maps better than
+                // to the segment.
+                let ambiguous = !frame
+                    && before.strip_suffix("at").is_some_and(|rest| {
+                        let rest = rest.trim_end_matches([' ', '\t']);
+                        rest.is_empty() || rest.ends_with('\n')
+                    });
                 let unit = if frame {
                     TraceColumnUnit::Bytes
                 } else {
@@ -1258,7 +1292,7 @@ impl<'a> Remapper<'a> {
                     line,
                     column,
                     unit,
-                    mapped: self.locate(file, line, column, unit),
+                    mapped: self.locate_capped(file, line, column, unit, ambiguous),
                 });
             }
             // The location is used up: text right after it starts a new token.
@@ -1674,6 +1708,60 @@ fn is_frame_header_before(before: &str) -> bool {
     digits > 0 && header.as_bytes().get(digits) == Some(&b':')
 }
 
+/// Numbers the suggestions of the spans of one diagnostic and decides, once for all of them,
+/// whether they apply to Marigold. The one place that sets `part`, `parts`, `alternative`,
+/// `alternatives` and `applicable_to_marigold`.
+///
+/// Spans whose reported byte ranges are equal or overlap edit the same place: they are
+/// alternatives. The other spans are the parts of one edit.
+fn number_suggestions(spans: &mut [MappedSpan]) {
+    let ranges: Vec<(usize, usize)> = spans
+        .iter()
+        .map(|s| {
+            s.raw
+                .as_ref()
+                .map_or((0, 0), |r| (r.byte_start, r.byte_end))
+        })
+        .collect();
+    let same_place = |i: usize, j: usize| {
+        let ((a1, b1), (a2, b2)) = (ranges[i], ranges[j]);
+        (a1 == a2 && b1 == b2) || (a1 < b2 && a2 < b1)
+    };
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for i in (0..spans.len()).filter(|&i| spans[i].suggestion.is_some()) {
+        let mut merged = vec![i];
+        let mut kept = Vec::new();
+        for group in groups.drain(..) {
+            if group.iter().any(|&j| same_place(i, j)) {
+                merged.extend(group);
+            } else {
+                kept.push(group);
+            }
+        }
+        merged.sort_unstable();
+        kept.push(merged);
+        kept.sort_by_key(|g| g[0]);
+        groups = kept;
+    }
+    let all_direct_and_exact = groups
+        .iter()
+        .flatten()
+        .all(|&i| spans[i].precision == Precision::Exact && spans[i].via_macro.is_none());
+    let applicable = all_direct_and_exact && groups.iter().all(|g| g.len() == 1);
+    let parts = groups.len();
+    for (part, group) in groups.iter().enumerate() {
+        for (alternative, &i) in group.iter().enumerate() {
+            if let Some(suggestion) = spans[i].suggestion.as_mut() {
+                suggestion.part = part;
+                suggestion.parts = parts;
+                suggestion.alternative = alternative;
+                suggestion.alternatives = group.len();
+                suggestion.applicable_to_marigold = applicable;
+            }
+        }
+    }
+}
+
 fn source_range_fits(source: &str, range: ByteRange) -> bool {
     range.start <= range.end
         && range.end <= source.len()
@@ -1687,17 +1775,42 @@ fn source_range_fits(source: &str, range: ByteRange) -> bool {
 /// last `)` prove nothing, so every other kind needs its whole generated text to equal its
 /// Marigold text. A function signature that is generated as `const fn <signature>` is
 /// therefore only [`Precision::Segment`] until its kind is added here.
+///
+/// The `match` has no wildcard on purpose: a new [`SegmentKind`] does not compile until
+/// someone has decided what is true of it.
 fn suffix_is_verbatim(kind: SegmentKind) -> bool {
-    matches!(kind, SegmentKind::Function)
+    match kind {
+        // `const ` + the source.
+        SegmentKind::Function => true,
+        // Generated with attributes and rewritten field types, or pure wiring.
+        SegmentKind::Struct
+        | SegmentKind::Enum
+        | SegmentKind::StreamVariable
+        | SegmentKind::StreamVariableRunner
+        | SegmentKind::ReturningStream
+        | SegmentKind::NonReturningStream => false,
+    }
 }
 
 /// Segment kinds whose text the user wrote: a warning anchored in one of them is the user's
-/// own, at any precision (see [`MappedDiagnostic::likely_generated_noise`]). Text that is
-/// proven identical to the Marigold text counts too, whatever its kind, and does not need to
-/// be listed. The finer-grained kinds of a function, a struct and an enum that are not
-/// verbatim join this list when they exist.
+/// own, at any precision (see [`MappedDiagnostic::likely_generated_noise`]): a lint on a
+/// `fn`, a `struct` or an `enum` (`non_snake_case`, `dead_code`, a field that is never read)
+/// is about code the user can change. Text that is proven identical to the Marigold text
+/// counts too, whatever its kind, and does not need to be listed. Stream kinds are the
+/// generator's wiring around the user's expressions: lints there (`unused_mut` and the like)
+/// are noise.
+///
+/// The `match` has no wildcard on purpose: a new [`SegmentKind`] (a function body, a struct
+/// field, an enum variant, ...) does not compile until someone has decided which side of
+/// the line it is on.
 fn is_user_authored(kind: SegmentKind) -> bool {
-    matches!(kind, SegmentKind::Function)
+    match kind {
+        SegmentKind::Function | SegmentKind::Struct | SegmentKind::Enum => true,
+        SegmentKind::StreamVariable
+        | SegmentKind::StreamVariableRunner
+        | SegmentKind::ReturningStream
+        | SegmentKind::NonReturningStream => false,
+    }
 }
 
 /// Length in bytes of the part, at the end of a segment's generated text, that is proven to be
@@ -2269,6 +2382,10 @@ mod tests {
                     assert!(
                         probes <= most_probes(len),
                         "n={n} {a}..{b}: {probes} probes over {len} items"
+                    );
+                    assert!(
+                        probes >= 1,
+                        "n={n} {a}..{b}: a search over {len} items probed nothing"
                     );
                 }
                 // the searches really run over the whole index, not over a small part of it
