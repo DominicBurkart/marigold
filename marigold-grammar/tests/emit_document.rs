@@ -118,7 +118,6 @@ fn top_level_segments_are_the_statements_and_the_rest_are_nested() {
             }
         }
     }
-    // programs with parts really are nested
     let nested = json_for("range(0, 3).map(f).return");
     let parents: Vec<&Value> = nested["segments"]
         .as_array()
@@ -176,7 +175,6 @@ fn json_shape_and_key_order_are_pinned() {
         r#""source":{"start":0,"end":15,"start_line":1,"start_column":1,"end_line":1,"end_column":16},"#,
         r#""generated":{"start":50,"end":229,"start_line":3,"start_column":5,"end_line":3,"end_column":184}}"#,
     );
-    // the input of the declaration is nested in it: `range(0, 5)` -> `iter(0..5)`
     let input = concat!(
         r#"{"kind":"input_range","name":null,"ident":null,"expr_index":0,"parent":0,"#,
         r#""source":{"start":4,"end":15,"start_line":1,"start_column":5,"end_line":1,"end_column":16},"#,
@@ -226,8 +224,6 @@ fn nested_kind_strings_are_snake_case_and_documented() {
         .collect();
     kinds.sort_unstable();
     kinds.dedup();
-    // every kind the module documentation lists (the one-segment-per-statement kinds are
-    // covered by the test above)
     for documented in [
         "input_range",
         "input_read_file",
@@ -727,7 +723,6 @@ fn validate_v1_rejects_every_structural_corruption() {
 fn check_semantics_rejects_every_semantic_corruption() {
     let good = json_for("x = range(0, 5)\ny = x.map(f)\ny.return");
     check_semantics(&good).unwrap();
-    // the declaration of `y` (line 2): a top-level segment that is not the first one
     let y = good["segments"]
         .as_array()
         .unwrap()

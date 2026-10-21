@@ -51,10 +51,6 @@ pub fn expr_ranges(src: &str) -> Option<Vec<ByteRange>> {
     )
 }
 
-// ===========================================================================================
-// T2: independent oracle for the sub-expression segments
-// ===========================================================================================
-
 use marigold_grammar::source_map::SegmentKind as K;
 use pest::iterators::Pair;
 
@@ -226,7 +222,6 @@ fn chain(pair: Pair<Rule>, expr_index: usize, path: &[K], out: &mut Vec<Exp>) {
     let mut seen_decl_name = pair.as_rule() != Rule::stream_variable_declaration;
     for p in pair.into_inner() {
         match p.as_rule() {
-            // the first identifier of `name = ...` is the declared name, not an input.
             Rule::identifier if !seen_decl_name => seen_decl_name = true,
             Rule::identifier => out.push(Exp {
                 expr_index,
@@ -275,7 +270,6 @@ fn chain(pair: Pair<Rule>, expr_index: usize, path: &[K], out: &mut Vec<Exp>) {
             Rule::output_function => {
                 let rule = p.clone().into_inner().next().unwrap().as_rule();
                 if let Some(kind) = rule_kind(rule) {
-                    // generated as two regions around the stream: setup before it, sink after it.
                     for _ in 0..2 {
                         out.push(Exp {
                             expr_index,

@@ -1215,7 +1215,6 @@ fn large_programs_round_trip_and_stay_fast() {
     let doc = stdout_json(&out);
     validate_v1(&doc).unwrap();
     check_semantics(&doc).unwrap();
-    // per i: declaration + input + runner, stream + input variable, struct + field
     assert_eq!(doc["segments"].as_array().unwrap().len(), 7 * 3000);
 }
 

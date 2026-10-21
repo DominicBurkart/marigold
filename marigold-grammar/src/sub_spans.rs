@@ -94,7 +94,6 @@ fn parts_of_expr(expr: Pair<'_, Rule>) -> Vec<SubSpan> {
     };
     match inner.as_rule() {
         Rule::stream => chain(inner.into_inner()),
-        // the first identifier is the declared name, which is not a part
         Rule::stream_variable_declaration => chain(inner.into_inner().skip(1)),
         Rule::struct_decl => struct_fields(inner),
         Rule::enum_decl => enum_variants(inner),
@@ -122,8 +121,6 @@ fn chain<'i>(pairs: impl Iterator<Item = Pair<'i, Rule>>) -> Vec<SubSpan> {
                 functions += 1;
             }
             Rule::output_function => {
-                // `return` generates no code of its own; `write_file` wraps the stream, so
-                // it is two parts with one source.
                 if let Some(call) = pair.into_inner().next() {
                     if let Some(kind) = kind_of(call.as_rule()) {
                         let source = trimmed(&call);
@@ -207,7 +204,6 @@ fn enum_variants(decl: Pair<'_, Rule>) -> Vec<SubSpan> {
                         variants.push(variant_part(index, &variant));
                     }
                 }
-                // the `default` variant comes after the plain ones
                 Rule::default_variant => {
                     let index = variants.len();
                     variants.push(variant_part(index, &part));

@@ -162,7 +162,6 @@ fn probe_points(text: &str, edges: impl Iterator<Item = usize>) -> Vec<usize> {
 /// property tests alike.
 fn assert_invariants(src: &str, g: &GeneratedProgram) {
     let ctx = || format!("program {src:?}");
-    // T2: (b)-(e) are about the statement-level segments; (f) (lookups) uses the whole map.
     let all = g.map.segments();
     let segs: Vec<Segment> = g.map.top_level().cloned().collect();
     let segs = &segs[..];
@@ -686,7 +685,6 @@ fn g16_multibyte_characters_keep_byte_offsets_exact() {
     assert!(gen_text(&g, seg).contains("\u{65e5}\u{672c}\u{8a9e}/\u{f6}.csv"));
     let at = g.rust.find('\u{65e5}').unwrap() + 1;
     assert!(!g.rust.is_char_boundary(at));
-    // (T2: the literal sits in the function body, which is a nested region of the function)
     assert_eq!(
         g.map.source_for_generated(at).unwrap().kind,
         K::FunctionBody
@@ -867,7 +865,6 @@ fn generated_for_source_returns_all_overlaps_in_generated_order() {
     let [decl, ret, runner] = top_segments(&g)[..] else {
         panic!()
     };
-    // T2: nested segments overlap too; this T1 test looks at the statement-level ones.
     let q = |start, end| only_top(&g, g.map.generated_for_source(ByteRange { start, end }));
 
     assert_eq!(q(0, 1), vec![decl, runner]);
@@ -1185,7 +1182,6 @@ fn json_shape_is_stable() {
     let v = serde_json::to_value(&g).unwrap();
     assert_eq!(v["rust"], g.rust);
     let segs = v["map"]["segments"].as_array().unwrap();
-    // T2: decl, its input, the stream, its input, runner (nested ones are pinned in source_map_subexpr.rs)
     assert_eq!(segs.len(), 5);
     let kinds: Vec<_> = segs.iter().map(|s| s["kind"].as_str().unwrap()).collect();
     assert_eq!(
@@ -1285,7 +1281,6 @@ fn assert_invariants_cheap(src: &str, g: &GeneratedProgram) {
 fn assert_glue_is_exact(src: &str) {
     let g = generate(src);
     let mut previous: Option<(usize, K)> = None;
-    // statement-level segments only: the nested ones lie inside them
     for s in g.map.top_level() {
         let gap = match previous {
             None => &g.rust[..s.generated.start],

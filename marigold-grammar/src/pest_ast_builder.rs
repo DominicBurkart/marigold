@@ -770,8 +770,6 @@ impl PestAstBuilder {
             streams.iter().map(|s| s.inp.input_count.clone()),
         );
 
-        // Each argument is a piece, so that the parts of the code that stand for the
-        // arguments (and, inside them, for their inputs and stream functions) are known.
         let mut emit = crate::source_map::Emit::default();
         emit.push("::marigold::marigold_impl::futures::prelude::stream::select_all::select_all([");
         for (index, stream) in streams.iter().enumerate() {

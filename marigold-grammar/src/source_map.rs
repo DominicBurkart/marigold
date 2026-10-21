@@ -445,8 +445,6 @@ impl SourceMap {
             while let Some(&top) = open.last() {
                 #[cfg(test)]
                 count(&BUILD_STEPS);
-                // `top` does not enclose this segment: it ends before it starts, or it
-                // ends inside it (a partial overlap is no nesting).
                 if segments[top].generated.end <= segment.generated.start
                     || segment.generated.end > segments[top].generated.end
                 {
@@ -601,8 +599,6 @@ impl SourceMap {
     /// assert_eq!(program.map.index_of(&input.clone()), None);
     /// ```
     pub fn index_of(&self, segment: &Segment) -> Option<usize> {
-        // A `&Segment` points at a whole segment, so if it points into `self.segments`
-        // the offset is a multiple of the segment size.
         let offset =
             (segment as *const Segment as usize).checked_sub(self.segments.as_ptr() as usize)?;
         let index = offset / std::mem::size_of::<Segment>();
@@ -1025,8 +1021,6 @@ fn attach_parts(
     expr_index: usize,
     out: &mut Vec<Segment>,
 ) {
-    // Pieces and parts are nearly always in the same order, so look for the partner just
-    // after the previous one first: linear overall, not quadratic in the chain length.
     let mut cursor = 0;
     for piece in pieces {
         let found = (cursor..parts.len()).chain(0..cursor).find(|&k| {
@@ -1599,10 +1593,10 @@ mod tests {
     fn construction_never_panics_on_overlapping_duplicate_or_degenerate_segments() {
         let m = SourceMap::new(vec![
             seg((0, 10), (0, 10), SegmentKind::Struct, 0),
-            seg((5, 15), (0, 10), SegmentKind::Enum, 0), // partial overlap: unspecified nesting, no panic
-            seg((5, 15), (0, 10), SegmentKind::Function, 0), // duplicate range
-            seg((7, 7), (3, 3), SegmentKind::StreamMap, 0), // zero width
-            seg((9, 2), (9, 2), SegmentKind::StreamMap, 0), // inverted
+            seg((5, 15), (0, 10), SegmentKind::Enum, 0),
+            seg((5, 15), (0, 10), SegmentKind::Function, 0),
+            seg((7, 7), (3, 3), SegmentKind::StreamMap, 0),
+            seg((9, 2), (9, 2), SegmentKind::StreamMap, 0),
             seg(
                 (usize::MAX - 1, usize::MAX),
                 (usize::MAX - 1, usize::MAX),

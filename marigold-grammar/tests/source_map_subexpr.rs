@@ -20,10 +20,6 @@ use proptest::prelude::*;
 const TOKIO_LIKE: bool = cfg!(any(feature = "tokio", feature = "async-std"));
 const IO: bool = cfg!(feature = "io");
 
-// ---------------------------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------------------------
-
 fn generate(src: &str) -> GeneratedProgram {
     marigold_generate(src).unwrap_or_else(|e| panic!("{src:?} should generate: {e}"))
 }
@@ -87,10 +83,6 @@ fn pt_up(src: &str, points: impl Iterator<Item = usize>) -> Vec<usize> {
     v.dedup();
     v
 }
-
-// ---------------------------------------------------------------------------------------------
-// the text every region must have, restated from the Marigold source slice
-// ---------------------------------------------------------------------------------------------
 
 const BUF: &str =
     "buffered(std::cmp::max(2 * (::marigold::marigold_impl::num_cpus::get() - 1), 2))";
@@ -200,7 +192,6 @@ fn check_input_text(kind: K, slice: &str, text: &str) {
         K::InputReadFile => {
             let (_, a) = call_parts(slice);
             let path = a[0];
-            // the grammar allows blanks around the `=` signs
             let squash = |x: &str| x.split_whitespace().collect::<String>();
             let strukt = squash(a[2]).strip_prefix("struct=").unwrap().to_string();
             let infer = a
@@ -220,18 +211,12 @@ fn check_input_text(kind: K, slice: &str, text: &str) {
             } else {
                 format!("::marigold::marigold_impl::csv_async::AsyncDeserializer::from_reader( ::marigold::marigold_impl::tokio::fs::File::open({path}) .await .expect(\"Marigold could not open file\") .compat() ).into_deserialize::<{strukt}>()")
             };
-            // the template's layout is irrelevant, and so is whitespace inside the quoted path (a
-            // path may contain blanks and line breaks)
             assert_eq!(norm(text), norm(&expected), "{slice}");
         }
         K::InputSelectAll => {}
         k => panic!("{k:?}"),
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// nested invariants
-// ---------------------------------------------------------------------------------------------
 
 const USE_BLOCK: &str = "{use ::marigold::marigold_impl::*; ";
 const MCS: &str = "::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new(";
@@ -266,7 +251,6 @@ fn check_chain(src: &str, g: &GeneratedProgram, chain: &[usize], open: usize, cl
                 ".",
                 "exactly one dot between chain elements"
             );
-            // source side: only `.` and whitespace between the elements
             assert_eq!(
                 src[prev.source.end..s.source.start].trim_matches(&[' ', '\t', '\r', '\n'][..]),
                 ".",
@@ -393,8 +377,6 @@ fn check_statement_layout(src: &str, g: &GeneratedProgram, i: usize) {
                     None => path.trim_matches('"').ends_with(".gz"),
                 };
                 assert_eq!(pt.contains("GzipEncoder"), gz, "{pt}");
-                // the source order of the pieces is chain..., call; generated order is call-setup,
-                // chain..., call-sink. The chain's source must precede the call.
                 let last = &segs[*chain.last().unwrap()];
                 assert_eq!(
                     src[last.source.end..p.source.start].trim_matches(&[' ', '\t', '\r', '\n'][..]),
@@ -415,7 +397,6 @@ fn check_statement_layout(src: &str, g: &GeneratedProgram, i: usize) {
             assert_eq!(&g.rust[s.generated.start..sig.generated.start], "const fn ");
             assert_eq!(&g.rust[sig.generated.end..body.generated.start], " ");
             assert_eq!(body.generated.end, s.generated.end);
-            // the body is copied verbatim (multibyte, CRLF, braces in strings) -> linear offset mapping.
             assert_eq!(gtext(g, body), stext(src, body));
             let name = s.name.as_deref().unwrap();
             assert!(
@@ -486,8 +467,6 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
     let segs = g.map.segments();
     assert_eq!(g.rust, marigold_parse(src).unwrap(), "{}", ctx());
 
-    // N0: nest-or-disjoint; no two segments share a generated range; parent() is the smallest
-    // enclosing segment (brute force).
     for (i, s) in segs.iter().enumerate() {
         assert!(
             s.generated.start < s.generated.end && s.generated.end <= g.rust.len(),
@@ -541,7 +520,6 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
             .count()
     );
 
-    // N3/N4: children vs parent.
     for (i, s) in segs.iter().enumerate() {
         let kids = g.map.children(i);
         for w in kids.windows(2) {
@@ -560,8 +538,6 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
                 s.source.start <= c.source.start && c.source.end <= s.source.end,
                 "child source inside parent source: {c:?} in {s:?}"
             );
-            // proper sub-range, except a select_all branch that is just one input: `select_all(range(0, 3))`
-            // the branch and its input are the same source text.
             if c.source == s.source {
                 assert!(
                     s.kind == K::SelectAllBranch && is_input(c.kind) && kids.len() == 1,
@@ -572,7 +548,6 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
                 !is_stmt_kind(c.kind),
                 "statement kinds are never nested: {c:?}"
             );
-            // allowed (parent -> child) kinds
             let ok = match s.kind {
                 K::ReturningStream | K::StreamVariable | K::SelectAllBranch => {
                     is_input(c.kind) || is_stream_fn(c.kind)
@@ -595,7 +570,6 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
         }
     }
 
-    // N5/N6: the nested part equals the independently derived expectation.
     let mut got: Vec<Exp> = (0..segs.len())
         .filter(|&i| g.map.parent(i).is_some())
         .map(|i| {
@@ -619,14 +593,12 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
     want.sort_by_key(Exp::key);
     assert_eq!(got, want, "{}", ctx());
 
-    // N7: laid out exactly as the code generator writes it.
     for (i, s) in segs.iter().enumerate() {
         if is_stmt_kind(s.kind) {
             check_statement_layout(src, g, i);
         }
     }
 
-    // N8: names + identifiers.
     let (mut ret, mut non_ret, mut runner) = (0, 0, 0);
     for (i, s) in segs.iter().enumerate() {
         if g.map.parent(i).is_some() {
@@ -677,7 +649,6 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
             }
             k => panic!("root with kind {k:?}"),
         }
-        // segments_for_ident finds the definition (and only same-ident definitions)
         let id = s.ident.as_deref().unwrap();
         let found = g.map.segments_for_ident(id);
         assert!(
@@ -695,8 +666,6 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
         .segments_for_ident("no_such_ident_\u{1F600}")
         .is_empty());
 
-    // N9: the lookups, brute force. Every byte of the generated program for small programs,
-    // edges +-1 otherwise.
     let all_bytes = g.rust.len() <= 6_000;
     let probes: Vec<usize> = if all_bytes {
         (0..=g.rust.len()).collect()
@@ -744,7 +713,6 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
             };
             let all: Vec<&Segment> = segs.iter().filter(|s| hit(s)).collect();
             assert_eq!(g.map.generated_for_source(q), all, "query {q:?} {}", ctx());
-            // innermost = overlapping segments that have no overlapping descendant (generated containment)
             let inner: Vec<&Segment> = all
                 .iter()
                 .copied()
@@ -765,8 +733,6 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
         }
     }
     for s in segs {
-        // a nested segment is found by its own source: it is among the innermost hits unless a
-        // descendant is. For leaves that is exactly "contained in the innermost hits".
         let hits = g.map.generated_for_source_innermost(s.source);
         assert!(!hits.is_empty());
         assert!(hits
@@ -774,7 +740,6 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
             .all(|h| h.source.start < s.source.end && s.source.start < h.source.end));
     }
 
-    // N10: deterministic.
     let again = generate(src);
     assert_eq!(&again, g);
     assert_eq!(
@@ -782,10 +747,6 @@ fn assert_nested(src: &str, g: &GeneratedProgram) {
         serde_json::to_string(g).unwrap()
     );
 }
-
-// ---------------------------------------------------------------------------------------------
-// golden trees
-// ---------------------------------------------------------------------------------------------
 
 enum Gen {
     Exact(String),
@@ -895,7 +856,6 @@ fn filter_map_g(f: &str) -> String {
 
 #[test]
 fn t2_g01_unnamed_returning_has_input_child_and_no_output_child() {
-    // `.return` generates no text: the only child is the input, there is no Output segment.
     assert_tree(
         "range(0, 5).return",
         vec![
@@ -1017,14 +977,12 @@ fn t2_g03_numeric_argument_stream_functions() {
                 gx("combinations(4).await.map(|v| <[_; 4]>::try_from(v).unwrap())"),
             ),
             sub(1, K::StreamKeepFirstN, "keep_first_n(5, cmp)", gx("keep_first_n(5, cmp).await")),
-            // a numeric initial value is used as is ...
             sub(
                 1,
                 K::StreamFold,
                 "fold(0, add)",
                 gx("marifold(0, |acc, x| futures::future::ready(add(acc, x))).await"),
             ),
-            // ... anything else is called as a constructor.
             sub(
                 1,
                 K::StreamFold,
@@ -1053,7 +1011,6 @@ fn t2_g04_write_file_is_two_regions_around_the_stream() {
     let (stmt, setup, input, map, sink) = (&segs[0], &segs[1], &segs[2], &segs[3], &segs[4]);
     assert_eq!(stext(src, setup), "write_file(\"a/b.csv\", csv)");
     assert_eq!(setup.source, sink.source);
-    // generated order is setup, input, fn, sink; source order is input, fn, call.
     assert!(setup.source.start > map.source.end && input.source.end < map.source.start);
     assert_eq!(
         setup.generated.end, input.generated.start,
@@ -1074,7 +1031,6 @@ fn t2_g04_write_file_is_two_regions_around_the_stream() {
         "let non_returning_stream_0 = Box::pin({use ::marigold::marigold_impl::*; "
     );
     assert_eq!(&g.rust[sink.generated.end..stmt.generated.end], "});");
-    // glue inside the statement belongs to the statement
     assert_eq!(
         g.map.source_for_generated(input.generated.end),
         Some(stmt),
@@ -1194,7 +1150,6 @@ fn t2_g07_variable_from_prior_variable() {
             ),
         ],
     );
-    // the declared name `x` / `y` at the start of a declaration is NOT an input.
     let g = generate(src);
     assert_eq!(
         g.map
@@ -1268,7 +1223,6 @@ fn t2_g08_read_file_variants() {
         .map(|s| gtext(&g, s).contains("GzipDecoder"))
         .collect();
     assert_eq!(gz, [false, false, true, true]);
-    // the generated region keeps the code's own leading newline: regions are the node's bytes, untrimmed.
     assert!(gtext(&g, inputs[0]).starts_with("\n"));
     assert_nested(src, &g);
 }
@@ -1318,7 +1272,6 @@ fn t2_g09_select_all_branches_nest_their_own_chains() {
             ),
         ],
     );
-    // branches are separated by exactly ",\n" and the whole call ends with "])"
     let (b0, b1) = (seg(2), seg(4));
     assert_eq!(&g.rust[b0.generated.end..b1.generated.start], ",\n");
     assert_eq!(&g.rust[b1.generated.end..seg(1).generated.end], "])");
@@ -1326,7 +1279,6 @@ fn t2_g09_select_all_branches_nest_their_own_chains() {
 
 #[test]
 fn t2_g10_nested_select_all_with_whitespace_inside() {
-    // pest includes the whitespace before `,` / `)` in the branch pair; our range must not.
     let src = "select_all( select_all(range(0,1) , range(1,2)) .map(f) , read_file(\"a.csv\",csv,struct=R) ) .return";
     let g = generate(src);
     let branches: Vec<&str> = g
@@ -1351,7 +1303,6 @@ fn t2_g10_nested_select_all_with_whitespace_inside() {
         stext(src, outer),
         "select_all( select_all(range(0,1) , range(1,2)) .map(f) , read_file(\"a.csv\",csv,struct=R) )"
     );
-    // depth: stmt(0) > select_all(1) > branch(2) > select_all(3) > branch(4) > range(5)
     let max_depth = (0..g.map.segments().len())
         .map(|i| depth(&g, i))
         .max()
@@ -1396,7 +1347,6 @@ fn t2_g12_function_signature_and_verbatim_body() {
             sub(1, K::FunctionBody, "{ x * 2 }", gx("{ x * 2 }")),
         ],
     );
-    // no parameters
     assert_tree(
         "fn z() -> i32 { 1 }",
         vec![
@@ -1432,8 +1382,6 @@ fn t2_g13_function_body_is_byte_identical_for_hostile_bodies() {
 
 #[test]
 fn t2_g14_function_return_type_may_end_in_a_unicode_space() {
-    // pest's WHITESPACE is ASCII only, so a trailing NBSP belongs to the return type. A `trim_end()`
-    // based implementation would drop it from the signature range.
     let src = "fn f(x: i32) -> i32\u{a0} { x }";
     assert!(marigold_parse(src).is_ok());
     let g = generate(src);
@@ -1465,7 +1413,6 @@ fn t2_g15_struct_fields() {
             ),
             decl(1, K::StructField, "c", "c: Option<u8>", gx("c: Option<u8>")),
             decl(1, K::StructField, "d", "d: Vec<u8>", gx("d: Vec<u8>")),
-            // unresolved bound -> i128 on the plain (no resolved bounds) path ...
             decl(
                 1,
                 K::StructField,
@@ -1475,7 +1422,6 @@ fn t2_g15_struct_fields() {
             ),
         ],
     );
-    // ... a resolved bound picks the smallest type; the generated impl block is NOT a sub-segment.
     let g = generate(src);
     let st = &g.map.segments()[0];
     let e = g
@@ -1559,7 +1505,6 @@ fn t2_g18_enum_values_are_multibyte_but_variant_regions_are_exact() {
 
 #[test]
 fn t2_g19_every_kind_together_keeps_generated_order_and_tree_shape() {
-    // same program as T1-g10, now with the nested rows.
     let src = "range(0, 2).return\nfn f(x: i32) -> i32 { x }\nx = range(0, 3).map(f)\nstruct S { a: u8 }\nenum E { A }\nx.write_file(\"o.csv\", csv)\nrange(E).return";
     let g = generate(src);
     let shape: Vec<(usize, K, usize)> = g
@@ -1615,7 +1560,6 @@ fn t2_g20_multibyte_paths_and_names() {
         .collect();
     assert!(gtext(&g, outs[0]).contains("\u{65e5}\u{672c}\u{8a9e}/\u{f6}.csv"));
     assert!(gtext(&g, outs[1]).len() > 10);
-    // a byte in the middle of a multibyte char of the source maps like its neighbours
     let mid = src.find('\u{65e5}').unwrap() + 1;
     assert!(!src.is_char_boundary(mid));
     let hits = g.map.generated_for_source_innermost(ByteRange {
@@ -1626,7 +1570,6 @@ fn t2_g20_multibyte_paths_and_names() {
         hits.iter().map(|s| s.kind).collect::<Vec<_>>(),
         [K::OutputWriteFile, K::OutputWriteFile]
     );
-    // a byte in the middle of a multibyte char of the generated text maps to the write_file region
     let at = g.rust.find('\u{65e5}').unwrap() + 1;
     assert!(!g.rust.is_char_boundary(at));
     assert_eq!(
@@ -1684,7 +1627,6 @@ fn t2_g22_return_has_no_region_and_resolves_to_the_statement() {
         start: at,
         end: at + "return".len(),
     };
-    // all overlaps: only the statement; innermost: the statement (the nearest enclosing region).
     assert_eq!(g.map.generated_for_source(q), vec![ret]);
     assert_eq!(g.map.generated_for_source_innermost(q), vec![ret]);
     let p = ByteRange {
@@ -1692,7 +1634,6 @@ fn t2_g22_return_has_no_region_and_resolves_to_the_statement() {
         end: at + 2,
     };
     assert_eq!(g.map.generated_for_source_innermost(p), vec![ret]);
-    // and likewise for the `.` that joins the chain
     let dot = src.rfind(".return").unwrap();
     assert_eq!(
         g.map.generated_for_source_innermost(ByteRange {
@@ -1701,16 +1642,12 @@ fn t2_g22_return_has_no_region_and_resolves_to_the_statement() {
         }),
         vec![ret]
     );
-    // no segment anywhere is the `return` keyword
     assert!(g.map.segments().iter().all(|s| stext(src, s) != "return"));
     assert_nested(src, &g);
 }
 
 #[test]
 fn t2_g23_no_distinct_region_constructs_resolve_to_the_nearest_enclosing_segment() {
-    // (a) bounded-struct constants, (b) enum helper impl and serde glue, (c) a stream variable's
-    // runner internals, (d) the derive attribute: all of them sit inside the statement segment and
-    // have no segment of their own.
     let src = "struct P { v: int[0, 255] }\nenum E { A }\nx = range(E)\nx.return";
     let g = generate(src);
     let seg_at = |needle: &str| {
@@ -1721,15 +1658,10 @@ fn t2_g23_no_distinct_region_constructs_resolve_to_the_nearest_enclosing_segment
     assert_eq!(seg_at("#[derive(").kind, K::Struct);
     assert_eq!(seg_at("__marigold_variants() -> [E; 1]").kind, K::Enum);
     assert_eq!(seg_at("runner_future").kind, K::StreamVariableRunner);
-    // glue that belongs to no Marigold construct has no segment at all
     let glue = g.rust.find("typed_stream_vec<").unwrap();
     assert_eq!(g.map.source_for_generated(glue), None);
     assert_nested(src, &g);
 }
-
-// ---------------------------------------------------------------------------------------------
-// every grammar alternative has a golden program
-// ---------------------------------------------------------------------------------------------
 
 /// `(rule, a program whose generation must contain a segment of that rule's kind whose source
 /// starts with the given text)`.
@@ -1828,7 +1760,6 @@ fn grammar_alternatives_are_all_covered() {
     want.sort_unstable();
     assert_eq!(covered, want);
 
-    // the statement-level alternatives of `expr` are the T1 kinds
     let mut exprs = grammar_alternatives("expr");
     exprs.sort();
     assert_eq!(
@@ -1861,7 +1792,6 @@ fn every_grammar_alternative_produces_its_segment_kind() {
                 assert_eq!(found, expected, "{rule}: {program:?}");
             }
             None => {
-                // `return`: no region of its own, and nothing in the map has `return` as source.
                 assert!(
                     g.map
                         .segments()
@@ -1873,10 +1803,6 @@ fn every_grammar_alternative_produces_its_segment_kind() {
         }
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// lookups on nested real maps
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn source_for_generated_returns_the_innermost_region_and_the_statement_in_glue() {
@@ -1909,7 +1835,6 @@ fn source_for_generated_returns_the_innermost_region_and_the_statement_in_glue()
         None,
         "separator after the statement"
     );
-    // a region inside a region inside a region: every byte answers with the deepest region.
     let nested = "select_all(range(0, 1), select_all(range(2, 3).map(f)))\n.return";
     let g = generate(nested);
     let deepest = g
@@ -1934,14 +1859,10 @@ fn generated_for_source_keeps_returning_every_overlap_outer_before_inner() {
     };
     let q = |a: usize, b: usize| g.map.generated_for_source(ByteRange { start: a, end: b });
     let at = |needle: &str| src.find(needle).unwrap();
-    // a cursor inside `map(f)`: the statement and the region
     assert_eq!(q(at("map") + 1, at("map") + 1), vec![stmt, map]);
-    // the dot between two functions and the keyword `return`: only the statement
     assert_eq!(q(at(".map"), at(".map") + 1), vec![stmt]);
     assert_eq!(q(at("return"), at("return") + 6), vec![stmt]);
-    // the whole statement: all of it, pre-order (generated order)
     assert_eq!(q(0, src.len()), vec![stmt, input, map, filter]);
-    // a range over two functions
     assert_eq!(q(at("map"), at("filter") + 3), vec![stmt, map, filter]);
 }
 
@@ -1958,37 +1879,29 @@ fn generated_for_source_innermost_picks_the_most_specific_regions() {
             .collect()
     };
     let at = |needle: &str| src.find(needle).unwrap();
-    // inside `map(f)` of the declaration: that function, plus the runner of the whole declaration
-    // (it implements the whole source range and has no children).
     assert_eq!(
         kinds_of(at("map(f)") + 1, at("map(f)") + 1),
         vec![(K::StreamMap, 0), (K::StreamVariableRunner, 0)]
     );
-    // on the declared name `x`: the declaration and its runner (neither has a hit descendant)
     assert_eq!(
         kinds_of(0, 1),
         vec![(K::StreamVariable, 0), (K::StreamVariableRunner, 0)]
     );
-    // on `range(`: the input region and the runner
     assert_eq!(
         kinds_of(at("range") + 2, at("range") + 2),
         vec![(K::InputRange, 0), (K::StreamVariableRunner, 0)]
     );
-    // on the use `x.map(g)`: variable input, then the function.
     assert_eq!(
         kinds_of(at("x.map(g)"), at("x.map(g)") + 8),
         vec![(K::InputVariable, 1), (K::StreamMap, 1)]
     );
-    // on `.return`: the statement
     assert_eq!(
         kinds_of(src.len() - 4, src.len()),
         vec![(K::ReturningStream, 1)]
     );
-    // a range covering nothing
     assert!(kinds_of(src.len(), src.len()).is_empty());
     assert!(kinds_of(5, 2).is_empty());
     assert!(kinds_of(usize::MAX - 1, usize::MAX).is_empty());
-    // plain overlap query is still the superset
     let all = g.map.generated_for_source(ByteRange {
         start: at("map(f)") + 1,
         end: at("map(f)") + 1,
@@ -2028,18 +1941,12 @@ fn parent_children_and_top_level_describe_the_tree() {
             K::StreamVariableRunner
         ]
     );
-    // out of range never panics
     assert_eq!(g.map.parent(6), None);
     assert!(g.map.children(6).is_empty());
 }
 
-// ---------------------------------------------------------------------------------------------
-// identifiers
-// ---------------------------------------------------------------------------------------------
-
 #[test]
 fn identifiers_follow_the_generated_ordinals_not_the_source_positions() {
-    // same program as T1-g15: two variables, three returning, three non-returning streams
     let src = "a = range(0, 2)\nb = range(2, 4)\na.return\nrange(9, 10).write_file(\"p.csv\", csv)\nb.return\nrange(7, 8).return\na.write_file(\"q.csv\", csv)\nrange(1, 2).write_file(\"r.csv\", csv)";
     let g = generate(src);
     let idents: Vec<(K, usize, String)> = g
@@ -2070,7 +1977,6 @@ fn identifiers_follow_the_generated_ordinals_not_the_source_positions() {
             ),
         ]
     );
-    // a trace that names a generated local finds the Marigold construct
     let hit = g.map.segments_for_ident("returning_stream_1");
     assert_eq!(hit.len(), 1);
     assert_eq!(stext(src, hit[0]), "b.return");
@@ -2079,10 +1985,8 @@ fn identifiers_follow_the_generated_ordinals_not_the_source_positions() {
         (hit[0].kind, stext(src, hit[0])),
         (K::StreamVariableRunner, "b = range(2, 4)")
     );
-    // the vec![..] glue names the same identifiers; the lookup finds the definition, not the glue
     assert!(g.rust.contains("\nreturning_stream_1,\n"));
     assert!(g.map.segments_for_ident("returning_stream_3").is_empty());
-    // exact match only: neither a prefix nor an extension of a real identifier finds anything
     for not_an_ident in [
         "returning_stream_",
         "returning_stream",
@@ -2101,8 +2005,6 @@ fn identifiers_follow_the_generated_ordinals_not_the_source_positions() {
 
 #[test]
 fn user_names_that_collide_with_generated_identifiers_are_both_reported() {
-    // a stream variable called `returning_stream_0` and the first returning stream share the
-    // identifier in the generated code (Rust shadows); the map must not hide either.
     let src = "returning_stream_0 = range(0, 1)\nreturning_stream_0.return";
     let g = generate(src);
     let hits = g.map.segments_for_ident("returning_stream_0");
@@ -2111,7 +2013,6 @@ fn user_names_that_collide_with_generated_identifiers_are_both_reported() {
         [K::StreamVariable, K::ReturningStream],
         "generated order"
     );
-    // a struct and a stream variable may share a name (types and values live in different namespaces)
     let src = "struct S { a: u8 }\nS = range(0, 1)\nS.return";
     let g = generate(src);
     let kinds: Vec<K> = g
@@ -2121,7 +2022,6 @@ fn user_names_that_collide_with_generated_identifiers_are_both_reported() {
         .map(|s| s.kind)
         .collect();
     assert_eq!(kinds, [K::Struct, K::StreamVariable]);
-    // same name declared twice
     let src = "x = range(0, 1)\nx = range(1, 2)\nx.return";
     let g = generate(src);
     assert_eq!(g.map.segments_for_ident("x").len(), 2);
@@ -2135,10 +2035,6 @@ fn only_statement_level_segments_carry_an_identifier() {
         assert_eq!(s.ident.is_some(), g.map.parent(i).is_none(), "{s:?}");
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// JSON
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn json_has_a_stable_shape_for_nested_segments() {
@@ -2172,7 +2068,6 @@ fn json_has_a_stable_shape_for_nested_segments() {
     assert_eq!(segs[0]["ident"], "x");
     assert_eq!(segs[2]["ident"], "returning_stream_0");
     assert_eq!(segs[4]["ident"], "stream_variable_runners_0");
-    // every new kind serialises as lowercase snake_case, and no two kinds collide
     let mut seen = std::collections::HashSet::new();
     for (_, k) in RULE_KINDS {
         if let Some(k) = k {
@@ -2198,10 +2093,6 @@ fn json_has_a_stable_shape_for_nested_segments() {
         "stream_permutations_with_replacement"
     );
 }
-
-// ---------------------------------------------------------------------------------------------
-// corpus, bigger programs
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn every_corpus_program_satisfies_the_nested_invariants() {
@@ -2241,7 +2132,6 @@ fn corpus_multi_consumer_program_has_the_expected_tree() {
             K::StreamVariableRunner
         ]
     );
-    // each stream variable / stream has an input
     let inputs = g
         .map
         .segments()
@@ -2339,7 +2229,6 @@ fn many_expressions_get_exactly_the_expected_nested_segments() {
     let n = 800;
     let src = many_chain_exprs(n);
     let g = generate(&src);
-    // per i: decl(+input,+2 fns)=4, returning(+input,+1 fn)=3, struct(+2 fields)=3, fn(+sig,+body)=3, runner=1
     assert_eq!(g.map.segments().len(), n * (4 + 3 + 3 + 3 + 1));
     let count = |k: K| g.map.segments().iter().filter(|s| s.kind == k).count();
     assert_eq!(count(K::InputRange), n);
@@ -2347,7 +2236,6 @@ fn many_expressions_get_exactly_the_expected_nested_segments() {
     assert_eq!(count(K::StreamMap), 2 * n);
     assert_eq!(count(K::StructField), 2 * n);
     assert_eq!(count(K::FunctionBody), n);
-    // cheap structural check (assert_nested is quadratic)
     assert_eq!(g.rust, marigold_parse(&src).unwrap());
     let segs = g.map.segments();
     let mut stack: Vec<&Segment> = Vec::new();
@@ -2370,13 +2258,6 @@ fn many_expressions_get_exactly_the_expected_nested_segments() {
     }
 }
 
-// There is deliberately no wall-clock ratio test here: a fixed-margin ratio of two timings is
-// flaky on a loaded machine. The linearity of the work is pinned by deterministic counters in
-// `src/source_map.rs` (`construction_work_is_n_log_n`,
-// `pairing_parts_with_pieces_does_linear_work_in_the_chain_length`) and by the paired-round
-// timing test `mapped_code_generation_grows_linearly_with_program_size` in `src/parser.rs`,
-// whose program contains nested segments (inputs, stream functions, struct fields).
-
 #[test]
 fn nested_lookups_are_fast_on_a_big_program() {
     use std::time::Instant;
@@ -2393,7 +2274,6 @@ fn nested_lookups_are_fast_on_a_big_program() {
         hits += g.map.generated_for_source(s.source).len();
     }
     assert!(hits > 0);
-    // a backstop against a hang; the work itself is pinned by counters in `source_map.rs`
     assert!(t.elapsed().as_secs() < 60, "{:?}", t.elapsed());
 }
 
@@ -2402,7 +2282,6 @@ fn nested_lookups_are_fast_on_a_big_program() {
 /// grammar allows, with hyphenated names, and with stream variables named like input functions.
 /// The mutation proptests find such programs by chance; these cases make them deterministic.
 const WHITESPACE_VARIANTS: &[&str] = &[
-    // output
     "v0. write_file(\"\u{65e5}0.csv\", csv)",
     "range(0, 1) . write_file(\"a.csv\", csv)",
     "range(0, 1).write_file( \"a.csv\" , csv )",
@@ -2414,7 +2293,6 @@ const WHITESPACE_VARIANTS: &[&str] = &[
     "range(0, 1)\n\t.\r\n\treturn",
     "x = range(0, 1)\nx . return",
     "x=range(0,1)\nx.return",
-    // inputs
     "range( 0 , 1 ).return",
     "range(0 ,= 1).return",
     "range(\n0,\n=\n1\n).return",
@@ -2423,27 +2301,22 @@ const WHITESPACE_VARIANTS: &[&str] = &[
     "read_file(\"d.csv\",csv,struct=S,infer_compression=true).ok().return\nstruct S { a: u8 }",
     "read_file(\"d.csv.gz\" , csv , struct =S , infer_compression = false ).return\nstruct S { a: u8 }",
     "read_file(\"a,b(1).csv\",csv,struct=S).return\nstruct S { a: u8 }",
-    // a quoted path may contain blanks and line breaks
     "read_file(\"in6.csv\n\",csv,struct=S).return\nstruct S { a: u8 }",
     "read_file(\"a  b\t.csv.gz\", csv, struct=S).return\nstruct S { a: u8 }",
     "range(0, 1).write_file(\"o\n  1.csv\", csv)",
-    // stream functions, every kind with blanks in its argument list
     "range(0, 1).map( f ).filter( g ).filter_map( h ).return",
     "range(0, 1)\n.\npermutations( 2 )\n.\ncombinations(\t2\t)\n.\npermutations_with_replacement(\n2\n).return",
     "range(0, 1).fold( 0 , f ).fold( z , f ).return",
     "range(0, 1).keep_first_n( 2 , cmp ).ok().ok_or_panic().return",
-    // stream variables and chains
     "x =\n range(0, 1) . map(f)",
     "x = range(0, 1)\n  .map(f)\n  .filter(g)\nx.return",
     "x = range(0, 1)\ny = x . map(f)\ny . return",
     "x = range(0, 1)\ny=x.map(f)\ny.return",
     "x = range(0, 1)\ny =\n\tx\n\t.map(f)\ny.return",
-    // select_all
     "select_all( range(0, 1) . map(f) , range(1, 2) ) . return",
     "select_all(\n\trange(0, 1),\n\trange(1, 2)\n)\n.\nfilter(g)\n.\nreturn",
     "select_all( select_all(range(1, 2)\t) , range(0, 1) . ok() ) . return",
     "x = select_all(range(0, 1))\nx . return",
-    // struct, enum and fn: fields, variants, signature and body
     "struct\nS\n{\na : u8 ,\nb : string_1 ,\n}\nrange(0, 1).return",
     "structS{a:u8}\nrange(0, 1).return",
     "struct S { a : Option < u8 > , b : int[ 0 , 255 ] }",
@@ -2454,12 +2327,10 @@ const WHITESPACE_VARIANTS: &[&str] = &[
     "fn\nf ( x : i32 )\n->\ni32\n{ x }\nrange(0, 1).map(f).return",
     "fnf(x: i32) -> i32 {x}\nrange(0, 1).map(f).return",
     "fn f(x: i32) -> i32 { /* { */ x }\nrange(0, 1).map(f).return",
-    // hyphens are part of identifiers: the leading letters of a name are not the whole name
     "v0-a = range(0, 1)\nv0-a.return",
     "v0-a = range(0, 1)\nv0-a.write_file(\"a.csv\", csv)",
     "a-b = range(0, 1)\nc-d = a-b.map(f)\nc-d.return",
     "x- = range(0, 1)\nx-.return",
-    // a stream variable may be called like an input function
     "range = range(0, 1)\nrange.return",
     "range = range(0, 1)\nrange.map(f).return",
     "read_file = range(0, 1)\nread_file . write_file(\"a.csv\", csv)",
@@ -2468,7 +2339,6 @@ const WHITESPACE_VARIANTS: &[&str] = &[
 
 #[test]
 fn whitespace_variants_keep_the_nested_invariants() {
-    // Check every case before failing, so one run lists all the brittle ones.
     let failing: Vec<&str> = WHITESPACE_VARIANTS
         .iter()
         .copied()
@@ -2486,10 +2356,6 @@ fn whitespace_variants_keep_the_nested_invariants() {
         "nested invariants failed for: {failing:#?}"
     );
 }
-
-// ---------------------------------------------------------------------------------------------
-// properties: arbitrary valid programs, whitespace everywhere
-// ---------------------------------------------------------------------------------------------
 
 fn ws() -> impl Strategy<Value = &'static str> {
     prop_oneof![
@@ -2673,7 +2539,6 @@ fn arb_program2() -> impl Strategy<Value = String> {
             3 => (arb_chain(), 0u32..3).prop_map(move |(c, n)| format!("w{n}_{i} = {c}")),
             2 => (0u32..3, prop::collection::vec(arb_fn(), 0..3), arb_output(), ws(), ws())
                 .prop_map(|(n, fns, o, w1, w2)| {
-                    // reads a variable (it need not be declared; the grammar does not care)
                     let mut s = format!("w{n}_0");
                     for f in fns {
                         s.push_str(&dot(w1, w2));
@@ -2825,13 +2690,8 @@ fn the_program_generator_reaches_every_segment_kind() {
     );
 }
 
-// ---------------------------------------------------------------------------------------------
-// more goldens, edge cases and API contract
-// ---------------------------------------------------------------------------------------------
-
 #[test]
 fn t2_g24_select_all_with_a_single_bare_input_branch() {
-    // branch and input have the same source text: the one case where a child is not a proper sub-range
     let src = "select_all(range(0, 3)).return";
     let g = generate(src);
     let rows: Vec<(usize, K, &str)> = g
@@ -2933,12 +2793,12 @@ fn t2_g26_wide_declarations_pair_every_field_and_variant_with_its_own_source() {
 #[test]
 fn programs_that_fail_after_parsing_return_the_same_error_and_never_panic() {
     let cases = [
-        "range(0, 1).write_file(\"o.json\", json)", // unsupported write_file format (AST builder error)
-        "range(5, 1).return",                       // negative range count (AST builder error)
-        "range(Nope).return",                       // unknown enum
+        "range(0, 1).write_file(\"o.json\", json)",
+        "range(5, 1).return",
+        "range(Nope).return",
         "enum E { A }\nx = range(Nope)\nx.return",
-        "struct T { f: int[10, 5] }\nrange(0, 1).return", // bound validation
-        "fn f(x: i32) -> i32\nrange(0,1).return",         // pest error
+        "struct T { f: int[10, 5] }\nrange(0, 1).return",
+        "fn f(x: i32) -> i32\nrange(0,1).return",
         "select_all(range(5, 1)).return",
     ];
     for src in cases {
@@ -3001,7 +2861,6 @@ fn identifiers_and_tree_shape_of_a_program_survive_appending_unrelated_items() {
         "\ny = x.map(g)",
     ] {
         let b = generate(&format!("{base}{extra}"));
-        // every segment of `a` is still there with the same kind, expr_index and identifier ...
         let before = idents(&a);
         let after = idents(&b);
         for row in &before {
@@ -3010,7 +2869,6 @@ fn identifiers_and_tree_shape_of_a_program_survive_appending_unrelated_items() {
                 "{row:?} lost after appending {extra:?}"
             );
         }
-        // ... and the sources of the statements are unchanged
         for s in a.map.top_level() {
             assert!(
                 b.map
@@ -3020,7 +2878,6 @@ fn identifiers_and_tree_shape_of_a_program_survive_appending_unrelated_items() {
             );
         }
     }
-    // appending a returning stream keeps the numbering of the earlier ones; prepending one renumbers
     let appended = generate(&format!("{base}\nrange(0, 9).return"));
     let prepended = generate(&format!("range(0, 9).return\n{base}"));
     let ret_ident = |g: &GeneratedProgram, text: &str, src: &str| {
@@ -3057,14 +2914,11 @@ fn index_of_maps_a_stored_segment_to_its_index_and_rejects_everything_else() {
     for (i, s) in g.map.segments().iter().enumerate() {
         assert_eq!(g.map.index_of(s), Some(i));
     }
-    // a clone lives somewhere else; so does a segment of another map
     let copy = g.map.segments()[1].clone();
     assert_eq!(g.map.index_of(&copy), None);
     let other = generate("range(0, 1).return");
     assert_eq!(g.map.index_of(&other.map.segments()[0]), None);
     assert_eq!(other.map.index_of(&g.map.segments()[0]), None);
-    // the point of it: from a lookup result to its ancestors
-    // (not `rust.find(".map(f)")`: with `tokio`/`async-std` the region text is different)
     let map = g
         .map
         .segments()
