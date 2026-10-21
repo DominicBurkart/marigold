@@ -7,6 +7,11 @@ in `.return` so tests can read their output; `marigold run` wraps a program in
 a `main` that expects no output, so use `marigold analyze` or `marigold check`
 on these files rather than `marigold run`.
 
+`build.rs` always emits the default (single-future) codegen. Forwarding the
+`tokio`/`async-std` features to `marigold-grammar` would change what `m!`
+generates for every crate in the workspace, so the examples run on the
+requested runtime but do not exercise the parallel codegen paths.
+
 Every example has three checks:
 
 | Check | Where |
