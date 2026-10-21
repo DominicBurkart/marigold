@@ -62,6 +62,18 @@ thread_local! {
     static WALK_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Segments `generated_for_source` looked at beyond the two binary searches.
     static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Expressions visited by the passes of code generation plus `CodeBuilder` appends.
+    static CODEGEN_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_codegen_steps() {
+    CODEGEN_STEPS.with(|c| c.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn codegen_steps() -> usize {
+    CODEGEN_STEPS.with(|c| c.get())
 }
 
 #[cfg(test)]
@@ -495,6 +507,8 @@ impl CodeBuilder {
 
     /// Append code that belongs to no expression: separators and wiring.
     pub(crate) fn glue(&mut self, code: &str) {
+        #[cfg(test)]
+        count(&CODEGEN_STEPS);
         self.out.push_str(code);
     }
 
@@ -506,6 +520,8 @@ impl CodeBuilder {
         name: Option<String>,
         code: &str,
     ) {
+        #[cfg(test)]
+        count(&CODEGEN_STEPS);
         let start = self.out.len();
         self.out.push_str(code);
         self.segments.push(GeneratedSegment {
@@ -517,6 +533,13 @@ impl CodeBuilder {
             expr_index,
             name,
         });
+    }
+
+    pub(crate) fn pass<'a, T>(&self, items: &'a [T]) -> impl Iterator<Item = (usize, &'a T)> {
+        items.iter().enumerate().inspect(|_| {
+            #[cfg(test)]
+            count(&CODEGEN_STEPS);
+        })
     }
 
     pub(crate) fn finish(self) -> (String, Vec<GeneratedSegment>) {
