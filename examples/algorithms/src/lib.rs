@@ -29,3 +29,6 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
 pub mod gcd;
 #[cfg(test)]
 pub mod tsp;
+pub mod tsp_ant_colony;
+pub mod tsp_genetic;
+pub mod tsp_simulated_annealing;

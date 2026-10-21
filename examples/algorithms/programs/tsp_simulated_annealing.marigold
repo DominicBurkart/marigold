@@ -1,0 +1,95 @@
+fn dist(a: i64, b: i64) -> i64 {
+    let xs: [i64; 10] = [0, 4, 9, 13, 6, 15, 2, 11, 8, 17];
+    let ys: [i64; 10] = [0, 7, 2, 8, 12, 15, 14, 5, 9, 3];
+    (xs[a as usize] - xs[b as usize]).abs() + (ys[a as usize] - ys[b as usize]).abs()
+}
+
+fn tour_len(t: [i64; 10]) -> i64 {
+    let mut i = 0;
+    let mut total = 0;
+    while i < 10 {
+        total += dist(t[i], t[(i + 1) % 10]);
+        i += 1;
+    }
+    total
+}
+
+fn next_rng(r: i64) -> i64 {
+    (r * 1103515245 + 12345) % 2147483648
+}
+
+fn start() -> [i64; 23] {
+    let mut s = [0; 23];
+    let mut i = 0;
+    while i < 10 {
+        s[i] = i as i64;
+        s[12 + i] = i as i64;
+        i += 1;
+    }
+    let l = tour_len([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    s[10] = l;
+    s[11] = 12345;
+    s[22] = l;
+    s
+}
+
+fn step(state: [i64; 23], round: i32) -> [i64; 23] {
+    let mut s = state;
+    let mut r = next_rng(s[11]);
+    let a = 1 + ((r >> 16) % 9) as usize;
+    r = next_rng(r);
+    let b = 1 + ((r >> 16) % 9) as usize;
+    let mut lo = a;
+    let mut hi = b;
+    if a > b {
+        lo = b;
+        hi = a;
+    }
+    let mut cand = [0; 10];
+    let mut i = 0;
+    while i < 10 {
+        cand[i] = s[i];
+        i += 1;
+    }
+    while lo < hi {
+        let tmp = cand[lo];
+        cand[lo] = cand[hi];
+        cand[hi] = tmp;
+        lo += 1;
+        hi -= 1;
+    }
+    let delta = tour_len(cand) - s[10];
+    r = next_rng(r);
+    let u = (r >> 16) % 100;
+    let temp = 30 * (2000 - round as i64) / 2000;
+    if delta <= 0 || delta * 100 < u * temp {
+        let mut k = 0;
+        while k < 10 {
+            s[k] = cand[k];
+            k += 1;
+        }
+        s[10] += delta;
+    }
+    if s[10] < s[22] {
+        let mut k = 0;
+        while k < 10 {
+            s[12 + k] = s[k];
+            k += 1;
+        }
+        s[22] = s[10];
+    }
+    s[11] = r;
+    s
+}
+
+fn best_tour(state: [i64; 23]) -> [i64; 10] {
+    let mut t = [0; 10];
+    let mut i = 0;
+    while i < 10 {
+        t[i] = state[12 + i];
+        i += 1;
+    }
+    t
+}
+
+range(0, 2000).fold(start, step).map(best_tour).return

@@ -1,0 +1,161 @@
+fn dist(a: i64, b: i64) -> i64 {
+    let xs: [i64; 10] = [0, 4, 9, 13, 6, 15, 2, 11, 8, 17];
+    let ys: [i64; 10] = [0, 7, 2, 8, 12, 15, 14, 5, 9, 3];
+    (xs[a as usize] - xs[b as usize]).abs() + (ys[a as usize] - ys[b as usize]).abs()
+}
+
+fn tour_len(t: [i64; 10]) -> i64 {
+    let mut i = 0;
+    let mut total = 0;
+    while i < 10 {
+        total += dist(t[i], t[(i + 1) % 10]);
+        i += 1;
+    }
+    total
+}
+
+fn next_rng(r: i64) -> i64 {
+    (r * 1103515245 + 12345) % 2147483648
+}
+
+fn individual(state: [i64; 161], k: usize) -> [i64; 10] {
+    let mut t = [0; 10];
+    let mut i = 0;
+    while i < 10 {
+        t[i] = state[k * 10 + i];
+        i += 1;
+    }
+    t
+}
+
+fn tournament(state: [i64; 161], r1: i64, r2: i64) -> usize {
+    let a = ((r1 >> 16) % 16) as usize;
+    let b = ((r2 >> 16) % 16) as usize;
+    if tour_len(individual(state, a)) <= tour_len(individual(state, b)) {
+        a
+    } else {
+        b
+    }
+}
+
+fn order_crossover(p: [i64; 10], q: [i64; 10], cut_a: usize, cut_b: usize) -> [i64; 10] {
+    let mut lo = cut_a;
+    let mut hi = cut_b;
+    if cut_a > cut_b {
+        lo = cut_b;
+        hi = cut_a;
+    }
+    let mut child = [-1; 10];
+    let mut used = [false; 10];
+    let mut i = lo;
+    while i <= hi {
+        child[i] = p[i];
+        used[p[i] as usize] = true;
+        i += 1;
+    }
+    let mut pos = (hi + 1) % 10;
+    let mut n = 0;
+    while n < 10 {
+        let city = q[(hi + 1 + n) % 10];
+        if !used[city as usize] {
+            child[pos] = city;
+            used[city as usize] = true;
+            pos = (pos + 1) % 10;
+        }
+        n += 1;
+    }
+    child
+}
+
+fn start() -> [i64; 161] {
+    let mut s = [0; 161];
+    let mut r = 987654321;
+    let mut k = 0;
+    while k < 16 {
+        let mut i = 0;
+        while i < 10 {
+            s[k * 10 + i] = i as i64;
+            i += 1;
+        }
+        let mut j = 9;
+        while j > 0 {
+            r = next_rng(r);
+            let m = ((r >> 16) % (j as i64 + 1)) as usize;
+            let tmp = s[k * 10 + j];
+            s[k * 10 + j] = s[k * 10 + m];
+            s[k * 10 + m] = tmp;
+            j -= 1;
+        }
+        k += 1;
+    }
+    s[160] = r;
+    s
+}
+
+fn generation(state: [i64; 161], _round: i32) -> [i64; 161] {
+    let mut next = [0; 161];
+    let mut r = state[160];
+    let mut elite = 0;
+    let mut k = 1;
+    while k < 16 {
+        if tour_len(individual(state, k)) < tour_len(individual(state, elite)) {
+            elite = k;
+        }
+        k += 1;
+    }
+    let mut i = 0;
+    while i < 10 {
+        next[i] = state[elite * 10 + i];
+        i += 1;
+    }
+    k = 1;
+    while k < 16 {
+        r = next_rng(r);
+        let r1 = r;
+        r = next_rng(r);
+        let r2 = r;
+        let p = individual(state, tournament(state, r1, r2));
+        r = next_rng(r);
+        let r3 = r;
+        r = next_rng(r);
+        let r4 = r;
+        let q = individual(state, tournament(state, r3, r4));
+        r = next_rng(r);
+        let cut_a = ((r >> 16) % 10) as usize;
+        r = next_rng(r);
+        let cut_b = ((r >> 16) % 10) as usize;
+        let mut child = order_crossover(p, q, cut_a, cut_b);
+        r = next_rng(r);
+        if (r >> 16) % 100 < 20 {
+            r = next_rng(r);
+            let x = ((r >> 16) % 10) as usize;
+            r = next_rng(r);
+            let y = ((r >> 16) % 10) as usize;
+            let tmp = child[x];
+            child[x] = child[y];
+            child[y] = tmp;
+        }
+        let mut c = 0;
+        while c < 10 {
+            next[k * 10 + c] = child[c];
+            c += 1;
+        }
+        k += 1;
+    }
+    next[160] = r;
+    next
+}
+
+fn fittest(state: [i64; 161]) -> [i64; 10] {
+    let mut best = 0;
+    let mut k = 1;
+    while k < 16 {
+        if tour_len(individual(state, k)) < tour_len(individual(state, best)) {
+            best = k;
+        }
+        k += 1;
+    }
+    individual(state, best)
+}
+
+range(0, 150).fold(start, generation).map(fittest).return
