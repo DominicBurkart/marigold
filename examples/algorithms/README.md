@@ -115,7 +115,7 @@ step. In a release build the whole program takes about 549 microseconds per
 run, against about 399 microseconds for a variant whose `fill_mask` only
 copies the table, so about 70 percent of the runtime is state copying rather
 than DP relaxations (about 41 thousand). The benchmark therefore measures the
-fold-state copy more than the algorithm.
+fold-state copy more than the algorithm. A smaller state is a follow-up.
 
 References for Held-Karp, as listed in the Wikipedia article (which gives no
 DOI or URL for either):
