@@ -1,0 +1,12 @@
+[
+  {
+    "tool_call": {
+      "name": "write",
+      "arguments": {
+        "filePath": "{file}",
+        "content": "range(Colour).return\n"
+      }
+    }
+  },
+  { "text": "Wrote hello_world.marigold." }
+]

@@ -14,6 +14,8 @@ exclude = ["tests/emit_cli.rs", "tests/golden/**"]
 tokio = ["marigold-impl/tokio", "marigold-grammar/tokio"]
 async-std = ["marigold-impl/async-std", "marigold-grammar/async-std"]
 io = ["marigold-impl/io", "marigold-grammar/io", "marigold-macros/io"]
+otel = ["marigold-impl/otel", "marigold-grammar/otel", "marigold-macros/otel"]
+otel-otlp = ["otel", "marigold-impl/otel-otlp"]
 # `marigold-grammar/io`: `marigold emit` must generate the code the `m!` macro generates under
 # `marigold run` (the macro is built with grammar feature `io`, see `marigold emit --help`).
 cli = ["clap", "convert_case", "home", "serde_json", "marigold-grammar/io"]
