@@ -75,6 +75,8 @@ fn trimmed(pair: &Pair<'_, Rule>) -> ByteRange {
 }
 
 fn leaf(role: Role, kind: SegmentKind, source: ByteRange, name: Option<String>) -> SubSpan {
+    #[cfg(test)]
+    crate::source_map::count_subspan_step();
     SubSpan {
         role,
         kind,
@@ -85,6 +87,8 @@ fn leaf(role: Role, kind: SegmentKind, source: ByteRange, name: Option<String>) 
 }
 
 fn parts_of_expr(expr: Pair<'_, Rule>) -> Vec<SubSpan> {
+    #[cfg(test)]
+    crate::source_map::count_subspan_step();
     let Some(inner) = expr.into_inner().next() else {
         return Vec::new();
     };

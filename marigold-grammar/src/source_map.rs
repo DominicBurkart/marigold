@@ -108,6 +108,34 @@ use serde::Serialize;
 use std::cmp::Reverse;
 use std::collections::HashMap;
 
+thread_local! {
+    static SKIP_LAYOUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// While alive, [`Emit`] records no layout on this thread: the generated text is the same,
+/// but no [`Piece`] is built. `marigold_parse` runs under it because it needs only the text.
+pub(crate) struct SkipLayout {
+    previous: bool,
+}
+
+impl SkipLayout {
+    pub(crate) fn enter(skip: bool) -> SkipLayout {
+        SkipLayout {
+            previous: SKIP_LAYOUT.with(|c| c.replace(skip)),
+        }
+    }
+}
+
+impl Drop for SkipLayout {
+    fn drop(&mut self) {
+        SKIP_LAYOUT.with(|c| c.set(self.previous));
+    }
+}
+
+fn skipping_layout() -> bool {
+    SKIP_LAYOUT.with(|c| c.get())
+}
+
 #[cfg(test)]
 thread_local! {
     /// Key evaluations in the two sorts plus the steps of the parent-link pass.
@@ -118,8 +146,25 @@ thread_local! {
     static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Source-side parts compared with a generated piece while pairing them.
     static PAIR_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Pieces recorded, source-side parts built and parts paired: the work of sub-span segments.
+    static SUBSPAN_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Expressions visited by the passes of code generation plus `CodeBuilder` appends.
     static CODEGEN_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_subspan_steps() {
+    SUBSPAN_STEPS.with(|c| c.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn subspan_steps() -> usize {
+    SUBSPAN_STEPS.with(|c| c.get())
+}
+
+#[cfg(test)]
+pub(crate) fn count_subspan_step() {
+    count(&SUBSPAN_STEPS);
 }
 
 #[cfg(test)]
@@ -863,6 +908,12 @@ impl Emit {
     /// Run `f`, which appends text to this emit, and record the text it appended as one
     /// piece with the pieces it recorded as children. Text that is empty records nothing.
     pub fn piece(&mut self, role: Role, f: impl FnOnce(&mut Emit)) {
+        if skipping_layout() {
+            f(self);
+            return;
+        }
+        #[cfg(test)]
+        count(&SUBSPAN_STEPS);
         let start = self.s.len();
         let outer = std::mem::take(&mut self.pieces);
         f(self);
@@ -887,6 +938,11 @@ impl Emit {
     pub fn push_with(&mut self, text: &str, pieces: &[Piece]) {
         let base = self.s.len();
         self.s.push_str(text);
+        if skipping_layout() {
+            return;
+        }
+        #[cfg(test)]
+        count(&SUBSPAN_STEPS);
         self.pieces
             .extend(pieces.iter().cloned().map(|piece| piece.shifted(base)));
     }
@@ -895,6 +951,11 @@ impl Emit {
     pub fn splice(&mut self, other: Emit) {
         let base = self.s.len();
         self.s.push_str(&other.s);
+        if skipping_layout() {
+            return;
+        }
+        #[cfg(test)]
+        count(&SUBSPAN_STEPS);
         self.pieces
             .extend(other.pieces.into_iter().map(|piece| piece.shifted(base)));
     }
@@ -973,7 +1034,10 @@ fn attach_parts(
     for piece in pieces {
         let found = (cursor..parts.len()).chain(0..cursor).find(|&k| {
             #[cfg(test)]
-            count(&PAIR_STEPS);
+            {
+                count(&PAIR_STEPS);
+                count(&SUBSPAN_STEPS);
+            }
             parts[k].role == piece.role
         });
         let Some(k) = found else { continue };

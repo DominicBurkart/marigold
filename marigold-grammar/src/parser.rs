@@ -230,7 +230,7 @@ impl PestParser {
 
     /// Internal function: parse input and build AST
     fn parse_input(input: &str) -> Result<String, String> {
-        Self::generate_input_with(input, None).map(|generated| generated.rust)
+        Self::generate_input_with(input, None, false).map(|generated| generated.rust)
     }
 
     #[cfg(feature = "otel")]
@@ -238,7 +238,7 @@ impl PestParser {
         input: &str,
         options: &crate::instrument::CodegenOptions,
     ) -> Result<String, String> {
-        Self::generate_instrumented(input, options).map(|generated| generated.rust)
+        Self::generate_instrumented_with(input, options, false).map(|generated| generated.rust)
     }
 
     #[cfg(feature = "otel")]
@@ -246,8 +246,17 @@ impl PestParser {
         input: &str,
         options: &crate::instrument::CodegenOptions,
     ) -> Result<crate::source_map::GeneratedProgram, String> {
+        Self::generate_instrumented_with(input, options, true)
+    }
+
+    #[cfg(feature = "otel")]
+    fn generate_instrumented_with(
+        input: &str,
+        options: &crate::instrument::CodegenOptions,
+        layout: bool,
+    ) -> Result<crate::source_map::GeneratedProgram, String> {
         let plan = Plan::new(input, options);
-        Self::generate_input_with(input, Some(&plan))
+        Self::generate_input_with(input, Some(&plan), layout)
     }
 
     /// Parse input, generate Rust code and map every generated item back to the
@@ -259,18 +268,24 @@ impl PestParser {
     pub(crate) fn generate_input(
         input: &str,
     ) -> Result<crate::source_map::GeneratedProgram, String> {
-        Self::generate_input_with(input, None)
+        Self::generate_input_with(input, None, true)
     }
 
     fn generate_input_with(
         input: &str,
         plan: Option<&Plan>,
+        layout: bool,
     ) -> Result<crate::source_map::GeneratedProgram, String> {
+        let _skip = crate::source_map::SkipLayout::enter(!layout);
         // Stage 1: Parse with Pest grammar
         let pairs = MarigoldPestParser::parse(Rule::program, input)
             .map_err(|e| format!("Parse error: {}", e))?;
         let ranges = Self::expr_ranges(&pairs);
-        let parts = crate::sub_spans::skeletons(&pairs);
+        let parts = if layout {
+            crate::sub_spans::skeletons(&pairs)
+        } else {
+            Vec::new()
+        };
 
         // Stage 2: Build AST from parse tree
         let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)?;
@@ -2361,5 +2376,76 @@ mod function_grammar_tests {
             steps >= 3 * statements,
             "{steps} steps for {statements} statements"
         );
+    }
+
+    const SUBSPAN_PROGRAMS: &[&str] = &[
+        "range(0, 5).return",
+        "range(0, 5).map(f).filter(g).return",
+        "x = range(0, 3).map(f)\nx.return",
+        "struct S { a: u8, b: u8 }\nrange(0, 5).return",
+        "enum E { A, B }\nrange(0, 5).return",
+        "fn f(x: u32) -> u32 { x }\nrange(0, 5).map(f).return",
+        "select_all(range(0, 2), range(2, 4)).return",
+        "range(0, 5).write_file(\"o.csv\", csv)",
+    ];
+
+    #[test]
+    fn marigold_parse_does_no_sub_span_work() {
+        for program in SUBSPAN_PROGRAMS {
+            crate::source_map::reset_subspan_steps();
+            let rust = crate::marigold_parse(program).unwrap();
+            assert!(!rust.is_empty());
+            assert_eq!(
+                crate::source_map::subspan_steps(),
+                0,
+                "marigold_parse did sub-span work for {program:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn marigold_generate_does_sub_span_work() {
+        for program in SUBSPAN_PROGRAMS {
+            crate::source_map::reset_subspan_steps();
+            let generated = crate::marigold_generate(program).unwrap();
+            assert!(!generated.rust.is_empty());
+            assert!(
+                crate::source_map::subspan_steps() > 0,
+                "marigold_generate did no sub-span work for {program:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_and_generate_agree_byte_for_byte_with_and_without_layout() {
+        for program in SUBSPAN_PROGRAMS {
+            assert_eq!(
+                crate::marigold_parse(program).unwrap(),
+                crate::marigold_generate(program).unwrap().rust,
+                "{program:?}"
+            );
+        }
+    }
+
+    #[cfg(feature = "otel")]
+    #[test]
+    fn instrumented_parse_does_no_sub_span_work_and_generate_does() {
+        let options = crate::instrument::CodegenOptions::new("t");
+        for program in SUBSPAN_PROGRAMS {
+            crate::source_map::reset_subspan_steps();
+            let parsed = crate::marigold_parse_instrumented(program, &options).unwrap();
+            assert_eq!(
+                crate::source_map::subspan_steps(),
+                0,
+                "marigold_parse_instrumented did sub-span work for {program:?}"
+            );
+            crate::source_map::reset_subspan_steps();
+            let generated = crate::marigold_generate_instrumented(program, &options).unwrap();
+            assert!(
+                crate::source_map::subspan_steps() > 0,
+                "marigold_generate_instrumented did no sub-span work for {program:?}"
+            );
+            assert_eq!(parsed, generated.rust);
+        }
     }
 }
