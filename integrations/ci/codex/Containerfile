@@ -1,0 +1,9 @@
+FROM docker.io/library/node:22-slim
+ARG CODEX_VERSION
+RUN test -n "$CODEX_VERSION" \
+ && npm install -g "@openai/codex@${CODEX_VERSION}" \
+ && npm cache clean --force \
+ && codex --version
+ENV HOME=/work/home
+ENV CODEX_HOME=/work/codex-home
+WORKDIR /work

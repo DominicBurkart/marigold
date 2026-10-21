@@ -10,6 +10,8 @@ pub mod marifold;
 pub mod multi_consumer_stream;
 pub mod permutations;
 pub mod run_stream;
+#[cfg(feature = "otel")]
+pub mod telemetry;
 
 pub use collect_and_apply::CollectAndAppliable;
 pub use combinations::Combinable;
