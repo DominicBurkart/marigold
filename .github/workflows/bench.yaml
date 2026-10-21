@@ -145,7 +145,8 @@ jobs:
       run: cargo bench --bench color_picker_bench --features tokio -- --baseline main 2>&1 | tee /tmp/bench_color_picker_bench.txt
       working-directory: examples/color-palette-picker
     - if: steps.restore-baseline.outputs.found == 'true'
-      run: cargo bench --bench algorithms_bench --features tokio -- --baseline main 2>&1 | tee /tmp/bench_algorithms_bench.txt
+      shell: bash -eo pipefail {0}
+      run: cargo bench --bench algorithms_bench --features tokio -- --baseline-lenient main 2>&1 | tee /tmp/bench_algorithms_bench.txt
       working-directory: examples/algorithms
 
     - name: Criterion benches — no baseline available
