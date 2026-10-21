@@ -1,21 +1,29 @@
-use algorithms::block_on;
 use criterion::{criterion_group, criterion_main, Criterion};
 
+fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Runtime::new().expect("could not build tokio runtime")
+}
+
 fn bench_gcd(c: &mut Criterion) {
-    c.bench_function("gcd", |b| b.iter(|| block_on(algorithms::gcd::run())));
+    let rt = runtime();
+    c.bench_function("gcd", |b| {
+        b.to_async(&rt).iter(algorithms::gcd::run);
+    });
 }
 
 fn bench_tsp_metaheuristics(c: &mut Criterion) {
+    let rt = runtime();
     let mut group = c.benchmark_group("tsp_metaheuristics");
     group.sample_size(10);
     group.bench_function("tsp_simulated_annealing", |b| {
-        b.iter(|| block_on(algorithms::tsp_simulated_annealing::run()))
+        b.to_async(&rt)
+            .iter(algorithms::tsp_simulated_annealing::run);
     });
     group.bench_function("tsp_genetic", |b| {
-        b.iter(|| block_on(algorithms::tsp_genetic::run()))
+        b.to_async(&rt).iter(algorithms::tsp_genetic::run);
     });
     group.bench_function("tsp_ant_colony", |b| {
-        b.iter(|| block_on(algorithms::tsp_ant_colony::run()))
+        b.to_async(&rt).iter(algorithms::tsp_ant_colony::run);
     });
     group.finish();
 }

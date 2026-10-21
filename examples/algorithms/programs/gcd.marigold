@@ -1,13 +1,47 @@
-fn start() -> [u64; 2] {
-    [1071, 462]
+fn start() -> [[u32; 2]; 64] {
+    let mut pairs = [[0u32; 2]; 64];
+    let mut hi: u32 = 2;
+    let mut lo: u32 = 1;
+    let mut i = 0;
+    while i < 45 {
+        pairs[i] = [hi, lo];
+        let next = hi.wrapping_add(lo);
+        lo = hi;
+        hi = next;
+        i += 1;
+    }
+    let mut x: u32 = 12345;
+    while i < 64 {
+        x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+        let a = x;
+        x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+        let b = if i == 63 { 0 } else { x };
+        pairs[i] = [a, b];
+        i += 1;
+    }
+    pairs
 }
 
-fn step(state: [u64; 2], _round: i32) -> [u64; 2] {
-    if state[1] == 0 { state } else { [state[1], state[0] % state[1]] }
+fn step(pairs: [[u32; 2]; 64], _round: i32) -> [[u32; 2]; 64] {
+    let mut next = pairs;
+    let mut i = 0;
+    while i < 64 {
+        if pairs[i][1] != 0 {
+            next[i] = [pairs[i][1], pairs[i][0] % pairs[i][1]];
+        }
+        i += 1;
+    }
+    next
 }
 
-fn first(state: [u64; 2]) -> u64 {
-    state[0]
+fn divisors(pairs: [[u32; 2]; 64]) -> [u32; 64] {
+    let mut out = [0u32; 64];
+    let mut i = 0;
+    while i < 64 {
+        out[i] = pairs[i][0];
+        i += 1;
+    }
+    out
 }
 
-range(0, 48).fold(start, step).map(first).return
+range(0, 48).fold(start, step).map(divisors).return

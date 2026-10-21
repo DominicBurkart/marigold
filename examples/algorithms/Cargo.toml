@@ -4,15 +4,14 @@ version = "0.1.0"
 publish = false
 edition = "2021"
 license = "Apache-2.0 OR MIT"
-build = "build.rs"
 
 [features]
-tokio = ["marigold/tokio", "marigold-grammar/tokio", "tokio/rt-multi-thread"]
-async-std = ["dep:async-std", "marigold/async-std", "marigold-grammar/async-std"]
+tokio = ["marigold/tokio", "tokio/rt-multi-thread"]
+async-std = ["dep:async-std", "marigold/async-std"]
 
 [dependencies]
 async-std = {version = "1", features = ["attributes"], optional = true}
-tokio = {version = "1", features = ["rt", "macros"]}
+tokio = {version = "1", features = ["rt", "rt-multi-thread", "macros"]}
 
 [dependencies.marigold]
 path = "../../marigold"
@@ -23,7 +22,8 @@ path = "../../marigold-grammar"
 version = "=0.2.0"
 
 [dev-dependencies]
-criterion = {version = "0.5", features = ["html_reports"]}
+marigold-grammar = {path = "../../marigold-grammar", version = "=0.2.0"}
+criterion = {version = "0.5", features = ["async_tokio", "html_reports"]}
 
 [[bench]]
 name = "algorithms_bench"
