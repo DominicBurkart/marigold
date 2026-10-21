@@ -21,15 +21,13 @@
 //! ```
 //! use marigold_grammar::rustc_json::{parse_messages, Level};
 //!
-//! // What `cargo build --message-format=json` printed: an artifact record, a
-//! // diagnostic wrapped by cargo, and cargo's human-readable summary line.
 //! let output = r#"{"reason":"compiler-artifact","package_id":"p 0.1.0"}
 //! {"reason":"compiler-message","package_id":"p 0.1.0","manifest_path":"/w/Cargo.toml","message":{"message":"cannot find value `x` in this scope","code":{"code":"E0425","explanation":"..."},"level":"error","spans":[{"file_name":"src/gen.rs","byte_start":10,"byte_end":11,"line_start":2,"line_end":2,"column_start":5,"column_end":6,"is_primary":true,"label":"not found in this scope","text":[],"expansion":null}],"children":[],"rendered":null}}
 //! error: could not compile `p` due to 1 previous error"#;
 //!
 //! let parsed = parse_messages(output);
-//! assert_eq!(parsed.skipped, 1); // the artifact record
-//! assert_eq!(parsed.errors.len(), 1); // the last line is not JSON
+//! assert_eq!(parsed.skipped, 1);
+//! assert_eq!(parsed.errors.len(), 1);
 //! assert_eq!(parsed.errors[0].line, 3);
 //!
 //! let message = &parsed.messages[0];
@@ -170,7 +168,6 @@ pub struct RustcDiagnostic {
 /// ```
 /// use marigold_grammar::rustc_json::RustcCode;
 ///
-/// // `explanation` is present in rustc's output and deliberately not read.
 /// let code: RustcCode = serde_json::from_str(r#"{"code":"E0308","explanation":"long text"}"#).unwrap();
 /// assert_eq!(code.code, "E0308");
 /// ```
@@ -197,7 +194,6 @@ pub struct RustcCode {
 /// assert_eq!((span.byte_start, span.byte_end), (5, 9));
 /// assert!(span.is_primary && span.text.is_empty() && span.expansion.is_none());
 ///
-/// // Spans are plain data: build one by default-constructing it.
 /// let mut built = RustcSpan::default();
 /// built.file_name = "src/gen.rs".to_string();
 /// assert_eq!(built.byte_end, 0);
@@ -243,7 +239,6 @@ pub struct RustcSpan {
 /// let line: RustcSpanLine = serde_json::from_str(
 ///     r#"{"text":"let a = 1;","highlight_start":5,"highlight_end":6}"#,
 /// ).unwrap();
-/// // `highlight_*` are 1-based columns in scalar values, end exclusive.
 /// assert_eq!(&line.text[line.highlight_start - 1..line.highlight_end - 1], "a");
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]

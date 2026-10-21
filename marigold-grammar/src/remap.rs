@@ -67,7 +67,6 @@
 //! let src = "fn f(x: i32) -> i32 { x }\nrange(0, 1).map(f).return";
 //! let program = marigold_generate(src).unwrap();
 //! let at = program.rust.find("{ x }").unwrap() + 2;
-//! // What `cargo build --message-format=json` printed (shortened).
 //! let stream = format!(
 //!     "{{\"reason\":\"compiler-message\",\"package_id\":\"app 0.1.0\",\"message\":{{\"message\":\"m\",\"level\":\"error\",\"children\":[],\"spans\":[{{\"file_name\":\"src/gen.rs\",\"byte_start\":{at},\"byte_end\":{},\"is_primary\":true}}]}}}}\n",
 //!     at + 1,
@@ -145,7 +144,6 @@
 //! let src = "fn f(x: i32) -> i32 { x }\nrange(0, 1).map(f).write_file(\"o\", csv)";
 //! let program = marigold_generate(src).unwrap();
 //!
-//! // Pretend rustc rejected the `x` in the function body of the file the code was written to.
 //! let start = program.rust.find("{ x }").unwrap() + 2;
 //! let json = format!(
 //!     r#"{{"$message_type":"diagnostic","message":"mismatched types","level":"error",
@@ -194,7 +192,6 @@ const MAX_EXPANSION_HOPS: usize = 64;
 /// let is_generated = |file: &str| file == "gen.rs";
 /// let remapper = Remapper::new(&program, src, &is_generated);
 ///
-/// // Line 1 of the generated file is the preamble: glue, nothing to map to.
 /// assert!(remapper.locate("gen.rs", 1, None, marigold_grammar::remap::TraceColumnUnit::Bytes).marigold.is_none());
 /// let at = program.rust.find("{ x }").unwrap() + 2;
 /// let line = program.rust[..at].matches('\n').count() + 1;
@@ -355,7 +352,6 @@ pub struct ReportedSpan {
 /// let program = marigold_generate(src).unwrap();
 /// let is_generated = |_: &str| true;
 /// let remapper = Remapper::new(&program, src, &is_generated);
-/// // A removal suggestion has an empty replacement; it is kept.
 /// let span: RustcSpan = serde_json::from_str(r#"{"byte_start":0,"byte_end":0,"suggested_replacement":"","suggestion_applicability":"MachineApplicable"}"#).unwrap();
 /// let suggestion = remapper.map_span(&span).suggestion.unwrap();
 /// assert_eq!(suggestion.replacement, "");
@@ -496,7 +492,6 @@ impl MappedDiagnostic {
     /// let program = marigold_generate(src).unwrap();
     /// let is_generated = |file: &str| file == "gen.rs";
     /// let remapper = Remapper::new(&program, src, &is_generated);
-    /// // The primary span is in another file; the note's span is in the generated code.
     /// let at = program.rust.find("returning_stream_0").unwrap();
     /// let line = format!(
     ///     r#"{{"$message_type":"diagnostic","message":"m","level":"error","spans":[{{"file_name":"other.rs","byte_start":0,"byte_end":1,"is_primary":true}}],
@@ -780,7 +775,6 @@ fn count(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>) {
 /// let is_generated = |file: &str| file.ends_with("gen.rs");
 /// let remapper = Remapper::new(&program, src, &is_generated);
 ///
-/// // The `x` in the function body, found from a run-time location (line, scalar column).
 /// let at = program.rust.find("{ x }").unwrap() + 2;
 /// let line = program.rust[..at].matches('\n').count() + 1;
 /// let column = at - program.rust[..at].rfind('\n').map_or(0, |i| i + 1) + 1;
@@ -946,14 +940,12 @@ impl<'a> Remapper<'a> {
     /// let is_generated = |file: &str| file == "src/main.rs";
     /// let remapper = Remapper::new(&program, src, &is_generated).with_prefix(prefix);
     ///
-    /// // Offsets are those of the whole file.
     /// let at = prefix.len() + program.rust.find("{ x }").unwrap() + 2;
     /// let span: RustcSpan = serde_json::from_str(&format!(
     ///     r#"{{"file_name":"src/main.rs","byte_start":{at},"byte_end":{}}}"#, at + 1,
     /// )).unwrap();
     /// assert_eq!(remapper.map_span(&span).precision, Precision::Exact);
     ///
-    /// // A span inside the prefix is outside the generated region.
     /// let wrapper: RustcSpan = serde_json::from_str(r#"{"file_name":"src/main.rs","byte_start":0,"byte_end":2}"#).unwrap();
     /// assert!(matches!(remapper.map_span(&wrapper).precision, Precision::Unmapped { .. }));
     /// ```
@@ -1133,7 +1125,7 @@ impl<'a> Remapper<'a> {
     /// let located = remapper.locate("src/gen.rs", line, Some(at - line_start + 1), TraceColumnUnit::Bytes);
     /// assert_eq!(located.precision, Precision::Exact);
     /// let range = located.marigold.unwrap().range;
-    /// assert_eq!(range.start, 22); // the position of `x` in the Marigold function
+    /// assert_eq!(range.start, 22);
     /// assert_eq!(range.start, range.end);
     ///
     /// assert!(remapper.locate("src/other.rs", line, None, TraceColumnUnit::Bytes).marigold.is_none());
@@ -1185,7 +1177,6 @@ impl<'a> Remapper<'a> {
     /// let is_generated = |file: &str| file == "src/gen.rs";
     /// let remapper = Remapper::new(&program, src, &is_generated);
     /// let line = program.rust[..program.rust.find("{ x }").unwrap()].matches('\n').count() + 1;
-    /// // the generated line is indented, so it is the `fn` and some glue: the whole `fn`
     /// let located = remapper.locate_line("src/gen.rs", line);
     /// assert_eq!(located.precision, Precision::Expression);
     /// let range = located.marigold.unwrap().range;
