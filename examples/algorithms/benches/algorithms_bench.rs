@@ -8,14 +8,14 @@ fn bench_gcd(c: &mut Criterion) {
 }
 
 fn bench_knapsack(c: &mut Criterion) {
-    let rt = runtime();
+    let rt = algorithms::runtime();
     c.bench_function("knapsack", |b| {
         b.to_async(&rt).iter(algorithms::knapsack::run);
     });
 }
 
 fn bench_floyd_warshall(c: &mut Criterion) {
-    let rt = runtime();
+    let rt = algorithms::runtime();
     c.bench_function("floyd_warshall", |b| {
         b.to_async(&rt).iter(algorithms::floyd_warshall::run);
     });
