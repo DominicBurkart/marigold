@@ -101,8 +101,9 @@ factor lives inside `fill_mask`, where the analyzer cannot see it
 
 The analyzer has no exponential complexity class
 ([#435](https://github.com/DominicBurkart/marigold/issues/435)), so the
-canonical class cannot be expressed. `held_karp_canonical_class_is_not_representable`
-pins the actual output instead: O(1), exact O(2), and 511 masks.
+canonical class cannot be expressed.
+`held_karp_canonical_class_is_not_representable` pins the O(1) time class and
+the 511-mask prefix instead; `tsp_held_karp` pins exact O(2).
 
 Simplification: the DP table (512 masks x 9 end cities, a fixed
 `[i32; 4608]`) is the fold state because `const fn` has no heap structures.
@@ -113,9 +114,10 @@ separate map.
 Cost of that state: the fold passes the roughly 18 KB table by value on every
 step. In a release build the whole program takes about 549 microseconds per
 run, against about 399 microseconds for a variant whose `fill_mask` only
-copies the table, so about 70 percent of the runtime is state copying rather
-than DP relaxations (about 41 thousand). The benchmark therefore measures the
-fold-state copy more than the algorithm. A smaller state is a follow-up.
+copies the table, so roughly 70 to 80 percent of the runtime is state copying
+rather than DP work (the program executes 9,216 relaxations). The benchmark
+therefore measures the fold-state copy more than the algorithm. A smaller
+state is a follow-up.
 
 References for Held-Karp, as listed in the Wikipedia article (which gives no
 DOI or URL for either):
