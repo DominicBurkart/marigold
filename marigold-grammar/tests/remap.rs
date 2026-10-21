@@ -4563,6 +4563,20 @@ fn n28_alternatives_at_one_place_are_not_the_parts_of_one_edit() {
             (1, 2, 1, 2, false, "]".to_string()),
         ]
     );
+    // places are numbered in the order rustc lists them, also when a later span joins an earlier place
+    let d = help(vec![
+        suggestion_part(t, "gen.rs", x, x, "a"),
+        suggestion_part(t, "gen.rs", x + 5, x + 5, ")"),
+        suggestion_part(t, "gen.rs", x, x, "c"),
+    ]);
+    assert_eq!(
+        numbered(&d),
+        [
+            (0, 2, 0, 2, false, "a".to_string()),
+            (0, 2, 1, 2, false, "c".to_string()),
+            (1, 2, 0, 1, false, ")".to_string()),
+        ]
+    );
     // neighbours and an insertion at the start of a replaced range are different places
     let d = help(vec![
         suggestion_part(t, "gen.rs", x, x + 1, "a"),
@@ -4614,6 +4628,12 @@ fn n29_an_at_line_that_may_be_a_backtrace_frame_in_an_unknown_form_never_maps_be
             Seg,
         ),
         (format!("  at {at}"), TraceColumnUnit::DisplayWidth, Seg),
+        (format!("\tat {at}"), TraceColumnUnit::DisplayWidth, Seg),
+        (
+            format!("   0: f\n\n\tat {at}"),
+            TraceColumnUnit::DisplayWidth,
+            Seg,
+        ),
         // inside a line it is a message: display width, which agrees on this ASCII line
         (
             format!("failed at {at}"),
