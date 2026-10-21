@@ -14,11 +14,13 @@ requested runtime but do not exercise the parallel codegen paths.
 
 Every example has three checks:
 
-| Check | Where |
-| --- | --- |
-| program runs and returns the right answer, compared with an independent oracle | `src/<name>.rs` tests (`cargo test -p algorithms`) |
-| analyzer estimate pinned; where it differs from the canonical class, a test asserts the difference so an analyzer fix shows up as a failing test | `tests/complexity.rs` |
-| benchmark | `benches/algorithms_bench.rs`, run by `.github/workflows/bench.yaml` |
+- The program runs and returns the right answer, compared with an independent
+  oracle: `src/<name>.rs` tests (`cargo test -p algorithms`).
+- The analyzer estimate is pinned in `tests/complexity.rs`. Where it differs
+  from the canonical class, a test asserts the difference, so an analyzer fix
+  shows up as a failing test.
+- A benchmark in `benches/algorithms_bench.rs`, run by
+  `.github/workflows/bench.yaml`.
 
 ## Writing a program
 
@@ -26,23 +28,28 @@ Every example has three checks:
   emitted as `const fn`, so bodies cannot allocate or use iterators; use fixed
   size arrays and `while` loops. Array literals need an explicit element type
   when a method such as `.abs()` is called on their items.
-- There are no comments at top level of a `.marigold` file. References live in
-  the table below.
+- There are no comments at top level of a `.marigold` file. References live
+  in this file.
 - Fixed-size inputs are declared inside functions. The analyzer sees only the
   stream shape, so loops that live inside a function body are invisible to it.
+- Keep this file within 80 columns (markdownlint enforces it, tables
+  included): one `###` section per program, as below.
 
 ## Programs
 
-| Program | Issue | Reference | Canonical complexity | Analyzer estimate |
-| --- | --- | --- | --- | --- |
-| `gcd` | [#410](https://github.com/DominicBurkart/marigold/issues/410) | [Euclidean algorithm](https://en.wikipedia.org/wiki/Euclidean_algorithm) | O(log(min(a, b))) | O(1), exact O(2): a fold over the constant `range(0, 48)` and a map. |
+### gcd
 
-### GCD
+- Issue: [#410](https://github.com/DominicBurkart/marigold/issues/410)
+- Reference: [Euclidean algorithm](https://en.wikipedia.org/wiki/Euclidean_algorithm)
+- Canonical complexity: O(log(min(a, b)))
+- Analyzer estimate: O(1), exact O(2): a fold over the constant
+  `range(0, 48)` and a map.
 
 Marigold has no data-dependent termination: a fold runs for the length of its
 source. This Euclid is therefore a fixed-iteration program, O(1) by
 construction, and the analyzer's O(1) is correct for the program as written.
-It is not a demonstration of O(log(min(a, b))).
+It is not a demonstration of O(log(min(a, b))); see
+[#429](https://github.com/DominicBurkart/marigold/issues/429).
 
 The 48 rounds bound the Euclid steps for every `u32` pair: the worst case is
 consecutive Fibonacci numbers (Lamé's theorem), and the largest such pair that
