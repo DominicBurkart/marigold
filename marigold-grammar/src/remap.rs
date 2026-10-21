@@ -1985,6 +1985,50 @@ mod tests {
     use crate::source_map::SourceMap;
     use std::path::Path;
 
+    fn existing_kinds() -> [(SegmentKind, bool, bool); 7] {
+        [
+            (SegmentKind::Struct, true, false),
+            (SegmentKind::Enum, true, false),
+            (SegmentKind::Function, true, true),
+            (SegmentKind::StreamVariable, false, false),
+            (SegmentKind::StreamVariableRunner, false, false),
+            (SegmentKind::ReturningStream, false, false),
+            (SegmentKind::NonReturningStream, false, false),
+        ]
+    }
+
+    #[test]
+    fn segment_kind_helpers_decide_every_existing_kind_new_kinds_must_be_added_when_t2_merges() {
+        let kinds = existing_kinds();
+        let distinct: std::collections::HashSet<_> = kinds.iter().map(|k| k.0).collect();
+        assert_eq!(distinct.len(), kinds.len());
+        let rust = "const fn f(x: i32) -> i32 { x }";
+        let source = "fn f(x: i32) -> i32 { x }";
+        let generated = ByteRange {
+            start: 0,
+            end: rust.len(),
+        };
+        let range = ByteRange {
+            start: 0,
+            end: source.len(),
+        };
+        for (kind, user_authored, suffix_verbatim) in kinds {
+            assert_eq!(is_user_authored(kind), user_authored, "{kind:?}");
+            assert_eq!(suffix_is_verbatim(kind), suffix_verbatim, "{kind:?}");
+            let want = if suffix_verbatim { source.len() } else { 0 };
+            assert_eq!(
+                verbatim_len(kind, rust, generated, source, range),
+                want,
+                "{kind:?}"
+            );
+            assert_eq!(
+                verbatim_len(kind, source, range, source, range),
+                source.len(),
+                "{kind:?}"
+            );
+        }
+    }
+
     fn counters() -> (usize, usize) {
         (SCANNED.with(|c| c.get()), WALKED.with(|c| c.get()))
     }
