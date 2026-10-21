@@ -849,8 +849,7 @@ mod tests {
         // Scrambled input order, so an uncounted insertion sort in `new` is quadratic here
         // too; source order is the reverse of generated order.
         let segments = scrambled(n);
-        // Timed from before construction: building the indexes must be fast too.
-        let t = std::time::Instant::now();
+        reset_counters();
         let m = SourceMap::new(segments);
         let mut hits = 0;
         for i in 0..n {
@@ -859,7 +858,14 @@ mod tests {
             hits += m.generated_for_source(r(i * 10, i * 10 + 8)).len();
         }
         assert_eq!(hits, n + n);
-        // O(n log n): milliseconds. O(n^2) would need ~2*10^10 comparisons.
-        assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
+        let log_n = usize::BITS as usize - n.leading_zeros() as usize;
+        let (build, walk, scanned) = (
+            counter(&BUILD_STEPS),
+            counter(&WALK_STEPS),
+            counter(&SCANNED),
+        );
+        assert!(build <= 5 * n * log_n, "{build} build steps");
+        assert!(walk <= 4 * n, "{walk} parent links followed");
+        assert!(scanned <= 4 * n, "{scanned} segments scanned");
     }
 }

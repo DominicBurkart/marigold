@@ -431,4 +431,81 @@ mod tests {
         assert_eq!(index.non_ascii.keys().copied().collect::<Vec<_>>(), [1]);
         assert!(index.non_ascii[&1].is_empty());
     }
+
+    fn lc(line: usize, column: usize) -> LineCol {
+        LineCol { line, column }
+    }
+
+    #[test]
+    fn many_short_lines_need_no_character_scanning() {
+        let text = "x\n".repeat(200_000);
+        let index = LineIndex::new(&text);
+        let mut worst = 0;
+        for i in 0..200_000usize {
+            worst = worst.max(scanned(|| {
+                assert_eq!(index.line_col(i * 2, ColumnUnit::Chars), lc(i + 1, 1));
+            }));
+        }
+        assert!(worst <= STRIDE + 4, "a query scanned {worst} characters");
+    }
+
+    #[test]
+    fn column_queries_on_a_long_ascii_line_scan_no_characters() {
+        let text = "a".repeat(2_000_000);
+        let index = LineIndex::new(&text);
+        let mut worst = 0;
+        for i in 0..200_000usize {
+            worst = worst.max(scanned(|| {
+                assert_eq!(index.line_col(i * 10, ColumnUnit::Chars), lc(1, i * 10 + 1));
+                assert_eq!(index.offset(1, i * 10 + 1, ColumnUnit::Utf16), Some(i * 10));
+            }));
+        }
+        assert!(worst <= STRIDE + 4, "a query scanned {worst} characters");
+    }
+
+    #[test]
+    fn a_long_line_with_one_multibyte_character_scans_one_stride_per_query() {
+        let text = format!("é{}", "a".repeat(909_000));
+        let index = LineIndex::new(&text);
+        let mut worst = 0;
+        for i in 0..20_000usize {
+            let b = 2 + (i * 45) % 909_000;
+            let want = lc(1, b);
+            worst = worst.max(scanned(|| {
+                assert_eq!(index.line_col(b, ColumnUnit::Chars), want);
+                assert_eq!(index.line_col(b, ColumnUnit::Utf16), want);
+                assert_eq!(index.offset(1, b, ColumnUnit::Chars), Some(b));
+            }));
+        }
+        assert!(
+            worst <= 3 * (STRIDE + 4),
+            "a query scanned {worst} characters"
+        );
+        assert!(worst >= 1, "the counter saw no work");
+    }
+
+    #[test]
+    fn twenty_thousand_expressions_on_one_line_build_with_bounded_scanning() {
+        let n = 20_000;
+        let src: String = (0..n)
+            .map(|i| format!("v{i} = range(0, 1) "))
+            .collect::<String>()
+            + "v0.return";
+        let g = crate::marigold_generate(&src).unwrap();
+        let mut doc = None;
+        let work = scanned(|| {
+            doc = Some(crate::emit::EmitDocument::new(&src, &g.rust, &g.map));
+        });
+        let doc = doc.unwrap();
+        assert_eq!(doc.segments.len(), 2 * n + 1);
+        let last = doc.segments.iter().find(|s| s.expr_index == n).unwrap();
+        assert_eq!(
+            (last.source.start_line, last.source.start_column),
+            (1, src.len() - "v0.return".len() + 1)
+        );
+        assert!(
+            work <= 4 * (STRIDE + 4) * doc.segments.len(),
+            "building the document scanned {work} characters"
+        );
+    }
 }

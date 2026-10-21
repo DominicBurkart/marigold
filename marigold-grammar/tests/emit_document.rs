@@ -780,36 +780,6 @@ fn naive_line_col_helper_agrees_with_a_hand_computed_case() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// scale
-// ---------------------------------------------------------------------------------------------
-
-#[test]
-fn twenty_thousand_expressions_on_one_line_build_in_linear_time() {
-    use std::time::{Duration, Instant};
-    // One source line (so every column lookup is against a 400 KB line) and, on the Rust side,
-    // a few very long lines: a per-lookup rescan of the line would be ~3e10 byte visits.
-    let n = 20_000;
-    let src: String = (0..n)
-        .map(|i| format!("v{i} = range(0, 1) "))
-        .collect::<String>()
-        + "v0.return";
-    let g = marigold_generate(&src).unwrap();
-    let t = Instant::now();
-    let doc = EmitDocument::new(&src, &g.rust, &g.map);
-    let elapsed = t.elapsed();
-    assert_eq!(doc.segments.len(), 2 * n + 1);
-    assert!(
-        elapsed < Duration::from_secs(10),
-        "building the document took {elapsed:?}"
-    );
-    let last = doc.segments.iter().find(|s| s.expr_index == n).unwrap();
-    assert_eq!(
-        (last.source.start_line, last.source.start_column),
-        (1, src.len() - "v0.return".len() + 1)
-    );
-}
-
-// ---------------------------------------------------------------------------------------------
 // deep nesting and validator meta-tests with hand-built documents
 // ---------------------------------------------------------------------------------------------
 

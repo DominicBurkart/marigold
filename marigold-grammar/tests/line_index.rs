@@ -360,44 +360,6 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------------------------
-// scale
-// ---------------------------------------------------------------------------------------------
-
-#[test]
-fn many_lines_and_long_ascii_lines_are_cheap() {
-    use std::time::{Duration, Instant};
-    let budget = Duration::from_secs(5);
-    // 200k lines: building is linear, a query is a binary search.
-    let many_lines = "x\n".repeat(200_000);
-    let idx = LineIndex::new(&many_lines);
-    let t = Instant::now();
-    for i in 0..200_000usize {
-        assert_eq!(idx.line_col(i * 2, ColumnUnit::Chars), lc(i + 1, 1));
-        assert!(
-            i % 1000 != 0 || t.elapsed() < budget,
-            "line lookups are not O(log n): {:?}",
-            t.elapsed()
-        );
-    }
-
-    // One 2 MB ASCII line, 200k column queries: must not rescan the line for each query
-    // (a rescan is ~2e5 * 1e6 byte visits). The clock is checked inside the loop so a
-    // quadratic implementation fails in seconds instead of minutes.
-    let long_line = "a".repeat(2_000_000);
-    let idx = LineIndex::new(&long_line);
-    let t = Instant::now();
-    for i in 0..200_000usize {
-        assert_eq!(idx.line_col(i * 10, ColumnUnit::Chars), lc(1, i * 10 + 1));
-        assert_eq!(idx.offset(1, i * 10 + 1, ColumnUnit::Utf16), Some(i * 10));
-        assert!(
-            i % 1000 != 0 || t.elapsed() < budget,
-            "ASCII column lookups are not O(1): {:?}",
-            t.elapsed()
-        );
-    }
-}
-
-// ---------------------------------------------------------------------------------------------
 // external oracle: rustc
 // ---------------------------------------------------------------------------------------------
 
@@ -615,28 +577,5 @@ fn long_ascii_prefix_then_multibyte_text_on_the_same_line() {
                 );
             }
         }
-    }
-}
-
-#[test]
-fn a_long_line_with_one_multibyte_character_is_cheap() {
-    use std::time::{Duration, Instant};
-    // 909 KB on one line and a single `é`: with a whole-text ASCII flag every query rescans the line
-    // (17 s for the emit document of such a file). The clock is checked inside the loop.
-    let line = format!("é{}", "a".repeat(909_000));
-    let idx = LineIndex::new(&line);
-    let budget = Duration::from_secs(10);
-    let t = Instant::now();
-    for i in 0..20_000usize {
-        let b = 2 + (i * 45) % 909_000;
-        let want = lc(1, b); // one `é` of two bytes: chars = bytes - 1
-        assert_eq!(idx.line_col(b, ColumnUnit::Chars), want);
-        assert_eq!(idx.line_col(b, ColumnUnit::Utf16), want);
-        assert_eq!(idx.offset(1, b, ColumnUnit::Chars), Some(b));
-        assert!(
-            i % 500 != 0 || t.elapsed() < budget,
-            "non-ASCII line lookups are not bounded: {:?}",
-            t.elapsed()
-        );
     }
 }

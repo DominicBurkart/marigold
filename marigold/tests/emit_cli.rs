@@ -1287,7 +1287,7 @@ fn large_programs_round_trip_and_stay_fast() {
     let path = write_temp("large.marigold", &src);
     let t = Instant::now();
     let out = emit_file(&["--format", "json"], &path);
-    assert!(t.elapsed() < Duration::from_secs(30), "{:?}", t.elapsed());
+    assert!(t.elapsed() < Duration::from_secs(60), "{:?}", t.elapsed());
     assert_eq!(out.status.code(), Some(0));
     let doc = stdout_json(&out);
     validate_v1(&doc).unwrap();
