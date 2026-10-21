@@ -21,7 +21,11 @@ fn weigh(pair: [i32; 2]) -> [i64; 3] {
         }
         i += 1;
     }
-    [pair[0] as i64, pair[1] as i64, 1000000000]
+    [pair[0] as i64, pair[1] as i64, 0]
+}
+
+fn is_edge(edge: [i64; 3]) -> bool {
+    edge[2] > 0
 }
 
 fn by_weight(a: &[i64; 3], b: &[i64; 3]) -> std::cmp::Ordering {
@@ -56,7 +60,7 @@ fn unite(state: [i64; 24], edge: [i64; 3]) -> [i64; 24] {
     let mut s = state;
     let ru = root(&s, edge[0]);
     let rv = root(&s, edge[1]);
-    if edge[2] < 1000000000 && ru != rv {
+    if ru != rv {
         s[ru as usize] = rv;
         let count = s[9] as usize;
         s[10 + 2 * count] = edge[0];
@@ -67,4 +71,4 @@ fn unite(state: [i64; 24], edge: [i64; 3]) -> [i64; 24] {
     s
 }
 
-range(0, 8).combinations(2).map(weigh).keep_first_n(28, by_weight).fold(start, unite).return
+range(0, 8).combinations(2).map(weigh).filter(is_edge).keep_first_n(13, by_weight).fold(start, unite).return

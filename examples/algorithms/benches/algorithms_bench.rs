@@ -1,19 +1,27 @@
-use algorithms::block_on;
 use criterion::{criterion_group, criterion_main, Criterion};
 
+fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Runtime::new().expect("could not build tokio runtime")
+}
+
 fn bench_gcd(c: &mut Criterion) {
-    c.bench_function("gcd", |b| b.iter(|| block_on(algorithms::gcd::run())));
+    let rt = runtime();
+    c.bench_function("gcd", |b| {
+        b.to_async(&rt).iter(algorithms::gcd::run);
+    });
 }
 
 fn bench_dijkstra(c: &mut Criterion) {
+    let rt = runtime();
     c.bench_function("dijkstra", |b| {
-        b.iter(|| block_on(algorithms::dijkstra::run()))
+        b.to_async(&rt).iter(algorithms::dijkstra::run);
     });
 }
 
 fn bench_kruskal(c: &mut Criterion) {
+    let rt = runtime();
     c.bench_function("kruskal", |b| {
-        b.iter(|| block_on(algorithms::kruskal::run()))
+        b.to_async(&rt).iter(algorithms::kruskal::run);
     });
 }
 

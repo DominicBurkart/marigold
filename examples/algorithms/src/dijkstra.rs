@@ -13,8 +13,8 @@ mod tests {
         (1, 3, 5),
         (2, 3, 8),
         (3, 4, 3),
-        (2, 5, 10),
-        (4, 5, 2),
+        (2, 5, 20),
+        (5, 4, 2),
         (5, 6, 1),
         (4, 6, 7),
         (6, 7, 4),
@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn known_distances_and_unreachable_vertex() {
         let result = block_on(run());
-        assert_eq!(result[0], [0, 3, 1, 8, 11, 11, 12, 16, INF]);
+        assert_eq!(result[0], [0, 3, 1, 8, 11, 13, 14, 18, INF]);
     }
 
     #[test]
