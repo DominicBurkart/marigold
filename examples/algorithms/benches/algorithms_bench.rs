@@ -8,14 +8,14 @@ fn bench_gcd(c: &mut Criterion) {
 }
 
 fn bench_dijkstra(c: &mut Criterion) {
-    let rt = runtime();
+    let rt = algorithms::runtime();
     c.bench_function("dijkstra", |b| {
         b.to_async(&rt).iter(algorithms::dijkstra::run);
     });
 }
 
 fn bench_kruskal(c: &mut Criterion) {
-    let rt = runtime();
+    let rt = algorithms::runtime();
     c.bench_function("kruskal", |b| {
         b.to_async(&rt).iter(algorithms::kruskal::run);
     });
