@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "features": [
+    "io",
+    "tokio"
+  ],
+  "source": "range(0, 10).return",
+  "rust": "async {\n    use ::marigold::marigold_impl::*;\n    let returning_stream_0 = Box::pin({use ::marigold::marigold_impl::*; ::marigold::marigold_impl::futures::stream::iter(0..10)});\n\n        /// silly function that uses generics to infer the output type (StreamItem) via generics, so that\n        /// we can provide the streams as an array of Pin<Box<dyn Stream<Item=StreamItem>>>.\n        #[inline(always)]\n        fn typed_stream_vec<StreamItem>(v: Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>>) -> Vec<core::pin::Pin<Box<dyn futures::Stream<Item=StreamItem>>>> {\n         v\n        }\n        let streams_array = typed_stream_vec(vec![\nreturning_stream_0,\n]\n);let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array);all_streams\n}\n",
+  "segments": [
+    {
+      "kind": "returning_stream",
+      "name": null,
+      "expr_index": 0,
+      "parent": null,
+      "source": {
+        "start": 0,
+        "end": 19,
+        "start_line": 1,
+        "start_column": 1,
+        "end_line": 1,
+        "end_column": 20
+      },
+      "generated": {
+        "start": 50,
+        "end": 177,
+        "start_line": 3,
+        "start_column": 5,
+        "end_line": 3,
+        "end_column": 132
+      }
+    }
+  ]
+}

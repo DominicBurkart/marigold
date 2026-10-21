@@ -1,0 +1,5 @@
+struct R { a: i32 }
+enum Mood { Happy = "😀", Sad = "ünï" }
+fn pick(x: &str) -> bool { /* é */ x == "日本語}" }
+read_file("dät€.csv", csv, struct=R).ok().return
+range(0, 1).write_file("日本語/ö.csv", csv)
