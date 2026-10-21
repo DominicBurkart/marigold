@@ -848,7 +848,6 @@ impl<'a> Remapper<'a> {
         let mut unusable = 0;
         for (index, segment) in program.map.segments().iter().enumerate() {
             let g = segment.generated;
-            // A segment that does not fit the program cannot be placed.
             if g.start >= g.end || g.end > rust.len() {
                 unusable += 1;
                 continue;
@@ -962,8 +961,6 @@ impl<'a> Remapper<'a> {
     pub fn with_prefix(mut self, prefix: &str) -> Self {
         self.prefix_len = prefix.len();
         self.prefix_newlines = prefix.bytes().filter(|&b| b == b'\n').count();
-        // rustc drops a byte order mark from the text it reports: its bytes count in
-        // offsets, but they are neither a column nor part of the first line's text.
         let visible = prefix.strip_prefix('\u{feff}').unwrap_or(prefix);
         self.prefix_tail = visible
             .rsplit_once('\n')
@@ -1093,7 +1090,6 @@ impl<'a> Remapper<'a> {
                 applicable_to_marigold: false,
             });
         mapped.via_macro = via_macro;
-        // A span on its own is a whole diagnostic of one span; `remap` redoes this for all.
         number_suggestions(std::slice::from_mut(&mut mapped));
         mapped
     }
@@ -1235,7 +1231,6 @@ impl<'a> Remapper<'a> {
     pub fn remap_trace(&self, text: &str) -> Vec<TracedLocation> {
         let bytes = text.as_bytes();
         let mut hits = Vec::new();
-        // Start of the current path-like token, and end of the last hit.
         let mut token_start = 0;
         let mut position = 0;
         while position < bytes.len() {
@@ -1270,13 +1265,6 @@ impl<'a> Remapper<'a> {
                 let frame = before
                     .strip_suffix("at")
                     .is_some_and(is_frame_header_before);
-                // An `at` that starts its line but is not under a plain numbered frame
-                // (coloured output, a blank line in between) may be a backtrace frame in a form
-                // that is not recognised: its unit is a guess, so it never maps better than
-                // to the segment.
-                //
-                // A line with an escape sequence (coloured output) is ambiguous too: the `at`
-                // may be hidden behind it, so what is read here cannot be trusted either way.
                 let line_start = text[..token_start].rfind('\n').map_or(0, |i| i + 1);
                 let line_end = text[end..].find('\n').map_or(text.len(), |i| end + i);
                 let coloured = text[line_start..line_end].contains('\u{1b}');
@@ -1303,17 +1291,12 @@ impl<'a> Remapper<'a> {
                     mapped: self.locate_capped(file, line, column, unit, ambiguous),
                 });
             }
-            // The location is used up: text right after it starts a new token.
             token_start = end;
             position = end;
         }
         hits
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// internals
-// ---------------------------------------------------------------------------------------------
 
 impl Remapper<'_> {
     /// Step 1: the span in the generated file that stands for `s`, and the macro that led to it.
@@ -1419,8 +1402,6 @@ impl Remapper<'_> {
         self.rust_index.line_col(offset, ColumnUnit::Chars).line - 1
     }
 
-    // --- checksum (step 3) ---
-
     fn generated_line_number(&self, line: usize) -> usize {
         self.prefix_newlines + 1 + line
     }
@@ -1453,7 +1434,6 @@ impl Remapper<'_> {
     /// Whether rustc's reported line text is the generated file's line `line`.
     fn line_text_matches(&self, line: usize, reported: &str) -> bool {
         let (content, terminated) = self.generated_line(line);
-        // rustc strips the `\r` of a `\r\n` from the text it reports.
         let content = content.strip_suffix('\r').unwrap_or(content);
         let tail = if line == 0 {
             self.prefix_tail.as_str()
@@ -1499,7 +1479,6 @@ impl Remapper<'_> {
         if first == last {
             return head.highlight_end == column_b;
         }
-        // rustc highlights a multi-line span's first line to its end.
         let (content, _) = self.generated_line(first);
         let content = content.strip_suffix('\r').unwrap_or(content);
         let width = content.chars().count()
@@ -1514,8 +1493,6 @@ impl Remapper<'_> {
             && tail.highlight_start == 1
             && tail.highlight_end == column_b
     }
-
-    // --- classification (step 4) ---
 
     /// The innermost slot around position `pos` (`start <= pos < end`).
     fn innermost_at(&self, pos: usize) -> Option<usize> {
@@ -1549,8 +1526,6 @@ impl Remapper<'_> {
         if a == b {
             return self.classify_point(a);
         }
-        // Collect the slots overlapping [a, b). Slots starting before `b` form a prefix of
-        // the sorted slots; since `max_end` never decreases, none before `lower` ends after `a`.
         let upper = search(&self.slots, |s| s.start < b);
         let lower = search(&self.slots, |s| s.max_end <= a);
         let segments = self.program.map.segments();
@@ -1605,7 +1580,6 @@ impl Remapper<'_> {
         }
         let source = self.program.map.segments()[s.segment].source;
         if s.verbatim > 0 && a >= s.end - s.verbatim && b <= s.end {
-            // The tail of the generated text is the tail of the source: anchor at the end.
             return Ok(Placement {
                 precision: Precision::Exact,
                 slot,
@@ -1631,8 +1605,6 @@ impl Remapper<'_> {
         })
     }
 
-    // --- run-time locations ---
-
     fn place_location(
         &self,
         line: usize,
@@ -1641,14 +1613,11 @@ impl Remapper<'_> {
     ) -> Result<Placement, UnmappedReason> {
         let outside = UnmappedReason::OutsideGeneratedRegion;
         let index = line.checked_sub(1 + self.prefix_newlines).ok_or(outside)?;
-        // A line that starts at the end of the program (after its final `\n`) holds only
-        // whatever follows the program in the file.
         let range = self.rust_index.line_range(index + 1).ok_or(outside)?;
         let (start, end) = (range.start, range.end);
         if start >= self.program.rust.len() {
             return Err(outside);
         }
-        // The text of the line that column counting sees: all of it, including a `\r`.
         let whole_line = &self.program.rust[start..end];
         let whole_line_placement = || {
             let visible = whole_line.strip_suffix('\r').unwrap_or(whole_line);
@@ -1662,7 +1631,6 @@ impl Remapper<'_> {
             return whole_line_placement();
         }
 
-        // Columns on the first program line also count the declared prefix's partial line.
         let (tail_width, tail_known) = if index == 0 {
             measure(&self.prefix_tail, unit)
         } else {
@@ -1670,7 +1638,6 @@ impl Remapper<'_> {
         };
         let wanted = column - 1;
         let Some(in_line) = wanted.checked_sub(tail_width) else {
-            // Inside the declared prefix, unless its width is not trusted.
             return if tail_known {
                 Err(outside)
             } else {
@@ -1679,8 +1646,6 @@ impl Remapper<'_> {
         };
         let (offset, known) = advance(whole_line, in_line, unit);
         if !(tail_known && known) {
-            // A width we cannot vouch for: the line must at least be one expression's, and the
-            // guessed position is never better than the whole segment.
             let line_placement = whole_line_placement()?;
             let guess = offset
                 .ok()
@@ -1699,10 +1664,6 @@ impl Remapper<'_> {
         }
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------------------------
 
 /// Whether `before`, the text in front of an `at` that ends right before a location, is a
 /// backtrace frame's second line: the `at` starts its line, and the line above it is a frame
@@ -1788,9 +1749,7 @@ fn source_range_fits(source: &str, range: ByteRange) -> bool {
 /// someone has decided what is true of it.
 fn suffix_is_verbatim(kind: SegmentKind) -> bool {
     match kind {
-        // `const ` + the source.
         SegmentKind::Function => true,
-        // Generated with attributes and rewritten field types, or pure wiring.
         SegmentKind::Struct
         | SegmentKind::Enum
         | SegmentKind::StreamVariable
@@ -1941,7 +1900,6 @@ fn advance(
     loop {
         let next = line[offset..].chars().next();
         if width == wanted {
-            // Zero-width characters share the column of what follows them.
             let mut skipped = offset;
             let mut rest = next;
             while let Some(c) = rest {
@@ -2076,7 +2034,6 @@ mod tests {
 
     #[test]
     fn display_width_table_is_what_rustc_reported_and_nothing_else() {
-        // (character, width) = (scalar delta measured with `Location::caller().column()`) + 1
         let verified: &[(char, usize)] = &[
             ('a', 1),
             ('\u{e9}', 1),
@@ -2106,7 +2063,6 @@ mod tests {
         for &(c, w) in verified {
             assert_eq!(display_width(c), Some(w), "U+{:04X}", c as u32);
         }
-        // Not in the verified set: the width is unknown, never a guess.
         for c in [
             '\u{0f00}',
             '\u{0080}',
@@ -2116,7 +2072,6 @@ mod tests {
         ] {
             assert_eq!(display_width(c), None, "U+{:04X}", c as u32);
         }
-        // units that do not depend on a table
         assert_eq!(char_width('日', TraceColumnUnit::Chars), (1, true));
         assert_eq!(char_width('日', TraceColumnUnit::Bytes), (3, true));
         assert_eq!(
@@ -2128,7 +2083,6 @@ mod tests {
     #[test]
     fn advance_converts_columns_and_rejects_positions_inside_characters() {
         let line = "a日\u{0301}b";
-        // scalar: a=0 日=1 U+0301=4 b=6
         assert_eq!(advance(line, 0, TraceColumnUnit::Chars), (Ok(0), true));
         assert_eq!(advance(line, 2, TraceColumnUnit::Chars), (Ok(4), true));
         assert_eq!(advance(line, 4, TraceColumnUnit::Chars), (Ok(7), true));
@@ -2136,13 +2090,11 @@ mod tests {
             advance(line, 5, TraceColumnUnit::Chars),
             (Err(UnmappedReason::InvalidSpan), true)
         );
-        // bytes: 日 occupies 1..4
         assert_eq!(advance(line, 4, TraceColumnUnit::Bytes), (Ok(4), true));
         assert_eq!(
             advance(line, 2, TraceColumnUnit::Bytes),
             (Err(UnmappedReason::InvalidSpan), true)
         );
-        // display: a=1, 日=2, U+0301=0, b=1; width 3 sits after 日 and after the combining mark
         assert_eq!(
             advance(line, 3, TraceColumnUnit::DisplayWidth),
             (Ok(6), true)
@@ -2151,14 +2103,11 @@ mod tests {
             advance(line, 4, TraceColumnUnit::DisplayWidth),
             (Ok(7), true)
         );
-        // the middle of a wide character
         assert_eq!(
             advance(line, 2, TraceColumnUnit::DisplayWidth),
             (Err(UnmappedReason::InvalidSpan), true)
         );
-        // a width that is not in the table is reported as unknown
         assert!(!advance("\u{0f00}x", 1, TraceColumnUnit::DisplayWidth).1);
-        // the end of the line is a valid position, one past it is not
         assert_eq!(advance("ab", 2, TraceColumnUnit::Chars), (Ok(2), true));
         assert_eq!(
             advance("ab", 3, TraceColumnUnit::Chars),
@@ -2194,7 +2143,6 @@ mod tests {
             ),
             source.len()
         );
-        // nothing in common
         assert_eq!(
             verbatim_len(
                 SegmentKind::Function,
@@ -2205,7 +2153,6 @@ mod tests {
             ),
             0
         );
-        // the last byte of two different characters is not a region
         assert_eq!(
             verbatim_len(
                 SegmentKind::Function,
@@ -2216,7 +2163,6 @@ mod tests {
             ),
             0
         );
-        // the region does not start inside a character on either side
         assert_eq!(
             verbatim_len(
                 SegmentKind::Function,
@@ -2237,7 +2183,6 @@ mod tests {
         assert_eq!(n("/../a"), Path::new("/a"));
         assert_eq!(n("a/../../b"), Path::new("../b"));
         assert_eq!(n("a//b"), Path::new("a/b"));
-        // `./..` and `../.` are the same step
         assert_eq!(n("/a/./../b"), n("/a/.././b"));
         assert_eq!(n("/a/./../b"), Path::new("/b"));
     }
@@ -2254,15 +2199,12 @@ mod tests {
             for k in 0..lookups {
                 let segment = &segments[(k * 7919) % n];
                 let at = segment.generated.end - 3;
-                // a one-byte span, a point, and a span that leaves the segment into glue
                 for (a, b) in [(at, at + 1), (at, at), (at, segment.generated.end + 1)] {
                     let mapped = remapper.map_span(&span(a, b));
                     assert!(mapped.marigold.is_some(), "n={n} {a}..{b}: {mapped:?}");
                 }
             }
             let (scanned, walked) = counters();
-            // Exactly the one segment each non-empty span overlaps (a point scans nothing), and
-            // one parent link for the span that leaves its segment (no container is found).
             assert_eq!((scanned, walked), (2 * lookups, lookups), "n={n}");
         }
     }
@@ -2287,7 +2229,6 @@ mod tests {
 
     #[test]
     fn nesting_costs_the_depth_and_not_the_number_of_segments() {
-        // 3 000 flat segments, then one expression nested 40 deep.
         let depth = 40;
         let mut segments = Vec::new();
         let mut rust = String::new();
@@ -2320,7 +2261,6 @@ mod tests {
         let is_generated = |f: &str| f == "gen.rs";
         let remapper = Remapper::new(&program, &src, &is_generated);
 
-        // a point in the middle: the innermost segment is the last one starting at or before it
         reset();
         let middle = g0 + depth;
         let mapped = remapper.map_span(&span(middle, middle));
@@ -2331,8 +2271,6 @@ mod tests {
         );
         assert_eq!(counters().1, 0);
 
-        // a span that the innermost candidate (the segment starting last) does not contain:
-        // the lookup walks up the parent links, one per segment too small, and no further
         reset();
         let (a, b) = (g0 + depth - 1, g0 + depth + 5);
         let mapped = remapper.map_span(&span(a, b));
@@ -2342,8 +2280,6 @@ mod tests {
         );
         assert_eq!(counters().1, 4);
 
-        // a point on the last byte of the outermost segment only: every one of the `depth - 1`
-        // inner segments that start before it is left through its parent link
         reset();
         let last = g0 + 2 * depth - 1;
         let mapped = remapper.map_span(&span(last, last));
@@ -2373,9 +2309,6 @@ mod tests {
             let remapper = Remapper::new(&program, &src, &is_generated);
             let segment = &program.map.segments()[n / 2];
             let at = segment.generated.end - 3;
-            // (span, number of searches among the slots): for a span the two ends of the
-            // overlapping slots and the container, for a point the innermost slot. The lines
-            // are looked up in `LineIndex`, whose cost is pinned by its own tests.
             for ((a, b), expected) in [
                 ((at, at + 1), 3),
                 ((at, at), 1),
@@ -2396,7 +2329,6 @@ mod tests {
                         "n={n} {a}..{b}: a search over {len} items probed nothing"
                     );
                 }
-                // the searches really run over the whole index, not over a small part of it
                 assert!(log.iter().all(|&(len, _)| len >= n), "n={n}: {log:?}");
             }
         }
@@ -2404,8 +2336,6 @@ mod tests {
 
     #[test]
     fn display_width_never_contradicts_rustc_and_knows_where_each_range_ends() {
-        // (code point, width): `Location::caller().column()` after the character minus the column
-        // after an `a`, plus one; measured with rustc 1.97.0 at the edges of every range.
         #[rustfmt::skip]
         const MEASURED: &[(u32, usize)] = &[
             (0x41, 1), (0x7f, 1), (0x9f, 1), (0xa0, 1), (0xac, 1), (0xad, 0), (0xff, 1), (0x100, 1),
@@ -2423,7 +2353,6 @@ mod tests {
             (0x1f650, 1), (0x1f680, 2), (0x1ffff, 1), (0x20000, 2), (0x2fffd, 2), (0x2fffe, 1),
             (0x30000, 2), (0x3fffd, 2),
         ];
-        // The first and last character of each range of the table.
         const ENDS: &[u32] = &[
             0x41, 0x7f, 0xa0, 0xad, 0xff, 0x100, 0x24f, 0x300, 0x36f, 0x482, 0x48a, 0x4ff, 0x627,
             0xe31, 0x1100, 0x115f, 0x200b, 0x200d, 0x20d0, 0x20dd, 0x20f0, 0x2190, 0x21ff, 0x2605,
@@ -2448,8 +2377,6 @@ mod tests {
                 "U+{cp:04X} unmeasured"
             );
         }
-        // One step beyond a range is not claimed (the combining marks of U+20D0 end at U+20F0,
-        // and the unassigned U+20F1..U+20FF are one column wide).
         for cp in [
             0x250, 0x370, 0x483, 0x1160, 0x20f1, 0x20f5, 0x20ff, 0x2100, 0x3001, 0xa000, 0x1f650,
         ] {
@@ -2466,7 +2393,6 @@ mod tests {
         let rust = "pre const fn f() { 1 }";
         let source = "fn f() { 1 }";
         let tail = range(4, rust.len());
-        // `const ` makes the whole text unequal; a Function's tail is the source
         assert_eq!(
             verbatim_len(
                 SegmentKind::Function,
@@ -2477,7 +2403,6 @@ mod tests {
             ),
             source.len()
         );
-        // any other kind needs the whole text to be the source
         for kind in [
             SegmentKind::StreamVariable,
             SegmentKind::Struct,
@@ -2500,7 +2425,6 @@ mod tests {
                 "{kind:?}"
             );
         }
-        // whole equality on a character boundary only
         assert_eq!(
             verbatim_len(
                 SegmentKind::Struct,
@@ -2519,8 +2443,6 @@ mod tests {
 
     #[test]
     fn the_kind_decisions_have_no_wildcard_arm() {
-        // A new `SegmentKind` must not compile until it has been classified: no `_ =>` and no
-        // `_ |` in the two matches.
         let source = include_str!("remap.rs");
         for name in ["fn suffix_is_verbatim(kind", "fn is_user_authored(kind"] {
             let start = source.find(name).unwrap();
@@ -2532,5 +2454,31 @@ mod tests {
                 "{name} has a wildcard arm"
             );
         }
+    }
+
+    #[test]
+    fn two_hundred_thousand_diagnostics_make_the_same_searches_each() {
+        let (src, program) = flat(2_000);
+        let is_generated = |f: &str| f == "gen.rs";
+        let remapper = Remapper::new(&program, &src, &is_generated);
+        let segment = &program.map.segments()[1_000];
+        let at = segment.generated.end - 3;
+        let diagnostic: RustcDiagnostic = RustcDiagnostic {
+            spans: vec![span(at, at + 1), span(at, at)],
+            ..Default::default()
+        };
+        clear_searches();
+        let first = remapper.remap(&diagnostic);
+        assert!(first.primary.as_ref().unwrap().marigold.is_some());
+        let per_diagnostic = searches().len();
+        assert_eq!(per_diagnostic, 3 + 1);
+        clear_searches();
+        for _ in 0..200_000 {
+            let mapped = remapper.remap(&diagnostic);
+            assert_eq!(mapped.primary.as_ref().unwrap().precision, Precision::Exact);
+        }
+        let log = searches();
+        assert_eq!(log.len(), 200_000 * per_diagnostic);
+        assert!(log.iter().all(|&(len, probes)| probes <= most_probes(len)));
     }
 }

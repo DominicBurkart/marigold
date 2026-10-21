@@ -16,10 +16,6 @@ use proptest::prelude::*;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-// ---------------------------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------------------------
-
 fn fixtures_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/remap")
 }
@@ -188,7 +184,6 @@ fn assert_span_invariants(src: &str, s: &impl Mapped) {
                 src.is_char_boundary(r.start) && src.is_char_boundary(r.end),
                 "{s:?}"
             );
-            // line/column are an independent recomputation from the range
             let lc = |off: usize| {
                 let before = &src[..off];
                 let line = before.matches('\n').count() + 1;
@@ -294,10 +289,6 @@ fn map_one(src: &str, program: &GeneratedProgram, prefix: &str, span: &RustcSpan
     r.map_span(span)
 }
 
-// ---------------------------------------------------------------------------------------------
-// A. rustc / cargo JSON reader
-// ---------------------------------------------------------------------------------------------
-
 #[test]
 fn reads_every_real_cargo_sample_and_every_bare_fixture() {
     for entry in std::fs::read_dir(fixtures_root().join("research")).unwrap() {
@@ -305,7 +296,6 @@ fn reads_every_real_cargo_sample_and_every_bare_fixture() {
         if p.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        // the research samples are pretty-printed cargo wrappers: one JSON document, many lines
         let text = std::fs::read_to_string(&p).unwrap();
         let m = parse_message_line(&text)
             .unwrap_or_else(|e| panic!("{p:?}: {e}"))
@@ -325,7 +315,6 @@ fn reads_every_real_cargo_sample_and_every_bare_fixture() {
         assert_eq!(bare.messages.len(), cargo.messages.len(), "{name}");
         assert!(!bare.messages.is_empty(), "{name}");
         for (b, c) in bare.messages.iter().zip(&cargo.messages) {
-            // the cargo wrapper carries exactly the bare diagnostic
             assert_eq!(b.diagnostic, c.diagnostic, "{name}");
             assert!(b.package_id.is_none() && b.manifest_path.is_none());
             assert_eq!(
@@ -339,7 +328,6 @@ fn reads_every_real_cargo_sample_and_every_bare_fixture() {
 
 #[test]
 fn span_fields_round_trip_the_real_rustc_units() {
-    // E0308 on a line with multibyte text: byte_* are bytes, column_* are scalar values.
     let m = parse_message_line(&read("research", "E0308_unicode_line.json"))
         .unwrap()
         .unwrap();
@@ -355,7 +343,6 @@ fn span_fields_round_trip_the_real_rustc_units() {
         (p.text[0].highlight_start, p.text[0].highlight_end),
         (38, 41)
     );
-    // the label line holds `é→` (2 + 3 bytes for 2 scalars): bytes and scalars really differ here
     let line_start = p.byte_start
         - p.text[0]
             .text
@@ -435,7 +422,6 @@ fn unknown_fields_are_ignored_and_missing_optional_fields_default() {
     assert!(d.code.is_none() && d.rendered.is_none());
     assert_eq!(d.children[0].message, "c");
     assert!(d.children[0].spans.is_empty());
-    // rustc before `$message_type` existed: recognised by shape
     let old =
         r#"{"message":"x","code":null,"level":"error","spans":[],"children":[],"rendered":"r"}"#;
     assert_eq!(
@@ -506,10 +492,6 @@ fn pathologically_nested_json_is_an_error_not_a_stack_overflow() {
     assert!(parse_message_line(&s).is_err());
 }
 
-// ---------------------------------------------------------------------------------------------
-// B. goldens against REAL rustc output (expected Marigold slices verified by hand, see TESTSPEC-T4.md)
-// ---------------------------------------------------------------------------------------------
-
 use Precision::{Exact, Expression, Segment as Seg};
 
 #[test]
@@ -548,7 +530,6 @@ fn g01_undefined_fn_in_a_stream_maps_to_the_whole_expression() {
         ),
         ("src/gen.rs", 1549, 1561, 35, 72)
     );
-    // the trailing "For more information..." record has no span at all
     let last = r.remap(fx.diags.last().unwrap());
     assert_eq!(last.level, Level::FailureNote);
     assert!(last.primary.is_none() && last.secondary.is_empty() && last.anchor().is_none());
@@ -582,13 +563,11 @@ fn g03_type_error_inside_fn_body_is_exact_and_byte_identical() {
         (sg.kind, sg.name.as_deref()),
         (SegmentKind::Function, Some("is_big"))
     );
-    // children: the trait-impl notes point into libcore, which is not the generated file
     let foreign: Vec<_> = m.children.iter().flat_map(|c| all_spans(c)).collect();
     assert_eq!(foreign.len(), 4);
     for s in foreign {
         assert_unmapped(s, UnmappedReason::ForeignFile);
     }
-    // the diagnostic is anchored on its primary span
     assert_eq!(
         m.anchor().unwrap().marigold.as_ref().unwrap().range.start,
         fx.src.find('+').unwrap()
@@ -627,7 +606,6 @@ fn g04_lints_on_generated_glue_are_unmapped_or_segment_level_and_flagged_as_nois
             }
         ]
     );
-    // the same lint inside user-written text is NOT noise (and its suggestion is applicable to Marigold)
     let fx = load("f09_unused_warning_in_fn");
     remapper!(fx, r);
     let w = r.remap(find(&fx, "unused variable: `unused`"));
@@ -657,7 +635,6 @@ fn g05_multibyte_line_keeps_columns_in_scalar_values() {
     let fx = load("f04_multibyte_fn");
     remapper!(fx, r);
     let m = r.remap(find(&fx, "mismatched types"));
-    // line 2 of the fn is `let s = "héllo → 日本語";` (multibyte); the error is on line 3
     assert_mapped(
         &fx.src,
         m.primary.as_ref().unwrap(),
@@ -686,8 +663,6 @@ fn g06_crlf_function_maps_exactly_and_offsets_count_the_carriage_return() {
 fn g07_macro_expansion_in_a_library_file_follows_the_call_site_into_the_function() {
     let fx = load("f06_mismatched_variable_types");
     remapper!(fx, r);
-    // `format!` in a `const fn`: rustc's primary span is inside liballoc; its expansion chain ends at
-    // the `format!(...)` call in the generated file, which is inside the user's function.
     let m = r.remap(find(&fx, "cannot call non-const function `format`"));
     let p = m.primary.as_ref().unwrap();
     assert_mapped(&fx.src, p, Exact, "format!(\"n{x}\")", (2, 29));
@@ -697,7 +672,6 @@ fn g07_macro_expansion_in_a_library_file_follows_the_call_site_into_the_function
         raw.file_name.contains("/library/alloc/src/macros.rs"),
         "raw keeps what rustc said"
     );
-    // and the desugaring variant (two hops)
     let m2 = r.remap(find(&fx, "non-const formatting macro"));
     assert_mapped(
         &fx.src,
@@ -706,7 +680,6 @@ fn g07_macro_expansion_in_a_library_file_follows_the_call_site_into_the_function
         "format!(\"n{x}\")",
         (2, 29),
     );
-    // a note whose span is in another crate and has no expansion stays unmapped
     let e0277 = r.remap(find(&fx, "the trait bound `String: std::marker::Copy`"));
     assert_mapped(
         &fx.src,
@@ -751,7 +724,6 @@ fn g09_primary_is_the_flagged_span_and_secondary_spans_keep_their_order() {
     let fx = load("f08_struct_then_undefined");
     remapper!(fx, r);
     let m = r.remap(find(&fx, "cannot find value `mk`"));
-    // rustc lists the libcore span FIRST (non-primary); the primary is the second span.
     let p = m.primary.as_ref().unwrap();
     assert!(p.is_primary);
     assert_mapped(
@@ -763,7 +735,6 @@ fn g09_primary_is_the_flagged_span_and_secondary_spans_keep_their_order() {
     );
     assert_eq!(m.secondary.len(), 1);
     assert_unmapped(&m.secondary[0], UnmappedReason::ForeignFile);
-    // rustc's "did you mean `Ok`" targets generated text: carried through, never offered for Marigold
     let help = m.children[0].primary.as_ref().unwrap();
     let sug = help.suggestion.as_ref().unwrap();
     assert_eq!(sug.replacement, "Ok");
@@ -805,7 +776,6 @@ fn g12_last_byte_of_a_function_segment_is_still_exact() {
     remapper!(fx, r);
     let m = r.remap(find(&fx, "destructor of `String`"));
     assert_mapped(&fx.src, m.primary.as_ref().unwrap(), Exact, "t", (3, 9));
-    // "value is dropped here" is the closing brace: the final byte of the segment
     assert_mapped(&fx.src, &m.secondary[0], Exact, "}", (5, 1));
     let seg = seg_in(&fx, "dup");
     assert_eq!(
@@ -831,7 +801,6 @@ fn g13_return_type_in_the_function_header_is_exact_too() {
     let m = r.remap(find(&fx, "mismatched types"));
     assert_mapped(&fx.src, m.primary.as_ref().unwrap(), Exact, "x", (2, 5));
     assert_mapped(&fx.src, &m.secondary[0], Exact, "i64", (1, 21));
-    // the generated header is `const fn widen(...)`: `const ` has no Marigold counterpart
     let seg = seg_in(&fx, "widen");
     assert!(fx.program.rust[seg.generated.start..].starts_with("const fn widen"));
 }
@@ -905,7 +874,6 @@ fn g16_zero_width_insertion_inside_a_function_is_a_zero_width_marigold_point() {
         &fx.src[..loc.range.start].lines().last().unwrap(),
         &"    let a = x + 1"
     );
-    // the same insertion repeated as the suggestion carries the replacement
     let sug = m.children[0]
         .primary
         .as_ref()
@@ -915,7 +883,6 @@ fn g16_zero_width_insertion_inside_a_function_is_a_zero_width_marigold_point() {
         .unwrap();
     assert_eq!(sug.replacement, ";");
     assert!(sug.applicable_to_marigold);
-    // secondary span `unexpected token` = the `a` on the next line
     assert_mapped(&fx.src, &m.secondary[0], Exact, "a", (3, 5));
 }
 
@@ -933,12 +900,10 @@ fn g17_inline_layout_with_prefix_maps_like_the_include_layout() {
         "range(0, 10).map(undefined_fn).write_file(\"out.csv\", csv)",
         (1, 1),
     );
-    // the same Marigold program, the include layout: identical Marigold range
     let inc = load("f01_undefined_fn");
     remapper!(inc, r2);
     let q = r2.remap(find(&inc, "undefined_fn")).primary.unwrap();
     assert_eq!(q.marigold, p.marigold);
-    // rustc's line numbers differ by the prefix's two newlines
     assert_eq!(
         p.raw.as_ref().unwrap().line_start,
         q.raw.as_ref().unwrap().line_start + 2
@@ -949,21 +914,17 @@ fn g17_inline_layout_with_prefix_maps_like_the_include_layout() {
 fn g18_wrapper_spans_and_spans_that_cover_wrapper_plus_program_are_outside_the_generated_region() {
     let fx = load("i02_returning_stream_tail_await");
     remapper!(fx, r);
-    // E0271: primary span is the `#[tokio::main]` attribute in the wrapper prefix
     let e0271 = r.remap(find(&fx, "to be a future that resolves to"));
     assert_unmapped(
         e0271.primary.as_ref().unwrap(),
         UnmappedReason::OutsideGeneratedRegion,
     );
-    // E0308: the span is `program + "\n    .await"`: it ends past the generated region
     let e0308 = r.remap(find(&fx, "mismatched types"));
     assert_unmapped(
         e0308.primary.as_ref().unwrap(),
         UnmappedReason::OutsideGeneratedRegion,
     );
-    // the secondary zero-width span sits inside the prefix as well
     assert_unmapped(&e0308.secondary[0], UnmappedReason::OutsideGeneratedRegion);
-    // `use ::marigold::marigold_impl::*;` unused-import warning is inside the preamble of the only expression
     let w = r.remap(find(&fx, "unused import"));
     let p = w.primary.as_ref().unwrap();
     assert_eq!(p.precision, Seg);
@@ -983,7 +944,6 @@ fn g19_lints_in_the_wrapper_file_are_foreign() {
         m.primary.as_ref().unwrap().raw.as_ref().unwrap().file_name,
         "src/main.rs"
     );
-    // its `let _ = ` suggestion is a zero-width insertion in the foreign file: unmapped, never Exact
     let sug = m.children[2].primary.as_ref().unwrap();
     assert_eq!(sug.suggestion.as_ref().unwrap().replacement, "let _ = ");
     assert!(!sug.suggestion.as_ref().unwrap().applicable_to_marigold);
@@ -993,14 +953,9 @@ fn g19_lints_in_the_wrapper_file_are_foreign() {
         "nothing in this diagnostic belongs to Marigold"
     );
     assert!(m.likely_generated_noise());
-    // preamble `use` is glue-or-segment but never exact
     let imp = r.remap(find(&fx, "unused import"));
     assert_eq!(imp.primary.as_ref().unwrap().precision, Seg);
 }
-
-// ---------------------------------------------------------------------------------------------
-// C. the research samples (other rustc situations), mapped through an identity-style synthetic map
-// ---------------------------------------------------------------------------------------------
 
 /// `t1_main.rs.txt` is a plain Rust file used for the research samples. Every `fn` line becomes a
 /// Function segment whose Marigold source is the same text placed after a `// pad` line, so offsets
@@ -1112,13 +1067,11 @@ fn research_e0382_expansion_chain_keeps_own_position_and_zero_width_clone_insert
     let is_gen = |f: &str| f == "src/main.rs";
     let r = Remapper::new(&program, &src, &is_gen);
     let m = r.remap(&sample("E0382_borrow_moved.json"));
-    // primary span is in the generated file but carries a 3-hop expansion into libstd: its own position wins
     let p = m.primary.as_ref().unwrap();
     assert_mapped(&src, p, Exact, "s", (6, 59));
     assert_eq!(p.via_macro, None);
     assert_mapped(&src, &m.secondary[0], Exact, "s", (6, 41));
     assert_mapped(&src, &m.secondary[1], Exact, "s", (6, 14));
-    // `help: consider cloning`: zero-width insertion right after the moved `s`
     let help = m.children[0].primary.as_ref().unwrap();
     let loc = help.marigold.as_ref().unwrap();
     assert_eq!(loc.range.start, loc.range.end);
@@ -1135,8 +1088,6 @@ fn research_macro_rules_definition_outside_any_segment_is_glue_not_a_guess() {
     let is_gen = |f: &str| f == "src/main.rs";
     let r = Remapper::new(&program, &src, &is_gen);
     let m = r.remap(&sample("E0308_macro_rules_expansion.json"));
-    // both spans sit in the `macro_rules!` line, which no segment covers; their expansion call site is `bad!()`
-    // (inside `fn e`) but the span's own position is what rustc points at, so that is what is reported
     for s in all_spans(&m) {
         assert_unmapped(s, UnmappedReason::Glue);
     }
@@ -1172,10 +1123,6 @@ fn research_wrapper_samples_are_foreign_or_outside() {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// D. rules, one at a time, on hand-shaped spans over a REAL generated program
-// ---------------------------------------------------------------------------------------------
-
 #[test]
 fn d01_every_offset_in_every_segment_maps_to_that_segments_expression() {
     let (src, program) = mini();
@@ -1184,7 +1131,6 @@ fn d01_every_offset_in_every_segment_maps_to_that_segments_expression() {
     for seg in program.map.segments() {
         let g = seg.generated;
         let expr = seg.source;
-        // sample start, middle, last byte (zero width and one byte)
         for off in [g.start, g.start + (g.end - g.start) / 2, g.end - 1] {
             if !program.rust.is_char_boundary(off) || !program.rust.is_char_boundary(off + 1) {
                 continue;
@@ -1211,7 +1157,6 @@ fn d01_every_offset_in_every_segment_maps_to_that_segments_expression() {
 fn d02_glue_between_segments_and_the_preamble_are_unmapped_glue() {
     let (src, program) = mini();
     let segs = program.map.segments();
-    // first byte of the program, a separator byte between two segments, the very last byte
     let mut offs = vec![(0, 5), (10, 20)];
     for w in segs.windows(2) {
         if w[0].generated.end < w[1].generated.start {
@@ -1227,7 +1172,6 @@ fn d02_glue_between_segments_and_the_preamble_are_unmapped_glue() {
             "",
             &rustc_span("gen.rs", &program.rust, a, b, true),
         );
-        // glue-only spans are Glue unless they graze a segment
         let hits = segs
             .iter()
             .filter(|s| s.generated.start < b && s.generated.end > a)
@@ -1236,7 +1180,6 @@ fn d02_glue_between_segments_and_the_preamble_are_unmapped_glue() {
             assert_unmapped(&m, UnmappedReason::Glue);
         }
     }
-    // the preamble itself
     let m = map_one(
         &src,
         &program,
@@ -1244,7 +1187,6 @@ fn d02_glue_between_segments_and_the_preamble_are_unmapped_glue() {
         &rustc_span("gen.rs", &program.rust, 0, 5, true),
     );
     assert_unmapped(&m, UnmappedReason::Glue);
-    // zero-width in glue
     let m = map_one(
         &src,
         &program,
@@ -1276,7 +1218,6 @@ fn d03_span_covering_two_expressions_is_unmapped_multiple_expressions() {
         &map_one(&src, &program, "", &sp),
         UnmappedReason::MultipleExpressions,
     );
-    // one byte of each of two neighbouring expressions (across the `\n\n` glue)
     let b = program.map.segments()[1].clone();
     assert!(a.generated.end < b.generated.start);
     let sp = rustc_span(
@@ -1296,7 +1237,6 @@ fn d03_span_covering_two_expressions_is_unmapped_multiple_expressions() {
 fn d04_span_leaving_its_segment_into_glue_stays_attributed_to_that_one_expression() {
     let (src, program) = mini();
     let s = seg_of(&program, SegmentKind::NonReturningStream, 2);
-    // from the middle of the statement to two bytes past its end (the `\n` glue and one more byte)
     let sp = rustc_span(
         "gen.rs",
         &program.rust,
@@ -1336,7 +1276,6 @@ fn d05_function_header_const_is_segment_level_but_the_rest_is_exact() {
         &rustc_span("gen.rs", &program.rust, plus, plus + 1, true),
     );
     assert_mapped(&src, &m, Exact, "+", (1, 25));
-    // span covering `const fn f` (starts before the verbatim region) is Segment, not Exact
     let m = map_one(
         &src,
         &program,
@@ -1380,7 +1319,6 @@ fn d07_line_column_and_text_are_a_checksum_of_the_generated_file() {
     let good = rustc_span("gen.rs", &program.rust, plus, plus + 1, true);
     assert_eq!(map_one(&src, &program, "", &good).precision, Exact);
     let stale = UnmappedReason::StaleGeneratedFile;
-    // each of the checksummed fields, one at a time
     for field in ["line_start", "line_end", "column_start", "column_end"] {
         let sp = corrupt_text(good.clone(), |v| {
             v[field] = json!(v[field].as_u64().unwrap() + 1)
@@ -1403,19 +1341,15 @@ fn d07_line_column_and_text_are_a_checksum_of_the_generated_file() {
         v["text"] = json!([v["text"][0].clone(), v["text"][0].clone()])
     });
     assert_unmapped(&map_one(&src, &program, "", &sp), stale);
-    // the file was rustfmt'd / re-generated differently: same bytes offsets, different lines
     let mut other = program.rust.clone();
     other.insert_str(f.generated.start, "\n\n\n");
     let sp = rustc_span("gen.rs", &other, plus + 3, plus + 4, true);
     assert_unmapped(&map_one(&src, &program, "", &sp), stale);
-    // byte offsets shifted by one but line/column/text still match THIS program: bytes win -> a different
-    // token, but since text no longer matches the highlighted slice it is rejected
     let shifted = corrupt_text(good.clone(), |v| {
         v["byte_start"] = json!(plus + 1);
         v["byte_end"] = json!(plus + 2);
     });
     assert_unmapped(&map_one(&src, &program, "", &shifted), stale);
-    // all-zero line/column means "not provided": bytes alone are used
     let bare = corrupt_text(good, |v| {
         for k in ["line_start", "line_end", "column_start", "column_end"] {
             v[k] = json!(0);
@@ -1461,12 +1395,10 @@ fn d08_invalid_spans_are_reported_never_panicked_on() {
         &map_one(&src, &program, "", &set(usize::MAX, 0)),
         UnmappedReason::InvalidSpan,
     );
-    // a span ending exactly at the end of the program is fine
     assert_unmapped(
         &map_one(&src, &program, "", &set(len - 1, len)),
         UnmappedReason::Glue,
     );
-    // not on a char boundary
     let src2 =
         "fn f(x: i32) -> bool { \"日本語\" == \"x\" }\nrange(0, 1).write_file(\"o.csv\", csv)";
     let p2 = marigold_generate(src2).unwrap();
@@ -1487,15 +1419,12 @@ fn d09_a_stale_marigold_source_is_detected_instead_of_fabricating_a_range() {
     let f = seg_of(&program, SegmentKind::Function, 0);
     let plus = f.generated.start + program.rust[f.generated.start..].find('+').unwrap();
     let sp = rustc_span("gen.rs", &program.rust, plus, plus + 1, true);
-    // the caller passes a shorter / different source than the map was built from
     let short = &src[..10];
     let is_gen = |f: &str| f == "gen.rs";
     let r = Remapper::new(&program, short, &is_gen);
     assert_unmapped(&r.map_span(&sp), UnmappedReason::StaleSourceMap);
-    // a source where a segment boundary falls inside a multibyte char
     let weird = "é".repeat(60);
     let r = Remapper::new(&program, &weird, &is_gen);
-    // the function's source range ends inside a two-byte character of that text
     assert!(!weird.is_char_boundary(src.find('}').unwrap() + 1));
     assert_unmapped(&r.map_span(&sp), UnmappedReason::StaleSourceMap);
 }
@@ -1509,7 +1438,6 @@ fn d10_expansion_chain_lands_in_the_generated_file_after_foreign_hops() {
     let foreign = |n: &str| {
         serde_json::from_value::<RustcSpan>(json!({"file_name": n, "byte_start": 5, "byte_end": 9, "line_start": 1, "line_end": 1, "column_start": 1, "column_end": 5, "is_primary": true, "text": []})).unwrap()
     };
-    // lib span -> expansion(call site in another lib) -> expansion(call site in generated file)
     let mid = with_expansion(foreign("/rustc/x/library/core/src/b.rs"), call, "inner!");
     let top = with_expansion(foreign("/rustc/x/library/core/src/a.rs"), mid, "outer!");
     let m = map_one(&src, &program, "", &top);
@@ -1519,13 +1447,11 @@ fn d10_expansion_chain_lands_in_the_generated_file_after_foreign_hops() {
         Some("inner!"),
         "the hop whose call site is in the generated file"
     );
-    // chain that never reaches the file
     let dead = with_expansion(foreign("/a.rs"), foreign("/b.rs"), "m!");
     assert_unmapped(
         &map_one(&src, &program, "", &dead),
         UnmappedReason::ForeignFile,
     );
-    // a span in the generated file that itself has an expansion keeps its own position
     let own = with_expansion(
         rustc_span("gen.rs", &program.rust, plus, plus + 1, true),
         foreign("/c.rs"),
@@ -1560,7 +1486,6 @@ fn d11_expansion_chains_are_bounded() {
         }
         cur
     };
-    // documented cap: at most 64 expansion hops are followed
     assert_eq!(
         map_one(&src, &program, "", &chain(3)).precision,
         Exact,
@@ -1575,7 +1500,6 @@ fn d11_expansion_chains_are_bounded() {
         &map_one(&src, &program, "", &chain(65)),
         UnmappedReason::ForeignFile,
     );
-    // absurdly deep chain: still terminates (and is cheap)
     assert_unmapped(
         &map_one(&src, &program, "", &chain(5_000)),
         UnmappedReason::ForeignFile,
@@ -1586,7 +1510,6 @@ fn d11_expansion_chains_are_bounded() {
 fn d12_prefix_is_respected_including_the_partial_first_line() {
     let (src, program) = mini();
     let f = seg_of(&program, SegmentKind::Function, 0);
-    // prefix ends mid-line (4 spaces, multibyte char), like a wrapper that opens a block on the same line
     for prefix in [
         "",
         "// é\nfn main() {\n    ",
@@ -1601,10 +1524,8 @@ fn d12_prefix_is_respected_including_the_partial_first_line() {
         let sp = rustc_span("gen.rs", &file, plus, plus + 1, true);
         let m = map_one(&src, &program, prefix, &sp);
         assert_mapped(&src, &m, Exact, "+", (1, 25));
-        // a span on the FIRST generated line (preamble) is glue and must not be confused with the prefix
         let sp = rustc_span("gen.rs", &file, base, base + 5, true);
         assert_unmapped(&map_one(&src, &program, prefix, &sp), UnmappedReason::Glue);
-        // a span inside the prefix is outside the region
         if !prefix.is_empty() {
             let first = file.chars().next().unwrap().len_utf8();
             let sp = rustc_span("gen.rs", &file, 0, first, true);
@@ -1613,7 +1534,6 @@ fn d12_prefix_is_respected_including_the_partial_first_line() {
                 UnmappedReason::OutsideGeneratedRegion,
             );
         }
-        // and a prefix the caller forgot to declare makes every span stale or out of range, never wrong
         if !prefix.is_empty() {
             let m = map_one(&src, &program, "", &sp_in_program(&file, plus));
             assert!(
@@ -1643,7 +1563,6 @@ fn d13_other_files_are_foreign_and_the_file_test_decides() {
         &map_one(&src, &program, "", &sp),
         UnmappedReason::ForeignFile,
     );
-    // the test is called with rustc's file_name verbatim
     let seen = std::cell::RefCell::new(vec![]);
     let is_gen = |f: &str| {
         seen.borrow_mut().push(f.to_string());
@@ -1657,7 +1576,6 @@ fn d13_other_files_are_foreign_and_the_file_test_decides() {
         f.generated.start + 7,
         true,
     );
-    // the byte after `const `: the `f` of `fn`
     assert_eq!(r.map_span(&sp).precision, Exact);
     assert!(seen.borrow().iter().any(|s| s == "./src/gen.rs"));
 }
@@ -1678,7 +1596,6 @@ fn d14_diagnostics_without_spans_pass_through() {
     assert!(m.primary.is_none() && m.secondary.is_empty() && m.children.is_empty());
     assert_eq!(m.rendered, d.rendered);
     assert!(m.anchor().is_none());
-    // when no span is flagged primary the first one is used
     let sp = rustc_span("gen.rs", &program.rust, 60, 61, false);
     let m = r.remap(&diag(vec![sp.clone(), sp]));
     assert!(m.primary.is_some() && m.secondary.len() == 1);
@@ -1698,11 +1615,9 @@ fn d15_anchor_prefers_primary_then_secondary_then_children() {
         false,
     );
     let outside = rustc_span("zzz.rs", &program.rust, 1, 2, true);
-    // primary foreign, secondary mapped
     let m = r.remap(&diag(vec![outside.clone(), inside.clone()]));
     assert!(m.primary.as_ref().unwrap().marigold.is_none());
     assert_eq!(m.anchor().unwrap().precision, Exact);
-    // only a child maps
     let mut v = serde_json::to_value(json!({
         "message": "m", "level": "error", "spans": [span_to_json(&outside)],
         "children": [{"message": "c", "level": "note", "spans": [span_to_json(&inside)], "children": []}]
@@ -1786,25 +1701,18 @@ fn d17_lexical_path_matching_needs_no_filesystem() {
     ));
 }
 
-// ---------------------------------------------------------------------------------------------
-// E. runtime locations (2b): panics, backtraces, Location::caller()
-// ---------------------------------------------------------------------------------------------
-
 #[test]
 fn e01_panic_location_uses_display_columns_and_backtrace_uses_byte_columns() {
     let fx = load("r01_panic_in_fn");
-    // generated line 4: `    let label = "héllo→日本"; if x == 2 { panic!("boom") }`
     let line = fx.program.rust.lines().nth(3).unwrap();
     assert!(line.contains("日本"));
     remapper!(fx, r);
-    // what the program really printed (see run.stderr.txt): panic at 4:43, backtrace frame at 4:48
     let stderr = read("r01_panic_in_fn", "run.stderr.txt");
     assert!(stderr.contains("panicked at src/gen.rs:4:43:"));
     assert!(stderr.contains("at ./src/gen.rs:4:48"));
     let by_display = r.locate("src/gen.rs", 4, Some(43), TraceColumnUnit::DisplayWidth);
     let by_bytes = r.locate("./src/gen.rs", 4, Some(48), TraceColumnUnit::Bytes);
     let by_scalar = r.locate("src/gen.rs", 4, Some(41), TraceColumnUnit::Chars);
-    // (`./src/gen.rs` is not the test's generated name: the byte one is mapped via the matching name)
     assert_unmapped(&by_bytes, UnmappedReason::ForeignFile);
     let by_bytes = r.locate("src/gen.rs", 4, Some(48), TraceColumnUnit::Bytes);
     for s in [&by_display, &by_bytes, &by_scalar] {
@@ -1816,15 +1724,12 @@ fn e01_panic_location_uses_display_columns_and_backtrace_uses_byte_columns() {
     }
     let want = fx.src.find("panic!").unwrap();
     assert_eq!(by_display.marigold.as_ref().unwrap().range.start, want);
-    // using the WRONG unit lands on a different token (this is the bug the unit parameter prevents)
     let wrong = r.locate("src/gen.rs", 4, Some(43), TraceColumnUnit::Chars);
     assert_ne!(wrong.marigold.as_ref().unwrap().range.start, want);
 }
 
 #[test]
 fn e02_display_width_table_matches_rustc_for_verified_characters() {
-    // Ground truth: Location::caller().column() after the character, measured with rustc 1.97 (see spec 6.3).
-    // (char, extra columns beyond the scalar count)
     let cases: &[(char, isize)] = &[
         ('a', 0),
         ('\u{e9}', 0),
@@ -1851,18 +1756,17 @@ fn e02_display_width_table_matches_rustc_for_verified_characters() {
         ('\u{3000}', 1),
         ('\u{20dd}', -1),
     ];
-    // one function per case, all on line 3 after `<prefix>`
     for (ch, extra) in cases {
         let src = format!(
             "fn f(x: i32) -> i32 {{ let s = \"{ch}\"; x }}\nrange(0, 1).write_file(\"o.csv\", csv)"
         );
         if ch.is_control() && *ch != '\t' {
-            continue; // not representable in a fn body for this check
+            continue;
         }
         let p = marigold_generate(&src).unwrap();
         let f = seg_of(&p, SegmentKind::Function, 0);
         let line_start = p.rust[..f.generated.start].rfind('\n').map_or(0, |i| i + 1);
-        let off = f.generated.start + p.rust[f.generated.start..].find(" x }").unwrap() + 1; // the `x`
+        let off = f.generated.start + p.rust[f.generated.start..].find(" x }").unwrap() + 1;
         let scalar_col = p.rust[line_start..off].chars().count() + 1;
         let line_no = p.rust[..off].matches('\n').count() + 1;
         let display_col = (scalar_col as isize + extra) as usize;
@@ -1892,7 +1796,6 @@ fn e03_crlf_source_runtime_location_and_line_only_lookup() {
     let loc = m.marigold.as_ref().unwrap();
     assert_eq!((loc.start.line, loc.start.column), (3, 27));
     assert_eq!(&fx.src[loc.range.start..loc.range.start + 4], "v[i]");
-    // line only (tracing metadata has no column): the whole line, attributed to the function
     let m = r.locate("src/gen.rs", 5, None, TraceColumnUnit::Chars);
     assert_eq!(m.precision, Exact);
     assert!(slice(&fx.src, &m).contains("v[i]") && !slice(&fx.src, &m).contains('\r'));
@@ -1904,7 +1807,6 @@ fn e03_crlf_source_runtime_location_and_line_only_lookup() {
 fn e04_runtime_lines_in_glue_wrapper_and_beyond_the_file() {
     let fx = load("r01_panic_in_fn");
     remapper!(fx, r);
-    // the closure/future frame `gen.rs:85:127` of the real trace is the `all_streams.collect()` glue
     let m = r.locate("src/gen.rs", 85, Some(127), TraceColumnUnit::Bytes);
     assert_unmapped(&m, UnmappedReason::Glue);
     assert_unmapped(
@@ -1927,7 +1829,6 @@ fn e04_runtime_lines_in_glue_wrapper_and_beyond_the_file() {
         &r.locate("src/main.rs", 3, Some(24), TraceColumnUnit::Bytes),
         UnmappedReason::ForeignFile,
     );
-    // usize extremes
     for (l, c) in [
         (usize::MAX, Some(usize::MAX)),
         (1, Some(usize::MAX)),
@@ -1948,7 +1849,6 @@ fn e05_runtime_columns_on_the_prefixed_first_line() {
     let prefix = "日本 ";
     let is_gen = |f: &str| f == "gen.rs";
     let r = Remapper::new(&program, &src, &is_gen).with_prefix(prefix);
-    // line 1 of the file = prefix + `async {`
     let m = r.locate("gen.rs", 1, Some(1), TraceColumnUnit::Chars);
     assert_unmapped(&m, UnmappedReason::OutsideGeneratedRegion);
     let after = |unit, col| r.locate("gen.rs", 1, Some(col), unit);
@@ -1992,7 +1892,6 @@ fn e06_trace_text_scanning_finds_panic_and_backtrace_locations() {
             format!("{}:{}:{}", h.file, h.line, h.column.unwrap())
         );
     }
-    // both user-code locations are the same Marigold byte; the glue frame is unmapped
     assert_eq!(hits[0].mapped.marigold, hits[1].mapped.marigold);
     assert_eq!(
         hits[0].mapped.marigold.as_ref().unwrap().range.start,
@@ -2036,7 +1935,6 @@ fn e07_trace_scanner_is_lenient_and_never_panics() {
     let h = r.remap_trace("C:\\proj\\src\\gen.rs:7:9");
     assert_eq!(h.len(), 1);
     assert_eq!(h[0].file, "C:\\proj\\src\\gen.rs");
-    // documented limitation: a path containing a space is not recognised (no partial/guessed match)
     let h = r.remap_trace("at /path with spaces/gen.rs:3:4");
     assert_eq!(h.len(), 1, "{h:?}");
     assert_eq!(h[0].file, "spaces/gen.rs");
@@ -2044,8 +1942,6 @@ fn e07_trace_scanner_is_lenient_and_never_panics() {
 
 #[test]
 fn e08_display_width_beyond_the_verified_table_never_claims_exact() {
-    // U+0F00 (Tibetan) is outside the table verified against rustc: the column may be wrong, so the
-    // result must degrade to the whole segment instead of pointing at a guessed byte.
     let src =
         "fn f(x: i32) -> i32 { let s = \"\u{0f00}\"; x }\nrange(0, 1).write_file(\"o.csv\", csv)";
     let p = marigold_generate(src).unwrap();
@@ -2058,7 +1954,6 @@ fn e08_display_width_beyond_the_verified_table_never_claims_exact() {
     let r = Remapper::new(&p, src, &is_gen);
     let m = r.locate("gen.rs", line, Some(col), TraceColumnUnit::DisplayWidth);
     assert_eq!(m.precision, Seg, "{m:?}");
-    // the exact units stay exact on the same line
     assert_eq!(
         r.locate("gen.rs", line, Some(col), TraceColumnUnit::Chars)
             .precision,
@@ -2099,10 +1994,6 @@ fn e09_errors_are_never_noise_and_trace_hits_come_in_text_order() {
     );
     assert!(hits.windows(2).all(|w| w[0].token.end <= w[1].token.start));
 }
-
-// ---------------------------------------------------------------------------------------------
-// H. nested segments (T2 will produce them) and corrupted maps
-// ---------------------------------------------------------------------------------------------
 
 /// outer expression 0 with two inner pieces, plus a second expression; synthetic but self-consistent.
 /// The generated text of a piece must not equal its Marigold text, or the piece is provably exact.
@@ -2175,33 +2066,26 @@ fn h01_innermost_segment_wins_and_straddling_siblings_fall_back_to_the_enclosing
         let a = program.rust.find(needle).unwrap();
         (a, a + needle.len())
     };
-    // inside an inner piece: the inner piece's source (finer than the expression)
     let (a, b) = rg("range(0,3)");
     let m = at(a + 2, b - 1);
     assert_eq!(m.precision, Seg);
     assert_eq!(slice(&src, &m), "range(0, 3)");
-    // the whole inner piece, and a piece-sized span in the other piece
     let (a, b) = rg("mapx(f)");
     assert_eq!(slice(&src, &at(a, b)), "map(f)");
-    // spans two sibling pieces, contained in the outer segment: the outer one
     let (a, _) = rg("range(0,3)");
     let (_, b) = rg("mapx(f)");
     let m = at(a + 1, b - 1);
     assert_eq!(m.precision, Seg);
     assert_eq!(slice(&src, &m), "xs = range(0, 3).map(f)");
-    // glue inside the outer segment (between the pieces) is the outer segment, not unmapped
     let (_, e1) = rg("range(0,3)");
     let m = at(e1, e1 + 1);
     assert_eq!(slice(&src, &m), "xs = range(0, 3).map(f)");
-    // leaves the outer segment into trailing glue but stays in expression 0: Expression
     let (_, oe) = rg("let xs = G(range(0,3)).M(mapx(f));");
     let m = at(oe - 3, oe + 1);
     assert_eq!(m.precision, Expression);
     assert_eq!(slice(&src, &m), "xs = range(0, 3).map(f)");
-    // two expressions
     let m = at(oe - 3, program.rust.find("let r0").unwrap() + 4);
     assert_unmapped(&m, UnmappedReason::MultipleExpressions);
-    // T1 agreement for single bytes everywhere
     for off in 0..program.rust.len() {
         let m = at(off, off + 1);
         match program.map.source_for_generated(off) {
@@ -2227,19 +2111,15 @@ fn h02_zero_width_insertion_at_boundaries_prefers_the_segment_that_starts_there(
         )
     };
     let a = program.rust.find("range(0,3)").unwrap();
-    // exactly at the start of the inner piece: the inner piece
     assert_eq!(slice(&src, &at(a)), "range(0, 3)");
-    // exactly at the end of the inner piece (next byte is outer-only text): the outer segment
     assert_eq!(
         slice(&src, &at(a + "range(0,3)".len())),
         "xs = range(0, 3).map(f)"
     );
-    // at the end of the whole second segment, followed by glue: attributed to that segment (insertion after its last byte)
     let end = program.rust.find("let r0 = ys;").unwrap() + "let r0 = ys;".len();
     let m = at(end);
     assert_eq!(slice(&src, &m), "ys.return");
     assert_eq!(m.precision, Seg);
-    // before the first segment, in the preamble: glue
     assert_unmapped(&at(3), UnmappedReason::Glue);
 }
 
@@ -2269,7 +2149,6 @@ fn h03_zero_width_insertion_at_the_very_end_of_a_function_stays_exact_and_zero_w
         }
     );
     assert_eq!((loc.start.line, loc.start.column), (1, 30));
-    // and at its very start: the segment, but not exact (`const ` precedes the verbatim region)
     let m = map_one(
         &src,
         &program,
@@ -2368,12 +2247,10 @@ fn h04_corrupted_maps_degrade_to_unmapped_never_to_a_wrong_range() {
             }
         }
     }
-    // an empty map: everything inside the program is glue
     let program = GeneratedProgram::new(rust.to_string(), SourceMap::new(vec![]));
     let r = Remapper::new(&program, src, &is_gen);
     assert_unmapped(&r.map_span(&sp(12, 13)), UnmappedReason::Glue);
     assert_unmapped(&r.map_span(&sp(0, 0)), UnmappedReason::Glue);
-    // empty program and empty source
     let program = GeneratedProgram::new(String::new(), SourceMap::new(vec![]));
     let r = Remapper::new(&program, "", &is_gen);
     let empty: RustcSpan =
@@ -2386,8 +2263,6 @@ fn h04_corrupted_maps_degrade_to_unmapped_never_to_a_wrong_range() {
 
 #[test]
 fn h05_verbatim_region_never_starts_inside_a_character() {
-    // Stale/mismatching texts whose last BYTES agree but whose last CHARACTERS differ:
-    // generated `é` = C3 A9, source `©` = C2 A9. Nothing here is verbatim.
     let rust = "async {\n    const fn f() \u{e9}\n}\n";
     let src = "fn f() \u{a9}";
     let g0 = rust.find("const").unwrap();
@@ -2405,18 +2280,12 @@ fn h05_verbatim_region_never_starts_inside_a_character() {
     let program = GeneratedProgram::new(rust.to_string(), SourceMap::new(vec![seg]));
     let is_gen = |f: &str| f == "gen.rs";
     let r = Remapper::new(&program, src, &is_gen);
-    // zero-width at the very end: would be `Exact` only if the last (shared) byte were treated as verbatim
     let m = r.map_span(&rustc_span("gen.rs", rust, g1, g1, true));
     assert_eq!(m.precision, Seg, "{m:?}");
-    // the whole last character
     let m = r.map_span(&rustc_span("gen.rs", rust, g1 - 2, g1, true));
     assert_eq!(m.precision, Seg, "{m:?}");
     assert_eq!(slice(src, &m), src);
 }
-
-// ---------------------------------------------------------------------------------------------
-// F. properties
-// ---------------------------------------------------------------------------------------------
 
 fn fixture_names() -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(fixtures_root())
@@ -2456,12 +2325,11 @@ fn f01_every_real_diagnostic_of_every_fixture_satisfies_all_invariants_and_none_
                 );
                 if s.precision == Exact {
                     exact += 1;
-                    // Exact <=> byte-identical text, checked against the raw generated bytes
                     let raw = s.raw.as_ref().unwrap();
                     let base = fx.prefix.len();
                     let mut cur = (raw.byte_start, raw.byte_end);
                     if s.via_macro.is_some() {
-                        continue; // raw is the library span; identity is checked for the direct ones
+                        continue;
                     }
                     cur.0 -= base;
                     cur.1 -= base;
@@ -2563,7 +2431,6 @@ proptest! {
             })).unwrap();
             let m = r.map_span(&sp);
             assert_span_invariants(&src, &m);
-            // honest: arbitrary numbers essentially never describe the generated file
             if let Some(l) = &m.marigold { prop_assert!(l.range.end <= src.len()); }
         }
     }
@@ -2668,12 +2535,8 @@ fn f03_agrees_with_source_map_lookup_for_every_offset() {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// G. scale
-// ---------------------------------------------------------------------------------------------
-
 #[test]
-fn g01_two_hundred_thousand_diagnostics_in_linear_time() {
+fn g01_two_hundred_thousand_diagnostics_all_map_the_same() {
     let fx = load("f06_mismatched_variable_types");
     remapper!(fx, r);
     let one = fx
@@ -2681,7 +2544,6 @@ fn g01_two_hundred_thousand_diagnostics_in_linear_time() {
         .iter()
         .find(|d| d.message.contains("non-const function"))
         .unwrap();
-    let start = std::time::Instant::now();
     let mut n_exact = 0usize;
     for _ in 0..200_000 {
         let m = r.remap(one);
@@ -2690,19 +2552,11 @@ fn g01_two_hundred_thousand_diagnostics_in_linear_time() {
         }
     }
     assert_eq!(n_exact, 200_000);
-    // Absolute bound with a wide margin (debug build ~1 s, 16 busy CPUs ~15 s): it only catches a
-    // remapper that is accidentally quadratic. What a lookup costs is pinned without a clock by
-    // the counters and search logs in `src/remap.rs` (`lookups_do_the_same_work_whatever_the_number_of_segments`,
-    // `every_search_is_a_binary_search_and_a_lookup_makes_the_same_searches_at_any_size`).
-    assert!(
-        start.elapsed() < std::time::Duration::from_secs(20),
-        "{:?}",
-        start.elapsed()
-    );
 }
 
-/// `n` single-line functions; returns the time of 30_000 point lookups (bytes only, line/column not provided).
-fn lookup_time(n: usize) -> std::time::Duration {
+/// `n` single-line functions and 30_000 point lookups (bytes only, line/column not provided), each of
+/// which must land in its own function.
+fn check_lookups(n: usize) {
     let mut src = String::new();
     let mut segs = vec![];
     let mut rust = String::from("async {\n    ");
@@ -2743,29 +2597,20 @@ fn lookup_time(n: usize) -> std::time::Duration {
             .unwrap()
         })
         .collect();
-    let t = std::time::Instant::now();
     for (k, sp) in spans.iter().enumerate() {
         let m = r.map_span(sp);
         assert_eq!(m.precision, Exact);
         assert_eq!(m.segment.as_ref().unwrap().expr_index, (k * 7919) % n);
     }
-    t.elapsed()
 }
 
 #[test]
-fn g02_lookup_cost_does_not_grow_with_the_number_of_segments() {
-    // Functional check on a 40 000-segment map plus an absolute bound with a wide margin. How much
-    // WORK a lookup does is asserted without a clock in `src/remap.rs` (see g01).
-    let large = lookup_time(40_000);
-    assert!(
-        large < std::time::Duration::from_secs(20),
-        "large={large:?}"
-    );
+fn g02_every_lookup_on_a_forty_thousand_segment_map_lands_in_its_own_function() {
+    check_lookups(40_000);
 }
 
 #[test]
 fn g03_a_span_covering_everything_stops_at_the_second_expression() {
-    // the whole-program span must not cost O(segments) per diagnostic
     let (src, program) = mini();
     let is_gen = |f: &str| f == "gen.rs";
     let r = Remapper::new(&program, &src, &is_gen);
@@ -2778,12 +2623,6 @@ fn g03_a_span_covering_everything_stops_at_the_second_expression() {
     ));
     assert_unmapped(&m, UnmappedReason::MultipleExpressions);
 }
-
-// ---------------------------------------------------------------------------------------------
-// I. additional tests written with the implementation: exact JSON shapes, suggestions through
-//    macros, the multi-line checksum, trace scanning corner cases, unverified widths, corpus-wide
-//    agreement with the T1 lookup
-// ---------------------------------------------------------------------------------------------
 
 fn key_set(v: &Value) -> Vec<&str> {
     let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
@@ -2845,7 +2684,6 @@ fn x01_json_shapes_have_exactly_these_keys() {
     );
     assert_eq!(p["precision"], json!({"kind": "exact"}));
     assert_eq!(p["segment"]["kind"], json!("function"));
-    // the help child carries the suggestion
     let help = &v["children"][1]["primary"]["suggestion"];
     assert_eq!(
         key_set(help),
@@ -2868,7 +2706,6 @@ fn x01_json_shapes_have_exactly_these_keys() {
         (json!(0), json!(1))
     );
     assert_eq!(help["applicable_to_marigold"], json!(true));
-    // unmapped span: same keys, nulls for what is missing
     assert_eq!(m.level, Level::Warning);
     let unmapped =
         serde_json::to_value(r.locate("other.rs", 1, None, TraceColumnUnit::Bytes)).unwrap();
@@ -2878,9 +2715,7 @@ fn x01_json_shapes_have_exactly_these_keys() {
         unmapped["precision"],
         json!({"kind": "unmapped", "reason": "foreign_file"})
     );
-    // a located line has the fields that need no rustc span, and only those
     assert_eq!(key_set(&unmapped), ["marigold", "precision", "segment"]);
-    // every reason and unit has a stable name
     for (reason, name) in [
         (UnmappedReason::ForeignFile, "foreign_file"),
         (
@@ -2939,7 +2774,6 @@ fn x03_a_suggestion_found_through_a_macro_call_site_is_not_applicable() {
     let (src, program) = mini();
     let f = seg_of(&program, SegmentKind::Function, 0);
     let plus = f.generated.start + program.rust[f.generated.start..].find('+').unwrap();
-    // the library span (replacement targets library text) whose call site is the `+` in the user's fn
     let call = rustc_span("gen.rs", &program.rust, plus, plus + 1, false);
     let mut lib = RustcSpan::default();
     lib.file_name = "/rustc/x/library/core/src/ops.rs".into();
@@ -2956,12 +2790,10 @@ fn x03_a_suggestion_found_through_a_macro_call_site_is_not_applicable() {
         !sug.applicable_to_marigold,
         "the replacement edits library text, not the span that was mapped"
     );
-    // the same replacement written directly on the generated span is applicable
     let mut direct = rustc_span("gen.rs", &program.rust, plus, plus + 1, true);
     direct.suggested_replacement = Some("-".into());
     let m = map_one(&src, &program, "", &direct);
     assert!(m.suggestion.unwrap().applicable_to_marigold);
-    // an empty replacement (a removal) is still a suggestion
     let mut removal = rustc_span("gen.rs", &program.rust, plus, plus + 1, true);
     removal.suggested_replacement = Some(String::new());
     assert_eq!(
@@ -3015,7 +2847,6 @@ fn x04_multi_line_checksum_covers_the_first_and_last_line_only() {
     let mut s = good.clone();
     s.line_end -= 1;
     assert_eq!(precision(&s), stale, "line_end");
-    // documented limit: the lines in between are not compared
     let mut s = good.clone();
     s.text[2].text = "anything".into();
     assert_eq!(precision(&s), Exact);
@@ -3026,26 +2857,21 @@ fn x05_trace_scanner_consumes_a_whole_location_even_when_it_is_not_ours() {
     let (src, program) = mini();
     let is_gen = |f: &str| f.ends_with(".rs");
     let r = Remapper::new(&program, &src, &is_gen);
-    // `:5` after a column belongs to no file, `x.rs:3:4:5` is one hit
     let hits = r.remap_trace("x.rs:3:4:5 y.rs:6");
     let got: Vec<_> = hits
         .iter()
         .map(|h| (h.file.as_str(), h.line, h.column))
         .collect();
     assert_eq!(got, [("x.rs", 3, Some(4)), ("y.rs", 6, None)]);
-    // a location in a file we do not own is skipped and does not leak into the next token
     let only_y = |f: &str| f == "y.rs" || f == "x.rs:3";
     let r = Remapper::new(&program, &src, &only_y);
     let hits = r.remap_trace("x.rs:3:4 y.rs:6:7");
     let got: Vec<_> = hits.iter().map(|h| h.file.as_str()).collect();
     assert_eq!(got, ["y.rs"]);
-    // a second colon-number pair right after a hit is not re-read as a file named after the first
     let any = |_: &str| true;
     let r = Remapper::new(&program, &src, &any);
     assert_eq!(r.remap_trace("a:1:2:3:4").len(), 1);
-    // numbers that do not fit are not locations
     assert!(r.remap_trace("a.rs:99999999999999999999999").is_empty());
-    // the unit follows the context
     let hits = r
         .remap_trace("panicked at a.rs:1:1:\n   0: f\n             at b.rs:2:2\n  1: g\n  at c.rs:3:3\nat d.rs:4:4\nbat e.rs:5:5\n(f.rs:6:6) foo at g.rs:7:7");
     let units: Vec<_> = hits.iter().map(|h| (h.file.as_str(), h.unit)).collect();
@@ -3053,10 +2879,8 @@ fn x05_trace_scanner_consumes_a_whole_location_even_when_it_is_not_ours() {
         units,
         [
             ("a.rs", TraceColumnUnit::DisplayWidth),
-            // only the `at` line under a numbered frame is a backtrace location (DWARF bytes)
             ("b.rs", TraceColumnUnit::Bytes),
             ("c.rs", TraceColumnUnit::Bytes),
-            // an `at` that follows a location, a word ending in `at`, a message: display width
             ("d.rs", TraceColumnUnit::DisplayWidth),
             ("e.rs", TraceColumnUnit::DisplayWidth),
             ("f.rs", TraceColumnUnit::DisplayWidth),
@@ -3067,7 +2891,6 @@ fn x05_trace_scanner_consumes_a_whole_location_even_when_it_is_not_ours() {
 
 #[test]
 fn x06_a_column_after_an_unverified_width_never_points_across_expressions() {
-    // line 2 is `aaa<U+0F00>bbb` (the generated text differs from the Marigold text): two expressions on one line, a character of unknown display width between
     let src = "AAA BBB".to_string();
     let rust = "async {\naaa\u{0f00}bbb\n}\n".to_string();
     let a = rust.find("aaa").unwrap();
@@ -3099,7 +2922,6 @@ fn x06_a_column_after_an_unverified_width_never_points_across_expressions() {
     );
     let is_gen = |f: &str| f == "gen.rs";
     let r = Remapper::new(&program, &src, &is_gen);
-    // the `B`: scalar column 5, byte column 7, display column 5 if U+0F00 had width 1
     let scalar = r.locate("gen.rs", 2, Some(5), TraceColumnUnit::Chars);
     assert_eq!(scalar.precision, Seg);
     assert_eq!(slice(&src, &scalar), "BBB");
@@ -3107,7 +2929,6 @@ fn x06_a_column_after_an_unverified_width_never_points_across_expressions() {
     assert_eq!(slice(&src, &bytes), "BBB");
     let display = r.locate("gen.rs", 2, Some(5), TraceColumnUnit::DisplayWidth);
     assert_unmapped(&display, UnmappedReason::MultipleExpressions);
-    // before the unknown character the display width is still trusted
     let before = r.locate("gen.rs", 2, Some(2), TraceColumnUnit::DisplayWidth);
     assert_eq!(slice(&src, &before), "AAA");
 }
@@ -3117,7 +2938,6 @@ fn x07_lines_without_code_and_the_trailing_empty_line_are_not_mapped() {
     let (src, program) = mini();
     let is_gen = |f: &str| f == "gen.rs";
     let r = Remapper::new(&program, &src, &is_gen);
-    // blank separator lines are glue, even though a segment ends on the line before
     let blank = program
         .rust
         .split('\n')
@@ -3128,7 +2948,6 @@ fn x07_lines_without_code_and_the_trailing_empty_line_are_not_mapped() {
         &r.locate("gen.rs", blank, None, TraceColumnUnit::Bytes),
         UnmappedReason::Glue,
     );
-    // the generated code ends in "\n": the line after it is not part of the program
     let lines = program.rust.matches('\n').count();
     assert!(program.rust.ends_with('\n'));
     for line in [lines + 1, lines + 2] {
@@ -3198,7 +3017,6 @@ fn x09_for_every_program_of_the_corpus_every_byte_agrees_with_the_t1_lookup() {
 
 #[test]
 fn x10_the_last_program_line_may_continue_into_text_after_the_program() {
-    // The program has no trailing newline, so the wrapper's closing text shares its last line.
     let src = "fn f(x: i32) -> i32 { x }";
     let rust = "async {\nconst fn f(x: i32) -> i32 { x }";
     let file = format!("{rust} // wrapper tail\n");
@@ -3223,14 +3041,12 @@ fn x10_the_last_program_line_may_continue_into_text_after_the_program() {
         "const fn f(x: i32) -> i32 { x } // wrapper tail"
     );
     assert_mapped(src, &map_one(src, &program, "", &sp), Exact, "x", (1, 23));
-    // the part of the line that is the program's must still agree with the reported text
     let mut other = sp.clone();
     other.text[0].text = "const fn g(x: i32) -> i32 { x } // wrapper tail".into();
     assert_unmapped(
         &map_one(src, &program, "", &other),
         UnmappedReason::StaleGeneratedFile,
     );
-    // a span ending exactly at the end of the program, and the insertion point there
     let end = rust.len();
     for (a, b) in [(end - 1, end), (end, end)] {
         let m = map_one(src, &program, "", &rustc_span("gen.rs", &file, a, b, true));
@@ -3240,8 +3056,6 @@ fn x10_the_last_program_line_may_continue_into_text_after_the_program() {
 
 #[test]
 fn x11_only_function_text_is_ever_exact_even_when_a_struct_or_enum_ends_in_the_same_byte() {
-    // Generated structs/enums end in `}` just like their Marigold source does, so a byte-suffix
-    // coincidence exists; it must not be reported as a proven-identical text.
     let src = "struct S { a: u8 }\nenum E { A, B }\nrange(0, 1).write_file(\"o.csv\", csv)";
     let program = marigold_generate(src).unwrap();
     for kind in [SegmentKind::Struct, SegmentKind::Enum] {
@@ -3273,11 +3087,9 @@ fn x12_the_declared_prefix_is_part_of_the_first_line_text_rustc_reports() {
     let (src, program) = mini();
     let prefix = "    ";
     let file = format!("{prefix}{}", program.rust);
-    // bytes 4..9 are `async` on the first program line
     let sp = rustc_span("gen.rs", &file, 4, 9, true);
     assert_eq!(sp.text[0].text, format!("{prefix}async {{"));
     assert_unmapped(&map_one(&src, &program, prefix, &sp), UnmappedReason::Glue);
-    // the same highlight numbers over a line text that lacks the prefix describe another file
     let mut other = sp.clone();
     other.text[0].text = "async {".to_string();
     assert_unmapped(
@@ -3288,7 +3100,6 @@ fn x12_the_declared_prefix_is_part_of_the_first_line_text_rustc_reports() {
 
 #[test]
 fn x13_an_expression_span_takes_the_widest_segment_not_the_first_one() {
-    // two pieces of expression 0 (no enclosing segment), the second one wider in Marigold
     let src = "AA BBBBBB";
     let rust = "async {\n  aa\n  bbbbbb\n}\n";
     let (a, b) = (rust.find("aa").unwrap(), rust.find("bbbbbb").unwrap());
@@ -3305,7 +3116,6 @@ fn x13_an_expression_span_takes_the_widest_segment_not_the_first_one() {
         rust.to_string(),
         SourceMap::new(vec![piece(a, a + 2, 0, 2), piece(b, b + 6, 3, 9)]),
     );
-    // from the last byte of the first piece to the first byte of the second one
     let m = map_one(
         src,
         &program,
@@ -3332,12 +3142,10 @@ fn x14_a_prefix_with_an_unverified_display_width_is_not_trusted_either() {
     );
     let is_gen = |f: &str| f == "gen.rs";
     let r = Remapper::new(&program, src, &is_gen).with_prefix("\u{0f00}");
-    // the `a`: after the 3-byte prefix and `fn ` (6 bytes, 5 scalars)
     let bytes = r.locate("gen.rs", 1, Some(7), TraceColumnUnit::Bytes);
     assert_mapped(src, &bytes, Exact, "", (1, 4));
     let scalar = r.locate("gen.rs", 1, Some(5), TraceColumnUnit::Chars);
     assert_mapped(src, &scalar, Exact, "", (1, 4));
-    // U+0F00 is not in the verified table: the column cannot be trusted
     let display = r.locate("gen.rs", 1, Some(5), TraceColumnUnit::DisplayWidth);
     assert_eq!(display.precision, Seg, "{display:?}");
     assert_eq!(slice(src, &display), "fn a() {}");
@@ -3354,11 +3162,6 @@ fn x15_an_empty_code_is_no_code() {
     .unwrap();
     assert_eq!(r.remap(&d).code, None);
 }
-
-// ---------------------------------------------------------------------------------------------
-// N. review round 1: data-driven exactness, noise by kind, multipart suggestions, widths,
-//    prefixes on later lines, the byte order mark, and the gaps that mutation testing found
-// ---------------------------------------------------------------------------------------------
 
 fn jdiag(v: Value) -> RustcDiagnostic {
     serde_json::from_value(v).unwrap()
@@ -3414,8 +3217,6 @@ fn body_offsets(
 
 #[test]
 fn n01_a_nested_segment_whose_bytes_equal_the_source_is_exact_whatever_its_kind() {
-    // The body of a function, as the finer-grained segments of a later release will have it:
-    // innermost wins, and its generated text is its source, byte for byte.
     let (src, program) = mini();
     let f = seg_of(&program, SegmentKind::Function, 0);
     let (g, s) = body_offsets(&program, &src, &f);
@@ -3432,7 +3233,6 @@ fn n01_a_nested_segment_whose_bytes_equal_the_source_is_exact_whatever_its_kind(
         m.segment.as_ref().unwrap().kind,
         SegmentKind::StreamVariable
     );
-    // the whole body, an insertion point at its start and one at its end
     let whole = deep.map_span(&sp(body.generated.start, body.generated.end));
     assert_mapped(&src, &whole, Exact, "{ x + 1 }", (1, body.source.start + 1));
     for at in [body.generated.start, body.generated.end] {
@@ -3440,7 +3240,6 @@ fn n01_a_nested_segment_whose_bytes_equal_the_source_is_exact_whatever_its_kind(
         assert_eq!(m.precision, Exact, "{at}: {m:?}");
         assert_eq!(slice(&src, &m), "", "{at}");
     }
-    // The nesting changes nothing for any byte of the function after `const `.
     for off in f.generated.start..f.generated.end {
         let (a, b) = (
             flat.map_span(&sp(off, off + 1)),
@@ -3461,8 +3260,6 @@ fn n01_a_nested_segment_whose_bytes_equal_the_source_is_exact_whatever_its_kind(
 #[test]
 fn n02_a_shared_last_byte_is_not_exactness_unless_the_kind_says_the_generated_text_ends_with_the_source(
 ) {
-    // A signature-like child: generated `const fn f(x: i32) -> i32`, Marigold `fn f(x: i32) -> i32`.
-    // Their last bytes (`i32`) agree, but only for a `Function` is that known to be the whole story.
     let (src, program) = mini();
     let f = seg_of(&program, SegmentKind::Function, 0);
     let sig_g = program.rust[f.generated.start..].find(" {").unwrap();
@@ -3517,8 +3314,6 @@ fn n03_exactness_in_a_nested_segment_carries_to_suggestions_and_to_the_noise_dec
 
 #[test]
 fn n04_a_warning_in_a_function_signature_is_the_users_even_when_it_is_only_segment_precise() {
-    // The signature is rewritten by the generator (`string_10`, references), so a lint on a
-    // parameter or on the name is attributed to the whole function: Segment, not Exact.
     for (func, needle) in [
         ("fn f(unused: i32, s: string_10) -> i32 { 1 }", "unused"),
         ("fn f(x: i32, y:&str) -> i32 { 1 }", "y:"),
@@ -3539,7 +3334,6 @@ fn n04_a_warning_in_a_function_signature_is_the_users_even_when_it_is_only_segme
         assert_eq!(p.precision, Seg, "{func}: {p:?}");
         assert_eq!(p.segment.as_ref().unwrap().kind, SegmentKind::Function);
         assert!(!m.likely_generated_noise(), "{func}");
-        // the same position as an error is, of course, not noise either
         let error = jdiag(json!({
             "message": "e", "level": "error", "children": [], "spans": [span_to_json(&sp)],
         }));
@@ -3601,7 +3395,6 @@ fn applicable_flags(d: &MappedDiagnostic) -> Vec<(usize, usize, bool, String)> {
 
 #[test]
 fn n06_a_multipart_suggestion_is_applicable_only_if_every_part_is() {
-    // rustc's "try wrapping the expression in `Some`": insert `Some(` before and `)` after.
     let (src, program) = mini();
     let f = seg_of(&program, SegmentKind::Function, 0);
     let ftext = &program.rust[f.generated.start..f.generated.end];
@@ -3616,7 +3409,6 @@ fn n06_a_multipart_suggestion_is_applicable_only_if_every_part_is() {
     };
     let t = &program.rust;
 
-    // both parts exact: applicable, numbered in rustc's order
     let d = help(vec![
         suggestion_part(t, "gen.rs", x, x, "Some("),
         suggestion_part(t, "gen.rs", x + 5, x + 5, ")"),
@@ -3629,7 +3421,6 @@ fn n06_a_multipart_suggestion_is_applicable_only_if_every_part_is() {
         ]
     );
 
-    // the second part in glue: the first part alone would break the program
     let d = help(vec![
         suggestion_part(t, "gen.rs", x, x, "Some("),
         suggestion_part(t, "gen.rs", 3, 3, ")"),
@@ -3643,7 +3434,6 @@ fn n06_a_multipart_suggestion_is_applicable_only_if_every_part_is() {
         ]
     );
 
-    // the second part only segment-precise (before the verbatim tail)
     let d = help(vec![
         suggestion_part(t, "gen.rs", f.generated.start, f.generated.start, ")"),
         suggestion_part(t, "gen.rs", x, x, "Some("),
@@ -3656,7 +3446,6 @@ fn n06_a_multipart_suggestion_is_applicable_only_if_every_part_is() {
         ]
     );
 
-    // a part found through a macro call site is not a part of the user's text
     let foreign: RustcSpan =
         serde_json::from_value(jspan("/rustc/x/library/core/src/a.rs", 5, 9)).unwrap();
     let mut via = with_expansion(foreign, rustc_span("gen.rs", t, x + 5, x + 5, true), "m!");
@@ -3670,7 +3459,6 @@ fn n06_a_multipart_suggestion_is_applicable_only_if_every_part_is() {
         ]
     );
 
-    // spans without a replacement are not parts; one exact replacement is a whole suggestion
     let d = help(vec![
         rustc_span("gen.rs", t, 3, 4, true),
         suggestion_part(t, "gen.rs", x, x + 1, "y"),
@@ -3678,12 +3466,10 @@ fn n06_a_multipart_suggestion_is_applicable_only_if_every_part_is() {
     assert_eq!(applicable_flags(&d), [(0, 1, true, "y".to_string())]);
     assert_eq!(d.suggestion_spans().len(), 1);
 
-    // a single span mapped on its own is part 0 of 1
     let single = r.map_span(&suggestion_part(t, "gen.rs", x, x + 1, "y"));
     let g = single.suggestion.unwrap();
     assert_eq!((g.part, g.parts, g.applicable_to_marigold), (0, 1, true));
 
-    // children are their own diagnostics: a bad part in a child does not spoil the parent
     let parent = r.remap(&jdiag(json!({
         "message": "m", "level": "error", "spans": [span_to_json(&suggestion_part(t, "gen.rs", x, x + 1, "y"))],
         "children": [{"message": "c", "level": "help", "children": [],
@@ -3695,7 +3481,6 @@ fn n06_a_multipart_suggestion_is_applicable_only_if_every_part_is() {
 
 #[test]
 fn n07_a_runtime_column_after_a_prefix_is_shifted_on_the_first_line_only() {
-    // The realistic inline layout: the generated code starts after `fn main() {` and four spaces.
     let (src, program) = mini();
     let prefix = "fn main() {\n    ";
     let is_gen = |name: &str| name == "gen.rs";
@@ -3757,12 +3542,10 @@ fn n08_the_function_on_the_second_line_is_not_shifted_by_a_one_line_prefix() {
             "{unit:?}"
         );
     }
-    // rustc's own numbers for a span on the second line do not include the prefix either
     let file = format!("    {rust}");
     let one = file.find('1').unwrap();
     let m = r.map_span(&rustc_span("gen.rs", &file, one, one + 1, true));
     assert_mapped(src, &m, Exact, "1", (1, src.find('1').unwrap() + 1));
-    // and on the first line the four spaces are columns
     let m = r.locate("gen.rs", 1, Some(5), TraceColumnUnit::Chars);
     assert_unmapped(&m, UnmappedReason::Glue);
     let m = r.locate("gen.rs", 1, Some(2), TraceColumnUnit::Chars);
@@ -3771,7 +3554,6 @@ fn n08_the_function_on_the_second_line_is_not_shifted_by_a_one_line_prefix() {
 
 #[test]
 fn n09_a_byte_order_mark_in_the_prefix_is_bytes_but_not_a_column() {
-    // rustc 1.97 (measured): the BOM counts in byte offsets, not in columns or in the line text.
     let prefix = "\u{feff}fn main() { ";
     let rust = "let x: u8 = \"a\"; }\n";
     let program = GeneratedProgram::new(rust.to_string(), SourceMap::new(vec![]));
@@ -3784,10 +3566,8 @@ fn n09_a_byte_order_mark_in_the_prefix_is_bytes_but_not_a_column() {
     let r = Remapper::new(&program, "", &is_gen).with_prefix(prefix);
     let m = r.map_span(&sp);
     assert_unmapped(&m, UnmappedReason::Glue);
-    // without the mark in the declared prefix the same numbers describe another file
     let r = Remapper::new(&program, "", &is_gen).with_prefix("fn main() { ");
     assert_unmapped(&r.map_span(&sp), UnmappedReason::StaleGeneratedFile);
-    // a run-time column on the first line does not count the mark either
     let src = "fn f() {}";
     let seg_rust = "fn f() {}\n";
     let seg = Segment::new(
@@ -3812,7 +3592,6 @@ fn n09_a_byte_order_mark_in_the_prefix_is_bytes_but_not_a_column() {
 
 #[test]
 fn n10_a_display_column_after_an_unassigned_combining_range_character_is_not_trusted() {
-    // U+20F5 is outside the combining marks (U+20D0..=U+20F0); rustc counts it as one column.
     let src = "fn f(x: i32) -> i32 { let _s = \"a\u{20f5}bc\"; x }\nrange(0, 1).map(f).return";
     let program = marigold_generate(src).unwrap();
     let is_gen = |name: &str| name == "gen.rs";
@@ -3825,7 +3604,6 @@ fn n10_a_display_column_after_an_unassigned_combining_range_character_is_not_tru
     let line = program.rust[..b].matches('\n').count() + 1;
     let scalar = program.rust[line_start..b].chars().count() + 1;
     let bytes = b - line_start + 1;
-    // the units that need no table point at the `b`
     assert_eq!(
         r.locate("gen.rs", line, Some(scalar), TraceColumnUnit::Chars)
             .precision,
@@ -3836,13 +3614,10 @@ fn n10_a_display_column_after_an_unassigned_combining_range_character_is_not_tru
             .precision,
         Exact
     );
-    // the display column is not trusted after a character outside the table: never Exact
     let m = r.locate("gen.rs", line, Some(scalar), TraceColumnUnit::DisplayWidth);
     assert!(matches!(m.precision, Seg | Expression), "{m:?}");
     assert_eq!(m.marigold.unwrap().range, f.source);
 }
-
-// --- gaps found by mutation testing ------------------------------------------------------------
 
 fn pair_program(
     rust: &str,
@@ -3888,7 +3663,6 @@ fn n11_an_expression_span_takes_the_earliest_of_equally_wide_pieces_measured_in_
         across(rust, &program, src, "aa", "bb"),
         (Expression, "AA".to_string())
     );
-    // the width is the width of the Marigold text, whatever the generated text looks like
     let src = "AA BBBBBB";
     let rust = "async {\n  aaaaaa\n  bb\n}\n";
     let program = pair_program(rust, ("aaaaaa", (0, 2)), ("bb", (3, 9)));
@@ -3921,7 +3695,6 @@ fn n12_the_anchor_searches_every_child_and_grandchild_and_accepts_any_precision(
         f.source.end - 2
     );
 
-    // a Segment-precise primary span is an anchor too (the anchor is not "the best span")
     let seg = program
         .map
         .segments()
@@ -3977,7 +3750,6 @@ fn n14_is_primary_is_copied_per_span() {
     assert!(m.primary.as_ref().unwrap().is_primary);
     let flags: Vec<bool> = m.secondary.iter().map(|s| s.is_primary).collect();
     assert_eq!(flags, [false, false, true]);
-    // no flagged span: the first one stands in as primary but keeps what rustc said
     let d = jdiag(
         json!({"message": "m", "level": "error", "children": [], "spans": [sp(false), sp(false)]}),
     );
@@ -4054,7 +3826,6 @@ fn n16_the_checksum_compares_the_end_column_the_text_and_every_reported_number()
     let stale = Precision::Unmapped {
         reason: UnmappedReason::StaleGeneratedFile,
     };
-    // the highlight's end must be the recomputed end column, text and numbers agreeing otherwise
     let with = |highlight_end: usize, text: &str| {
         jdiag(
             json!({"message": "m", "level": "error", "children": [], "spans": [{
@@ -4078,7 +3849,6 @@ fn n16_the_checksum_compares_the_end_column_the_text_and_every_reported_number()
             .precision,
         stale
     );
-    // the text is compared exactly, trailing and leading white space included
     for text in [format!("{line_text}  "), format!(" {line_text}")] {
         assert_eq!(
             r.remap(&with(col + 1, &text)).primary.unwrap().precision,
@@ -4086,7 +3856,6 @@ fn n16_the_checksum_compares_the_end_column_the_text_and_every_reported_number()
             "{text:?}"
         );
     }
-    // any non-zero reported number switches the whole check on: a lone number is not enough
     for field in ["line_start", "line_end"] {
         for value in [line, line + 1] {
             let d = jdiag(
@@ -4100,7 +3869,6 @@ fn n16_the_checksum_compares_the_end_column_the_text_and_every_reported_number()
             );
         }
     }
-    // all four zero: not provided, bytes alone decide
     let d = jdiag(
         json!({"message": "m", "level": "error", "children": [], "spans": [
         {"file_name": "gen.rs", "byte_start": plus, "byte_end": plus + 1}]}),
@@ -4129,7 +3897,6 @@ fn n17_a_multi_line_span_starting_on_the_prefixed_first_line_is_consistent() {
         ),
         "{m:?}"
     );
-    // ... and a first line that is not highlighted to its end is not
     let mut short = sp.clone();
     short.text[0].highlight_end -= 1;
     assert_unmapped(
@@ -4140,7 +3907,6 @@ fn n17_a_multi_line_span_starting_on_the_prefixed_first_line_is_consistent() {
 
 #[test]
 fn n18_a_lone_carriage_return_is_an_ordinary_column() {
-    // rustc 1.97 (measured): only `\r\n` loses its `\r`; a lone one stays in `text` and is a column.
     let rust = "fn main() { let a = 1;\r let _b: u8 = \"x\"; let _ = a; }\nfn z() {}\n";
     let program = GeneratedProgram::new(rust.to_string(), SourceMap::new(vec![]));
     let is_gen = |name: &str| name == "cr.rs";
@@ -4183,7 +3949,6 @@ fn n20_trace_delimiters_cut_the_file_name_exactly() {
             "{d:?}"
         );
     }
-    // no delimiter: the file would be `xsrc/gen.rs`, which is not ours
     assert!(r.remap_trace("xsrc/gen.rs:3:4").is_empty());
 }
 
@@ -4195,7 +3960,6 @@ fn n21_the_api_exposes_what_the_next_stages_need() {
     assert!(std::ptr::eq(r.program(), &program));
     assert_eq!(r.source(), src);
     assert_eq!((r.prefix_len(), r.unusable_segments()), (5, 0));
-    // a segment index names the segment in the map, for every segment
     let f = seg_of(&program, SegmentKind::Function, 0);
     let plus = f.generated.start + program.rust[f.generated.start..].find('+').unwrap();
     let file = format!("ab\n  {}", program.rust);
@@ -4207,7 +3971,6 @@ fn n21_the_api_exposes_what_the_next_stages_need() {
             .unwrap();
         assert_eq!((m.index, &program.map.segments()[m.index]), (i, segment));
     }
-    // segments that do not fit the program are counted, and their bytes read as glue
     let bad = Segment::new(
         br(0, program.rust.len() + 10),
         br(0, 3),
@@ -4222,7 +3985,6 @@ fn n21_the_api_exposes_what_the_next_stages_need() {
     let broken = GeneratedProgram::new(program.rust.clone(), SourceMap::new(segments));
     let r = Remapper::new(&broken, &src, &is_gen);
     assert_eq!(r.unusable_segments(), 2);
-    // a located line is the classification of the line alone
     let line = program.rust[..plus].matches('\n').count() + 1;
     let located = r.locate_line("gen.rs", line);
     assert_eq!(
@@ -4292,8 +4054,6 @@ fn golden_rows(m: &MappedDiagnostic, path: Vec<usize>, src: &str, out: &mut Vec<
 
 #[test]
 fn n22_every_real_span_agrees_with_the_frozen_output_of_the_independent_oracle() {
-    // `expected.jsonl` is the output of a separate implementation of the mapping rules (a Python
-    // script written from the specification, never from this crate), frozen once per fixture.
     let mut total = 0;
     for name in fixture_names() {
         let fx = load(&name);
@@ -4337,8 +4097,6 @@ fn n23_only_the_at_line_under_a_numbered_frame_is_a_backtrace_location() {
         assert_eq!(hits[0].unit, unit, "{text:?}");
     }
 }
-
-// --- final round: user-written struct and enum, alternatives, ambiguous trace units -------------
 
 #[test]
 fn n24_a_warning_in_a_user_struct_or_enum_is_the_users_even_when_only_segment_precise() {
@@ -4416,7 +4174,6 @@ fn n26_a_single_mapped_span_decides_applicability_like_a_diagnostic_of_one_span(
     let m = r.map_span(&sp);
     assert_eq!(m.precision, Seg);
     assert!(!m.suggestion.unwrap().applicable_to_marigold);
-    // the same span inside a diagnostic gets the same answer
     let d = r.remap(&diag(vec![sp]));
     assert!(
         !d.primary
@@ -4479,7 +4236,6 @@ fn numbered(d: &MappedDiagnostic) -> Vec<(usize, usize, usize, usize, bool, Stri
 
 #[test]
 fn n28_alternatives_at_one_place_are_not_the_parts_of_one_edit() {
-    // real rustc 1.97: "consider importing one of these enums" is two spans at the same point
     let fx = load("f17_alternative_suggestions");
     remapper!(fx, r);
     let m = r.remap(find(&fx, "cannot find type `Entry`"));
@@ -4505,14 +4261,12 @@ fn n28_alternatives_at_one_place_are_not_the_parts_of_one_edit() {
             ),
         ]
     );
-    // a single replacement of the same kind is a whole suggestion
     let single = r.remap(find(&fx, "cannot find type `Wrapping`"));
     assert_eq!(
         numbered(&single.children[0]),
         [(0, 1, 0, 1, false, "use std::num::Wrapping;\n\n".to_string())]
     );
 
-    // the same shape inside text that is Exact: still not applicable as a set
     let (src, program) = mini();
     let f = seg_of(&program, SegmentKind::Function, 0);
     let x = f.generated.start + program.rust[f.generated.start..].find("x + 1").unwrap();
@@ -4537,7 +4291,6 @@ fn n28_alternatives_at_one_place_are_not_the_parts_of_one_edit() {
             (0, 1, 1, 2, false, "b".to_string())
         ]
     );
-    // overlapping ranges are one place too
     let d = help(vec![
         suggestion_part(t, "gen.rs", x, x + 3, "a"),
         suggestion_part(t, "gen.rs", x + 2, x + 5, "b"),
@@ -4549,7 +4302,6 @@ fn n28_alternatives_at_one_place_are_not_the_parts_of_one_edit() {
             (0, 1, 1, 2, false, "b".to_string())
         ]
     );
-    // a place with alternatives next to a plain one: two parts, nothing applicable
     let d = help(vec![
         suggestion_part(t, "gen.rs", x, x, "Some("),
         suggestion_part(t, "gen.rs", x + 5, x + 5, ")"),
@@ -4563,7 +4315,6 @@ fn n28_alternatives_at_one_place_are_not_the_parts_of_one_edit() {
             (1, 2, 1, 2, false, "]".to_string()),
         ]
     );
-    // places are numbered in the order rustc lists them, also when a later span joins an earlier place
     let d = help(vec![
         suggestion_part(t, "gen.rs", x, x, "a"),
         suggestion_part(t, "gen.rs", x + 5, x + 5, ")"),
@@ -4577,7 +4328,6 @@ fn n28_alternatives_at_one_place_are_not_the_parts_of_one_edit() {
             (1, 2, 0, 1, false, ")".to_string()),
         ]
     );
-    // neighbours and an insertion at the start of a replaced range are different places
     let d = help(vec![
         suggestion_part(t, "gen.rs", x, x + 1, "a"),
         suggestion_part(t, "gen.rs", x + 1, x + 2, "b"),
@@ -4616,7 +4366,6 @@ fn n29_an_at_line_that_may_be_a_backtrace_frame_in_an_unknown_form_never_maps_be
             TraceColumnUnit::Bytes,
             Exact,
         ),
-        // coloured numbers, a blank line in between, no header: the unit is a guess
         (
             format!("\u{1b}[1m   0: f\u{1b}[0m\n  at {at}"),
             TraceColumnUnit::DisplayWidth,
@@ -4634,7 +4383,6 @@ fn n29_an_at_line_that_may_be_a_backtrace_frame_in_an_unknown_form_never_maps_be
             TraceColumnUnit::DisplayWidth,
             Seg,
         ),
-        // inside a line it is a message: display width, which agrees on this ASCII line
         (
             format!("failed at {at}"),
             TraceColumnUnit::DisplayWidth,
@@ -4650,7 +4398,6 @@ fn n29_an_at_line_that_may_be_a_backtrace_frame_in_an_unknown_form_never_maps_be
 
 #[test]
 fn n30_only_one_leading_byte_order_mark_is_not_a_column() {
-    // rustc strips one; a second one is an ordinary (zero-width, unknown) character
     let src = "fn f() {}";
     let seg = Segment::new(
         br(0, 9),
@@ -4662,7 +4409,6 @@ fn n30_only_one_leading_byte_order_mark_is_not_a_column() {
     let program = GeneratedProgram::new("fn f() {}\n".to_string(), SourceMap::new(vec![seg]));
     let is_gen = |name: &str| name == "bom.rs";
     let r = Remapper::new(&program, src, &is_gen).with_prefix("\u{feff}\u{feff}  ");
-    // tail = U+FEFF and two spaces: three characters before the program
     let m = r.locate("bom.rs", 1, Some(3 + 3 + 1), TraceColumnUnit::Chars);
     assert_eq!(m.precision, Exact, "{m:?}");
     assert_eq!(m.marigold.unwrap().range.start, 3);
@@ -4672,9 +4418,6 @@ fn n30_only_one_leading_byte_order_mark_is_not_a_column() {
 
 #[test]
 fn n31_a_line_with_an_escape_sequence_is_never_better_than_segment() {
-    // Coloured backtraces: `ESC[2mat ESC[0m path:L:C` and `ESC[2mat path ESC[0m`. The column is a
-    // byte column (DWARF), the unit cannot be told from the text, and on a line with non-ASCII
-    // text before the column a guessed unit lands on another byte.
     let src = "fn f(x: i32) -> i32 { let _s = \"h\u{e9}\u{e9}\"; x + 1 }\nrange(0, 3).return";
     let program = marigold_generate(src).unwrap();
     let is_gen = |name: &str| name == "gen.rs";
@@ -4687,7 +4430,6 @@ fn n31_a_line_with_an_escape_sequence_is_never_better_than_segment() {
     let chars = program.rust[line_start..plus].chars().count() + 1;
     assert_ne!(bytes, chars);
     let at = format!("gen.rs:{line}:{bytes}");
-    // control: the plain frame is exact
     let plain = r.remap_trace(&format!("   0: f\n             at {at}"));
     assert_eq!(plain[0].mapped.precision, Exact);
     for text in [
@@ -4706,7 +4448,6 @@ fn n31_a_line_with_an_escape_sequence_is_never_better_than_segment() {
             hits[0].mapped
         );
     }
-    // the escape sequence only matters on its own line
     let m = r.remap_trace(&format!("\u{1b}[0m\n   0: f\n  at {at}\n"));
     assert_eq!(m[0].mapped.precision, Exact);
 }
@@ -4749,8 +4490,6 @@ fn n32_adjacent_ranges_are_parts_and_overlap_is_transitive_whatever_the_listing_
             "{ranges:?}: {n:?}"
         );
     }
-    // a place is the transitive closure of "overlaps": a chain is one place, and a span that
-    // overlaps two earlier places joins them
     let chain = numbered_ranges(&[(0, 2), (1, 4), (3, 5)]);
     assert!(
         chain.iter().all(|t| t.1 == 1 && t.3 == 3 && !t.4),
