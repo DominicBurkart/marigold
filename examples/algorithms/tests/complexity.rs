@@ -99,3 +99,69 @@ fn tsp_held_karp_diverges_from_canonical_class() {
         ComplexityClass::OCombinatorial(9)
     );
 }
+
+#[test]
+fn tsp_simulated_annealing() {
+    let result = analyze_example("tsp_simulated_annealing");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn tsp_simulated_annealing_diverges_from_canonical_class() {
+    let canonical = ComplexityClass::ON;
+    let result = analyze_example("tsp_simulated_annealing");
+    assert_ne!(result.streams[0].time_class, canonical);
+}
+
+#[test]
+fn tsp_genetic() {
+    let result = analyze_example("tsp_genetic");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn tsp_genetic_diverges_from_canonical_class() {
+    let canonical = ComplexityClass::ON;
+    let result = analyze_example("tsp_genetic");
+    assert_ne!(result.streams[0].time_class, canonical);
+}
+
+#[test]
+fn tsp_ant_colony() {
+    let result = analyze_example("tsp_ant_colony");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn tsp_ant_colony_diverges_from_canonical_class() {
+    let canonical = ComplexityClass::OPolynomial(2);
+    let result = analyze_example("tsp_ant_colony");
+    assert_ne!(result.streams[0].time_class, canonical);
+}

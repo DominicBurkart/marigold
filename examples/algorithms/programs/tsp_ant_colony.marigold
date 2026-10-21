@@ -1,0 +1,146 @@
+fn dist(a: i64, b: i64) -> i64 {
+    let xs: [i64; 10] = [0, 4, 9, 13, 6, 15, 2, 11, 8, 17];
+    let ys: [i64; 10] = [0, 7, 2, 8, 12, 15, 14, 5, 9, 3];
+    (xs[a as usize] - xs[b as usize]).abs() + (ys[a as usize] - ys[b as usize]).abs()
+}
+
+fn tour_len(t: [i64; 10]) -> i64 {
+    let mut i = 0;
+    let mut total = 0;
+    while i < 10 {
+        total += dist(t[i], t[(i + 1) % 10]);
+        i += 1;
+    }
+    total
+}
+
+fn next_rng(r: i64) -> i64 {
+    (r * 1103515245 + 12345) % 2147483648
+}
+
+fn start() -> [i64; 112] {
+    let mut s = [0; 112];
+    let mut i = 0;
+    while i < 100 {
+        s[i] = 1000;
+        i += 1;
+    }
+    i = 0;
+    while i < 10 {
+        s[100 + i] = i as i64;
+        i += 1;
+    }
+    s[110] = tour_len([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    s[111] = 24680;
+    s
+}
+
+fn next_city(state: [i64; 112], current: usize, visited: [bool; 10], draw: i64) -> usize {
+    let mut weights = [0; 10];
+    let mut total = 0;
+    let mut j = 0;
+    while j < 10 {
+        if !visited[j] {
+            let d = dist(current as i64, j as i64);
+            weights[j] = state[current * 10 + j] * (10000 / (d * d));
+            total += weights[j];
+        }
+        j += 1;
+    }
+    let pick = draw >> 8;
+    let mut cum = 0;
+    let mut chosen = 10;
+    j = 0;
+    while j < 10 {
+        if !visited[j] {
+            cum += weights[j];
+            if chosen == 10 && cum * 8388608 > pick * total {
+                chosen = j;
+            }
+        }
+        j += 1;
+    }
+    if chosen == 10 {
+        j = 0;
+        while j < 10 {
+            if !visited[j] {
+                chosen = j;
+            }
+            j += 1;
+        }
+    }
+    chosen
+}
+
+fn iterate(state: [i64; 112], _round: i32) -> [i64; 112] {
+    let mut s = state;
+    let mut r = s[111];
+    let mut ants = [0; 80];
+    let mut a = 0;
+    while a < 8 {
+        r = next_rng(r);
+        let mut current = ((r >> 16) % 10) as usize;
+        let mut visited = [false; 10];
+        visited[current] = true;
+        ants[a * 10] = current as i64;
+        let mut n = 1;
+        while n < 10 {
+            r = next_rng(r);
+            current = next_city(state, current, visited, r);
+            visited[current] = true;
+            ants[a * 10 + n] = current as i64;
+            n += 1;
+        }
+        a += 1;
+    }
+    let mut e = 0;
+    while e < 100 {
+        s[e] = s[e] * 90 / 100;
+        if s[e] < 10 {
+            s[e] = 10;
+        }
+        e += 1;
+    }
+    a = 0;
+    while a < 8 {
+        let mut t = [0; 10];
+        let mut i = 0;
+        while i < 10 {
+            t[i] = ants[a * 10 + i];
+            i += 1;
+        }
+        let l = tour_len(t);
+        let deposit = 100000 / l;
+        i = 0;
+        while i < 10 {
+            let u = t[i] as usize;
+            let v = t[(i + 1) % 10] as usize;
+            s[u * 10 + v] += deposit;
+            s[v * 10 + u] += deposit;
+            i += 1;
+        }
+        if l < s[110] {
+            s[110] = l;
+            i = 0;
+            while i < 10 {
+                s[100 + i] = t[i];
+                i += 1;
+            }
+        }
+        a += 1;
+    }
+    s[111] = r;
+    s
+}
+
+fn best_tour(state: [i64; 112]) -> [i64; 10] {
+    let mut t = [0; 10];
+    let mut i = 0;
+    while i < 10 {
+        t[i] = state[100 + i];
+        i += 1;
+    }
+    t
+}
+
+range(0, 200).fold(start, iterate).map(best_tour).return
