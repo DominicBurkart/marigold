@@ -124,7 +124,9 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
 /// rustc's re-printed tokens (comments dropped, whitespace normalized), wraps the
 /// generated code in `{\n` ... `\n}\n` and gives every token a call-site span, so rustc
 /// diagnostics cannot be mapped through `m!()`. Mapping them requires writing `rust`
-/// verbatim to a real file and compiling that. See [`source_map`] for details.
+/// verbatim to a real file and compiling that. UNTESTED: no test expands `m!()` or
+/// compiles `rust`, so this account of rustc's behaviour is unverified. See
+/// [`source_map`] for details.
 ///
 /// ```
 /// use marigold_grammar::source_map::SegmentKind;
