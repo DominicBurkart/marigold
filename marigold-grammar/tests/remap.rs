@@ -4669,3 +4669,96 @@ fn n30_only_one_leading_byte_order_mark_is_not_a_column() {
     let m = r.locate("bom.rs", 1, Some(3 + 3), TraceColumnUnit::Chars);
     assert_eq!(m.marigold.unwrap().range.start, 2);
 }
+
+#[test]
+fn n31_a_line_with_an_escape_sequence_is_never_better_than_segment() {
+    // Coloured backtraces: `ESC[2mat ESC[0m path:L:C` and `ESC[2mat path ESC[0m`. The column is a
+    // byte column (DWARF), the unit cannot be told from the text, and on a line with non-ASCII
+    // text before the column a guessed unit lands on another byte.
+    let src = "fn f(x: i32) -> i32 { let _s = \"h\u{e9}\u{e9}\"; x + 1 }\nrange(0, 3).return";
+    let program = marigold_generate(src).unwrap();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, src, &is_gen);
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let plus = f.generated.start + program.rust[f.generated.start..].find('+').unwrap();
+    let line_start = program.rust[..plus].rfind('\n').map_or(0, |i| i + 1);
+    let line = program.rust[..plus].matches('\n').count() + 1;
+    let bytes = plus - line_start + 1;
+    let chars = program.rust[line_start..plus].chars().count() + 1;
+    assert_ne!(bytes, chars);
+    let at = format!("gen.rs:{line}:{bytes}");
+    // control: the plain frame is exact
+    let plain = r.remap_trace(&format!("   0: f\n             at {at}"));
+    assert_eq!(plain[0].mapped.precision, Exact);
+    for text in [
+        format!("   0: f\n  \u{1b}[2mat \u{1b}[0m {at}"),
+        format!("   0: f\n  \u{1b}[2mat {at}\u{1b}[0m"),
+        format!("   0: f\n  at {at} \u{1b}[0m"),
+        format!("   0: f\n  \u{1b}[2m at \u{1b}[0m {at}"),
+        format!("\u{1b}[1m   0: f\u{1b}[0m\n  at {at}"),
+    ] {
+        let hits = r.remap_trace(&text);
+        assert_eq!(hits.len(), 1, "{text:?}");
+        let p = hits[0].mapped.precision;
+        assert!(
+            matches!(p, Seg | Expression),
+            "{text:?}: {:?}",
+            hits[0].mapped
+        );
+    }
+    // the escape sequence only matters on its own line
+    let m = r.remap_trace(&format!("\u{1b}[0m\n   0: f\n  at {at}\n"));
+    assert_eq!(m[0].mapped.precision, Exact);
+}
+
+fn numbered_ranges(ranges: &[(usize, usize)]) -> Vec<(usize, usize, usize, usize, bool, String)> {
+    let (src, program) = mini();
+    let f = seg_of(&program, SegmentKind::Function, 0);
+    let base = f.generated.start + program.rust[f.generated.start..].find("x + 1").unwrap();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, &src, &is_gen);
+    let spans: Vec<Value> = ranges
+        .iter()
+        .enumerate()
+        .map(|(i, &(a, b))| {
+            json!({"file_name": "gen.rs", "byte_start": base + a, "byte_end": base + b,
+                   "suggested_replacement": format!("r{i}")})
+        })
+        .collect();
+    let m = r.remap(&jdiag(
+        json!({"message": "m", "level": "help", "children": [], "spans": spans}),
+    ));
+    let mut all = numbered(&m);
+    all.sort_by_key(|n| n.5.clone());
+    all
+}
+
+#[test]
+fn n32_adjacent_ranges_are_parts_and_overlap_is_transitive_whatever_the_listing_order() {
+    for ranges in [[(0, 1), (1, 2)], [(1, 2), (0, 1)]] {
+        let n = numbered_ranges(&ranges);
+        assert!(
+            n.iter().all(|t| t.1 == 2 && t.3 == 1 && t.4),
+            "{ranges:?}: {n:?}"
+        );
+    }
+    for ranges in [[(0, 3), (2, 5)], [(2, 5), (0, 3)]] {
+        let n = numbered_ranges(&ranges);
+        assert!(
+            n.iter().all(|t| t.1 == 1 && t.3 == 2 && !t.4),
+            "{ranges:?}: {n:?}"
+        );
+    }
+    // a place is the transitive closure of "overlaps": a chain is one place, and a span that
+    // overlaps two earlier places joins them
+    let chain = numbered_ranges(&[(0, 2), (1, 4), (3, 5)]);
+    assert!(
+        chain.iter().all(|t| t.1 == 1 && t.3 == 3 && !t.4),
+        "{chain:?}"
+    );
+    let bridge = numbered_ranges(&[(0, 2), (5, 7), (1, 6)]);
+    assert!(
+        bridge.iter().all(|t| t.1 == 1 && t.3 == 3 && !t.4),
+        "{bridge:?}"
+    );
+}

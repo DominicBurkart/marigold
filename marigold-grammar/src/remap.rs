@@ -1211,8 +1211,9 @@ impl<'a> Remapper<'a> {
     /// program formatted from a `Location`, is [`TraceColumnUnit::DisplayWidth`]. The
     /// context is a guess from the text, so a program that prints its own numbered lines
     /// followed by an `at` line can still be misread. An `at` that starts its line without such
-    /// a frame above it (coloured output, a blank line in between) is ambiguous: its location is
-    /// mapped no better than [`Precision::Segment`].
+    /// a frame above it (a blank line in between) is ambiguous, and so is any line that holds an
+    /// escape sequence (coloured output): their locations are mapped no better than
+    /// [`Precision::Segment`].
     ///
     /// ```
     /// use marigold_grammar::marigold_generate;
@@ -1273,11 +1274,18 @@ impl<'a> Remapper<'a> {
                 // (coloured output, a blank line in between) may be a backtrace frame in a form
                 // that is not recognised: its unit is a guess, so it never maps better than
                 // to the segment.
-                let ambiguous = !frame
-                    && before.strip_suffix("at").is_some_and(|rest| {
-                        let rest = rest.trim_end_matches([' ', '\t']);
-                        rest.is_empty() || rest.ends_with('\n')
-                    });
+                //
+                // A line with an escape sequence (coloured output) is ambiguous too: the `at`
+                // may be hidden behind it, so what is read here cannot be trusted either way.
+                let line_start = text[..token_start].rfind('\n').map_or(0, |i| i + 1);
+                let line_end = text[end..].find('\n').map_or(text.len(), |i| end + i);
+                let coloured = text[line_start..line_end].contains('\u{1b}');
+                let ambiguous = coloured
+                    || (!frame
+                        && before.strip_suffix("at").is_some_and(|rest| {
+                            let rest = rest.trim_end_matches([' ', '\t']);
+                            rest.is_empty() || rest.ends_with('\n')
+                        }));
                 let unit = if frame {
                     TraceColumnUnit::Bytes
                 } else {
@@ -2507,5 +2515,22 @@ mod tests {
         assert!(!suffix_is_verbatim(SegmentKind::Struct));
         assert!(is_user_authored(SegmentKind::Function));
         assert!(!is_user_authored(SegmentKind::StreamVariable));
+    }
+
+    #[test]
+    fn the_kind_decisions_have_no_wildcard_arm() {
+        // A new `SegmentKind` must not compile until it has been classified: no `_ =>` and no
+        // `_ |` in the two matches.
+        let source = include_str!("remap.rs");
+        for name in ["fn suffix_is_verbatim(kind", "fn is_user_authored(kind"] {
+            let start = source.find(name).unwrap();
+            let end = start + source[start..].find("\n}\n").unwrap();
+            let body = &source[start..end];
+            assert!(body.contains("match kind {"), "{name}");
+            assert!(
+                !body.contains("_ =>") && !body.contains("_ |") && !body.contains("| _"),
+                "{name} has a wildcard arm"
+            );
+        }
     }
 }
