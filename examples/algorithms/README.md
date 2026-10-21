@@ -58,3 +58,50 @@ per round, including that worst case, a zero operand and LCG-derived pairs, so
 the bound and the arithmetic are exercised together. Tests compare every pair
 with a reference Euclid and assert that the worst case needs fewer rounds than
 the cap.
+
+### dijkstra
+
+- Issue: [#407](https://github.com/DominicBurkart/marigold/issues/407)
+- Reference: [Dijkstra 1959](https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm)
+- Canonical complexity: O(V^2) with an array scan (O(E log V) with a heap)
+- Analyzer estimate: O(1), exact O(2): `range(0, 9).fold(start, settle)`
+  followed by `map(distances)`.
+
+The 9 vertices are a constant, so the whole stream collapses to O(1) (symbolic
+input size is [#415](https://github.com/DominicBurkart/marigold/issues/415)).
+The O(V) scan and the O(E) relaxation inside `settle` are invisible to the
+analyzer (per-item fn cost is
+[#416](https://github.com/DominicBurkart/marigold/issues/416)).
+
+One fold step settles exactly one vertex: select the closest unsettled vertex,
+then relax its edges. The relaxation loops live inside `settle`, so the stream
+shape is only the fold. Vertex 8 is isolated and stays at the 1000000000
+sentinel. Edges are undirected and one is listed in descending vertex order,
+so relaxation from both endpoints is exercised. Tests compare the result
+with Bellman-Ford.
+
+### kruskal
+
+- Issue: [#408](https://github.com/DominicBurkart/marigold/issues/408)
+- Reference: [Kruskal 1956](https://en.wikipedia.org/wiki/Kruskal%27s_algorithm)
+- Canonical complexity: O(E log E) for the sort, plus near-linear union-find
+- Analyzer estimate: O(C(n,2)), exact 2*O(C(n,2)) + 3, `collects_input`.
+
+The spine is `range(0, 8).combinations(2)` (all 28 vertex pairs),
+`map(weigh)` (attach a weight, 0 for the 15 non-edges), `filter(is_edge)`
+(keep the 13 edges), `keep_first_n(13, by_weight)` (sort ascending; the
+comparator reverses the order because `keep_first_n` returns the largest
+first) and `fold(start, unite)` (union-find, one fold step per edge).
+
+Divergence from the canonical class: the analyzer reports the quadratic pair
+enumeration, because the filter output size is unknown, and cannot see the
+sort cost or the union-find cost inside `unite`
+([#416](https://github.com/DominicBurkart/marigold/issues/416)). V = 8 is
+constant, so the symbolic form is lost
+([#415](https://github.com/DominicBurkart/marigold/issues/415)).
+
+The candidate counts match the canonical values: C(8, 2) = 28 pairs after
+`combinations(2)` and `map`, and `min(<=C(8, 2), 13)` after the filter and
+`keep_first_n`. Edge weights are distinct, so the MST is unique; tests
+compare the edges and the total weight with Prim. Union-find omits path
+compression and union by rank (8 vertices).
