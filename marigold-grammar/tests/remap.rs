@@ -2,8 +2,10 @@
 //!
 //! Ground truth: `tests/fixtures/remap/*` were produced by REALLY compiling Marigold-generated Rust with
 //! cargo/rustc 1.97 (`--message-format=json`); each directory is a frozen, self-consistent set
-//! (Marigold program, generated Rust, its source map, rustc's JSON, the file layout). Tests never
-//! regenerate them, so later codegen changes (T2) cannot invalidate them.
+//! (Marigold program, generated Rust, its source map, rustc's JSON, the file layout). The
+//! derived files (`generated.rs.txt`, `map.json`) are checked against this crate's generator by
+//! `derived_fixtures_equal_what_the_code_regenerates` and rewritten by `regenerate_fixtures`;
+//! the rustc captures (`cargo.jsonl`, `bare.jsonl`, `layout.json`, `research/*`) are frozen.
 mod common;
 
 use common::corpus;
@@ -4500,4 +4502,78 @@ fn n32_adjacent_ranges_are_parts_and_overlap_is_transitive_whatever_the_listing_
         bridge.iter().all(|t| t.1 == 1 && t.3 == 3 && !t.4),
         "{bridge:?}"
     );
+}
+
+fn regenerated_derived(name: &str) -> (String, String) {
+    let program = marigold_generate(&read(name, "program.marigold")).unwrap();
+    let render = |r: ByteRange| {
+        format!(
+            "{{\n        \"start\": {},\n        \"end\": {}\n      }}",
+            r.start, r.end
+        )
+    };
+    let segments: Vec<String> = program
+        .map
+        .segments()
+        .iter()
+        .map(|s| {
+            format!(
+                "    {{\n      \"generated\": {},\n      \"source\": {},\n      \"kind\": {},\n      \"expr_index\": {},\n      \"name\": {}\n    }}",
+                render(s.generated),
+                render(s.source),
+                serde_json::to_string(&s.kind).unwrap(),
+                s.expr_index,
+                serde_json::to_string(&s.name).unwrap()
+            )
+        })
+        .collect();
+    let map = format!("{{\n  \"segments\": [\n{}\n  ]\n}}", segments.join(",\n"));
+    (program.rust, map)
+}
+
+fn scenario_names() -> Vec<String> {
+    fixture_names()
+        .into_iter()
+        .filter(|n| fixtures_root().join(n).join("program.marigold").exists())
+        .collect()
+}
+
+/// Every committed `generated.rs.txt` and `map.json` equals what this crate generates from the
+/// scenario's `program.marigold`, so drift between the code generator and the frozen fixtures is
+/// detected.
+#[test]
+fn derived_fixtures_equal_what_the_code_regenerates() {
+    let names = scenario_names();
+    assert!(names.len() >= 18, "{names:?}");
+    let mut drifted = vec![];
+    for name in &names {
+        let (rust, map) = regenerated_derived(name);
+        if rust != read(name, "generated.rs.txt") || map != read(name, "map.json") {
+            drifted.push(name.clone());
+        }
+    }
+    assert!(
+        drifted.is_empty(),
+        "fixtures drifted from the generator: {drifted:?}; run MARIGOLD_REGEN_FIXTURES=1 cargo test -p marigold-grammar --test remap -- --ignored regenerate_fixtures"
+    );
+}
+
+/// Rewrites `generated.rs.txt` and `map.json` of every scenario under `tests/fixtures/remap/`
+/// from its `program.marigold` with this crate's own generator. Run with
+/// `MARIGOLD_REGEN_FIXTURES=1 cargo test -p marigold-grammar --test remap -- --ignored regenerate_fixtures`.
+/// `cargo.jsonl`, `bare.jsonl`, `layout.json` and `research/*` are captures of a real `rustc`/cargo
+/// run and cannot be regenerated offline; `expected.jsonl` comes from the independent oracle:
+/// `python3 -I tests/fixtures/remap/tools/regenerate_expected.py`.
+#[test]
+#[ignore = "rewrites fixtures; needs MARIGOLD_REGEN_FIXTURES=1"]
+fn regenerate_fixtures() {
+    if std::env::var("MARIGOLD_REGEN_FIXTURES").as_deref() != Ok("1") {
+        panic!("set MARIGOLD_REGEN_FIXTURES=1 to rewrite the derived fixtures");
+    }
+    for name in scenario_names() {
+        let (rust, map) = regenerated_derived(&name);
+        let dir = fixtures_root().join(&name);
+        std::fs::write(dir.join("generated.rs.txt"), rust).unwrap();
+        std::fs::write(dir.join("map.json"), map).unwrap();
+    }
 }
