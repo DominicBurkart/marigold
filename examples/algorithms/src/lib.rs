@@ -18,7 +18,14 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
     async_std::task::block_on(future)
 }
 
-#[cfg(not(all(feature = "async-std", not(feature = "tokio"))))]
+#[cfg(feature = "tokio")]
+pub fn block_on<F: Future>(future: F) -> F::Output {
+    tokio::runtime::Runtime::new()
+        .expect("could not build tokio runtime")
+        .block_on(future)
+}
+
+#[cfg(not(any(feature = "tokio", feature = "async-std")))]
 pub fn block_on<F: Future>(future: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .build()
@@ -29,5 +36,3 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
 pub mod binary_search;
 pub mod gcd;
 pub mod quicksort;
-#[cfg(test)]
-pub mod tsp;

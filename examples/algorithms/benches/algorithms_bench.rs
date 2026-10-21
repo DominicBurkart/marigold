@@ -1,19 +1,27 @@
-use algorithms::block_on;
 use criterion::{criterion_group, criterion_main, Criterion};
 
+fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Runtime::new().expect("could not build tokio runtime")
+}
+
 fn bench_gcd(c: &mut Criterion) {
-    c.bench_function("gcd", |b| b.iter(|| block_on(algorithms::gcd::run())));
+    let rt = runtime();
+    c.bench_function("gcd", |b| {
+        b.to_async(&rt).iter(algorithms::gcd::run);
+    });
 }
 
 fn bench_binary_search(c: &mut Criterion) {
+    let rt = runtime();
     c.bench_function("binary_search", |b| {
-        b.iter(|| block_on(algorithms::binary_search::run()))
+        b.to_async(&rt).iter(algorithms::binary_search::run);
     });
 }
 
 fn bench_quicksort(c: &mut Criterion) {
+    let rt = runtime();
     c.bench_function("quicksort", |b| {
-        b.iter(|| block_on(algorithms::quicksort::run()))
+        b.to_async(&rt).iter(algorithms::quicksort::run);
     });
 }
 
