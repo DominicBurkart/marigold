@@ -1,0 +1,13 @@
+fn start() -> [u64; 2] {
+    [1071, 462]
+}
+
+fn step(state: [u64; 2], _round: i32) -> [u64; 2] {
+    if state[1] == 0 { state } else { [state[1], state[0] % state[1]] }
+}
+
+fn first(state: [u64; 2]) -> u64 {
+    state[0]
+}
+
+range(0, 48).fold(start, step).map(first).return
