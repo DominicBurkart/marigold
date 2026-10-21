@@ -46,12 +46,14 @@ below, all on 2026-10-21 without any scenario delay.
 
 - Pinned: 0.163.0.
 - Latest (0.163.0, 2026-10-18): PASS, the pin is the latest release.
-- Oldest tested passing with the default scripts: 0.140.0 (2026-10-18).
+- Oldest tested passing with the default scripts: 0.140.0, 3/3 runs on
+  2026-10-21 (earlier single-run result superseded).
   0.120.0 fails: Codex answers `unsupported call: mcp__marigold:marigold_check`,
   so the scripted namespaced MCP call is not understood. This is test
   infrastructure, since the scripts target the newer `exec_command` tool and
   namespaced MCP tools. Versions 0.121.0 to 0.139.0 are untested.
-- Oldest tested passing with the legacy scripts: 0.55.0 (2026-10-18).
+- Oldest tested passing with the legacy scripts: 0.55.0, 3/3 runs on
+  2026-10-21 (earlier single-run result superseded).
   Run with `CODEX_TOOL_STYLE=legacy` to use `scripts/codex-legacy-*.json`,
   which call the older `shell` tool (`command` array) and the flat MCP tool
   name `mcp__marigold__marigold_check`. All assertions are unchanged. Also
@@ -73,7 +75,7 @@ below, all on 2026-10-21 without any scenario delay.
 
 - Pinned: 1.19.3.
 - Latest (1.19.3, 2026-10-18): PASS, the pin is the latest release.
-- Oldest tested passing: 1.1.16 (tested 2026-10-21), full scenario set
+- Oldest tested passing: 1.1.16, 3/3 runs on 2026-10-21, full scenario set
   including the `edit` scenarios. Also passing: 1.1.19, 1.1.39, 1.2.15.
 - Failing below: 1.1.15, 1.1.14, 1.1.9, 1.0.223 (2026-10-21) and 1.0.142
   (2026-10-18). On all of them the error scenarios and the mixed scenario
