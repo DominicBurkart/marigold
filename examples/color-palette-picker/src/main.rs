@@ -23,6 +23,10 @@ async fn main() {
         .collect::<Vec<_>>()
         .await
     );
+    println!(
+        "geometric palettes: {:?}",
+        color_palette_picker::geometric_palettes().await
+    );
 }
 
 /// Uses a multithread async-std runtime.
@@ -43,6 +47,10 @@ async fn main() {
         .await
         .collect::<Vec<_>>()
         .await
+    );
+    println!(
+        "geometric palettes: {:?}",
+        color_palette_picker::geometric_palettes().await
     );
 }
 
@@ -66,6 +74,10 @@ async fn main() {
         .collect::<Vec<_>>()
         .await
     );
+    println!(
+        "geometric palettes: {:?}",
+        color_palette_picker::geometric_palettes().await
+    );
 }
 
 /// Returns a single future, where all computation occurs in a single thread.
@@ -87,6 +99,10 @@ async fn main() {
         .await
         .collect::<Vec<_>>()
         .await
+    );
+    println!(
+        "geometric palettes: {:?}",
+        color_palette_picker::geometric_palettes().await
     );
 }
 
@@ -346,6 +362,116 @@ mod integer_lms_tests {
         let accessible = [[255i32, 102, 0], [128, 0, 128], [0, 128, 128]];
         let similar = [[200i32, 150, 100], [210, 160, 110], [190, 140, 90]];
         assert_order_agrees(&similar, &accessible);
+    }
+
+    fn wheel_color(hue: usize, ring: usize) -> [i32; 3] {
+        const HUES: [[i32; 3]; 12] = [
+            [255, 0, 0],
+            [255, 128, 0],
+            [255, 255, 0],
+            [128, 255, 0],
+            [0, 255, 0],
+            [0, 255, 128],
+            [0, 255, 255],
+            [0, 128, 255],
+            [0, 0, 255],
+            [128, 0, 255],
+            [255, 0, 255],
+            [255, 0, 128],
+        ];
+        HUES[hue].map(|c| match ring {
+            0 => c + (255 - c) * 2 / 3,
+            1 => c,
+            2 => c * 2 / 3,
+            _ => c / 3,
+        })
+    }
+
+    fn best_unrestricted_triple() -> [[i32; 3]; 3] {
+        let wheel: Vec<[i32; 3]> = (0..12)
+            .flat_map(|h| (0..4).map(move |r| wheel_color(h, r)))
+            .collect();
+        let mut best = [wheel[0], wheel[1], wheel[2]];
+        for a in 0..wheel.len() {
+            for b in a + 1..wheel.len() {
+                for c in b + 1..wheel.len() {
+                    let candidate = [wheel[a], wheel[b], wheel[c]];
+                    if min_palette_contrast(&candidate) > min_palette_contrast(&best) {
+                        best = candidate;
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    fn equilateral_scores_descending() -> Vec<i64> {
+        let mut scores = Vec::new();
+        for rotation in 0..4 {
+            for r0 in 0..4 {
+                for r1 in 0..4 {
+                    for r2 in 0..4 {
+                        scores.push(min_palette_contrast(&[
+                            wheel_color(rotation, r0),
+                            wheel_color(rotation + 4, r1),
+                            wheel_color(rotation + 8, r2),
+                        ]));
+                    }
+                }
+            }
+        }
+        scores.sort_unstable_by(|a, b| b.cmp(a));
+        scores
+    }
+
+    #[tokio::test]
+    async fn geometric_scores_equal_exhaustive_polygon_scores() {
+        let geometric = color_palette_picker::geometric_palettes().await;
+        let mut scores: Vec<i64> = geometric.iter().map(min_palette_contrast).collect();
+        scores.sort_unstable_by(|a, b| b.cmp(a));
+        assert_eq!(scores, equilateral_scores_descending()[..5].to_vec());
+    }
+
+    #[tokio::test]
+    async fn geometric_palettes_are_equilateral_wheel_polygons() {
+        let geometric = color_palette_picker::geometric_palettes().await;
+        assert_eq!(geometric.len(), 5);
+        for palette in &geometric {
+            let hue_ring = palette.map(|color| {
+                (0..12)
+                    .flat_map(|h| (0..4).map(move |r| (h, r)))
+                    .find(|&(h, r)| wheel_color(h, r) == color)
+                    .expect("palette color is not a wheel point")
+            });
+            assert!(hue_ring[0].0 < 4);
+            assert_eq!(hue_ring[1].0, hue_ring[0].0 + 4);
+            assert_eq!(hue_ring[2].0, hue_ring[0].0 + 8);
+        }
+    }
+
+    #[tokio::test]
+    async fn geometric_best_is_within_bound_of_unrestricted_optimum() {
+        let geometric = color_palette_picker::geometric_palettes().await;
+        let optimum = best_unrestricted_triple();
+        let geometric_best = min_palette_contrast(&geometric[0]);
+        let optimum_best = min_palette_contrast(&optimum);
+        assert!(geometric_best <= optimum_best);
+        assert!(geometric_best * 100 >= optimum_best * 80);
+        assert_ne!(
+            prisma_compare::<3>(&to_u8(&geometric[0]), &to_u8(&optimum)),
+            Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn geometric_program_text_matches_example_file_and_lib() {
+        fn squeeze(text: &str) -> String {
+            text.split_whitespace().collect()
+        }
+        let program = squeeze(include_str!(
+            "../../color-palette-picker-geometric.marigold"
+        ));
+        assert!(squeeze(include_str!("lib.rs")).contains(&program));
     }
 
     #[tokio::test]
