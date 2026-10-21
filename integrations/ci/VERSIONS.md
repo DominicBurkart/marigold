@@ -16,17 +16,24 @@ A FAIL is classified as one of:
 
 ## Claude Code (`@anthropic-ai/claude-code`)
 
-- Pinned: 2.1.289.
-- Oldest tested passing: 2.1.6 (tested 2026-10-18).
-- Latest (2.1.302, 2026-10-18): PASS, so the pin is 13 patch releases behind.
-- Other passing versions: 2.1.16, 2.1.53, 2.1.136.
-- Failing versions just below: 2.1.5, 2.1.4, 2.1.2, 2.0.76, 2.0.60.
-  Reason, integration: `claude -p --plugin-dir` runs and exits 0 without any
-  flag error and the valid control passes, but no later request contains the
-  `undefined-fn` diagnostic. The cause inside Claude Code is not established.
-  The changelog lists the LSP tool as added in 2.0.74, so diagnostics
-  delivery from plugin language servers evidently arrived later on this
-  scenario. Untested: 2.1.3 and 2.0.x other than the two listed.
+A version counts as passing only if it passes 3 consecutive fresh runs of the
+full scenario set. Earlier single-run results were superseded by the runs
+below, all on 2026-10-21 without any scenario delay.
+
+- Pinned: 2.1.289, 3/3 runs.
+- Oldest 3/3: 2.1.16 (3/3). Also 3/3: 2.1.53 and 2.1.289.
+- Latest (2.1.302): PASS in a single run on 2026-10-18, not repeated.
+- FLAKY: 2.1.6 is not a lower bound. It passed 5/5 runs on an idle machine,
+  5/6 runs under CPU load, and 2/4 runs for the reviewer.
+- Failing every run, just below: 2.1.5, 2.1.4, 2.1.2, 2.0.76, 2.0.60
+  (single runs). Reason, integration: `claude -p --plugin-dir` exits 0 with
+  no flag error and the valid control passes, but no later request contains
+  `undefined-fn`. The changelog lists the LSP tool as added in 2.0.74.
+- Race: Claude Code delivers plugin LSP diagnostics asynchronously on a later
+  model turn. The mock answers instantly, so on a slow or loaded machine all
+  four scripted turns finish before the server's diagnostics arrive. In the
+  failing 2.1.6 run the log shows 4 requests, none with `undefined-fn`.
+  Versions that pass 3/3 may still be racy, only less often.
 
 ## Codex CLI (`@openai/codex`)
 
