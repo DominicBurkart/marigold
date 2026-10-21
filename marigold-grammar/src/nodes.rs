@@ -126,7 +126,7 @@ impl UnnamedStreamNode {
 
     /// The code of the stream with the layout of its parts: the output's prefix, the input
     /// and every stream function, and the output's postfix.
-    pub fn emit(&self) -> Emit {
+    pub(crate) fn emit(&self) -> Emit {
         let mut emit = Emit::default();
         emit.push("{use ::marigold::marigold_impl::*; ");
         emit_output_prefix(&mut emit, &self.out);
@@ -166,7 +166,7 @@ impl InputAndMaybeStreamFunctions {
     }
 
     /// The code of the input and the chain of stream functions, with the layout of its parts.
-    pub fn emit(&self) -> Emit {
+    pub(crate) fn emit(&self) -> Emit {
         let mut emit = Emit::default();
         self.emit_into(&mut emit);
         emit
@@ -193,7 +193,7 @@ impl NamedStreamNode {
 
     /// The code of the stream with the layout of its parts. The stream variable the stream
     /// reads from is its input: `x.get()`.
-    pub fn emit(&self) -> Emit {
+    pub(crate) fn emit(&self) -> Emit {
         let mut emit = Emit::default();
         emit.push("{use ::marigold::marigold_impl::*; ");
         emit_output_prefix(&mut emit, &self.out);
@@ -220,7 +220,7 @@ impl StreamVariableNode {
     }
 
     /// The declaration with the layout of its parts: the input and every stream function.
-    pub fn declaration_emit(&self) -> Emit {
+    pub(crate) fn declaration_emit(&self) -> Emit {
         let mut emit = Emit::default();
         emit.push(&format!("let mut {} = ", self.variable_name));
         emit.push("{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new(");
@@ -256,7 +256,7 @@ impl StreamVariableFromPriorStreamVariableNode {
 
     /// The declaration with the layout of its parts. The prior stream variable is the
     /// input (`x.get()`); the name being declared is not a part.
-    pub fn declaration_emit(&self) -> Emit {
+    pub(crate) fn declaration_emit(&self) -> Emit {
         let mut emit = Emit::default();
         emit.push(&format!("let mut {} = ", self.variable_name));
         emit.push("{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new(");
@@ -322,8 +322,7 @@ pub struct InputFunctionNode {
     pub code: String,
     /// Parts of `code` that stand for parts of the Marigold source, relative to the start
     /// of `code`. Only `select_all` has any: its arguments. Empty for the other inputs.
-    #[doc(hidden)]
-    pub layout: Vec<Piece>,
+    pub(crate) layout: Vec<Piece>,
 }
 
 pub struct OutputFunctionNode {
@@ -363,7 +362,7 @@ impl StructDeclarationNode {
 
     /// The code of the struct with the layout of its parts: one piece per field,
     /// `name: type` without the separating `,\n`.
-    pub fn emit_with_bounds(
+    pub(crate) fn emit_with_bounds(
         &self,
         field_bounds: Option<&std::collections::HashMap<String, ResolvedFieldBounds>>,
     ) -> Emit {
@@ -620,7 +619,7 @@ impl EnumDeclarationNode {
     /// `default` variant last. A piece is just the variant (`A`, or `Other(..)` for a sized
     /// default variant): not the serde attributes before it, the value it is renamed to
     /// or the `,\n` after it, so its extent does not depend on the `io` feature.
-    pub fn emit(&self) -> Emit {
+    pub(crate) fn emit(&self) -> Emit {
         #[cfg(not(feature = "io"))]
         let traits = &["Copy", "Clone", "Debug", "Eq", "PartialEq"].join(", ");
         #[cfg(feature = "io")]
@@ -808,7 +807,7 @@ impl FnDeclarationNode {
     /// The code of the function with the layout of its parts: the signature (name,
     /// parameters and return type) and the body, braces included. The body is the source
     /// text of the function body verbatim.
-    pub fn emit(&self) -> Emit {
+    pub(crate) fn emit(&self) -> Emit {
         let name = &self.name;
         let parameters_string = self
             .parameters

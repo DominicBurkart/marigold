@@ -846,9 +846,8 @@ impl GeneratedProgram {
 
 /// The part of a statement a [`Piece`] stands for. Together with the nesting it identifies
 /// the partner of a piece in the source-side skeleton (`sub_spans`).
-#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Role {
+pub(crate) enum Role {
     /// The input of a stream (`range(..)`, `read_file(..)`, `select_all(..)`, `x.get()`).
     Input,
     /// The `j`-th stream function of a chain.
@@ -871,29 +870,27 @@ pub enum Role {
 
 /// A region of the text of an [`Emit`], relative to the start of the enclosing piece (or of
 /// the emit, for a top-level piece).
-#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Piece {
-    pub start: usize,
-    pub end: usize,
-    pub role: Role,
-    pub children: Vec<Piece>,
+pub(crate) struct Piece {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) role: Role,
+    pub(crate) children: Vec<Piece>,
 }
 
 /// Generated code together with the regions of it that stand for parts of the Marigold
 /// source. The nodes build their code with this, and `code()` is `emit().s`, so the
 /// recorded layout cannot drift from the emitted text.
-#[doc(hidden)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Emit {
-    pub s: String,
-    pub pieces: Vec<Piece>,
+pub(crate) struct Emit {
+    pub(crate) s: String,
+    pub(crate) pieces: Vec<Piece>,
 }
 
 impl Emit {
     /// Code with no recorded parts, for code that was built as a plain string (the
     /// instrumented code of the `otel` feature).
-    pub fn text(s: String) -> Emit {
+    pub(crate) fn text(s: String) -> Emit {
         Emit {
             s,
             pieces: Vec::new(),
@@ -901,13 +898,13 @@ impl Emit {
     }
 
     /// Append text that stands for no part.
-    pub fn push(&mut self, text: &str) {
+    pub(crate) fn push(&mut self, text: &str) {
         self.s.push_str(text);
     }
 
     /// Run `f`, which appends text to this emit, and record the text it appended as one
     /// piece with the pieces it recorded as children. Text that is empty records nothing.
-    pub fn piece(&mut self, role: Role, f: impl FnOnce(&mut Emit)) {
+    pub(crate) fn piece(&mut self, role: Role, f: impl FnOnce(&mut Emit)) {
         if skipping_layout() {
             f(self);
             return;
@@ -935,7 +932,7 @@ impl Emit {
     }
 
     /// Append `text`, which has the (relative) `pieces` recorded for it.
-    pub fn push_with(&mut self, text: &str, pieces: &[Piece]) {
+    pub(crate) fn push_with(&mut self, text: &str, pieces: &[Piece]) {
         let base = self.s.len();
         self.s.push_str(text);
         if skipping_layout() {
@@ -948,7 +945,7 @@ impl Emit {
     }
 
     /// Append another emit with its pieces.
-    pub fn splice(&mut self, other: Emit) {
+    pub(crate) fn splice(&mut self, other: Emit) {
         let base = self.s.len();
         self.s.push_str(&other.s);
         if skipping_layout() {
