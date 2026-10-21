@@ -4,7 +4,6 @@ version = "0.1.0"
 publish = false
 edition = "2021"
 license = "Apache-2.0 OR MIT"
-build = "build.rs"
 
 [features]
 tokio = ["marigold/tokio", "marigold-grammar/tokio", "tokio/rt-multi-thread"]
@@ -23,6 +22,7 @@ path = "../../marigold-grammar"
 version = "=0.2.0"
 
 [dev-dependencies]
+marigold-grammar = {path = "../../marigold-grammar", version = "=0.2.0"}
 criterion = {version = "0.5", features = ["html_reports"]}
 
 [[bench]]
