@@ -205,6 +205,11 @@ pub fn marigold_parse_instrumented(
 ///
 /// `rust` is byte-for-byte what [`marigold_parse_instrumented`] returns for the same input and
 /// options. Each instrumented statement maps to the expression it was generated from.
+///
+/// The map only has the statement-level segments (and their [`source_map::Segment::ident`]),
+/// not the nested segments [`marigold_generate`] returns for the parts of a statement: the
+/// instrumentation wraps the input and every stream function in nested adapter calls, so the
+/// parts are not adjacent regions of the generated code.
 #[cfg(feature = "otel")]
 pub fn marigold_generate_instrumented(
     s: &str,
