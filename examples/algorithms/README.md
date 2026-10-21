@@ -58,3 +58,39 @@ per round, including that worst case, a zero operand and LCG-derived pairs, so
 the bound and the arithmetic are exercised together. Tests compare every pair
 with a reference Euclid and assert that the worst case needs fewer rounds than
 the cap.
+
+### knapsack
+
+- Issue: [#409](https://github.com/DominicBurkart/marigold/issues/409)
+- Reference: [Knapsack problem](https://en.wikipedia.org/wiki/Knapsack_problem)
+- Canonical complexity: O(n * W) time, O(W) space
+- Analyzer estimate: O(1), exact O(2), cardinality 1: a fold over the
+  constant `range(0, 14)` and a map.
+
+The spine is a fold with one item per step. Each step is one
+descending-capacity DP row update (`c` from `W` down to the item weight) on a
+`[i64; 51]` row, so the 14 items and capacity 50 are constants. The `n * W`
+product lives in the step function's loop and the fixed row, which the
+analyzer cannot see (per-item function cost:
+[#416](https://github.com/DominicBurkart/marigold/issues/416); symbolic input
+size: [#415](https://github.com/DominicBurkart/marigold/issues/415)). The
+oracle enumerates all 2^14 subsets in the test. The tests assert that the
+analyzer class differs from the canonical class, and pin the range
+cardinality (14) and the folded cardinality (1).
+
+### floyd_warshall
+
+- Issue: [#411](https://github.com/DominicBurkart/marigold/issues/411)
+- Reference: Floyd 1962 (doi 10.1145/367766.368168), Warshall 1962
+  (doi 10.1145/321105.321107),
+  [Wikipedia](https://en.wikipedia.org/wiki/Floyd%E2%80%93Warshall_algorithm)
+- Canonical complexity: O(V^3) time, O(V^2) space
+- Analyzer estimate: O(1), exact O(1), cardinality 1: a single fold over the
+  constant `range(0, 8)`.
+
+The spine is a fold with one step per intermediate vertex `k`, each step
+relaxing all `V^2` pairs of the flat `[i64; 64]` distance matrix. The `V^3`
+lives in the step function's two nested loops and the fixed array, invisible
+to the analyzer (#415, #416). The oracle is Bellman-Ford from every source in
+the test. Weights are nonnegative; there is no negative-cycle case. The tests
+pin the range cardinality (8) and assert divergence from the canonical class.

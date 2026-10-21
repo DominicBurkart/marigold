@@ -35,4 +35,6 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
     runtime().block_on(future)
 }
 
+pub mod floyd_warshall;
 pub mod gcd;
+pub mod knapsack;
