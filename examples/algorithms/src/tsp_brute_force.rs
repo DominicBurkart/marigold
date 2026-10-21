@@ -8,6 +8,6 @@ mod tests {
 
     #[test]
     fn matches_shared_fixture_optimum() {
-        assert_eq!(block_on(run()), vec![tsp::optimum() as i32]);
+        assert_eq!(block_on(run()), vec![tsp::optimum()]);
     }
 }

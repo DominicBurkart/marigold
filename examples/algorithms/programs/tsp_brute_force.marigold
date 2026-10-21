@@ -14,12 +14,8 @@ fn tour_length(rest: [i32; 9]) -> i32 {
     total
 }
 
-fn unbounded() -> i32 {
-    i32::MAX
-}
-
 fn shorter(best: i32, candidate: i32) -> i32 {
     if candidate < best { candidate } else { best }
 }
 
-range(1, 10).permutations(9).map(tour_length).fold(unbounded, shorter).return
+range(1, 10).permutations(9).map(tour_length).fold(2147483647, shorter).return
