@@ -1,0 +1,66 @@
+fn start() -> [i64; 18] {
+    let mut state = [1000000000; 18];
+    state[0] = 0;
+    let mut i = 9;
+    while i < 18 {
+        state[i] = 0;
+        i += 1;
+    }
+    state
+}
+
+fn settle(state: [i64; 18], _round: i32) -> [i64; 18] {
+    const EDGES: [[i64; 3]; 12] = [
+        [0, 1, 4],
+        [0, 2, 1],
+        [2, 1, 2],
+        [1, 3, 5],
+        [2, 3, 8],
+        [3, 4, 3],
+        [2, 5, 10],
+        [4, 5, 2],
+        [5, 6, 1],
+        [4, 6, 7],
+        [6, 7, 4],
+        [3, 7, 20],
+    ];
+    let mut s = state;
+    let mut best = 9;
+    let mut v = 0;
+    while v < 9 {
+        if s[9 + v] == 0 && (best == 9 || s[v] < s[best]) {
+            best = v;
+        }
+        v += 1;
+    }
+    if best == 9 || s[best] >= 1000000000 {
+        return s;
+    }
+    s[9 + best] = 1;
+    let mut e = 0;
+    while e < 12 {
+        let a = EDGES[e][0] as usize;
+        let b = EDGES[e][1] as usize;
+        let w = EDGES[e][2];
+        if a == best && s[9 + b] == 0 && s[a] + w < s[b] {
+            s[b] = s[a] + w;
+        }
+        if b == best && s[9 + a] == 0 && s[b] + w < s[a] {
+            s[a] = s[b] + w;
+        }
+        e += 1;
+    }
+    s
+}
+
+fn distances(state: [i64; 18]) -> [i64; 9] {
+    let mut d = [0; 9];
+    let mut i = 0;
+    while i < 9 {
+        d[i] = state[i];
+        i += 1;
+    }
+    d
+}
+
+range(0, 9).fold(start, settle).map(distances).return

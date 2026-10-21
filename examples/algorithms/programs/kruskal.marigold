@@ -1,0 +1,70 @@
+fn weigh(pair: [i32; 2]) -> [i64; 3] {
+    const EDGES: [[i64; 3]; 13] = [
+        [0, 1, 7],
+        [0, 3, 5],
+        [1, 2, 8],
+        [1, 3, 9],
+        [1, 4, 6],
+        [2, 4, 10],
+        [3, 4, 15],
+        [3, 5, 11],
+        [4, 5, 12],
+        [4, 6, 13],
+        [5, 6, 14],
+        [6, 7, 3],
+        [5, 7, 16],
+    ];
+    let mut i = 0;
+    while i < 13 {
+        if EDGES[i][0] == pair[0] as i64 && EDGES[i][1] == pair[1] as i64 {
+            return EDGES[i];
+        }
+        i += 1;
+    }
+    [pair[0] as i64, pair[1] as i64, 1000000000]
+}
+
+fn by_weight(a: &[i64; 3], b: &[i64; 3]) -> std::cmp::Ordering {
+    if a[2] > b[2] {
+        std::cmp::Ordering::Less
+    } else if a[2] < b[2] {
+        std::cmp::Ordering::Greater
+    } else {
+        std::cmp::Ordering::Equal
+    }
+}
+
+fn start() -> [i64; 24] {
+    let mut state = [0; 24];
+    let mut i = 0;
+    while i < 8 {
+        state[i] = i as i64;
+        i += 1;
+    }
+    state
+}
+
+fn root(parent: &[i64; 24], vertex: i64) -> i64 {
+    let mut r = vertex;
+    while parent[r as usize] != r {
+        r = parent[r as usize];
+    }
+    r
+}
+
+fn unite(state: [i64; 24], edge: [i64; 3]) -> [i64; 24] {
+    let mut s = state;
+    let ru = root(&s, edge[0]);
+    let rv = root(&s, edge[1]);
+    if edge[2] < 1000000000 && ru != rv {
+        s[ru as usize] = rv;
+        let count = s[9] as usize;
+        s[10 + 2 * count] = edge[0];
+        s[11 + 2 * count] = edge[1];
+        s[8] += edge[2];
+        s[9] += 1;
+    }
+    s
+}
+
+range(0, 8).combinations(2).map(weigh).keep_first_n(28, by_weight).fold(start, unite).return

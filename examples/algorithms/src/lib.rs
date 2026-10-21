@@ -26,6 +26,8 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
         .block_on(future)
 }
 
+pub mod dijkstra;
 pub mod gcd;
+pub mod kruskal;
 #[cfg(test)]
 pub mod tsp;
