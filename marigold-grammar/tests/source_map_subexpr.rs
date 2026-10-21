@@ -220,7 +220,9 @@ fn check_input_text(kind: K, slice: &str, text: &str) {
             } else {
                 format!("::marigold::marigold_impl::csv_async::AsyncDeserializer::from_reader( ::marigold::marigold_impl::tokio::fs::File::open({path}) .await .expect(\"Marigold could not open file\") .compat() ).into_deserialize::<{strukt}>()")
             };
-            assert_eq!(norm(text), expected, "{slice}");
+            // the template's layout is irrelevant, and so is whitespace inside the quoted path (a
+            // path may contain blanks and line breaks)
+            assert_eq!(norm(text), norm(&expected), "{slice}");
         }
         K::InputSelectAll => {}
         k => panic!("{k:?}"),
@@ -2395,6 +2397,96 @@ fn nested_lookups_are_fast_on_a_big_program() {
     assert!(t.elapsed().as_secs() < 60, "{:?}", t.elapsed());
 }
 
+/// The grammar skips ASCII whitespace between tokens, so one construct can be written many ways.
+/// Every construct that has nested segments appears here with whitespace in each position the
+/// grammar allows, with hyphenated names, and with stream variables named like input functions.
+/// The mutation proptests find such programs by chance; these cases make them deterministic.
+const WHITESPACE_VARIANTS: &[&str] = &[
+    // output
+    "v0. write_file(\"\u{65e5}0.csv\", csv)",
+    "range(0, 1) . write_file(\"a.csv\", csv)",
+    "range(0, 1).write_file( \"a.csv\" , csv )",
+    "range(0, 1).write_file(\"a.csv\" , csv , compression = gz)",
+    "range(0, 1).write_file(\"a.csv\",csv,compression=none)",
+    "range(0, 1).write_file(\"a.csv\", csv\n)",
+    "x = range(0, 1)\nx\n.\nwrite_file(\"a.csv\", csv)",
+    "range(0, 1) . return",
+    "range(0, 1)\n\t.\r\n\treturn",
+    "x = range(0, 1)\nx . return",
+    "x=range(0,1)\nx.return",
+    // inputs
+    "range( 0 , 1 ).return",
+    "range(0 ,= 1).return",
+    "range(\n0,\n=\n1\n).return",
+    "range( E ).return\nenum E { A }",
+    "read_file( \"d.csv\" , csv , struct = S ) . ok() . return\nstruct S { a: u8 }",
+    "read_file(\"d.csv\",csv,struct=S,infer_compression=true).ok().return\nstruct S { a: u8 }",
+    "read_file(\"d.csv.gz\" , csv , struct =S , infer_compression = false ).return\nstruct S { a: u8 }",
+    "read_file(\"a,b(1).csv\",csv,struct=S).return\nstruct S { a: u8 }",
+    // a quoted path may contain blanks and line breaks
+    "read_file(\"in6.csv\n\",csv,struct=S).return\nstruct S { a: u8 }",
+    "read_file(\"a  b\t.csv.gz\", csv, struct=S).return\nstruct S { a: u8 }",
+    "range(0, 1).write_file(\"o\n  1.csv\", csv)",
+    // stream functions, every kind with blanks in its argument list
+    "range(0, 1).map( f ).filter( g ).filter_map( h ).return",
+    "range(0, 1)\n.\npermutations( 2 )\n.\ncombinations(\t2\t)\n.\npermutations_with_replacement(\n2\n).return",
+    "range(0, 1).fold( 0 , f ).fold( z , f ).return",
+    "range(0, 1).keep_first_n( 2 , cmp ).ok().ok_or_panic().return",
+    // stream variables and chains
+    "x =\n range(0, 1) . map(f)",
+    "x = range(0, 1)\n  .map(f)\n  .filter(g)\nx.return",
+    "x = range(0, 1)\ny = x . map(f)\ny . return",
+    "x = range(0, 1)\ny=x.map(f)\ny.return",
+    "x = range(0, 1)\ny =\n\tx\n\t.map(f)\ny.return",
+    // select_all
+    "select_all( range(0, 1) . map(f) , range(1, 2) ) . return",
+    "select_all(\n\trange(0, 1),\n\trange(1, 2)\n)\n.\nfilter(g)\n.\nreturn",
+    "select_all( select_all(range(1, 2)\t) , range(0, 1) . ok() ) . return",
+    "x = select_all(range(0, 1))\nx . return",
+    // struct, enum and fn: fields, variants, signature and body
+    "struct\nS\n{\na : u8 ,\nb : string_1 ,\n}\nrange(0, 1).return",
+    "structS{a:u8}\nrange(0, 1).return",
+    "struct S { a : Option < u8 > , b : int[ 0 , 255 ] }",
+    "enum\nE\n{ A , B = \"b\" , default Z }\nrange(E).return",
+    "enumE{A}\nrange(E).return",
+    "enum E { A , default Other ( string_10 ) }",
+    "enum E { A , default Q = \"q\" }",
+    "fn\nf ( x : i32 )\n->\ni32\n{ x }\nrange(0, 1).map(f).return",
+    "fnf(x: i32) -> i32 {x}\nrange(0, 1).map(f).return",
+    "fn f(x: i32) -> i32 { /* { */ x }\nrange(0, 1).map(f).return",
+    // hyphens are part of identifiers: the leading letters of a name are not the whole name
+    "v0-a = range(0, 1)\nv0-a.return",
+    "v0-a = range(0, 1)\nv0-a.write_file(\"a.csv\", csv)",
+    "a-b = range(0, 1)\nc-d = a-b.map(f)\nc-d.return",
+    "x- = range(0, 1)\nx-.return",
+    // a stream variable may be called like an input function
+    "range = range(0, 1)\nrange.return",
+    "range = range(0, 1)\nrange.map(f).return",
+    "read_file = range(0, 1)\nread_file . write_file(\"a.csv\", csv)",
+    "select_all = range(0, 1)\nselect_all-x = select_all.map(f)\nselect_all-x.return",
+];
+
+#[test]
+fn whitespace_variants_keep_the_nested_invariants() {
+    // Check every case before failing, so one run lists all the brittle ones.
+    let failing: Vec<&str> = WHITESPACE_VARIANTS
+        .iter()
+        .copied()
+        .filter(|src| {
+            assert!(
+                marigold_parse(src).is_ok(),
+                "the case itself must be valid Marigold: {src:?}: {:?}",
+                marigold_parse(src).map(|_| ())
+            );
+            std::panic::catch_unwind(|| assert_nested(src, &generate(src))).is_err()
+        })
+        .collect();
+    assert!(
+        failing.is_empty(),
+        "nested invariants failed for: {failing:#?}"
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // properties: arbitrary valid programs, whitespace everywhere
 // ---------------------------------------------------------------------------------------------
@@ -2637,6 +2729,38 @@ proptest! {
         match insert {
             Some(s) => src.insert_str(pos, &s),
             None => if pos < src.len() { src.remove(pos); },
+        }
+        match marigold_parse(&src) {
+            Ok(rust) => {
+                let g = generate(&src);
+                prop_assert_eq!(&g.rust, &rust);
+                assert_nested(&src, &g);
+            }
+            Err(e) => prop_assert_eq!(marigold_generate(&src).unwrap_err().0, e.0),
+        }
+    }
+
+    /// Edits that change how a program is spaced or which identifier it names: whitespace
+    /// anywhere, a stray dot, a hyphen (part of identifiers), an underscore. Up to three per
+    /// program. The nested source slices must follow the grammar, not assumptions about spacing.
+    #[test]
+    fn spacing_and_hyphen_edits_keep_nested_invariants(
+        base in arb_program2(),
+        edits in prop::collection::vec(
+            (any::<prop::sample::Index>(), prop::option::of(prop::sample::select(vec![
+                " ", "\t", "\n", "\r\n", "  ", "-", ".", "_", " . ", "\n.\n", ",", " , ", "=", " = ",
+            ]))),
+            1..4,
+        ),
+    ) {
+        let mut src = base;
+        for (at, insert) in edits {
+            let boundaries: Vec<usize> = (0..=src.len()).filter(|i| src.is_char_boundary(*i)).collect();
+            let pos = boundaries[at.index(boundaries.len())];
+            match insert {
+                Some(text) => src.insert_str(pos, text),
+                None => if pos < src.len() { src.remove(pos); },
+            }
         }
         match marigold_parse(&src) {
             Ok(rust) => {

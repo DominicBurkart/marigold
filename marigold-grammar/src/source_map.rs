@@ -844,6 +844,15 @@ pub struct Emit {
 }
 
 impl Emit {
+    /// Code with no recorded parts, for code that was built as a plain string (the
+    /// instrumented code of the `otel` feature).
+    pub fn text(s: String) -> Emit {
+        Emit {
+            s,
+            pieces: Vec::new(),
+        }
+    }
+
     /// Append text that stands for no part.
     pub fn push(&mut self, text: &str) {
         self.s.push_str(text);

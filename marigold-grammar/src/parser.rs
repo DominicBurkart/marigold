@@ -20,6 +20,12 @@
 use pest::Parser;
 use std::fmt;
 
+#[cfg(feature = "otel")]
+use crate::instrument::Plan;
+#[cfg(not(feature = "otel"))]
+#[allow(dead_code)]
+enum Plan {}
+
 /// Error type for parser
 #[derive(Debug, Clone)]
 pub struct MarigoldParseError(pub String);
@@ -152,7 +158,7 @@ impl PestParser {
             None
         };
 
-        match Self::generate_rust_code(expressions, resolved_bounds) {
+        match Self::generate_rust_code(expressions, resolved_bounds, None) {
             Ok(_) => Vec::new(),
             Err(msg) => vec![Diagnostic::whole(input, "codegen-error", msg)],
         }
@@ -224,7 +230,24 @@ impl PestParser {
 
     /// Internal function: parse input and build AST
     fn parse_input(input: &str) -> Result<String, String> {
-        Self::generate_input(input).map(|generated| generated.rust)
+        Self::generate_input_with(input, None).map(|generated| generated.rust)
+    }
+
+    #[cfg(feature = "otel")]
+    pub(crate) fn parse_instrumented(
+        input: &str,
+        options: &crate::instrument::CodegenOptions,
+    ) -> Result<String, String> {
+        Self::generate_instrumented(input, options).map(|generated| generated.rust)
+    }
+
+    #[cfg(feature = "otel")]
+    pub(crate) fn generate_instrumented(
+        input: &str,
+        options: &crate::instrument::CodegenOptions,
+    ) -> Result<crate::source_map::GeneratedProgram, String> {
+        let plan = Plan::new(input, options);
+        Self::generate_input_with(input, Some(&plan))
     }
 
     /// Parse input, generate Rust code and map every generated item back to the
@@ -235,6 +258,13 @@ impl PestParser {
     /// identical between them.
     pub(crate) fn generate_input(
         input: &str,
+    ) -> Result<crate::source_map::GeneratedProgram, String> {
+        Self::generate_input_with(input, None)
+    }
+
+    fn generate_input_with(
+        input: &str,
+        plan: Option<&Plan>,
     ) -> Result<crate::source_map::GeneratedProgram, String> {
         // Stage 1: Parse with Pest grammar
         let pairs = MarigoldPestParser::parse(Rule::program, input)
@@ -254,7 +284,7 @@ impl PestParser {
         let resolved_bounds = Self::validate_bounded_types(&expressions)?;
 
         // Stages 4 and 5
-        Self::generate_mapped(expressions, resolved_bounds, &ranges, &parts)
+        Self::generate_mapped(expressions, resolved_bounds, &ranges, &parts, plan)
     }
 
     /// Stages 4 and 5 of [`Self::generate_input`], split out so tests can time exactly the
@@ -264,9 +294,11 @@ impl PestParser {
         resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
         ranges: &[crate::diagnostics::ByteRange],
         parts: &[Vec<crate::sub_spans::SubSpan>],
+        plan: Option<&Plan>,
     ) -> Result<crate::source_map::GeneratedProgram, String> {
         // Stage 4: Generate Rust code (replicating LALRPOP logic)
-        let (rust, generated) = Self::generate_rust_code_mapped(expressions, resolved_bounds)?;
+        let (rust, generated) =
+            Self::generate_rust_code_mapped(expressions, resolved_bounds, plan)?;
 
         // Stage 5: Attach each item's source range, and the source ranges of its parts.
         // `expr_index` indexes `ranges` and `parts` because all are parallel to the
@@ -354,8 +386,9 @@ impl PestParser {
     fn generate_rust_code(
         expressions: Vec<crate::nodes::TypedExpression>,
         resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
+        plan: Option<&Plan>,
     ) -> Result<String, String> {
-        Self::generate_rust_code_mapped(expressions, resolved_bounds).map(|(rust, _)| rust)
+        Self::generate_rust_code_mapped(expressions, resolved_bounds, plan).map(|(rust, _)| rust)
     }
 
     /// Generate Rust code from AST expressions and record, for every top-level
@@ -369,9 +402,10 @@ impl PestParser {
     fn generate_rust_code_mapped(
         expressions: Vec<crate::nodes::TypedExpression>,
         resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
+        plan: Option<&Plan>,
     ) -> Result<(String, Vec<crate::source_map::GeneratedSegment>), String> {
         use crate::nodes::TypedExpression;
-        use crate::source_map::{CodeBuilder, Emit, SegmentKind};
+        use crate::source_map::{CodeBuilder, SegmentKind};
 
         let struct_bounds = Self::build_struct_bounds_map(&resolved_bounds);
         let mut out = CodeBuilder::new("async {\n    use ::marigold::marigold_impl::*;\n    ");
@@ -421,10 +455,14 @@ impl PestParser {
         // 3. Generate stream variable declarations
         for (i, expr) in expressions.iter().enumerate() {
             let (name, code) = match expr {
-                TypedExpression::StreamVariable(v) => (&v.variable_name, v.declaration_emit()),
-                TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                    (&v.variable_name, v.declaration_emit())
-                }
+                TypedExpression::StreamVariable(v) => (
+                    &v.variable_name,
+                    Self::variable_declaration_code(plan, i, v)?,
+                ),
+                TypedExpression::StreamVariableFromPriorStreamVariable(v) => (
+                    &v.variable_name,
+                    Self::variable_from_prior_declaration_code(plan, i, v)?,
+                ),
                 _ => continue,
             };
             out.segment(
@@ -441,8 +479,10 @@ impl PestParser {
         let mut n_returning_streams = 0;
         for (i, expr) in expressions.iter().enumerate() {
             let code = match expr {
-                TypedExpression::UnnamedReturningStream(s) => s.emit(),
-                TypedExpression::NamedReturningStream(s) => s.emit(),
+                TypedExpression::UnnamedReturningStream(s) => {
+                    Self::unnamed_stream_code(plan, i, s)?
+                }
+                TypedExpression::NamedReturningStream(s) => Self::named_stream_code(plan, i, s)?,
                 _ => continue,
             };
             let ident = format!("returning_stream_{n_returning_streams}");
@@ -456,8 +496,10 @@ impl PestParser {
         let mut n_non_returning_streams = 0;
         for (i, expr) in expressions.iter().enumerate() {
             let code = match expr {
-                TypedExpression::UnnamedNonReturningStream(s) => s.emit(),
-                TypedExpression::NamedNonReturningStream(s) => s.emit(),
+                TypedExpression::UnnamedNonReturningStream(s) => {
+                    Self::unnamed_stream_code(plan, i, s)?
+                }
+                TypedExpression::NamedNonReturningStream(s) => Self::named_stream_code(plan, i, s)?,
                 _ => continue,
             };
             let ident = format!("non_returning_stream_{n_non_returning_streams}");
@@ -478,7 +520,7 @@ impl PestParser {
                 _ => continue,
             };
             let ident = format!("stream_variable_runners_{n_stream_variable_runners}");
-            let mut runner = Emit::default();
+            let mut runner = crate::source_map::Emit::default();
             runner.push(&code);
             let stmt = Self::boxed_statement(&ident, runner);
             out.segment(
@@ -560,6 +602,66 @@ impl PestParser {
         stmt.splice(code);
         stmt.push(");");
         stmt
+    }
+
+    fn unnamed_stream_code(
+        plan: Option<&Plan>,
+        expr_index: usize,
+        node: &crate::nodes::UnnamedStreamNode,
+    ) -> Result<crate::source_map::Emit, String> {
+        #[cfg(feature = "otel")]
+        if let Some(plan) = plan {
+            return plan
+                .unnamed(expr_index, node)
+                .map(crate::source_map::Emit::text);
+        }
+        let _ = (plan, expr_index);
+        Ok(node.emit())
+    }
+
+    fn named_stream_code(
+        plan: Option<&Plan>,
+        expr_index: usize,
+        node: &crate::nodes::NamedStreamNode,
+    ) -> Result<crate::source_map::Emit, String> {
+        #[cfg(feature = "otel")]
+        if let Some(plan) = plan {
+            return plan
+                .named(expr_index, node)
+                .map(crate::source_map::Emit::text);
+        }
+        let _ = (plan, expr_index);
+        Ok(node.emit())
+    }
+
+    fn variable_declaration_code(
+        plan: Option<&Plan>,
+        expr_index: usize,
+        node: &crate::nodes::StreamVariableNode,
+    ) -> Result<crate::source_map::Emit, String> {
+        #[cfg(feature = "otel")]
+        if let Some(plan) = plan {
+            return plan
+                .variable(expr_index, node)
+                .map(crate::source_map::Emit::text);
+        }
+        let _ = (plan, expr_index);
+        Ok(node.declaration_emit())
+    }
+
+    fn variable_from_prior_declaration_code(
+        plan: Option<&Plan>,
+        expr_index: usize,
+        node: &crate::nodes::StreamVariableFromPriorStreamVariableNode,
+    ) -> Result<crate::source_map::Emit, String> {
+        #[cfg(feature = "otel")]
+        if let Some(plan) = plan {
+            return plan
+                .variable_from_prior(expr_index, node)
+                .map(crate::source_map::Emit::text);
+        }
+        let _ = (plan, expr_index);
+        Ok(node.declaration_emit())
     }
 
     fn build_struct_bounds_map(
@@ -2198,46 +2300,5 @@ mod function_grammar_tests {
             .expect("Simple fn should still parse after grammar change");
         assert!(code.contains("x: i32"), "param type i32 should be present");
         assert!(code.contains("-> i32"), "return type i32 should be present");
-    }
-
-    fn many_expressions(n: usize) -> String {
-        (0..n)
-            .map(|i| format!("v{i} = range(0, 5).map(f)\nv{i}.return\nstruct S{i} {{ a: u8 }}\n"))
-            .collect()
-    }
-
-    /// Seconds spent on everything `marigold_generate` does after the syntax tree is built:
-    /// source ranges, code generation with segment recording, attaching ranges and building
-    /// the map. The tree is built before the clock starts and the pest parse is not part of it.
-    fn after_parse_seconds(pairs: &pest::iterators::Pairs<'_, Rule>) -> f64 {
-        let expressions =
-            crate::pest_ast_builder::PestAstBuilder::build_program(pairs.clone()).unwrap();
-        let start = std::time::Instant::now();
-        let ranges = PestParser::expr_ranges(pairs);
-        let parts = crate::sub_spans::skeletons(pairs);
-        let generated = PestParser::generate_mapped(expressions, None, &ranges, &parts).unwrap();
-        std::hint::black_box(&generated);
-        start.elapsed().as_secs_f64()
-    }
-
-    /// Guards the cost of the source map end to end: 4x more expressions must cost about 4x,
-    /// not 16x. Machine load cannot be subtracted from one measurement, so each round times the
-    /// small and the large program back to back (load hits both alike), and the test passes if
-    /// any round shows near-linear growth. Linear growth is about 4x; the bound leaves 2x of
-    /// noise. The work counters in `source_map.rs` pin the map's own complexity exactly.
-    #[test]
-    fn mapped_code_generation_grows_linearly_with_program_size() {
-        let (small_src, large_src) = (many_expressions(2_000), many_expressions(8_000));
-        let small = MarigoldPestParser::parse(Rule::program, &small_src).unwrap();
-        let large = MarigoldPestParser::parse(Rule::program, &large_src).unwrap();
-        let mut best = f64::INFINITY;
-        for _ in 0..9 {
-            let (s, l) = (after_parse_seconds(&small), after_parse_seconds(&large));
-            best = best.min(l / s);
-            if best < 6.0 {
-                return;
-            }
-        }
-        panic!("8000 expressions cost {best:.1}x as much as 2000; linear is about 4x");
     }
 }

@@ -55,4 +55,5 @@ embedded). If the program does not compile, stdout stays empty and the errors
 go to stderr as `marigold check` prints them. Offsets refer to the file as it
 is on disk, not to the text `m!()` sees. The output of the `cargo install
 marigold -F cli` build matches `marigold run`; a build with `-F cli,tokio`
-generates different code.
+generates different code. UNVERIFIED: no test runs `marigold run` or compiles
+the emitted code, so neither claim is proven.

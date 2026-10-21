@@ -108,6 +108,45 @@ fn naive_for_source(segs: &[Segment], q: ByteRange) -> Vec<&Segment> {
     segs.iter().filter(|s| hit(s)).collect()
 }
 
+/// `src` without the ASCII whitespace the grammar skips between tokens. Text inside double
+/// quotes is kept as written: whitespace there is part of a path.
+fn without_insignificant_whitespace(src: &str) -> String {
+    let mut out = String::new();
+    let mut in_string = false;
+    for c in src.chars() {
+        if c == '"' {
+            in_string = !in_string;
+        }
+        if in_string || !c.is_ascii_whitespace() {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// What a stream expression starts with, following the grammar: an input function (`range(`,
+/// `read_file(` and `select_all(` are single tokens, so the parenthesis follows immediately), or
+/// the name of a stream variable. Names may contain hyphens, and may be spelled like an input
+/// function when no `(` follows. Returns the variable name for the latter.
+fn stream_variable_read_by(source: &str) -> Option<&str> {
+    let is_start = |c: char| c.is_ascii_alphabetic() || c == '_';
+    let is_part = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    assert!(source.starts_with(is_start), "{source}");
+    let end = source.find(|c| !is_part(c)).unwrap_or(source.len());
+    let (name, rest) = source.split_at(end);
+    if rest.trim_start().starts_with('.') {
+        Some(name)
+    } else {
+        assert!(
+            ["range(", "read_file(", "select_all("]
+                .iter()
+                .any(|input| source.starts_with(input)),
+            "neither a variable followed by `.` nor an input function: {source}"
+        );
+        None
+    }
+}
+
 /// Char-boundary offsets worth probing: every segment edge +-1, plus 0 and len.
 fn probe_points(text: &str, edges: impl Iterator<Item = usize>) -> Vec<usize> {
     let mut pts = vec![0, text.len()];
@@ -289,7 +328,10 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
                     "{text}"
                 );
                 assert!(text.ends_with("});"), "{text}");
-                assert!(source.ends_with("return"), "{source}");
+                assert!(
+                    without_insignificant_whitespace(source).ends_with(".return"),
+                    "{source}"
+                );
                 assert_eq!(s.name, None);
                 ret += 1;
             }
@@ -301,8 +343,10 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
                     "{text}"
                 );
                 assert!(text.ends_with("});"), "{text}");
+                // whitespace is allowed after the dot and before the closing parenthesis
+                let compact = without_insignificant_whitespace(source);
                 assert!(
-                    source.contains(".write_file(") && source.ends_with(')'),
+                    compact.contains(".write_file(") && compact.ends_with(')'),
                     "{source}"
                 );
                 assert_eq!(s.name, None);
@@ -311,12 +355,8 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
             _ => panic!("new SegmentKind: extend this test"),
         }
         if matches!(s.kind, K::ReturningStream | K::NonReturningStream) {
-            let first = source
-                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-                .next()
-                .unwrap();
-            if !matches!(first, "range" | "read_file" | "select_all") {
-                assert!(text.contains(&format!("{first}.get()")), "{text}");
+            if let Some(variable) = stream_variable_read_by(source) {
+                assert!(text.contains(&format!("{variable}.get()")), "{text}");
             }
         }
     }
@@ -961,6 +1001,80 @@ fn corpus_programs_with_several_expressions_produce_expected_segment_counts() {
     );
 }
 
+/// The grammar skips ASCII whitespace between tokens, so the same expression can be written many
+/// ways. Every construct the invariants inspect appears here with whitespace in each position the
+/// grammar allows, and with hyphenated identifiers (hyphens are part of identifiers). The
+/// mutation proptest finds such programs by chance; these cases make them deterministic.
+const WHITESPACE_VARIANTS: &[&str] = &[
+    // the proptest regression: whitespace after the dot
+    "v0. write_file(\"\u{65e5}0.csv\", csv)",
+    "v0 . write_file(\"a.csv\", csv)",
+    "v0\n.\twrite_file(\"a.csv\", csv)",
+    "range(0, 1) . write_file(\"a.csv\", csv)",
+    "range(0, 1).write_file( \"a.csv\" , csv )",
+    "range(0, 1).write_file(\"a.csv\" , csv , compression = gz)",
+    "range(0, 1).write_file(\"a.csv\",csv,compression=none)",
+    "range(0, 1).write_file(\"a.csv\", csv\n)",
+    "x = range(0, 1)\nx\n.\nwrite_file(\"a.csv\", csv)",
+    // return
+    "range(0, 1) . return",
+    "range(0, 1).\nreturn",
+    "range(0, 1)\n\t.\r\n\treturn",
+    "x = range(0, 1)\nx . return",
+    "x=range(0,1)\nx.return",
+    // range
+    "range( 0 , 1 ).return",
+    "range(0 ,= 1).return",
+    "range(\n0,\n=\n1\n).return",
+    "range( E ).return\nenum E { A }",
+    // stream variables and chains
+    "x =\n range(0, 1) . map(f)",
+    "x = range(0, 1)\n  .map(f)\n  .filter(g)\nx.return",
+    "x = range(0, 1)\ny = x . map(f)\ny . return",
+    "x = range(0, 1)\ny=x.map(f)\ny.return",
+    "x = range(0, 1)\ny =\n\tx\n\t.map(f)\ny.return",
+    // read_file
+    "read_file( \"d.csv\" , csv , struct = S ) . ok() . return\nstruct S { a: u8 }",
+    "read_file(\"d.csv\",csv,struct=S,infer_compression=true).ok().return\nstruct S { a: u8 }",
+    // select_all
+    "select_all( range(0, 1) . map(f) , range(1, 2) ) . return",
+    "select_all(\n\trange(0, 1),\n\trange(1, 2)\n)\n.\nfilter(g)\n.\nreturn",
+    // struct, enum and fn headers
+    "struct\nS\n{\na : u8 ,\nb : string_1 ,\n}\nrange(0, 1).return",
+    "structS{a:u8}\nrange(0, 1).return",
+    "enum\nE\n{ A , B = \"b\" , default Z }\nrange(E).return",
+    "enumE{A}\nrange(E).return",
+    "fn\nf ( x : i32 )\n->\ni32\n{ x }\nrange(0, 1).map(f).return",
+    "fnf(x: i32) -> i32 {x}\nrange(0, 1).map(f).return",
+    "fn f(x: i32) -> i32 { /* { */ x }\nrange(0, 1).map(f).return",
+    // hyphens are part of identifiers: the leading letters of a name are not the whole name
+    "v0-a = range(0, 1)\nv0-a.return",
+    "v0-a = range(0, 1)\nv0-a.write_file(\"a.csv\", csv)",
+    "x- = range(0, 1)\nx-.return",
+    // a stream variable may be called like an input function
+    "range = range(0, 1)\nrange.return",
+    "read_file = range(0, 1)\nread_file . write_file(\"a.csv\", csv)",
+    "select_all = range(0, 1)\nselect_all-x = select_all.map(f)\nselect_all-x.return",
+];
+
+#[test]
+fn whitespace_variants_keep_all_invariants() {
+    // Check every case before failing, so one run lists all the brittle ones.
+    let failing: Vec<&str> = WHITESPACE_VARIANTS
+        .iter()
+        .copied()
+        .filter(|src| {
+            assert!(
+                marigold_parse(src).is_ok(),
+                "the case itself must be valid Marigold: {src:?}: {:?}",
+                marigold_parse(src).map(|_| ())
+            );
+            std::panic::catch_unwind(|| assert_invariants(src, &generate(src))).is_err()
+        })
+        .collect();
+    assert!(failing.is_empty(), "invariants failed for: {failing:#?}");
+}
+
 /// One chunk of program text built from a template index and a size parameter. Names are unique
 /// per position, so the generated program never declares the same name twice.
 fn chunk(kind: u8, n: u32, i: usize) -> String {
@@ -1028,22 +1142,60 @@ proptest! {
         at in any::<prop::sample::Index>(),
         insert in prop::option::of("[\\PC]"),
     ) {
-        let boundaries: Vec<usize> = (0..=base.len()).filter(|i| base.is_char_boundary(*i)).collect();
-        let pos = boundaries[at.index(boundaries.len())];
-        let mut src = base.clone();
-        match insert {
-            Some(s) => src.insert_str(pos, &s),
-            None => if pos < src.len() { src.remove(pos); },
+        let src = edited(&base, at, insert.as_deref());
+        check_parse_and_generate_agree(&src)?;
+    }
+
+    /// The same, but the edits are the ones that change how a program is spaced or which
+    /// identifier it names: whitespace anywhere, a stray dot, a hyphen. Up to three per program.
+    #[test]
+    fn spacing_and_hyphen_edits_keep_invariants(
+        base in arb_program(),
+        edits in prop::collection::vec(
+            (any::<prop::sample::Index>(), prop::option::of(prop::sample::select(vec![
+                " ", "\t", "\n", "\r\n", "  ", "-", ".", "_", " . ", "\n.\n",
+            ]))),
+            1..4,
+        ),
+    ) {
+        let mut src = base;
+        for (at, insert) in edits {
+            src = edited(&src, at, insert);
         }
-        match marigold_parse(&src) {
-            Ok(rust) => {
-                let g = generate(&src);
-                prop_assert_eq!(&g.rust, &rust);
-                assert_invariants(&src, &g);
+        check_parse_and_generate_agree(&src)?;
+    }
+}
+
+/// `base` with one character removed at a char boundary (`insert` is `None`) or `insert` added.
+fn edited(base: &str, at: prop::sample::Index, insert: Option<&str>) -> String {
+    let boundaries: Vec<usize> = (0..=base.len())
+        .filter(|i| base.is_char_boundary(*i))
+        .collect();
+    let pos = boundaries[at.index(boundaries.len())];
+    let mut src = base.to_string();
+    match insert {
+        Some(s) => src.insert_str(pos, s),
+        None => {
+            if pos < src.len() {
+                src.remove(pos);
             }
-            Err(e) => prop_assert_eq!(marigold_generate(&src).unwrap_err().0, e.0),
         }
     }
+    src
+}
+
+/// Whatever `marigold_parse` makes of `src`, `marigold_generate` agrees, and an accepted program
+/// satisfies every invariant.
+fn check_parse_and_generate_agree(src: &str) -> Result<(), TestCaseError> {
+    match marigold_parse(src) {
+        Ok(rust) => {
+            let g = generate(src);
+            prop_assert_eq!(&g.rust, &rust);
+            assert_invariants(src, &g);
+        }
+        Err(e) => prop_assert_eq!(marigold_generate(src).unwrap_err().0, e.0),
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------

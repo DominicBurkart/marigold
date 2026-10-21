@@ -1,0 +1,12 @@
+[
+  {
+    "tool_call": {
+      "name": "write",
+      "arguments": {
+        "filePath": "{file}",
+        "content": "b = a.map(f)\na = range(0, 3)\nb.return\nx = range(0, 3).map(undefined_fn)\nx.return\nrange(Colour).return\n"
+      }
+    }
+  },
+  { "text": "Wrote hello_world.marigold." }
+]

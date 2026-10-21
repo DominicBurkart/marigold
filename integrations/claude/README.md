@@ -93,7 +93,9 @@ also maps each top-level expression to the code generated for it. Offsets are
 byte offsets into the file; lines are 1-based and columns count Unicode scalar
 values. Errors go to stderr, stdout is a complete document or empty. The
 `cargo install marigold -F cli` build generates the code `marigold run`
-compiles; a build with `-F cli,tokio` generates different code.
+compiles; a build with `-F cli,tokio` generates different code. UNVERIFIED:
+no test runs `marigold run` or compiles the emitted code, so neither claim is
+proven, and the feature-set snapshot test only compares emitted text.
 
 The `marigold_check` tool is exposed only by `marigold-lsp mcp`. This plugin
 registers the language server, not the MCP server. To add the MCP server to

@@ -1,0 +1,15 @@
+FROM docker.io/library/node:22-slim
+ARG OPENCODE_VERSION
+RUN test -n "$OPENCODE_VERSION" \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends ripgrep git ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install -g "opencode-ai@${OPENCODE_VERSION}" \
+ && npm cache clean --force \
+ && opencode --version
+ENV HOME=/work/home
+ENV XDG_CONFIG_HOME=/work/xdg/config
+ENV XDG_DATA_HOME=/work/xdg/data
+ENV XDG_CACHE_HOME=/work/xdg/cache
+ENV XDG_STATE_HOME=/work/xdg/state
+WORKDIR /work
