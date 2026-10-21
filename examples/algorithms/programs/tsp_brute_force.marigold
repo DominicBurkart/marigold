@@ -1,0 +1,25 @@
+fn dist(a: i32, b: i32) -> i32 {
+    let xs: [i32; 10] = [0, 4, 9, 13, 6, 15, 2, 11, 8, 17];
+    let ys: [i32; 10] = [0, 7, 2, 8, 12, 15, 14, 5, 9, 3];
+    (xs[a as usize] - xs[b as usize]).abs() + (ys[a as usize] - ys[b as usize]).abs()
+}
+
+fn tour_length(rest: [i32; 9]) -> i32 {
+    let mut total = dist(0, rest[0]) + dist(rest[8], 0);
+    let mut i = 0;
+    while i < 8 {
+        total += dist(rest[i], rest[i + 1]);
+        i += 1;
+    }
+    total
+}
+
+fn unbounded() -> i32 {
+    i32::MAX
+}
+
+fn shorter(best: i32, candidate: i32) -> i32 {
+    if candidate < best { candidate } else { best }
+}
+
+range(1, 10).permutations(9).map(tour_length).fold(unbounded, shorter).return

@@ -37,5 +37,7 @@ pub mod gcd;
 #[cfg(test)]
 pub mod tsp;
 pub mod tsp_ant_colony;
+pub mod tsp_brute_force;
 pub mod tsp_genetic;
+pub mod tsp_held_karp;
 pub mod tsp_simulated_annealing;
