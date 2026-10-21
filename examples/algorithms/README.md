@@ -14,11 +14,13 @@ requested runtime but do not exercise the parallel codegen paths.
 
 Every example has three checks:
 
-| Check | Where |
-| --- | --- |
-| program runs and returns the right answer, compared with an independent oracle | `src/<name>.rs` tests (`cargo test -p algorithms`) |
-| analyzer estimate pinned; where it differs from the canonical class, a test asserts the difference so an analyzer fix shows up as a failing test | `tests/complexity.rs` |
-| benchmark | `benches/algorithms_bench.rs`, run by `.github/workflows/bench.yaml` |
+- The program runs and returns the right answer, compared with an independent
+  oracle: `src/<name>.rs` tests (`cargo test -p algorithms`).
+- The analyzer estimate is pinned in `tests/complexity.rs`. Where it differs
+  from the canonical class, a test asserts the difference, so an analyzer fix
+  shows up as a failing test.
+- A benchmark in `benches/algorithms_bench.rs`, run by
+  `.github/workflows/bench.yaml`.
 
 ## Writing a program
 
@@ -26,25 +28,28 @@ Every example has three checks:
   emitted as `const fn`, so bodies cannot allocate or use iterators; use fixed
   size arrays and `while` loops. Array literals need an explicit element type
   when a method such as `.abs()` is called on their items.
-- There are no comments at top level of a `.marigold` file. References live in
-  the table below.
+- There are no comments at top level of a `.marigold` file. References live
+  in this file.
 - Fixed-size inputs are declared inside functions. The analyzer sees only the
   stream shape, so loops that live inside a function body are invisible to it.
+- Keep this file within 80 columns (markdownlint enforces it, tables
+  included): one `###` section per program, as below.
 
 ## Programs
 
-| Program | Issue | Reference | Canonical complexity | Analyzer estimate |
-| --- | --- | --- | --- | --- |
-| `gcd` | [#410](https://github.com/DominicBurkart/marigold/issues/410) | [Euclidean algorithm](https://en.wikipedia.org/wiki/Euclidean_algorithm) | O(log(min(a, b))) | O(1), exact O(2): a fold over the constant `range(0, 48)` and a map. |
-| `binary_search` | [#412](https://github.com/DominicBurkart/marigold/issues/412) | [Binary search algorithm](https://en.wikipedia.org/wiki/Binary_search_algorithm) | O(log n) per query | O(1), exact O(2): a fold over the constant `range(0, 5)` and a map. This is a fixed-iteration program, O(1) by construction, not a demonstration of O(log n): the 5 rounds are sized for the worst case on 16 elements, and the analyzer cannot see data-dependent early exit ([#429](https://github.com/DominicBurkart/marigold/issues/429)); symbolic input size is [#415](https://github.com/DominicBurkart/marigold/issues/415) and per-item fn cost is [#416](https://github.com/DominicBurkart/marigold/issues/416). See the Binary search section. |
-| `quicksort` | [#413](https://github.com/DominicBurkart/marigold/issues/413) | Hoare, "Quicksort", 1962; [Quicksort](https://en.wikipedia.org/wiki/Quicksort) | O(n log n) average, O(n^2) worst | O(1), exact O(2): a fold over the constant `range(0, 16)` and a map. Fixed-iteration, O(1) by construction: the 16 steps are sized for the O(n^2) worst case on 16 elements, and the partition work lives in the fn body, invisible to the analyzer ([#415](https://github.com/DominicBurkart/marigold/issues/415), [#416](https://github.com/DominicBurkart/marigold/issues/416), [#429](https://github.com/DominicBurkart/marigold/issues/429)). See the Quicksort section. |
+### gcd
 
-### GCD
+- Issue: [#410](https://github.com/DominicBurkart/marigold/issues/410)
+- Reference: [Euclidean algorithm](https://en.wikipedia.org/wiki/Euclidean_algorithm)
+- Canonical complexity: O(log(min(a, b)))
+- Analyzer estimate: O(1), exact O(2): a fold over the constant
+  `range(0, 48)` and a map.
 
 Marigold has no data-dependent termination: a fold runs for the length of its
 source. This Euclid is therefore a fixed-iteration program, O(1) by
 construction, and the analyzer's O(1) is correct for the program as written.
-It is not a demonstration of O(log(min(a, b))).
+It is not a demonstration of O(log(min(a, b))); see
+[#429](https://github.com/DominicBurkart/marigold/issues/429).
 
 The 48 rounds bound the Euclid steps for every `u32` pair: the worst case is
 consecutive Fibonacci numbers (Lamé's theorem), and the largest such pair that
@@ -54,7 +59,22 @@ the bound and the arithmetic are exercised together. Tests compare every pair
 with a reference Euclid and assert that the worst case needs fewer rounds than
 the cap.
 
-### Binary search
+### binary_search
+
+- Issue: [#412](https://github.com/DominicBurkart/marigold/issues/412)
+- Reference:
+  [Binary search algorithm](https://en.wikipedia.org/wiki/Binary_search_algorithm)
+- Canonical complexity: O(log n) per query
+- Analyzer estimate: O(1), exact O(2): a fold over the constant
+  `range(0, 5)` and a map.
+
+This is a fixed-iteration program, O(1) by construction, not a demonstration
+of O(log n). The 5 rounds are sized for the worst case on 16 elements, and the
+analyzer cannot see data-dependent early exit
+([#429](https://github.com/DominicBurkart/marigold/issues/429)). Symbolic
+input size is [#415](https://github.com/DominicBurkart/marigold/issues/415)
+and per-item fn cost is
+[#416](https://github.com/DominicBurkart/marigold/issues/416).
 
 Each fold round halves the lo/hi interval of 8 queries at once (misses below
 and above the array, hits, duplicate runs); the program returns the 8
@@ -63,7 +83,21 @@ rounds are needed in the worst case and the cap is exactly that. Tests compare
 every result with `partition_point` and `binary_search`, and assert that a
 cap one round short gives a wrong answer for at least one query.
 
-### Quicksort
+### quicksort
+
+- Issue: [#413](https://github.com/DominicBurkart/marigold/issues/413)
+- Reference: Hoare, "Quicksort", 1962;
+  [Quicksort](https://en.wikipedia.org/wiki/Quicksort)
+- Canonical complexity: O(n log n) average, O(n^2) worst
+- Analyzer estimate: O(1), exact O(2): a fold over the constant
+  `range(0, 16)` and a map.
+
+This is a fixed-iteration program, O(1) by construction. The 16 steps are
+sized for the O(n^2) worst case on 16 elements, and the partition work lives
+in the fn body, invisible to the analyzer
+([#415](https://github.com/DominicBurkart/marigold/issues/415),
+[#416](https://github.com/DominicBurkart/marigold/issues/416),
+[#429](https://github.com/DominicBurkart/marigold/issues/429)).
 
 Each fold step pops one partition from an explicit work-list held in the
 state array and performs one Lomuto partition (last element as pivot), pushing
