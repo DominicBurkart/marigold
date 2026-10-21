@@ -29,3 +29,5 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
 pub mod gcd;
 #[cfg(test)]
 pub mod tsp;
+pub mod tsp_brute_force;
+pub mod tsp_held_karp;
