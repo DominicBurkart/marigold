@@ -59,15 +59,16 @@ A FAIL is classified as one of:
 
 - Pinned: 1.19.3.
 - Latest (1.19.3, 2026-10-18): PASS, the pin is the latest release.
-- Oldest tested passing: 1.1.39 (tested 2026-10-21), full scenario set
-  including the `edit` scenarios. Also passing: 1.2.15.
-- Failing below: 1.0.223 and 1.0.142.
-  - 1.0.142 (2026-10-18): the error scenarios pass, so the integration works.
-    The characterization scenarios fail: a successful write returns an empty
-    result instead of "Wrote file successfully.", and an Information
-    diagnostic is shown to the model in a `<file_diagnostics>` block. The
-    pinned behaviour is therefore version specific, not an integration
-    failure.
-  - 1.0.223 (2026-10-21): error scenarios pass and the mixed scenario passes;
-    the assertions that need the text "Wrote file successfully" fail.
-- Versions from 1.0.224 to 1.1.38 are untested.
+- Oldest tested passing: 1.1.16 (tested 2026-10-21), full scenario set
+  including the `edit` scenarios. Also passing: 1.1.19, 1.1.39, 1.2.15.
+- Failing below: 1.1.15, 1.1.14, 1.1.9, 1.0.223 (2026-10-21) and 1.0.142
+  (2026-10-18). On all of them the error scenarios and the mixed scenario
+  pass, so the integration works: the Error diagnostic reaches the model.
+  The failing assertions are characterization pins that need the text "Wrote
+  file successfully" in the tool result; these versions return an empty
+  result for a successful write. This is a difference in opencode output
+  text, not a failure of the integration. On 1.0.142 an Information
+  diagnostic is also shown to the model in a `<file_diagnostics>` block, so
+  the "information is dropped" pin does not hold there either.
+- Tested lower bound for the integration itself (error diagnostic reaches the
+  model after `write` and `edit`): 1.0.142 or older, not searched.
