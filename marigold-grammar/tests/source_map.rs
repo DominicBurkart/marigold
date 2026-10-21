@@ -93,6 +93,45 @@ fn naive_for_source(segs: &[Segment], q: ByteRange) -> Vec<&Segment> {
     segs.iter().filter(|s| hit(s)).collect()
 }
 
+/// `src` without the ASCII whitespace the grammar skips between tokens. Text inside double
+/// quotes is kept as written: whitespace there is part of a path.
+fn without_insignificant_whitespace(src: &str) -> String {
+    let mut out = String::new();
+    let mut in_string = false;
+    for c in src.chars() {
+        if c == '"' {
+            in_string = !in_string;
+        }
+        if in_string || !c.is_ascii_whitespace() {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// What a stream expression starts with, following the grammar: an input function (`range(`,
+/// `read_file(` and `select_all(` are single tokens, so the parenthesis follows immediately), or
+/// the name of a stream variable. Names may contain hyphens, and may be spelled like an input
+/// function when no `(` follows. Returns the variable name for the latter.
+fn stream_variable_read_by(source: &str) -> Option<&str> {
+    let is_start = |c: char| c.is_ascii_alphabetic() || c == '_';
+    let is_part = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    assert!(source.starts_with(is_start), "{source}");
+    let end = source.find(|c| !is_part(c)).unwrap_or(source.len());
+    let (name, rest) = source.split_at(end);
+    if rest.trim_start().starts_with('.') {
+        Some(name)
+    } else {
+        assert!(
+            ["range(", "read_file(", "select_all("]
+                .iter()
+                .any(|input| source.starts_with(input)),
+            "neither a variable followed by `.` nor an input function: {source}"
+        );
+        None
+    }
+}
+
 /// Char-boundary offsets worth probing: every segment edge +-1, plus 0 and len.
 fn probe_points(text: &str, edges: impl Iterator<Item = usize>) -> Vec<usize> {
     let mut pts = vec![0, text.len()];
@@ -271,7 +310,10 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
                     "{text}"
                 );
                 assert!(text.ends_with("});"), "{text}");
-                assert!(source.ends_with("return"), "{source}");
+                assert!(
+                    without_insignificant_whitespace(source).ends_with(".return"),
+                    "{source}"
+                );
                 assert_eq!(s.name, None);
                 ret += 1;
             }
@@ -283,8 +325,10 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
                     "{text}"
                 );
                 assert!(text.ends_with("});"), "{text}");
+                // whitespace is allowed after the dot and before the closing parenthesis
+                let compact = without_insignificant_whitespace(source);
                 assert!(
-                    source.contains(".write_file(") && source.ends_with(')'),
+                    compact.contains(".write_file(") && compact.ends_with(')'),
                     "{source}"
                 );
                 assert_eq!(s.name, None);
@@ -293,12 +337,8 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
             _ => panic!("new SegmentKind: extend this test"),
         }
         if matches!(s.kind, K::ReturningStream | K::NonReturningStream) {
-            let first = source
-                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-                .next()
-                .unwrap();
-            if !matches!(first, "range" | "read_file" | "select_all") {
-                assert!(text.contains(&format!("{first}.get()")), "{text}");
+            if let Some(variable) = stream_variable_read_by(source) {
+                assert!(text.contains(&format!("{variable}.get()")), "{text}");
             }
         }
     }
