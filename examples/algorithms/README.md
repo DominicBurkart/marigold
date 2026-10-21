@@ -100,7 +100,6 @@ separate map.
 [tsp-exact]: https://en.wikipedia.org/wiki/Travelling_salesman_problem#Exact_algorithms
 [held-karp]: https://en.wikipedia.org/wiki/Held%E2%80%93Karp_algorithm
 
-
 ### tsp_nearest_neighbour
 
 - Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
