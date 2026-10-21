@@ -133,9 +133,6 @@ struct GeneratedProgram {
     stream_ends_with_fold: Vec<bool>,
     /// Per-stream: whether it's purely streaming ops (no collecting, no fold) in the full pipeline.
     stream_only_streaming: Vec<bool>,
-    /// Whether this program uses stream variables. Stream variables add O(n) space for
-    /// buffering, so the O(1) streaming-only space invariant only applies to unnamed streams.
-    uses_stream_variable: bool,
 }
 
 /// Generate an unnamed stream program: `input.chain.{return|write_file}`
@@ -157,7 +154,6 @@ fn arb_unnamed_stream_program() -> impl Strategy<Value = GeneratedProgram> {
             stream_output_has_collecting: vec![has_collecting],
             stream_ends_with_fold: vec![ends_with_fold],
             stream_only_streaming: vec![only_streaming],
-            uses_stream_variable: false,
         }
     })
 }
@@ -203,7 +199,6 @@ fn arb_stream_var_program() -> impl Strategy<Value = GeneratedProgram> {
                 stream_output_has_collecting: vec![output_has_collecting],
                 stream_ends_with_fold: vec![ends_with_fold],
                 stream_only_streaming: vec![only_streaming],
-                uses_stream_variable: true,
             }
         })
 }
@@ -264,7 +259,6 @@ fn arb_multi_consumer_program() -> impl Strategy<Value = GeneratedProgram> {
                 ],
                 stream_ends_with_fold: vec![ends_fold_1, ends_fold_2],
                 stream_only_streaming: vec![only_streaming_1, only_streaming_2],
-                uses_stream_variable: true,
             }
         })
 }
@@ -368,12 +362,10 @@ proptest! {
     }
 
     /// Streams with only streaming ops (map, filter, filter_map) have O(1) space.
-    /// Stream variables are excluded: the analyzer adds O(n) space for variable buffering.
+    /// Stream variables are included: they add no space of their own, and back-pressure means a
+    /// lagging consumer slows the producer instead of buffering.
     #[test]
     fn streaming_only_has_o1_space(prog in arb_program()) {
-        if prog.uses_stream_variable {
-            return Ok(());
-        }
         let result = marigold_grammar::marigold_analyze(&prog.source).unwrap();
         for (i, stream) in result.streams.iter().enumerate() {
             if i < prog.stream_only_streaming.len() && prog.stream_only_streaming[i] {

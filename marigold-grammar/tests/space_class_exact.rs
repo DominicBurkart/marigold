@@ -1,8 +1,9 @@
-use marigold_grammar::complexity::ProgramComplexity;
+use marigold_grammar::complexity::{ComplexityClass, ProgramComplexity};
 use marigold_grammar::{marigold_analyze, marigold_stream_complexities};
 use std::path::{Path, PathBuf};
 
 const F: &str = "fn f(a: i32) -> i32 { a }\nfn g(a: i32) -> i32 { a }\n";
+const FILTER: &str = "fn keep(a: i32) -> bool { a > 1 }\nfn f(a: i32) -> i32 { a }\n";
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
@@ -38,9 +39,7 @@ fn assert_invariants(label: &str, p: &ProgramComplexity) {
         .streams
         .iter()
         .map(|s| s.space_class.clone())
-        .fold(marigold_grammar::complexity::ComplexityClass::O1, |a, b| {
-            a.max(b)
-        });
+        .fold(ComplexityClass::O1, |a, b| a.max(b));
     assert_eq!(
         p.program_space, max,
         "{label}: program_space != max of streams"
@@ -124,4 +123,71 @@ fn all_fixture_programs_satisfy_invariants() {
     }
     eprintln!("covered {covered} of {} fixture programs", files.len());
     assert!(covered >= 20, "only {covered} fixtures analyzed");
+}
+
+#[test]
+fn named_filtered_permutations_match_inline_and_exceed_o1() {
+    let named = marigold_analyze(&format!(
+        "{FILTER}x = range(0, 5).filter(keep)\nx.permutations(2).return"
+    ))
+    .unwrap();
+    let inline = marigold_analyze(&format!(
+        "{FILTER}range(0, 5).filter(keep).permutations(2).return"
+    ))
+    .unwrap();
+    let n = named.streams.last().unwrap();
+    let i = &inline.streams[0];
+    assert!(
+        n.space_class > ComplexityClass::O1,
+        "named permutations space {} must exceed O(1)",
+        n.space_class
+    );
+    assert!(
+        i.space_class > ComplexityClass::O1,
+        "inline permutations space {} must exceed O(1)",
+        i.space_class
+    );
+    assert_eq!(n.space_class, i.space_class);
+    assert_eq!(n.exact_space, i.exact_space);
+}
+
+#[test]
+fn variable_over_non_constant_source_is_o1() {
+    let src = "struct Data { a: int[0, 5] }\nfn f(a: Data) -> Data { a }\nx = read_file(\"d.csv\", csv, struct=Data).ok()\nx.map(f).return";
+    let r = marigold_analyze(src).unwrap();
+    let s = r.streams.last().unwrap();
+    assert_eq!(s.space_class, ComplexityClass::O1);
+    assert_eq!(s.exact_space.simplified(), ComplexityClass::O1);
+}
+
+#[test]
+fn multi_consumer_variable_is_o1_for_every_consumer() {
+    let src = format!("{F}x = range(0, 5)\nx.map(f).return\nx.filter(g).return");
+    let src = src.replace(
+        "fn g(a: i32) -> i32 { a }",
+        "fn g(a: i32) -> bool { a > 1 }",
+    );
+    let r = marigold_analyze(&src).unwrap();
+    assert_eq!(r.streams.len(), 2);
+    for s in &r.streams {
+        assert_eq!(s.space_class, ComplexityClass::O1, "{}", s.description);
+        assert_eq!(
+            s.exact_space.simplified(),
+            ComplexityClass::O1,
+            "{}",
+            s.description
+        );
+    }
+    assert_eq!(r.program_space, ComplexityClass::O1);
+}
+
+#[test]
+fn undefined_variable_reports_unknown_space() {
+    for body in ["nope.map(f).return", "y = nope.map(f)\ny.return"] {
+        let r = marigold_analyze(&format!("{F}{body}")).unwrap();
+        let s = r.streams.last().unwrap();
+        assert_eq!(s.space_class, ComplexityClass::Unknown, "{body}");
+        assert_eq!(s.exact_space.simplified(), ComplexityClass::O1, "{body}");
+        assert_eq!(r.program_space, ComplexityClass::Unknown, "{body}");
+    }
 }

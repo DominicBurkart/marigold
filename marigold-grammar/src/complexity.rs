@@ -969,9 +969,11 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
 
 /// Analyzes every stream expression in a program.
 ///
-/// For every stream, `space_class` is derived from `exact_space` as
-/// `exact_space.simplified()`. A named stream variable and the same pipeline
-/// written inline therefore report identical space.
+/// For every program whose stream variables are all declared, each stream's
+/// `space_class` equals `exact_space.simplified()`, so a named stream variable
+/// and the same pipeline written inline report identical space. A stream
+/// variable that is never declared is a source the analyzer cannot see, and
+/// its streams report an unknown (`O(?)`) `space_class`.
 pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
     analyze_nodes(expressions).0
 }
