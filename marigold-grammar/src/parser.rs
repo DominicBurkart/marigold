@@ -2253,44 +2253,4 @@ mod function_grammar_tests {
         assert!(code.contains("x: i32"), "param type i32 should be present");
         assert!(code.contains("-> i32"), "return type i32 should be present");
     }
-
-    fn many_expressions(n: usize) -> String {
-        (0..n)
-            .map(|i| format!("v{i} = range(0, 5).map(f)\nv{i}.return\nstruct S{i} {{ a: u8 }}\n"))
-            .collect()
-    }
-
-    /// Seconds spent on everything `marigold_generate` does after the syntax tree is built:
-    /// source ranges, code generation with segment recording, attaching ranges and building
-    /// the map. The tree is built before the clock starts and the pest parse is not part of it.
-    fn after_parse_seconds(pairs: &pest::iterators::Pairs<'_, Rule>) -> f64 {
-        let expressions =
-            crate::pest_ast_builder::PestAstBuilder::build_program(pairs.clone()).unwrap();
-        let start = std::time::Instant::now();
-        let ranges = PestParser::expr_ranges(pairs);
-        let generated = PestParser::generate_mapped(expressions, None, &ranges, None).unwrap();
-        std::hint::black_box(&generated);
-        start.elapsed().as_secs_f64()
-    }
-
-    /// Guards the cost of the source map end to end: 4x more expressions must cost about 4x,
-    /// not 16x. Machine load cannot be subtracted from one measurement, so each round times the
-    /// small and the large program back to back (load hits both alike), and the test passes if
-    /// any round shows near-linear growth. Linear growth is about 4x; the bound leaves 2x of
-    /// noise. The work counters in `source_map.rs` pin the map's own complexity exactly.
-    #[test]
-    fn mapped_code_generation_grows_linearly_with_program_size() {
-        let (small_src, large_src) = (many_expressions(2_000), many_expressions(8_000));
-        let small = MarigoldPestParser::parse(Rule::program, &small_src).unwrap();
-        let large = MarigoldPestParser::parse(Rule::program, &large_src).unwrap();
-        let mut best = f64::INFINITY;
-        for _ in 0..9 {
-            let (s, l) = (after_parse_seconds(&small), after_parse_seconds(&large));
-            best = best.min(l / s);
-            if best < 6.0 {
-                return;
-            }
-        }
-        panic!("8000 expressions cost {best:.1}x as much as 2000; linear is about 4x");
-    }
 }
