@@ -946,6 +946,80 @@ fn corpus_programs_with_several_expressions_produce_expected_segment_counts() {
     );
 }
 
+/// The grammar skips ASCII whitespace between tokens, so the same expression can be written many
+/// ways. Every construct the invariants inspect appears here with whitespace in each position the
+/// grammar allows, and with hyphenated identifiers (hyphens are part of identifiers). The
+/// mutation proptest finds such programs by chance; these cases make them deterministic.
+const WHITESPACE_VARIANTS: &[&str] = &[
+    // the proptest regression: whitespace after the dot
+    "v0. write_file(\"\u{65e5}0.csv\", csv)",
+    "v0 . write_file(\"a.csv\", csv)",
+    "v0\n.\twrite_file(\"a.csv\", csv)",
+    "range(0, 1) . write_file(\"a.csv\", csv)",
+    "range(0, 1).write_file( \"a.csv\" , csv )",
+    "range(0, 1).write_file(\"a.csv\" , csv , compression = gz)",
+    "range(0, 1).write_file(\"a.csv\",csv,compression=none)",
+    "range(0, 1).write_file(\"a.csv\", csv\n)",
+    "x = range(0, 1)\nx\n.\nwrite_file(\"a.csv\", csv)",
+    // return
+    "range(0, 1) . return",
+    "range(0, 1).\nreturn",
+    "range(0, 1)\n\t.\r\n\treturn",
+    "x = range(0, 1)\nx . return",
+    "x=range(0,1)\nx.return",
+    // range
+    "range( 0 , 1 ).return",
+    "range(0 ,= 1).return",
+    "range(\n0,\n=\n1\n).return",
+    "range( E ).return\nenum E { A }",
+    // stream variables and chains
+    "x =\n range(0, 1) . map(f)",
+    "x = range(0, 1)\n  .map(f)\n  .filter(g)\nx.return",
+    "x = range(0, 1)\ny = x . map(f)\ny . return",
+    "x = range(0, 1)\ny=x.map(f)\ny.return",
+    "x = range(0, 1)\ny =\n\tx\n\t.map(f)\ny.return",
+    // read_file
+    "read_file( \"d.csv\" , csv , struct = S ) . ok() . return\nstruct S { a: u8 }",
+    "read_file(\"d.csv\",csv,struct=S,infer_compression=true).ok().return\nstruct S { a: u8 }",
+    // select_all
+    "select_all( range(0, 1) . map(f) , range(1, 2) ) . return",
+    "select_all(\n\trange(0, 1),\n\trange(1, 2)\n)\n.\nfilter(g)\n.\nreturn",
+    // struct, enum and fn headers
+    "struct\nS\n{\na : u8 ,\nb : string_1 ,\n}\nrange(0, 1).return",
+    "structS{a:u8}\nrange(0, 1).return",
+    "enum\nE\n{ A , B = \"b\" , default Z }\nrange(E).return",
+    "enumE{A}\nrange(E).return",
+    "fn\nf ( x : i32 )\n->\ni32\n{ x }\nrange(0, 1).map(f).return",
+    "fnf(x: i32) -> i32 {x}\nrange(0, 1).map(f).return",
+    "fn f(x: i32) -> i32 { /* { */ x }\nrange(0, 1).map(f).return",
+    // hyphens are part of identifiers: the leading letters of a name are not the whole name
+    "v0-a = range(0, 1)\nv0-a.return",
+    "v0-a = range(0, 1)\nv0-a.write_file(\"a.csv\", csv)",
+    "x- = range(0, 1)\nx-.return",
+    // a stream variable may be called like an input function
+    "range = range(0, 1)\nrange.return",
+    "read_file = range(0, 1)\nread_file . write_file(\"a.csv\", csv)",
+    "select_all = range(0, 1)\nselect_all-x = select_all.map(f)\nselect_all-x.return",
+];
+
+#[test]
+fn whitespace_variants_keep_all_invariants() {
+    // Check every case before failing, so one run lists all the brittle ones.
+    let failing: Vec<&str> = WHITESPACE_VARIANTS
+        .iter()
+        .copied()
+        .filter(|src| {
+            assert!(
+                marigold_parse(src).is_ok(),
+                "the case itself must be valid Marigold: {src:?}: {:?}",
+                marigold_parse(src).map(|_| ())
+            );
+            std::panic::catch_unwind(|| assert_invariants(src, &generate(src))).is_err()
+        })
+        .collect();
+    assert!(failing.is_empty(), "invariants failed for: {failing:#?}");
+}
+
 /// One chunk of program text built from a template index and a size parameter. Names are unique
 /// per position, so the generated program never declares the same name twice.
 fn chunk(kind: u8, n: u32, i: usize) -> String {
