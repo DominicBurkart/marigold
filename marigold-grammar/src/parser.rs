@@ -269,8 +269,6 @@ impl PestParser {
         // Stage 1: Parse with Pest grammar
         let pairs = MarigoldPestParser::parse(Rule::program, input)
             .map_err(|e| format!("Parse error: {}", e))?;
-        // Ranges and the parts of each expression must be taken before the builder
-        // consumes the pairs.
         let ranges = Self::expr_ranges(&pairs);
         let parts = crate::sub_spans::skeletons(&pairs);
 
@@ -283,7 +281,6 @@ impl PestParser {
         // Stage 3: Validate bounded types (if any)
         let resolved_bounds = Self::validate_bounded_types(&expressions)?;
 
-        // Stages 4 and 5
         Self::generate_mapped(expressions, resolved_bounds, &ranges, &parts, plan)
     }
 
@@ -300,9 +297,6 @@ impl PestParser {
         let (rust, generated) =
             Self::generate_rust_code_mapped(expressions, resolved_bounds, plan)?;
 
-        // Stage 5: Attach each item's source range, and the source ranges of its parts.
-        // `expr_index` indexes `ranges` and `parts` because all are parallel to the
-        // top-level expressions.
         let mut segments = Vec::new();
         for g in generated {
             g.attach_source(ranges, parts, &mut segments);
@@ -411,7 +405,7 @@ impl PestParser {
         let mut out = CodeBuilder::new("async {\n    use ::marigold::marigold_impl::*;\n    ");
 
         // 1. Generate enums and structs
-        for (i, expr) in expressions.iter().enumerate() {
+        for (i, expr) in out.pass(&expressions) {
             match expr {
                 TypedExpression::StructDeclaration(s) => {
                     let field_bounds = struct_bounds.get(&s.name);
@@ -439,7 +433,7 @@ impl PestParser {
         }
 
         // 2. Generate functions
-        for (i, expr) in expressions.iter().enumerate() {
+        for (i, expr) in out.pass(&expressions) {
             if let TypedExpression::FnDeclaration(f) = expr {
                 out.segment(
                     SegmentKind::Function,
@@ -453,7 +447,7 @@ impl PestParser {
         }
 
         // 3. Generate stream variable declarations
-        for (i, expr) in expressions.iter().enumerate() {
+        for (i, expr) in out.pass(&expressions) {
             let (name, code) = match expr {
                 TypedExpression::StreamVariable(v) => (
                     &v.variable_name,
@@ -475,9 +469,8 @@ impl PestParser {
             out.glue("\n\n");
         }
 
-        // 4. Generate returning streams
         let mut n_returning_streams = 0;
-        for (i, expr) in expressions.iter().enumerate() {
+        for (i, expr) in out.pass(&expressions) {
             let code = match expr {
                 TypedExpression::UnnamedReturningStream(s) => {
                     Self::unnamed_stream_code(plan, i, s)?
@@ -492,9 +485,8 @@ impl PestParser {
             n_returning_streams += 1;
         }
 
-        // 5. Generate non-returning streams
         let mut n_non_returning_streams = 0;
-        for (i, expr) in expressions.iter().enumerate() {
+        for (i, expr) in out.pass(&expressions) {
             let code = match expr {
                 TypedExpression::UnnamedNonReturningStream(s) => {
                     Self::unnamed_stream_code(plan, i, s)?
@@ -509,9 +501,8 @@ impl PestParser {
             n_non_returning_streams += 1;
         }
 
-        // 6. Generate stream variable runners
         let mut n_stream_variable_runners = 0;
-        for (i, expr) in expressions.iter().enumerate() {
+        for (i, expr) in out.pass(&expressions) {
             let (name, code) = match expr {
                 TypedExpression::StreamVariable(v) => (&v.variable_name, v.runner_code()),
                 TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
@@ -2300,5 +2291,75 @@ mod function_grammar_tests {
             .expect("Simple fn should still parse after grammar change");
         assert!(code.contains("x: i32"), "param type i32 should be present");
         assert!(code.contains("-> i32"), "return type i32 should be present");
+    }
+
+    fn independent_statements(n: usize) -> String {
+        (0..n)
+            .map(|i| format!("v{i} = range(0, 5).map(f)\nv{i}.return\nstruct S{i} {{ a: u8 }}\n"))
+            .collect()
+    }
+
+    fn chained_statements(n: usize) -> String {
+        let mut program = "x_0 = range(0, 5)\n".to_string();
+        for i in 1..n {
+            program.push_str(&format!("x_{i} = x_{}.map(f)\n", i - 1));
+        }
+        program.push_str(&format!("x_{}.return\n", n - 1));
+        program
+    }
+
+    fn codegen_steps_for(program: &str) -> (usize, usize, usize) {
+        let pairs = MarigoldPestParser::parse(Rule::program, program).unwrap();
+        let expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs).unwrap();
+        let statements = expressions.len();
+        crate::source_map::reset_codegen_steps();
+        let (rust, segments) =
+            PestParser::generate_rust_code_mapped(expressions, None, None).unwrap();
+        std::hint::black_box((&rust, &segments));
+        (statements, crate::source_map::codegen_steps(), rust.len())
+    }
+
+    const STEPS_PER_STATEMENT: usize = 40;
+    const BYTES_PER_STATEMENT: usize = 2_000;
+
+    fn assert_codegen_is_linear(build: fn(usize) -> String) {
+        for n in [1_000_usize, 4_000, 16_000] {
+            let (statements, steps, bytes) = codegen_steps_for(&build(n));
+            assert!(
+                statements >= n,
+                "n={n}: only {statements} statements parsed"
+            );
+            assert!(
+                steps <= STEPS_PER_STATEMENT * statements,
+                "n={n}: {steps} steps for {statements} statements"
+            );
+            assert!(
+                steps >= statements,
+                "n={n}: only {steps} steps counted for {statements} statements"
+            );
+            assert!(
+                bytes <= BYTES_PER_STATEMENT * statements,
+                "n={n}: {bytes} bytes for {statements} statements"
+            );
+        }
+    }
+
+    #[test]
+    fn mapped_code_generation_work_is_linear_for_independent_statements() {
+        assert_codegen_is_linear(independent_statements);
+    }
+
+    #[test]
+    fn mapped_code_generation_work_is_linear_for_chained_statements() {
+        assert_codegen_is_linear(chained_statements);
+    }
+
+    #[test]
+    fn mapped_code_generation_work_counter_is_wired_to_the_builder() {
+        let (statements, steps, _) = codegen_steps_for(&independent_statements(10));
+        assert!(
+            steps >= 3 * statements,
+            "{steps} steps for {statements} statements"
+        );
     }
 }

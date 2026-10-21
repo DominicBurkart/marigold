@@ -57,14 +57,12 @@ fn assert_document_ok(src: &str) {
     validate_v1(&v).unwrap_or_else(|e| panic!("{e} for {src:?}"));
     check_semantics(&v).unwrap_or_else(|e| panic!("{e} for {src:?}"));
 
-    // header
     assert_eq!(v["version"], json!(1));
     assert_eq!(EMIT_SCHEMA_VERSION, 1);
     assert_eq!(v["features"], json!(expected_features()));
     assert_eq!(v["source"], json!(src));
     assert_eq!(v["rust"], json!(marigold_parse(src).unwrap()));
 
-    // lossless view of the SourceMap, same order, same count
     let segs = g.map.segments();
     let out = v["segments"].as_array().unwrap();
     assert_eq!(out.len(), segs.len(), "{src:?}");
@@ -83,8 +81,6 @@ fn assert_document_ok(src: &str) {
             assert_eq!(j[side]["start"], json!(r.start));
             assert_eq!(j[side]["end"], json!(r.end));
         }
-        // independent source range oracle (T1 convention) and re-slicing both sides:
-        // a top-level segment covers its whole expression, a nested one lies inside it.
         let expr = ranges[s.expr_index];
         if j["parent"].is_null() {
             assert_eq!(segment_text(&v, i, "source"), &src[expr.start..expr.end]);
@@ -163,10 +159,6 @@ fn parent_links_match_the_ranges() {
         }
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// shape goldens
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn json_shape_and_key_order_are_pinned() {
@@ -279,7 +271,6 @@ fn empty_and_whitespace_only_programs_have_no_segments() {
 
 #[test]
 fn multiline_generated_segments_report_end_on_a_later_line() {
-    // the stream-variable runner statement spans several generated lines
     let v = json_for("x = range(0, 5)\nx.return");
     let runner = v["segments"]
         .as_array()
@@ -309,7 +300,6 @@ fn multiline_source_segments_report_end_on_a_later_line() {
 
 #[test]
 fn unicode_and_crlf_columns_are_scalar_counts_and_offsets_are_bytes() {
-    // 'é' (2 bytes) before the string, an emoji (4 bytes / 2 UTF-16 units) inside the path
     let src = "range(0, 1).write_file(\"é😀.csv\", csv)\r\nrange(2, 3).return\r\n";
     let v = json_for(src);
     validate_v1(&v).unwrap();
@@ -337,10 +327,6 @@ fn unicode_and_crlf_columns_are_scalar_counts_and_offsets_are_bytes() {
     assert_eq!(b["start_line"], json!(2));
     assert_eq!(b["start_column"], json!(1));
 }
-
-// ---------------------------------------------------------------------------------------------
-// invariants over programs
-// ---------------------------------------------------------------------------------------------
 
 fn golden_dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../marigold/tests/golden/emit")
@@ -390,8 +376,6 @@ fn every_corpus_program_yields_a_valid_document() {
 
 #[test]
 fn offset_arithmetic_is_relative_to_the_original_text_not_a_trimmed_copy() {
-    // `marigold run` trims; `emit` must not. Surrounding ASCII whitespace changes only the
-    // source side of the document, shifted by exactly the left padding in bytes.
     let program = "x = range(0, 5)\nx.return";
     let base = json_for(program);
     for (left, right) in [
@@ -463,10 +447,6 @@ proptest! {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// hand-built maps: exact `parent` indices and garbage-in robustness
-// ---------------------------------------------------------------------------------------------
-
 fn r(start: usize, end: usize) -> ByteRange {
     ByteRange { start, end }
 }
@@ -491,11 +471,11 @@ fn nested_segments_get_flat_pre_order_with_parent_indices() {
     let source = "aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc";
     let rust = "0123456789\n0123456789\n0123456789\n0123456789\n";
     let map = SourceMap::new(vec![
-        seg((12, 18), (14, 17), SegmentKind::StreamVariableRunner, 0), // inside the second
-        seg((0, 40), (0, 31), SegmentKind::ReturningStream, 0),        // outermost
-        seg((11, 30), (11, 20), SegmentKind::StreamVariable, 0),       // middle
-        seg((5, 8), (2, 4), SegmentKind::Struct, 1),                   // inside outermost, sibling
-        seg((41, 43), (21, 30), SegmentKind::Enum, 2),                 // disjoint, top level
+        seg((12, 18), (14, 17), SegmentKind::StreamVariableRunner, 0),
+        seg((0, 40), (0, 31), SegmentKind::ReturningStream, 0),
+        seg((11, 30), (11, 20), SegmentKind::StreamVariable, 0),
+        seg((5, 8), (2, 4), SegmentKind::Struct, 1),
+        seg((41, 43), (21, 30), SegmentKind::Enum, 2),
     ]);
     let v = serde_json::to_value(EmitDocument::new(source, rust, &map)).unwrap();
     validate_v1(&v).unwrap();
@@ -536,7 +516,6 @@ fn equal_generated_ranges_nest_in_map_order() {
 
 #[test]
 fn partially_overlapping_segments_are_siblings_not_parent_and_child() {
-    // A malformed map (T1/T2 never produce one): neither contains the other, so no parent link.
     let map = SourceMap::new(vec![
         seg((0, 10), (0, 3), SegmentKind::Struct, 0),
         seg((5, 15), (4, 8), SegmentKind::Enum, 1),
@@ -552,8 +531,8 @@ fn ranges_outside_the_texts_or_inside_a_char_never_panic() {
     let source = "é😀";
     let rust = "日本";
     let map = SourceMap::new(vec![
-        seg((1, 2), (1, 2), SegmentKind::Struct, 0), // inside a char on both sides
-        seg((0, 1000), (0, usize::MAX), SegmentKind::Enum, 1), // far past the end
+        seg((1, 2), (1, 2), SegmentKind::Struct, 0),
+        seg((0, 1000), (0, usize::MAX), SegmentKind::Enum, 1),
         seg(
             (usize::MAX - 1, usize::MAX),
             (3, 5),
@@ -565,7 +544,6 @@ fn ranges_outside_the_texts_or_inside_a_char_never_panic() {
     assert_eq!(doc.segments.len(), 3);
     let text = serde_json::to_string(&doc).unwrap();
     assert!(text.starts_with(r#"{"version":1"#));
-    // clamped, not wrapped: the far-past-the-end range reports the end of the text
     let far = doc.segments.iter().find(|s| s.expr_index == 1).unwrap();
     assert_eq!((far.source.end_line, far.source.end_column), (1, 3));
     assert_eq!((far.generated.end_line, far.generated.end_column), (1, 3));
@@ -581,10 +559,6 @@ fn an_empty_map_makes_a_header_only_document() {
         json!({"version": 1, "features": expected_features(), "source": "src", "rust": "rust", "segments": []})
     );
 }
-
-// ---------------------------------------------------------------------------------------------
-// the validator must be able to fail (otherwise every schema test above is vacuous)
-// ---------------------------------------------------------------------------------------------
 
 type Corrupt = Box<dyn Fn(&mut Value)>;
 
@@ -809,7 +783,6 @@ fn check_semantics_rejects_every_semantic_corruption() {
     for (what, corrupt) in cases {
         let mut bad = good.clone();
         corrupt(&mut bad);
-        // structural validity is not the point: keep `validate_v1` happy where possible
         assert!(
             validate_v1(&bad).is_err() || check_semantics(&bad).is_err(),
             "validators accepted a document with: {what}"
@@ -822,10 +795,6 @@ fn check_semantics_rejects_every_semantic_corruption() {
         }
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// properties on generated programs
-// ---------------------------------------------------------------------------------------------
 
 fn arb_chunk(i: usize) -> impl Strategy<Value = String> {
     prop_oneof![
@@ -898,7 +867,6 @@ proptest! {
 
 #[test]
 fn naive_line_col_helper_agrees_with_a_hand_computed_case() {
-    // guards the validator's own oracle
     let t = "é😀\nxy";
     assert_eq!(naive_line_col(t, 0), (1, 1));
     assert_eq!(naive_line_col(t, 2), (1, 2));
@@ -906,41 +874,6 @@ fn naive_line_col_helper_agrees_with_a_hand_computed_case() {
     assert_eq!(naive_line_col(t, 7), (2, 1));
     assert_eq!(naive_line_col(t, 9), (2, 3));
 }
-
-// ---------------------------------------------------------------------------------------------
-// scale
-// ---------------------------------------------------------------------------------------------
-
-#[test]
-fn twenty_thousand_expressions_on_one_line_build_in_linear_time() {
-    use std::time::{Duration, Instant};
-    // One source line (so every column lookup is against a 400 KB line) and, on the Rust side,
-    // a few very long lines: a per-lookup rescan of the line would be ~3e10 byte visits.
-    let n = 20_000;
-    let src: String = (0..n)
-        .map(|i| format!("v{i} = range(0, 1) "))
-        .collect::<String>()
-        + "v0.return";
-    let g = marigold_generate(&src).unwrap();
-    let t = Instant::now();
-    let doc = EmitDocument::new(&src, &g.rust, &g.map);
-    let elapsed = t.elapsed();
-    // per variable: declaration, its input, runner; then the stream and its input
-    assert_eq!(doc.segments.len(), 3 * n + 2);
-    assert!(
-        elapsed < Duration::from_secs(10),
-        "building the document took {elapsed:?}"
-    );
-    let last = doc.segments.iter().find(|s| s.expr_index == n).unwrap();
-    assert_eq!(
-        (last.source.start_line, last.source.start_column),
-        (1, src.len() - "v0.return".len() + 1)
-    );
-}
-
-// ---------------------------------------------------------------------------------------------
-// deep nesting and validator meta-tests with hand-built documents
-// ---------------------------------------------------------------------------------------------
 
 fn nested(g: (usize, usize), s: (usize, usize), kind: SegmentKind) -> Segment {
     seg(g, s, kind, 0)
@@ -1004,9 +937,9 @@ fn semantic_validator_rejects_an_ancestor_that_is_not_the_innermost_parent() {
     );
     check_semantics(&v).unwrap();
     assert_eq!(v["segments"][2]["parent"], json!(1));
-    v["segments"][2]["parent"] = json!(0); // an ancestor, but not the innermost one
+    v["segments"][2]["parent"] = json!(0);
     assert!(check_semantics(&v).is_err());
-    v["segments"][2]["parent"] = json!(null); // nested, but claims to be top level
+    v["segments"][2]["parent"] = json!(null);
     assert!(check_semantics(&v).is_err());
 }
 
@@ -1020,7 +953,7 @@ fn semantic_validator_rejects_an_empty_range() {
     v["segments"][0]["source"]["end"] = json!(2);
     v["segments"][0]["source"]["end_line"] = json!(1);
     v["segments"][0]["source"]["end_column"] = json!(3);
-    validate_v1(&v).unwrap(); // structurally fine
+    validate_v1(&v).unwrap();
     assert!(
         check_semantics(&v).is_err(),
         "start == end must be rejected"

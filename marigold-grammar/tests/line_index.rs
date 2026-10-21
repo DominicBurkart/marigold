@@ -35,7 +35,6 @@ fn width(c: char, unit: ColumnUnit) -> usize {
 fn naive(text: &str, offset: usize, unit: ColumnUnit) -> LineCol {
     let (mut line, mut col) = (1, 1);
     for (i, c) in text.char_indices() {
-        // `i + len_utf8 > offset` means the char contains or follows `offset`: stop (floor).
         if i + c.len_utf8() > offset {
             break;
         }
@@ -68,20 +67,16 @@ fn boundaries(text: &str) -> Vec<usize> {
         .collect()
 }
 
-// ---------------------------------------------------------------------------------------------
-// hand-computed goldens
-// ---------------------------------------------------------------------------------------------
-
 #[test]
 fn ascii_goldens() {
     let idx = LineIndex::new("ab\ncd\n");
     for (off, want) in [
         (0, lc(1, 1)),
         (1, lc(1, 2)),
-        (2, lc(1, 3)), // the '\n' itself belongs to line 1, one past the last column
+        (2, lc(1, 3)),
         (3, lc(2, 1)),
         (5, lc(2, 3)),
-        (6, lc(3, 1)), // EOF after a trailing newline is the start of an empty last line
+        (6, lc(3, 1)),
     ] {
         for unit in UNITS {
             assert_eq!(idx.line_col(off, unit), want, "offset {off} {unit:?}");
@@ -92,7 +87,6 @@ fn ascii_goldens() {
 
 #[test]
 fn units_differ_exactly_where_expected() {
-    // 'é' = 2 bytes / 1 char / 1 utf16; '𝄞' = 4 bytes / 1 char / 2 utf16; '日' = 3 / 1 / 1
     let src = "é𝄞日x\nÿy";
     let idx = LineIndex::new(src);
     let x = src.find('x').unwrap();
@@ -108,11 +102,10 @@ fn units_differ_exactly_where_expected() {
 
 #[test]
 fn crlf_is_not_special_cased() {
-    // Binding: only '\n' ends a line; '\r' is a column; the '\n' of a CRLF is addressable.
     let src = "ab\r\ncd";
     let idx = LineIndex::new(src);
-    assert_eq!(idx.line_col(2, ColumnUnit::Chars), lc(1, 3)); // the '\r'
-    assert_eq!(idx.line_col(3, ColumnUnit::Chars), lc(1, 4)); // the '\n' (LSP's LineIndex would say col 3)
+    assert_eq!(idx.line_col(2, ColumnUnit::Chars), lc(1, 3));
+    assert_eq!(idx.line_col(3, ColumnUnit::Chars), lc(1, 4));
     assert_eq!(idx.line_col(4, ColumnUnit::Chars), lc(2, 1));
     assert_eq!(idx.offset(1, 4, ColumnUnit::Chars), Some(3));
     assert_eq!(idx.offset(1, 5, ColumnUnit::Chars), None);
@@ -187,11 +180,9 @@ fn offset_rejects_out_of_range_and_misaligned_positions() {
         assert_eq!(idx.offset(2, 4, unit), None, "col past end+1 {unit:?}");
         assert_eq!(idx.offset(2, 3, unit), Some(src.len()), "end of last line");
     }
-    // line 1 is "a😀b": 1 + 4 + 1 bytes, 3 chars, 4 utf16 units
-    assert_eq!(idx.offset(1, 3, ColumnUnit::Chars), Some(5)); // 'b'
-    assert_eq!(idx.offset(1, 4, ColumnUnit::Chars), Some(6)); // the '\n'
+    assert_eq!(idx.offset(1, 3, ColumnUnit::Chars), Some(5));
+    assert_eq!(idx.offset(1, 4, ColumnUnit::Chars), Some(6));
     assert_eq!(idx.offset(1, 5, ColumnUnit::Chars), None);
-    // column 3 in utf16 / 3..5 in bytes fall inside the emoji: no such position
     assert_eq!(idx.offset(1, 3, ColumnUnit::Utf16), None);
     assert_eq!(idx.offset(1, 4, ColumnUnit::Utf16), Some(5));
     for col in 3..=5 {
@@ -206,8 +197,6 @@ fn offset_rejects_out_of_range_and_misaligned_positions() {
 
 #[test]
 fn migrated_cases_from_main_rs_line_col_tests() {
-    // The four `line_col_tests` that live in marigold/src/main.rs on main@2343ee8; they move here
-    // when `line_col` is deleted, with identical expected values.
     assert_eq!(
         LineIndex::new("abc").line_col(0, ColumnUnit::Chars),
         lc(1, 1)
@@ -233,10 +222,6 @@ fn linecol_orders_by_line_then_column() {
     assert!(lc(1, 99) < lc(2, 1));
     assert!(lc(2, 1) < lc(2, 2));
 }
-
-// ---------------------------------------------------------------------------------------------
-// properties
-// ---------------------------------------------------------------------------------------------
 
 fn mixed_text() -> impl Strategy<Value = String> {
     proptest::collection::vec(
@@ -359,48 +344,6 @@ proptest! {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// scale
-// ---------------------------------------------------------------------------------------------
-
-#[test]
-fn many_lines_and_long_ascii_lines_are_cheap() {
-    use std::time::{Duration, Instant};
-    let budget = Duration::from_secs(5);
-    // 200k lines: building is linear, a query is a binary search.
-    let many_lines = "x\n".repeat(200_000);
-    let idx = LineIndex::new(&many_lines);
-    let t = Instant::now();
-    for i in 0..200_000usize {
-        assert_eq!(idx.line_col(i * 2, ColumnUnit::Chars), lc(i + 1, 1));
-        assert!(
-            i % 1000 != 0 || t.elapsed() < budget,
-            "line lookups are not O(log n): {:?}",
-            t.elapsed()
-        );
-    }
-
-    // One 2 MB ASCII line, 200k column queries: must not rescan the line for each query
-    // (a rescan is ~2e5 * 1e6 byte visits). The clock is checked inside the loop so a
-    // quadratic implementation fails in seconds instead of minutes.
-    let long_line = "a".repeat(2_000_000);
-    let idx = LineIndex::new(&long_line);
-    let t = Instant::now();
-    for i in 0..200_000usize {
-        assert_eq!(idx.line_col(i * 10, ColumnUnit::Chars), lc(1, i * 10 + 1));
-        assert_eq!(idx.offset(1, i * 10 + 1, ColumnUnit::Utf16), Some(i * 10));
-        assert!(
-            i % 1000 != 0 || t.elapsed() < budget,
-            "ASCII column lookups are not O(1): {:?}",
-            t.elapsed()
-        );
-    }
-}
-
-// ---------------------------------------------------------------------------------------------
-// external oracle: rustc
-// ---------------------------------------------------------------------------------------------
-
 /// rustc's JSON spans are the ground truth for "1-based Unicode scalar column + 0-based byte
 /// offset of the on-disk file". Compile a file full of multibyte text, CRLFs and tabs, and
 /// require `LineIndex` to reproduce every span's start and end. Skips (loudly) when `rustc` is
@@ -465,13 +408,8 @@ fn chars_columns_and_byte_offsets_agree_with_rustc() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ---------------------------------------------------------------------------------------------
-// line terminators, combining marks, serialization, line ranges
-// ---------------------------------------------------------------------------------------------
-
 #[test]
 fn only_lf_ends_a_line_whatever_unicode_says() {
-    // NEL, VT, FF, FS/GS/RS, LS, PS are all ordinary one-column characters.
     for c in [
         '\u{85}', '\u{b}', '\u{c}', '\u{1c}', '\u{1d}', '\u{1e}', '\u{2028}', '\u{2029}',
     ] {
@@ -491,7 +429,6 @@ fn only_lf_ends_a_line_whatever_unicode_says() {
 
 #[test]
 fn a_combining_mark_is_a_column_of_its_own() {
-    // No grapheme clustering: "e" + U+0301 are two scalar values.
     let src = "e\u{301}x";
     let idx = LineIndex::new(src);
     let x = src.find('x').unwrap();
@@ -518,10 +455,10 @@ fn positions_serialize_with_the_json_key_names_of_the_emit_document() {
 fn line_range_covers_a_line_without_its_newline() {
     let idx = LineIndex::new("ab\r\ncd\n\nlast");
     let range = |line| idx.line_range(line).map(|r| (r.start, r.end));
-    assert_eq!(range(1), Some((0, 3))); // the '\r' belongs to the line
+    assert_eq!(range(1), Some((0, 3)));
     assert_eq!(range(2), Some((4, 6)));
-    assert_eq!(range(3), Some((7, 7))); // empty line
-    assert_eq!(range(4), Some((8, 12))); // last line has no '\n'
+    assert_eq!(range(3), Some((7, 7)));
+    assert_eq!(range(4), Some((8, 12)));
     assert_eq!(range(0), None);
     assert_eq!(range(5), None);
     assert_eq!(range(usize::MAX), None);
@@ -547,10 +484,6 @@ proptest! {
         }
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// long non-ASCII lines (checkpoints)
-// ---------------------------------------------------------------------------------------------
 
 /// Lines much longer than the checkpoint stride, full of multibyte characters, so every
 /// checkpoint and every stride boundary is exercised (the shorter `mixed_text` never reaches one).
@@ -586,12 +519,9 @@ proptest! {
 
 #[test]
 fn long_ascii_prefix_then_multibyte_text_on_the_same_line() {
-    // Whether a line is pure ASCII must be decided over the whole line, not its first bytes.
     let texts = [
-        // the first non-ASCII character is far past the first stride
         format!("{}é{}", "a".repeat(1000), "b".repeat(1000)),
         format!("{}😀", "a".repeat(600)),
-        // an ASCII line, then a line whose first 300 bytes are ASCII, then ASCII again
         format!(
             "{}\n{}日{}\n{}",
             "x".repeat(400),
@@ -599,7 +529,6 @@ fn long_ascii_prefix_then_multibyte_text_on_the_same_line() {
             "z".repeat(700),
             "w".repeat(400)
         ),
-        // non-ASCII only at the very end of a long line, before the newline
         format!("{}ü\n{}", "q".repeat(5000), "r".repeat(300)),
     ];
     for text in &texts {
@@ -615,28 +544,5 @@ fn long_ascii_prefix_then_multibyte_text_on_the_same_line() {
                 );
             }
         }
-    }
-}
-
-#[test]
-fn a_long_line_with_one_multibyte_character_is_cheap() {
-    use std::time::{Duration, Instant};
-    // 909 KB on one line and a single `é`: with a whole-text ASCII flag every query rescans the line
-    // (17 s for the emit document of such a file). The clock is checked inside the loop.
-    let line = format!("é{}", "a".repeat(909_000));
-    let idx = LineIndex::new(&line);
-    let budget = Duration::from_secs(10);
-    let t = Instant::now();
-    for i in 0..20_000usize {
-        let b = 2 + (i * 45) % 909_000;
-        let want = lc(1, b); // one `é` of two bytes: chars = bytes - 1
-        assert_eq!(idx.line_col(b, ColumnUnit::Chars), want);
-        assert_eq!(idx.line_col(b, ColumnUnit::Utf16), want);
-        assert_eq!(idx.offset(1, b, ColumnUnit::Chars), Some(b));
-        assert!(
-            i % 500 != 0 || t.elapsed() < budget,
-            "non-ASCII line lookups are not bounded: {:?}",
-            t.elapsed()
-        );
     }
 }

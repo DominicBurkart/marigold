@@ -21,10 +21,6 @@ use marigold_grammar::{
 };
 use proptest::prelude::*;
 
-// ---------------------------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------------------------
-
 /// Everything `generate_rust_code` writes before the first section (pinned so that a builder that
 /// forgets the prefix offset is caught right away).
 const PREAMBLE: &str = "async {\n    use ::marigold::marigold_impl::*;\n    ";
@@ -171,13 +167,11 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
     let segs: Vec<Segment> = g.map.top_level().cloned().collect();
     let segs = &segs[..];
 
-    // (a) hard invariant: identical to marigold_parse, byte for byte.
     assert_eq!(g.rust, marigold_parse(src).unwrap(), "{}", ctx());
     assert!(g.rust.starts_with(PREAMBLE), "{}", ctx());
 
     let exprs = common::expr_ranges(src).expect("accepted program must parse with pest");
 
-    // (b) in bounds, non-empty, on char boundaries -- both sides.
     for s in segs {
         let (gr, sr) = (s.generated, s.source);
         assert!(
@@ -200,7 +194,6 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
         );
     }
 
-    // (c) order + T1 flatness: strictly increasing, pairwise disjoint, separated by glue.
     for w in segs.windows(2) {
         assert!(
             w[0].generated.end < w[1].generated.start,
@@ -210,7 +203,6 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
         );
     }
 
-    // (d) one expr_index per top-level expression, legal kind combinations, exact source range.
     let mut per_expr: Vec<Vec<K>> = vec![Vec::new(); exprs.len()];
     for s in segs {
         assert!(s.expr_index < exprs.len(), "{s:?} {}", ctx());
@@ -236,7 +228,6 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
         assert!(ok, "expr {i} has kinds {kinds:?} {}", ctx());
     }
 
-    // (d') agree with marigold_stream_complexities on range, index and name.
     for n in marigold_stream_complexities(src).unwrap() {
         let seg = segs
             .iter()
@@ -251,7 +242,6 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
         assert_eq!(seg.source, n.range);
         assert_eq!(seg.name, n.name);
     }
-    // (d'') agree with marigold_symbols on declarations.
     for d in marigold_symbols(src).declarations {
         let kind = match d.kind {
             SymbolKind::Struct => K::Struct,
@@ -268,7 +258,6 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
         assert!(seg.source.start <= d.range.start && d.range.end <= seg.source.end);
     }
 
-    // (e) generated text contains the expected construct for each kind.
     let (mut ret, mut non_ret, mut runner) = (0, 0, 0);
     for s in segs {
         let text = gen_text(g, s);
@@ -281,23 +270,22 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
                     "{text}"
                 );
                 assert!(text.trim_end().ends_with('}'), "{text}");
-                assert!(source.starts_with("struct") /* grammar allows `structS{..}` */);
+                assert!(source.starts_with("struct"));
             }
             K::Enum => {
                 assert!(text.contains(&format!("enum {} ", name.unwrap())), "{text}");
-                assert!(source.starts_with("enum") /* grammar allows `enumE{..}` */);
+                assert!(source.starts_with("enum"));
             }
             K::Function => {
                 assert!(
                     text.starts_with(&format!("const fn {}(", name.unwrap())),
                     "{text}"
                 );
-                // the body is copied verbatim, multibyte characters and CRLF included.
                 assert!(
                     text.ends_with(&source[source.find('{').unwrap()..]),
                     "{text}"
                 );
-                assert!(source.starts_with("fn") /* grammar allows `fnf(..)` */);
+                assert!(source.starts_with("fn"));
             }
             K::StreamVariable => {
                 assert!(
@@ -343,7 +331,6 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
                     "{text}"
                 );
                 assert!(text.ends_with("});"), "{text}");
-                // whitespace is allowed after the dot and before the closing parenthesis
                 let compact = without_insignificant_whitespace(source);
                 assert!(
                     compact.contains(".write_file(") && compact.ends_with(')'),
@@ -360,13 +347,11 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
             }
         }
     }
-    // the glue's `vec![...]` lists exactly the streams the segments describe.
     for k in 0..ret {
         assert!(g.rust.contains(&format!("\nreturning_stream_{k},\n")));
     }
     assert!(!g.rust.contains(&format!("\nreturning_stream_{ret},\n")));
 
-    // (f) lookups agree with brute force, on every interesting offset / range.
     for off in probe_points(
         &g.rust,
         all.iter()
@@ -395,10 +380,7 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
         }
     }
     for s in all {
-        // forward/inverse consistency: the segment is found from its first byte (T2: and from
-        // every byte not covered by one of its children, checked by `assert_nested`) ...
         assert_eq!(g.map.source_for_generated(s.generated.start), Some(s));
-        // ... and querying its own source range returns it, in generated order.
         let hits = g.map.generated_for_source(s.source);
         assert!(hits.contains(&s));
         assert!(hits
@@ -412,7 +394,6 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
     };
     assert!(g.map.generated_for_source(q).is_empty());
 
-    // (g) deterministic.
     let again = generate(src);
     assert_eq!(&again, g);
     assert_eq!(
@@ -420,10 +401,6 @@ fn assert_invariants(src: &str, g: &GeneratedProgram) {
         serde_json::to_string(g).unwrap()
     );
 }
-
-// ---------------------------------------------------------------------------------------------
-// golden programs (hand-checked against generate_rust_code's section order)
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn g01_unnamed_returning() {
@@ -553,7 +530,6 @@ fn g09_function() {
 
 #[test]
 fn g10_every_kind_out_of_source_order() {
-    // source: stream, fn, var, struct, enum, named non-returning, enum-range stream
     let src = "range(0, 2).return\nfn f(x: i32) -> i32 { x }\nx = range(0, 3).map(f)\nstruct S { a: u8 }\nenum E { A }\nx.write_file(\"o.csv\", csv)\nrange(E).return";
     assert_rows(
         src,
@@ -659,7 +635,6 @@ fn g15_ordinals_follow_generated_order_not_source_order() {
             (K::StreamVariableRunner, 1),
         ]
     );
-    // returning_stream_1 is the *second* returning stream in source order: `b.return`.
     let second_ret = top_segments(&g)[3];
     assert!(gen_text(&g, second_ret).starts_with("let returning_stream_1 = "));
     assert_eq!(src_text(src, second_ret), "b.return");
@@ -701,7 +676,6 @@ fn g16_multibyte_characters_keep_byte_offsets_exact() {
             ),
         ],
     );
-    // generated side: the multibyte literal is inside the segment that came from it.
     let g = generate(src);
     let seg = g
         .map
@@ -710,8 +684,6 @@ fn g16_multibyte_characters_keep_byte_offsets_exact() {
         .find(|s| s.kind == K::NonReturningStream)
         .unwrap();
     assert!(gen_text(&g, seg).contains("\u{65e5}\u{672c}\u{8a9e}/\u{f6}.csv"));
-    // a byte offset in the middle of a multibyte char is inside the segment, and does not panic.
-    // (enum values are not emitted into the Rust, so use the fn body's literal.)
     let at = g.rust.find('\u{65e5}').unwrap() + 1;
     assert!(!g.rust.is_char_boundary(at));
     // (T2: the literal sits in the function body, which is a nested region of the function)
@@ -744,7 +716,6 @@ fn g17_crlf_line_endings() {
 
 #[test]
 fn g18_trailing_whitespace_is_excluded_even_when_pest_includes_it_in_the_expr_span() {
-    // pest's `expr` span for a stream variable swallows the whitespace that follows it.
     let src = "  x = range(0, 5)   \n\n   \n\n y = x.map(f)   \t\ny.return   ";
     let g = generate(src);
     let var = &g.map.segments()[0];
@@ -812,7 +783,6 @@ fn g22_only_declarations_and_a_lone_stream_variable() {
             (K::Function, 2, Some("f"), "fn f(x: i32) -> i32 { x }"),
         ],
     );
-    // no returning stream => the `Item=()` flavour of the glue; still no segment for it.
     assert_rows(
         "x = range(0, 3)",
         &[
@@ -834,10 +804,6 @@ fn g23_realistic_multiline_program_from_examples_bounded_types() {
         ],
     );
 }
-
-// ---------------------------------------------------------------------------------------------
-// lookup semantics on real maps
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn source_for_generated_is_half_open_and_none_in_glue() {
@@ -891,7 +857,6 @@ fn source_for_generated_is_half_open_and_none_in_glue() {
     );
     assert_eq!(g.map.source_for_generated(g.rust.len()), None);
     assert_eq!(g.map.source_for_generated(usize::MAX), None);
-    // the runner maps back to the *declaration's* source: many generated spots, one source range.
     assert_eq!(runner.source, decl.source);
 }
 
@@ -905,27 +870,20 @@ fn generated_for_source_returns_all_overlaps_in_generated_order() {
     // T2: nested segments overlap too; this T1 test looks at the statement-level ones.
     let q = |start, end| only_top(&g, g.map.generated_for_source(ByteRange { start, end }));
 
-    // inside the declaration: its decl and its runner, but not the stream that merely uses `x`.
     assert_eq!(q(0, 1), vec![decl, runner]);
-    // the whole program: generated order (decl, stream, runner), not source order.
     assert_eq!(q(0, src.len()), vec![decl, ret, runner]);
-    // spans the end of expr 0, the newline and the start of expr 1.
     assert_eq!(q(14, 17), vec![decl, ret, runner]);
-    // exactly the newline between expressions: nothing.
     assert_eq!(q(15, 16), Vec::<&Segment>::new());
-    // half-open: touching ranges do not overlap.
     assert_eq!(q(15, 15 + 1), Vec::<&Segment>::new());
     assert_eq!(q(decl.source.end, ret.source.start), Vec::<&Segment>::new());
     assert_eq!(
         q(ret.source.end, ret.source.end + 5),
         Vec::<&Segment>::new()
     );
-    // zero-width query == "the segment covering this byte" (cursor position semantics).
     assert_eq!(q(0, 0), vec![decl, runner]);
     assert_eq!(q(16, 16), vec![ret]);
     assert_eq!(q(15, 15), Vec::<&Segment>::new());
     assert_eq!(q(src.len(), src.len()), Vec::<&Segment>::new());
-    // degenerate input never panics.
     assert!(q(5, 2).is_empty());
     assert!(q(usize::MAX - 1, usize::MAX).is_empty());
 }
@@ -934,7 +892,6 @@ fn generated_for_source_returns_all_overlaps_in_generated_order() {
 fn lookups_work_on_the_out_of_order_program() {
     let src = "range(0, 2).return\nfn f(x: i32) -> i32 { x }\nx = range(0, 3).map(f)\nx.return";
     let g = generate(src);
-    // the first source expression is emitted *after* the function and the variable.
     let first = only_top(
         &g,
         g.map.generated_for_source(ByteRange { start: 0, end: 5 }),
@@ -951,16 +908,11 @@ fn lookups_work_on_the_out_of_order_program() {
             .generated
             .start
     );
-    // the function's generated text maps back to the function's source.
     let at = g.rust.find("const fn f").unwrap();
     let back = g.map.source_for_generated(at + 3).unwrap();
     assert_eq!((back.kind, back.expr_index), (K::Function, 1));
     assert_eq!(src_text(src, back), "fn f(x: i32) -> i32 { x }");
 }
-
-// ---------------------------------------------------------------------------------------------
-// corpus + properties
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn every_corpus_program_satisfies_all_invariants() {
@@ -982,7 +934,6 @@ fn every_corpus_program_satisfies_all_invariants() {
 
 #[test]
 fn corpus_programs_with_several_expressions_produce_expected_segment_counts() {
-    // tests/programs/multi_consumer.marigold: fn, var, ret, var(from prior), ret
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/programs/multi_consumer.marigold");
     let src = std::fs::read_to_string(path).unwrap();
@@ -1006,7 +957,6 @@ fn corpus_programs_with_several_expressions_produce_expected_segment_counts() {
 /// grammar allows, and with hyphenated identifiers (hyphens are part of identifiers). The
 /// mutation proptest finds such programs by chance; these cases make them deterministic.
 const WHITESPACE_VARIANTS: &[&str] = &[
-    // the proptest regression: whitespace after the dot
     "v0. write_file(\"\u{65e5}0.csv\", csv)",
     "v0 . write_file(\"a.csv\", csv)",
     "v0\n.\twrite_file(\"a.csv\", csv)",
@@ -1016,30 +966,24 @@ const WHITESPACE_VARIANTS: &[&str] = &[
     "range(0, 1).write_file(\"a.csv\",csv,compression=none)",
     "range(0, 1).write_file(\"a.csv\", csv\n)",
     "x = range(0, 1)\nx\n.\nwrite_file(\"a.csv\", csv)",
-    // return
     "range(0, 1) . return",
     "range(0, 1).\nreturn",
     "range(0, 1)\n\t.\r\n\treturn",
     "x = range(0, 1)\nx . return",
     "x=range(0,1)\nx.return",
-    // range
     "range( 0 , 1 ).return",
     "range(0 ,= 1).return",
     "range(\n0,\n=\n1\n).return",
     "range( E ).return\nenum E { A }",
-    // stream variables and chains
     "x =\n range(0, 1) . map(f)",
     "x = range(0, 1)\n  .map(f)\n  .filter(g)\nx.return",
     "x = range(0, 1)\ny = x . map(f)\ny . return",
     "x = range(0, 1)\ny=x.map(f)\ny.return",
     "x = range(0, 1)\ny =\n\tx\n\t.map(f)\ny.return",
-    // read_file
     "read_file( \"d.csv\" , csv , struct = S ) . ok() . return\nstruct S { a: u8 }",
     "read_file(\"d.csv\",csv,struct=S,infer_compression=true).ok().return\nstruct S { a: u8 }",
-    // select_all
     "select_all( range(0, 1) . map(f) , range(1, 2) ) . return",
     "select_all(\n\trange(0, 1),\n\trange(1, 2)\n)\n.\nfilter(g)\n.\nreturn",
-    // struct, enum and fn headers
     "struct\nS\n{\na : u8 ,\nb : string_1 ,\n}\nrange(0, 1).return",
     "structS{a:u8}\nrange(0, 1).return",
     "enum\nE\n{ A , B = \"b\" , default Z }\nrange(E).return",
@@ -1047,11 +991,9 @@ const WHITESPACE_VARIANTS: &[&str] = &[
     "fn\nf ( x : i32 )\n->\ni32\n{ x }\nrange(0, 1).map(f).return",
     "fnf(x: i32) -> i32 {x}\nrange(0, 1).map(f).return",
     "fn f(x: i32) -> i32 { /* { */ x }\nrange(0, 1).map(f).return",
-    // hyphens are part of identifiers: the leading letters of a name are not the whole name
     "v0-a = range(0, 1)\nv0-a.return",
     "v0-a = range(0, 1)\nv0-a.write_file(\"a.csv\", csv)",
     "x- = range(0, 1)\nx-.return",
-    // a stream variable may be called like an input function
     "range = range(0, 1)\nrange.return",
     "read_file = range(0, 1)\nread_file . write_file(\"a.csv\", csv)",
     "select_all = range(0, 1)\nselect_all-x = select_all.map(f)\nselect_all-x.return",
@@ -1059,7 +1001,6 @@ const WHITESPACE_VARIANTS: &[&str] = &[
 
 #[test]
 fn whitespace_variants_keep_all_invariants() {
-    // Check every case before failing, so one run lists all the brittle ones.
     let failing: Vec<&str> = WHITESPACE_VARIANTS
         .iter()
         .copied()
@@ -1090,7 +1031,6 @@ fn chunk(kind: u8, n: u32, i: usize) -> String {
         8 => format!("range(0, {n}).write_file(\"\u{f6}{i}.csv\", csv)"),
         9 => format!("v{}.write_file(\"\u{65e5}{i}.csv\", csv)", i / 2),
         10 => format!("read_file(\"d{i}.csv\", csv, struct=S{i}).ok().return"),
-        // two expressions in one chunk: an enum and a stream over it (declared in any order).
         _ => format!("range(E{i}).return\nenum E{i} {{ P, Q }}"),
     }
 }
@@ -1198,24 +1138,20 @@ fn check_parse_and_generate_agree(src: &str) -> Result<(), TestCaseError> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------------------------
-// error paths
-// ---------------------------------------------------------------------------------------------
-
 #[test]
 fn errors_are_exactly_the_errors_of_marigold_parse() {
     let cases = [
-        "range(0,",                                                 // syntax error
-        "range(0, 1).retur",                                        // typo in output function
-        "x = range(0,3)\nrange(0,1).retur",                         // error after valid chunk
-        "// comment\nrange(0,1).return", // comments are not part of the grammar
-        "range(Color).return",           // unknown enum (post-parse validation)
-        "enum E { A }\nrange(Nope).return", // unknown enum, others declared
-        "struct T { f: int[10, 5] }\nrange(0,1).return", // bounded type validation
-        "struct T { f: int[0, Missing.len()] }\nrange(0,1).return", // undefined type in bounds
-        "fn f(x: i32) -> i32\nrange(0,1).return", // fn without body
-        "range(0, 1).return\u{0}",       // NUL
-        "x = r\u{e9}nge(0, 1)",          // non-ASCII identifier
+        "range(0,",
+        "range(0, 1).retur",
+        "x = range(0,3)\nrange(0,1).retur",
+        "// comment\nrange(0,1).return",
+        "range(Color).return",
+        "enum E { A }\nrange(Nope).return",
+        "struct T { f: int[10, 5] }\nrange(0,1).return",
+        "struct T { f: int[0, Missing.len()] }\nrange(0,1).return",
+        "fn f(x: i32) -> i32\nrange(0,1).return",
+        "range(0, 1).return\u{0}",
+        "x = r\u{e9}nge(0, 1)",
     ];
     for src in cases {
         let expected = marigold_parse(src).expect_err(src);
@@ -1236,17 +1172,11 @@ fn unknown_enum_error_message_is_preserved() {
 
 #[test]
 fn oversized_input_is_not_rejected_because_marigold_parse_does_not_reject_it() {
-    // `MAX_CHECK_INPUT_BYTES` only guards the diagnostics path (LSP/editor DoS protection).
-    // `marigold_generate` must keep `Err iff marigold_parse errs`.
     let src = " ".repeat(marigold_grammar::diagnostics::MAX_CHECK_INPUT_BYTES + 1);
     let g = generate(&src);
     assert!(g.map.segments().is_empty());
     assert_eq!(g.rust, marigold_parse(&src).unwrap());
 }
-
-// ---------------------------------------------------------------------------------------------
-// serialization + scale
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn json_shape_is_stable() {
@@ -1280,8 +1210,6 @@ fn json_shape_is_stable() {
             "ident": "x",
         })
     );
-    // `Value` indexing yields Null for a missing key too, so look at the key sets themselves:
-    // `name` is present (as null) for streams, and no lookup index leaks into the output.
     let keys = |v: &serde_json::Value| {
         let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
         keys.sort();
@@ -1326,7 +1254,6 @@ fn many_expressions_get_exactly_the_expected_segments() {
     let n = 1_500;
     let src = many_exprs(n);
     let g = generate(&src);
-    // per i: var decl + runner + returning stream + struct (T2: plus 4 nested segments each: input, fn, variable input, field)
     assert_eq!(g.map.top_level().count(), 4 * n);
     assert_eq!(g.map.segments().len(), 8 * n);
     let count = |k| g.map.segments().iter().filter(|s| s.kind == k).count();
