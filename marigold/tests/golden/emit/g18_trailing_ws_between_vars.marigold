@@ -1,0 +1,6 @@
+  x = range(0, 5)   
+
+   
+
+ y = x.map(f)   	
+y.return   

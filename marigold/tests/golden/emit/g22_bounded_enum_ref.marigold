@@ -1,0 +1,4 @@
+enum Color { Red, Green }
+struct P { c: int[0, Color.len()] }
+x = range(Color)
+x.return

@@ -1,0 +1,3 @@
+struct B { a: u8 }
+enum A { X }
+struct C { a: u8 }

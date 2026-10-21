@@ -1,0 +1,8 @@
+a = range(0, 2)
+b = range(2, 4)
+a.return
+range(9, 10).write_file("p.csv", csv)
+b.return
+range(7, 8).return
+a.write_file("q.csv", csv)
+range(1, 2).write_file("r.csv", csv)
