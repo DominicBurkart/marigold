@@ -8,7 +8,7 @@ fn bench_gcd(c: &mut Criterion) {
 }
 
 fn bench_tsp_exact(c: &mut Criterion) {
-    let rt = runtime();
+    let rt = algorithms::runtime();
     let mut group = c.benchmark_group("tsp_exact");
     group.sample_size(10);
     group.bench_function("tsp_brute_force", |b| {
@@ -21,7 +21,7 @@ fn bench_tsp_exact(c: &mut Criterion) {
 }
 
 fn bench_tsp_metaheuristics(c: &mut Criterion) {
-    let rt = runtime();
+    let rt = algorithms::runtime();
     let mut group = c.benchmark_group("tsp_metaheuristics");
     group.sample_size(10);
     group.bench_function("tsp_simulated_annealing", |b| {
