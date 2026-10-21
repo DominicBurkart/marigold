@@ -463,6 +463,42 @@ mod integer_lms_tests {
         );
     }
 
+    #[tokio::test]
+    async fn geometric_best_matches_pinned_reference() {
+        let geometric = color_palette_picker::geometric_palettes().await;
+        assert_eq!(min_palette_contrast(&geometric[0]), 384_514_391_494);
+        assert!(
+            geometric[0] == [[85, 0, 0], [170, 255, 170], [170, 170, 255]]
+                || geometric[0] == [[255, 255, 170], [0, 85, 85], [255, 170, 255]]
+        );
+    }
+
+    #[test]
+    fn geometric_program_uses_the_validated_oracle_weights() {
+        let program: String = include_str!("../../color-palette-picker-geometric.marigold")
+            .split_whitespace()
+            .collect();
+        let lib: String = include_str!("lib.rs").split_whitespace().collect();
+        for (weight, channel) in [
+            (390473, "lr"),
+            (549904, "lg"),
+            (8902, "lb"),
+            (70926, "lr"),
+            (963107, "lg"),
+            (1358, "lb"),
+            (23143, "lr"),
+            (128012, "lg"),
+            (936052, "lb"),
+            (212673, "lr"),
+            (715152, "lg"),
+            (72175, "lb"),
+        ] {
+            let term = format!("{weight}*{channel}");
+            assert!(program.contains(&term), "{term}");
+            assert!(lib.contains(&term), "{term}");
+        }
+    }
+
     #[test]
     fn geometric_program_text_matches_example_file_and_lib() {
         fn squeeze(text: &str) -> String {
