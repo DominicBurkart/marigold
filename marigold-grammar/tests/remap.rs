@@ -4504,6 +4504,7 @@ fn n32_adjacent_ranges_are_parts_and_overlap_is_transitive_whatever_the_listing_
     );
 }
 
+#[cfg(not(any(feature = "io", feature = "tokio", feature = "async-std")))]
 fn regenerated_derived(name: &str) -> (String, String) {
     let program = marigold_generate(&read(name, "program.marigold")).unwrap();
     let render = |r: ByteRange| {
@@ -4531,6 +4532,7 @@ fn regenerated_derived(name: &str) -> (String, String) {
     (program.rust, map)
 }
 
+#[cfg(not(any(feature = "io", feature = "tokio", feature = "async-std")))]
 fn scenario_names() -> Vec<String> {
     fixture_names()
         .into_iter()
@@ -4538,8 +4540,10 @@ fn scenario_names() -> Vec<String> {
         .collect()
 }
 
+#[cfg(not(any(feature = "io", feature = "tokio", feature = "async-std")))]
 /// Every committed `generated.rs.txt` and `map.json` equals what this crate generates from the
-/// scenario's `program.marigold`, so drift between the code generator and the frozen fixtures is
+/// scenario's `program.marigold` with the default features (the runtime features change the
+/// generated code, so the test is compiled out with them), so drift between the code generator and the frozen fixtures is
 /// detected.
 #[test]
 fn derived_fixtures_equal_what_the_code_regenerates() {
@@ -4558,8 +4562,9 @@ fn derived_fixtures_equal_what_the_code_regenerates() {
     );
 }
 
+#[cfg(not(any(feature = "io", feature = "tokio", feature = "async-std")))]
 /// Rewrites `generated.rs.txt` and `map.json` of every scenario under `tests/fixtures/remap/`
-/// from its `program.marigold` with this crate's own generator. Run with
+/// from its `program.marigold` with this crate's own generator and the default features. Run with
 /// `MARIGOLD_REGEN_FIXTURES=1 cargo test -p marigold-grammar --test remap -- --ignored regenerate_fixtures`.
 /// `cargo.jsonl`, `bare.jsonl`, `layout.json` and `research/*` are captures of a real `rustc`/cargo
 /// run and cannot be regenerated offline; `expected.jsonl` comes from the independent oracle:
