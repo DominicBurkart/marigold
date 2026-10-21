@@ -9,6 +9,7 @@
     {
       "kind": "returning_stream",
       "name": null,
+      "ident": "returning_stream_0",
       "expr_index": 0,
       "parent": null,
       "source": {
@@ -26,6 +27,29 @@
         "start_column": 5,
         "end_line": 3,
         "end_column": 132
+      }
+    },
+    {
+      "kind": "input_range",
+      "name": null,
+      "ident": null,
+      "expr_index": 0,
+      "parent": 0,
+      "source": {
+        "start": 0,
+        "end": 12,
+        "start_line": 1,
+        "start_column": 1,
+        "end_line": 1,
+        "end_column": 13
+      },
+      "generated": {
+        "start": 119,
+        "end": 174,
+        "start_line": 3,
+        "start_column": 74,
+        "end_line": 3,
+        "end_column": 129
       }
     }
   ]

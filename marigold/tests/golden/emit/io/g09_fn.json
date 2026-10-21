@@ -9,6 +9,7 @@
     {
       "kind": "function",
       "name": "double",
+      "ident": "double",
       "expr_index": 0,
       "parent": null,
       "source": {
@@ -29,8 +30,55 @@
       }
     },
     {
+      "kind": "function_signature",
+      "name": null,
+      "ident": null,
+      "expr_index": 0,
+      "parent": 0,
+      "source": {
+        "start": 3,
+        "end": 24,
+        "start_line": 1,
+        "start_column": 4,
+        "end_line": 1,
+        "end_column": 25
+      },
+      "generated": {
+        "start": 59,
+        "end": 80,
+        "start_line": 3,
+        "start_column": 14,
+        "end_line": 3,
+        "end_column": 35
+      }
+    },
+    {
+      "kind": "function_body",
+      "name": null,
+      "ident": null,
+      "expr_index": 0,
+      "parent": 0,
+      "source": {
+        "start": 25,
+        "end": 34,
+        "start_line": 1,
+        "start_column": 26,
+        "end_line": 1,
+        "end_column": 35
+      },
+      "generated": {
+        "start": 81,
+        "end": 90,
+        "start_line": 3,
+        "start_column": 36,
+        "end_line": 3,
+        "end_column": 45
+      }
+    },
+    {
       "kind": "returning_stream",
       "name": null,
+      "ident": "returning_stream_0",
       "expr_index": 1,
       "parent": null,
       "source": {
@@ -48,6 +96,52 @@
         "start_column": 1,
         "end_line": 5,
         "end_column": 139
+      }
+    },
+    {
+      "kind": "input_range",
+      "name": null,
+      "ident": null,
+      "expr_index": 1,
+      "parent": 3,
+      "source": {
+        "start": 35,
+        "end": 46,
+        "start_line": 2,
+        "start_column": 1,
+        "end_line": 2,
+        "end_column": 12
+      },
+      "generated": {
+        "start": 161,
+        "end": 215,
+        "start_line": 5,
+        "start_column": 70,
+        "end_line": 5,
+        "end_column": 124
+      }
+    },
+    {
+      "kind": "stream_map",
+      "name": null,
+      "ident": null,
+      "expr_index": 1,
+      "parent": 3,
+      "source": {
+        "start": 47,
+        "end": 58,
+        "start_line": 2,
+        "start_column": 13,
+        "end_line": 2,
+        "end_column": 24
+      },
+      "generated": {
+        "start": 216,
+        "end": 227,
+        "start_line": 5,
+        "start_column": 125,
+        "end_line": 5,
+        "end_column": 136
       }
     }
   ]

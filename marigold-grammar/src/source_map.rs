@@ -355,10 +355,12 @@ impl SourceMap {
     ///
     /// Maps built by [`crate::marigold_generate`] nest their segments properly: any two
     /// generated ranges are nested or disjoint. Hand-built maps may nest segments too (the
-    /// innermost one wins in [`source_for_generated`](Self::source_for_generated)). Any
-    /// input is accepted and nothing panics, but "innermost" and the parent links are only
-    /// defined when the generated ranges nest or are disjoint: lookups on partially
-    /// overlapping ranges are best effort. The lookups are fast as documented only for
+    /// innermost one wins in [`source_for_generated`](Self::source_for_generated)). The
+    /// [`parent`](Self::parent) of a segment is the closest earlier segment whose generated
+    /// range contains its own (equal ranges nest in input order); a segment that only partly
+    /// overlaps an earlier one is not nested in it. Any input is accepted and nothing
+    /// panics, but "innermost" is only well defined when the generated ranges nest or are
+    /// disjoint: lookups on partially overlapping ranges are best effort. The lookups are fast as documented only for
     /// such maps; see [`generated_for_source`](Self::generated_for_source) for the source
     /// side.
     ///
@@ -388,7 +390,11 @@ impl SourceMap {
             while let Some(&top) = open.last() {
                 #[cfg(test)]
                 count(&BUILD_STEPS);
-                if segments[top].generated.end <= segment.generated.start {
+                // `top` does not enclose this segment: it ends before it starts, or it
+                // ends inside it (a partial overlap is no nesting).
+                if segments[top].generated.end <= segment.generated.start
+                    || segment.generated.end > segments[top].generated.end
+                {
                     subtree_end[top] = i;
                     open.pop();
                 } else {
@@ -1345,8 +1351,10 @@ mod tests {
             hits += m.generated_for_source(r(i * 10, i * 10 + 8)).len();
         }
         assert_eq!(hits, n + n);
-        // O(n log n): milliseconds. O(n^2) would need ~2*10^10 comparisons.
-        assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
+        // O(n log n): milliseconds. O(n^2) would need ~2*10^10 comparisons, minutes. The bound is
+        // far above what a loaded machine needs (the real guarantee is the work counters in
+        // `construction_work_is_n_log_n` and `lookups_do_constant_work_...`).
+        assert!(t.elapsed().as_secs() < 60, "{:?}", t.elapsed());
     }
 
     fn named(gen: (usize, usize), src: (usize, usize), kind: SegmentKind, ident: &str) -> Segment {
@@ -1514,6 +1522,22 @@ mod tests {
     }
 
     #[test]
+    fn a_partial_overlap_is_not_a_nesting() {
+        // [0, 10) and [5, 15) overlap partly, [6, 9) is inside both but the closest is [5, 15)
+        let m = SourceMap::new(vec![
+            seg((0, 10), (0, 3), SegmentKind::Struct, 0),
+            seg((5, 15), (4, 8), SegmentKind::Enum, 1),
+            seg((6, 9), (5, 6), SegmentKind::Function, 2),
+            seg((20, 30), (9, 10), SegmentKind::Struct, 3),
+        ]);
+        let parents: Vec<Option<usize>> = (0..4).map(|i| m.parent(i)).collect();
+        assert_eq!(parents, vec![None, None, Some(1), None]);
+        assert_eq!(m.children(1), vec![2]);
+        assert!(m.children(0).is_empty());
+        assert_eq!(m.top_level().count(), 3);
+    }
+
+    #[test]
     fn construction_never_panics_on_overlapping_duplicate_or_degenerate_segments() {
         let m = SourceMap::new(vec![
             seg((0, 10), (0, 10), SegmentKind::Struct, 0),
@@ -1591,6 +1615,7 @@ mod tests {
             }
         }
         let m = SourceMap::new(segs);
+        reset_counters();
         let t = std::time::Instant::now();
         let mut hits = 0usize;
         for i in 0..n {
@@ -1606,7 +1631,16 @@ mod tests {
                 .len();
         }
         assert_eq!(hits, n * (15 + 1 + 2));
-        assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
+        // Deterministic work bounds: the nesting depth is 1, so a lookup walks at most one
+        // parent link, and a source query looks at the few segments of one statement, not at
+        // the 90_000 others. The wall-clock bound is only a backstop against a hang.
+        assert!(counter(&WALK_STEPS) <= n, "{} walks", counter(&WALK_STEPS));
+        assert!(
+            counter(&SCANNED) <= 16 * n,
+            "{} segments scanned",
+            counter(&SCANNED)
+        );
+        assert!(t.elapsed().as_secs() < 60, "{:?}", t.elapsed());
     }
 
     #[test]

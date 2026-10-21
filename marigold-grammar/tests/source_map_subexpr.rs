@@ -2391,7 +2391,8 @@ fn nested_lookups_are_fast_on_a_big_program() {
         hits += g.map.generated_for_source(s.source).len();
     }
     assert!(hits > 0);
-    assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
+    // a backstop against a hang; the work itself is pinned by counters in `source_map.rs`
+    assert!(t.elapsed().as_secs() < 60, "{:?}", t.elapsed());
 }
 
 // ---------------------------------------------------------------------------------------------

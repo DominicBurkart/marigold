@@ -9,7 +9,8 @@
 //! * `marigold_parse`                         -- `rust` must be byte-identical;
 //! * `common::expr_ranges`                    -- independent per-expression source range;
 //! * `marigold_generate(..).map`              -- the document must be a lossless view of the map;
-//! * hand-built nested `SourceMap`s           -- the only way to reach `parent != null` until T2.
+//! * hand-built nested `SourceMap`s           -- garbage-in robustness and exact `parent` indices;
+//! * `parent_links_match_the_ranges`          -- `parent` recomputed from the ranges by brute force.
 
 mod common;
 #[path = "common/emit_schema.rs"]
@@ -71,6 +72,8 @@ fn assert_document_ok(src: &str) {
     for (i, (s, j)) in segs.iter().zip(out).enumerate() {
         assert_eq!(j["expr_index"], json!(s.expr_index));
         assert_eq!(j["name"], json!(s.name));
+        assert_eq!(j["ident"], json!(s.ident));
+        assert_eq!(j["parent"], json!(g.map.parent(i)), "parent is the map's");
         assert_eq!(
             j["kind"],
             serde_json::to_value(s.kind).unwrap(),
@@ -95,12 +98,68 @@ fn assert_document_ok(src: &str) {
     }
 }
 
-/// T1/T3 programs have no nesting. T2 deletes this test on purpose.
+/// The top-level segments of the document are the statement-level segments of the map, the
+/// others have a parent and carry no `ident`/`name` of a statement.
 #[test]
-fn every_segment_is_top_level_until_t2_adds_nesting() {
+fn top_level_segments_are_the_statements_and_the_rest_are_nested() {
     for (_, src) in golden_programs() {
-        for s in json_for(&src)["segments"].as_array().unwrap() {
-            assert!(s["parent"].is_null(), "{src:?}: {s}");
+        let g = marigold_generate(&src).unwrap();
+        let v = json_for(&src);
+        let segments = v["segments"].as_array().unwrap();
+        let roots: Vec<&Value> = segments.iter().filter(|s| s["parent"].is_null()).collect();
+        assert_eq!(roots.len(), g.map.top_level().count(), "{src:?}");
+        for (root, top) in roots.iter().zip(g.map.top_level()) {
+            assert_eq!(root["generated"]["start"], json!(top.generated.start));
+            assert!(root["ident"].is_string(), "{src:?}: {root}");
+        }
+        for (i, s) in segments.iter().enumerate() {
+            if let Some(p) = s["parent"].as_u64() {
+                assert!((p as usize) < i, "{src:?}: {s}");
+                assert!(
+                    s["ident"].is_null(),
+                    "{src:?}: nested segments have no ident"
+                );
+            }
+        }
+    }
+    // programs with parts really are nested
+    let nested = json_for("range(0, 3).map(f).return");
+    let parents: Vec<&Value> = nested["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| &s["parent"])
+        .collect();
+    assert_eq!(parents, [&json!(null), &json!(0), &json!(0)]);
+}
+
+/// `parent` is "the innermost earlier segment whose generated range contains this one": recompute
+/// it by brute force from the ranges of the document and compare with the map's own answer.
+#[test]
+fn parent_links_match_the_ranges() {
+    let mut programs: Vec<String> = golden_programs().into_iter().map(|(_, s)| s).collect();
+    programs.push("select_all(range(0, 3), range(5, 8).map(f)).filter_map(g).return".into());
+    programs.push(
+        "fn f(x: i32) -> i32 { x }\nstruct S { a: u8, b: u8 }\nenum E { A, default Z }".into(),
+    );
+    for src in programs {
+        let g = marigold_generate(&src).unwrap();
+        let v = json_for(&src);
+        let segments = v["segments"].as_array().unwrap();
+        for (i, s) in segments.iter().enumerate() {
+            let range = |s: &Value| {
+                (
+                    s["generated"]["start"].as_u64().unwrap(),
+                    s["generated"]["end"].as_u64().unwrap(),
+                )
+            };
+            let (start, end) = range(s);
+            let want = (0..i).rev().find(|&j| {
+                let (ps, pe) = range(&segments[j]);
+                ps <= start && end <= pe
+            });
+            assert_eq!(s["parent"], json!(want), "{src:?} segment {i}");
+            assert_eq!(g.map.parent(i), want, "{src:?} segment {i}");
         }
     }
 }
@@ -121,11 +180,20 @@ fn json_shape_and_key_order_are_pinned() {
         "{text}"
     );
     let first_segment = concat!(
-        r#"{"kind":"stream_variable","name":"x","expr_index":0,"parent":null,"#,
+        r#"{"kind":"stream_variable","name":"x","ident":"x","expr_index":0,"parent":null,"#,
         r#""source":{"start":0,"end":15,"start_line":1,"start_column":1,"end_line":1,"end_column":16},"#,
         r#""generated":{"start":50,"end":229,"start_line":3,"start_column":5,"end_line":3,"end_column":184}}"#,
     );
-    assert!(text.contains(&format!(r#""segments":[{first_segment},{{"kind":"returning_stream","name":null,"expr_index":1,"parent":null,"source":{{"start":16,"end":24,"start_line":2,"start_column":1,"end_line":2,"end_column":9}},"#)), "{text}");
+    // the input of the declaration is nested in it: `range(0, 5)` -> `iter(0..5)`
+    let input = concat!(
+        r#"{"kind":"input_range","name":null,"ident":null,"expr_index":0,"parent":0,"#,
+        r#""source":{"start":4,"end":15,"start_line":1,"start_column":5,"end_line":1,"end_column":16},"#,
+    );
+    assert!(
+        text.contains(&format!(r#""segments":[{first_segment},{input}"#)),
+        "{text}"
+    );
+    assert!(text.contains(r#"{"kind":"returning_stream","name":null,"ident":"returning_stream_0","expr_index":1,"parent":null,"source":{"start":16,"end":24,"start_line":2,"start_column":1,"end_line":2,"end_column":9},"#), "{text}");
     assert!(text.ends_with("}]}"), "no trailing fields: {text}");
 }
 
@@ -137,6 +205,7 @@ fn kind_strings_are_snake_case_of_the_t1_variants() {
         .as_array()
         .unwrap()
         .iter()
+        .filter(|s| s["parent"].is_null())
         .map(|s| s["kind"].as_str().unwrap())
         .collect();
     assert_eq!(
@@ -151,6 +220,49 @@ fn kind_strings_are_snake_case_of_the_t1_variants() {
             "stream_variable_runner"
         ]
     );
+}
+
+#[test]
+fn nested_kind_strings_are_snake_case_and_documented() {
+    let src = "struct S { a: u8 }\nenum E { A }\nfn f(x: i32) -> i32 { x }\nx = select_all(range(0, 3), read_file(\"a.csv\", csv, struct=S)).map(f).filter(f).filter_map(f).permutations(1).permutations_with_replacement(1).combinations(1).keep_first_n(1, f).fold(0, f).ok().ok_or_panic()\nx.write_file(\"o.csv\", csv)";
+    let v = json_for(src);
+    let mut kinds: Vec<&str> = v["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["kind"].as_str().unwrap())
+        .collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+    // every kind the module documentation lists (the one-segment-per-statement kinds are
+    // covered by the test above)
+    for documented in [
+        "input_range",
+        "input_read_file",
+        "input_select_all",
+        "input_variable",
+        "select_all_branch",
+        "stream_map",
+        "stream_filter",
+        "stream_filter_map",
+        "stream_permutations",
+        "stream_permutations_with_replacement",
+        "stream_combinations",
+        "stream_keep_first_n",
+        "stream_fold",
+        "stream_ok",
+        "stream_ok_or_panic",
+        "output_write_file",
+        "function_signature",
+        "function_body",
+        "struct_field",
+        "enum_variant",
+    ] {
+        assert!(
+            kinds.contains(&documented),
+            "{documented} missing from {kinds:?}"
+        );
+    }
 }
 
 #[test]
@@ -352,7 +464,7 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------------------------
-// hand-built maps: the only way to exercise `parent` before T2, and garbage-in robustness
+// hand-built maps: exact `parent` indices and garbage-in robustness
 // ---------------------------------------------------------------------------------------------
 
 fn r(start: usize, end: usize) -> ByteRange {
@@ -525,6 +637,10 @@ fn corruptions() -> Vec<(&'static str, Corrupt)> {
             Box::new(|v| v["segments"][0]["name"] = json!(3)),
         ),
         (
+            "ident wrong type",
+            Box::new(|v| v["segments"][0]["ident"] = json!(3)),
+        ),
+        (
             "kind not snake_case",
             Box::new(|v| v["segments"][0]["kind"] = json!("StreamVariable")),
         ),
@@ -576,6 +692,7 @@ fn corruptions() -> Vec<(&'static str, Corrupt)> {
     for k in [
         "kind",
         "name",
+        "ident",
         "expr_index",
         "parent",
         "source",
@@ -636,6 +753,13 @@ fn validate_v1_rejects_every_structural_corruption() {
 fn check_semantics_rejects_every_semantic_corruption() {
     let good = json_for("x = range(0, 5)\ny = x.map(f)\ny.return");
     check_semantics(&good).unwrap();
+    // the declaration of `y` (line 2): a top-level segment that is not the first one
+    let y = good["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|s| s["kind"] == "stream_variable" && s["name"] == "y")
+        .unwrap();
     let cases: Vec<(&str, Corrupt)> = vec![
         (
             "source end shifted",
@@ -647,15 +771,15 @@ fn check_semantics_rejects_every_semantic_corruption() {
         ),
         (
             "wrong source line",
-            Box::new(|v| v["segments"][1]["source"]["start_line"] = json!(1)),
+            Box::new(move |v| v["segments"][y]["source"]["start_line"] = json!(1)),
         ),
         (
             "wrong source column",
-            Box::new(|v| v["segments"][1]["source"]["end_column"] = json!(99)),
+            Box::new(move |v| v["segments"][y]["source"]["end_column"] = json!(99)),
         ),
         (
             "wrong generated column",
-            Box::new(|v| v["segments"][1]["generated"]["start_column"] = json!(2)),
+            Box::new(move |v| v["segments"][y]["generated"]["start_column"] = json!(2)),
         ),
         (
             "range past the text",
@@ -671,7 +795,11 @@ fn check_semantics_rejects_every_semantic_corruption() {
         ),
         (
             "bogus parent",
-            Box::new(|v| v["segments"][1]["parent"] = json!(0)),
+            Box::new(move |v| v["segments"][y]["parent"] = json!(0)),
+        ),
+        (
+            "nested segment claims to be top level",
+            Box::new(|v| v["segments"][1]["parent"] = json!(null)),
         ),
         (
             "range inside a multibyte char",
@@ -797,7 +925,8 @@ fn twenty_thousand_expressions_on_one_line_build_in_linear_time() {
     let t = Instant::now();
     let doc = EmitDocument::new(&src, &g.rust, &g.map);
     let elapsed = t.elapsed();
-    assert_eq!(doc.segments.len(), 2 * n + 1);
+    // per variable: declaration, its input, runner; then the stream and its input
+    assert_eq!(doc.segments.len(), 3 * n + 2);
     assert!(
         elapsed < Duration::from_secs(10),
         "building the document took {elapsed:?}"
