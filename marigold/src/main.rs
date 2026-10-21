@@ -272,8 +272,6 @@ fn report_emit_failure(
 ) -> i32 {
     use marigold_grammar::diagnostics::MAX_CHECK_INPUT_BYTES;
 
-    // `marigold_check` refuses large inputs without parsing them (`input-too-large`),
-    // which would be false here: `emit` has no size limit.
     let errors: Vec<_> = if source.len() <= MAX_CHECK_INPUT_BYTES {
         marigold_grammar::marigold_check(source)
             .into_iter()
@@ -283,19 +281,14 @@ fn report_emit_failure(
         Vec::new()
     };
 
-    // Over the limit there are no diagnostics of `check`: summarize pest's message, which
-    // embeds the offending line (twice) and whatever control characters it holds.
     let (line, column, offset, message) = summarize_parse_error(source, &parse_error.0);
     let rendered = match format {
         EmitFormat::Rust if errors.is_empty() => {
             format!("{path}:{line}:{column}: error[syntax-error]: {message}\n")
         }
         EmitFormat::Rust => render_human(path, source, &errors),
-        // Serialize the typed values: going through `serde_json::Value` would sort the keys.
         EmitFormat::Json => {
             if errors.is_empty() {
-                // The one diagnostic of `check`'s array, written out because the CLI has
-                // no way to construct a `Diagnostic`: same keys, order and indentation.
                 let message = serde_json::Value::String(message).to_string();
                 format!(
                     "[\n  {{\n    \"range\": {{\n      \"start\": {offset},\n      \"end\": {offset}\n    }},\n    \
@@ -587,7 +580,6 @@ mod summary_tests {
     #[test]
     fn counts_the_column_in_characters_not_bytes() {
         let message = "Parse error:  --> 1:5\n  |\n  = expected x";
-        // `éé` is four bytes: column 5 is byte offset 6 of "éé" + 2 more characters
         assert_eq!(summarize_parse_error("ééab!", message).2, 6);
     }
 
@@ -596,7 +588,6 @@ mod summary_tests {
         let (line, column, offset, text) = summarize_parse_error("abc", "Parse error: odd");
         assert_eq!((line, column, offset), (1, 1, 0));
         assert_eq!(text, "Parse error: odd");
-        // a position that is not in the source does not panic either
         assert_eq!(
             summarize_parse_error("abc", "Parse error:  --> 9:9\n  = expected x").2,
             0
@@ -605,7 +596,6 @@ mod summary_tests {
 
     #[test]
     fn escapes_control_characters_and_truncates_a_long_message() {
-        // no `= expected` line: the whole message is kept, so it must be made safe
         let message = format!(
             "Parse error: \u{1b}]0;pwned\u{7}\nline two\t{}",
             "x".repeat(10_000)
@@ -622,13 +612,11 @@ mod summary_tests {
 
     #[test]
     fn truncation_never_splits_a_multibyte_character_and_counts_bytes() {
-        // "Parse error: " is 13 bytes, so the 2048-byte limit falls inside a two-byte character
         let message = format!("Parse error: {}", "é".repeat(2000));
         let (_, _, _, text) = summarize_parse_error("", &message);
         assert!(text.ends_with(" [message truncated]"), "{}", text.len());
         assert!(text.len() <= MAX_SUMMARY_BYTES + " [message truncated]".len());
         assert!(text.len() > MAX_SUMMARY_BYTES - 4, "{}", text.len());
-        // and a four-byte one
         let message = format!("Parse error: {}", "😀".repeat(1000));
         let (_, _, _, text) = summarize_parse_error("", &message);
         assert!(text.ends_with(" [message truncated]"));
@@ -638,7 +626,6 @@ mod summary_tests {
 
     #[test]
     fn c1_control_characters_are_escaped_too() {
-        // U+009B is a single-character CSI for many terminals, U+0085 is NEL
         let (_, _, _, text) = summarize_parse_error("", "Parse error: a\u{9b}31mb\u{85}");
         assert!(
             !text.contains('\u{9b}') && !text.contains('\u{85}'),
@@ -649,7 +636,6 @@ mod summary_tests {
     #[test]
     fn the_column_after_astral_characters_is_counted_in_characters() {
         let message = "Parse error:  --> 1:5\n  |\n  = expected x";
-        // 😀😀ab!: column 5 is the `!` = byte 10; in UTF-16 units column 5 would be byte 9
         assert_eq!(summarize_parse_error("😀😀ab!", message).2, 10);
     }
 

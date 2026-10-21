@@ -269,7 +269,6 @@ impl PestParser {
         // Stage 1: Parse with Pest grammar
         let pairs = MarigoldPestParser::parse(Rule::program, input)
             .map_err(|e| format!("Parse error: {}", e))?;
-        // Ranges must be taken before the builder consumes the pairs.
         let ranges = Self::expr_ranges(&pairs);
 
         // Stage 2: Build AST from parse tree
@@ -281,7 +280,6 @@ impl PestParser {
         // Stage 3: Validate bounded types (if any)
         let resolved_bounds = Self::validate_bounded_types(&expressions)?;
 
-        // Stages 4 and 5
         Self::generate_mapped(expressions, resolved_bounds, &ranges, plan)
     }
 
@@ -297,8 +295,6 @@ impl PestParser {
         let (rust, generated) =
             Self::generate_rust_code_mapped(expressions, resolved_bounds, plan)?;
 
-        // Stage 5: Attach each item's source range. `expr_index` indexes `ranges`
-        // because both are parallel to the top-level expressions.
         let segments = generated
             .into_iter()
             .map(|g| g.attach_source(ranges))
@@ -447,7 +443,6 @@ impl PestParser {
             out.glue("\n\n");
         }
 
-        // 4. Generate returning streams
         let mut n_returning_streams = 0;
         for (i, expr) in out.pass(&expressions) {
             let code = match expr {
@@ -463,7 +458,6 @@ impl PestParser {
             n_returning_streams += 1;
         }
 
-        // 5. Generate non-returning streams
         let mut n_non_returning_streams = 0;
         for (i, expr) in out.pass(&expressions) {
             let code = match expr {
@@ -480,7 +474,6 @@ impl PestParser {
             n_non_returning_streams += 1;
         }
 
-        // 6. Generate stream variable runners
         let mut n_stream_variable_runners = 0;
         for (i, expr) in out.pass(&expressions) {
             let (name, code) = match expr {

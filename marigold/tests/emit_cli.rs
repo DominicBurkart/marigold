@@ -23,10 +23,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-// ---------------------------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------------------------
-
 fn marigold() -> Command {
     Command::new(env!("CARGO_BIN_EXE_marigold"))
 }
@@ -178,7 +174,6 @@ fn assert_document_ok(doc: &Value, src: &str) {
         assert_eq!(j["generated"]["end"], json!(lib.generated.end));
         assert_eq!(j["expr_index"], json!(lib.expr_index));
         assert_eq!(j["name"], json!(lib.name));
-        // Round trip using nothing but the JSON: re-slice both texts.
         let (stext, gtext) = (
             segment_text(doc, i, "source"),
             segment_text(doc, i, "generated"),
@@ -203,10 +198,9 @@ fn assert_document_ok(doc: &Value, src: &str) {
                 gtext.contains("struct ") || gtext.contains("enum "),
                 "{gtext:?}"
             ),
-            _ => {} // T2 adds kinds: the schema validator and the goldens still cover them
+            _ => {}
         }
     }
-    // Other public APIs that know (parts of) the same ranges.
     for n in marigold_stream_complexities(src).unwrap() {
         let hit = out
             .iter()
@@ -228,10 +222,6 @@ fn assert_document_ok(doc: &Value, src: &str) {
         assert!(hit["source"]["end"].as_u64().unwrap() as usize >= d.range.end);
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// --format rust
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn rust_format_is_the_default_and_equals_marigold_parse_byte_for_byte() {
@@ -272,8 +262,6 @@ fn rust_format_matches_marigold_parse_for_the_whole_repo_corpus() {
 
 #[test]
 fn rust_output_is_the_inner_text_of_what_m_expands_to() {
-    // `m!(..)` expands to "{\n" + marigold_parse(tokens) + "\n}\n"; `emit` prints the middle part
-    // for the file's own text. Pin the wrapper-free contract.
     let path = write_temp("inner.marigold", "range(0, 3).return");
     let out = emit_file(&[], &path);
     let text = s(&out.stdout);
@@ -284,10 +272,6 @@ fn rust_output_is_the_inner_text_of_what_m_expands_to() {
     assert!(text.ends_with("all_streams\n}\n"), "{text:?}");
     assert!(!text.starts_with('{'));
 }
-
-// ---------------------------------------------------------------------------------------------
-// --format json
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn json_documents_validate_for_every_golden_program() {
@@ -412,10 +396,6 @@ fn json_columns_count_scalar_values_and_offsets_count_bytes() {
     );
 }
 
-// ---------------------------------------------------------------------------------------------
-// golden documents
-// ---------------------------------------------------------------------------------------------
-
 const GOLDEN_JSON: [&str; 8] = [
     "g01_unnamed_returning",
     "g03_var_named_returning",
@@ -499,7 +479,6 @@ fn snapshot_path(variant: &str, name: &str) -> PathBuf {
 
 #[test]
 fn golden_json_documents_are_stable() {
-    // Only the exact value `1` blesses, so a stray `UPDATE_GOLDEN=0` or `=` cannot rewrite them.
     let update = std::env::var("UPDATE_GOLDEN").as_deref() == Ok("1");
     let variant = golden_variant();
     for name in GOLDEN_JSON {
@@ -531,10 +510,8 @@ fn golden_json_documents_are_stable() {
             golden.display(),
             s(&out.stdout)
         );
-        // a golden file must itself be a valid v1 document for its input ...
         let document: Value = serde_json::from_str(&want).unwrap();
         assert_document_ok(&document, &std::fs::read_to_string(&input).unwrap());
-        // ... whose Rust is the snapshot captured from `main` before the source map existed
         let snapshot = snapshot_path(variant, name);
         assert_eq!(
             document["rust"],
@@ -543,7 +520,6 @@ fn golden_json_documents_are_stable() {
             snapshot.display()
         );
     }
-    // Blessing is not a pass: the new files must be reviewed, then the tests rerun without it.
     assert!(
         !update,
         "golden documents rewritten for `{variant}`: review `git diff`, then rerun without UPDATE_GOLDEN"
@@ -552,15 +528,12 @@ fn golden_json_documents_are_stable() {
 
 #[test]
 fn rust_output_equals_the_snapshots_captured_from_main_for_this_feature_set() {
-    // `marigold_parse` in this process and the binary share the grammar's features, so comparing
-    // them cannot notice a binary built with the wrong ones (`cli` must enable `io`, the view of
-    // the `m!` macro under `marigold run`). The snapshots were captured on main with those features.
     let variant = golden_variant();
     let mut compared = 0;
     for (name, path, _) in golden_programs() {
         let name = name.trim_end_matches(".marigold");
         let Ok(snapshot) = std::fs::read_to_string(snapshot_path(variant, name)) else {
-            continue; // g25 is not one of the main snapshots
+            continue;
         };
         let out = emit_file(&[], &path);
         assert_eq!(out.status.code(), Some(0), "{name}");
@@ -572,14 +545,9 @@ fn rust_output_equals_the_snapshots_captured_from_main_for_this_feature_set() {
 
 #[test]
 fn json_lists_the_grammar_features_the_rust_depends_on() {
-    // Run under plain `--features cli` (`cargo test -p marigold --features cli --test emit_cli`):
-    // the only configuration where `cli` itself must provide the `io` feature. CI's
-    // `--all-features` enables `io` anyway.
     let path = write_temp("features.marigold", "range(0, 3).return");
     let doc = stdout_json(&emit_file(&["--format", "json"], &path));
     assert_eq!(doc["features"], json!(expected_features()));
-    // `read_file` is where the `io` view differs from the featureless one: the generated code
-    // derives `Deserialize` for the struct, as the `m!` macro does under `marigold run`
     let program = "struct R { a: i32 }\nread_file(\"data.csv\", csv, struct=R).ok().return";
     let io_view = emit_file(&[], &write_temp("io_view.marigold", program));
     assert_eq!(io_view.status.code(), Some(0));
@@ -589,10 +557,6 @@ fn json_lists_the_grammar_features_the_rust_depends_on() {
         s(&io_view.stdout)
     );
 }
-
-// ---------------------------------------------------------------------------------------------
-// stdin vs file
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn stdin_and_file_give_byte_identical_output_for_both_formats() {
@@ -640,13 +604,8 @@ fn empty_stdin_is_a_valid_empty_program() {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// trimming: offsets are relative to the ORIGINAL file
-// ---------------------------------------------------------------------------------------------
-
 #[test]
 fn emit_does_not_trim_so_offsets_index_the_original_file() {
-    // `marigold run` calls `.trim()`; `emit` must not: offsets are valid for the file on disk.
     let program = "x = range(0, 5)\nx.return";
     let src = "\n\n  \t\r\n\u{20}".to_string() + program + " \r\n\r\n\t";
     let path = write_temp("padded.marigold", &src);
@@ -667,7 +626,6 @@ fn emit_does_not_trim_so_offsets_index_the_original_file() {
         "one space precedes it on that line"
     );
     assert_eq!(segment_text(&doc, 0, "source"), "x = range(0, 5)");
-    // Same Rust as the trimmed program (what `run` would compile), different offsets.
     let trimmed = stdout_json(&emit_file(
         &["--format", "json"],
         &write_temp("trimmed.marigold", program),
@@ -677,7 +635,6 @@ fn emit_does_not_trim_so_offsets_index_the_original_file() {
         emit_file(&[], &path).stdout,
         emit_file(&[], &write_temp("trimmed.marigold", program)).stdout
     );
-    // and via stdin
     assert_eq!(
         emit_stdin(&["--format", "json"], src.as_bytes()).stdout,
         emit_file(&["--format", "json"], &path).stdout
@@ -686,12 +643,6 @@ fn emit_does_not_trim_so_offsets_index_the_original_file() {
 
 #[test]
 fn characters_outside_the_grammar_around_a_program_are_a_syntax_error_for_emit_and_check() {
-    // PINNED DIVERGENCE (see TESTSPEC-T3 section 5): `run` and `analyze` trim with `str::trim`,
-    // which strips Unicode White_Space such as U+00A0 (no-break space) and U+000C (form feed),
-    // but the grammar's WHITESPACE is only " \t\r\n". `emit` follows `check` (no trim), so
-    // those two are accepted by `run` and rejected here. A byte order mark (U+FEFF) is not
-    // White_Space: `run` rejects it too. If a later task makes `run` agree with `emit`,
-    // update this test on purpose.
     for (name, src) in [
         ("nbsp", "\u{a0}range(0, 1).return"),
         ("bom", "\u{feff}range(0, 1).return"),
@@ -706,10 +657,6 @@ fn characters_outside_the_grammar_around_a_program_are_a_syntax_error_for_emit_a
         assert_eq!(emit.stderr, check.stdout, "{name}: same rendering as check");
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// error paths and exit codes
-// ---------------------------------------------------------------------------------------------
 
 const BAD_PROGRAMS: [(&str, &str); 9] = [
     ("syntax_truncated", "range(0,"),
@@ -745,7 +692,6 @@ fn compile_errors_exit_one_with_empty_stdout_and_check_style_diagnostics_on_stde
                 "{name} {format}: stdout must stay empty on failure"
             );
         }
-        // human diagnostics: exactly the error lines `marigold check` prints for the file
         let human = emit_file(&["--format", "rust"], &path);
         let check = check_file(&[], &path);
         assert_eq!(check.status.code(), Some(1), "{name}");
@@ -755,7 +701,6 @@ fn compile_errors_exit_one_with_empty_stdout_and_check_style_diagnostics_on_stde
             "{name}: {}",
             s(&human.stderr)
         );
-        // json diagnostics: exactly `marigold check --format json` (same array, same key order)
         let json_err = emit_file(&["--format", "json"], &path);
         let check_json = check_file(&["--format", "json"], &path);
         let want: Vec<Value> = stdout_json(&check_json)
@@ -799,12 +744,10 @@ fn error_blocks(check_stdout: &str) -> String {
 
 #[test]
 fn human_column_after_multibyte_text_counts_scalar_values() {
-    // "é" is 2 bytes and "😀" 4 bytes / 2 UTF-16 units: the error is on the same line, after them,
-    // so rendering the column in bytes or UTF-16 units gives a different number.
     let first = "range(0, 1).write_file(\"é😀.csv\", csv)";
     let src = format!("{first} range(Colour).return");
     assert_ne!(first.len(), first.chars().count());
-    let col = first.chars().count() + 1 + 7; // a space, then `Colour` is the 7th char of `range(Colour)`
+    let col = first.chars().count() + 1 + 7;
     let path = write_temp("multibyte_column.marigold", &src);
     let want = format!("{}:1:{col}: error[undefined-enum]: ", path.display());
     let emit = emit_file(&[], &path);
@@ -816,7 +759,6 @@ fn human_column_after_multibyte_text_counts_scalar_values() {
 
 #[test]
 fn only_errors_are_printed_when_the_program_also_has_warnings() {
-    // `check` prints a warning (1:5) and an error (2:7) for this program; `emit` only the error.
     let path = write_temp("warning_and_error.marigold", "a = a\nrange(Colour).return");
     let check = check_file(&[], &path);
     assert!(
@@ -849,7 +791,6 @@ fn human_diagnostic_positions_are_line_and_scalar_column() {
     let path = write_temp("pos.marigold", src);
     let out = emit_file(&[], &path);
     assert_eq!(out.status.code(), Some(1));
-    // pest reports the failure at the start of the unparsable chunk: line 2, column 1.
     assert!(
         s(&out.stderr).starts_with(&format!("{}:2:1: error[syntax-error]:", path.display())),
         "{}",
@@ -866,8 +807,6 @@ fn human_diagnostic_positions_are_line_and_scalar_column() {
 
 #[test]
 fn human_diagnostics_include_the_help_line_literally() {
-    // `emit` and `check` share the human renderer, so comparing one with the other cannot
-    // notice a line they both drop: pin the exact text.
     let path = write_temp("help.marigold", "range(Color).return");
     let want = format!(
         "{}:1:7: error[undefined-enum]: range(Color): 'Color' is not a declared enum in this program\n  help: no enums are declared in this program\n",
@@ -1050,8 +989,6 @@ fn a_full_disk_is_exit_two_not_silent_success() {
 
 #[test]
 fn input_of_exactly_the_check_limit_gets_the_diagnostics_check_gives() {
-    // 10 MiB exactly: `check` still parses it, so `emit` must report the same (real) position, not
-    // its fallback for larger inputs.
     const MAX: usize = 10 * 1024 * 1024;
     let mut src = " ".repeat(MAX - "range(0,".len());
     src.push_str("range(0,");
@@ -1068,7 +1005,6 @@ fn input_of_exactly_the_check_limit_gets_the_diagnostics_check_gives() {
 
 #[test]
 fn oversized_valid_input_is_emitted_although_check_rejects_it() {
-    // marigold_generate has no size limit (it mirrors marigold_parse); only `check` is capped.
     let path = write_temp("huge_ws.marigold", " ".repeat(10 * 1024 * 1024 + 1));
     let out = emit_file(&[], &path);
     assert_eq!(out.status.code(), Some(0), "{:?}", out.status);
@@ -1078,8 +1014,6 @@ fn oversized_valid_input_is_emitted_although_check_rejects_it() {
 
 #[test]
 fn oversized_invalid_input_still_exits_one_and_prints_nothing_on_stdout() {
-    // `check` would answer `input-too-large` here, which would be a lie for `emit`; `emit` falls
-    // back to the parse error message. (The message embeds the whole line: ~2x the input.)
     let path = write_temp(
         "huge_bad.marigold",
         format!("{}range(0,", " ".repeat(10 * 1024 * 1024 + 1)),
@@ -1091,7 +1025,6 @@ fn oversized_invalid_input_still_exits_one_and_prints_nothing_on_stdout() {
     assert_eq!(err[0]["severity"], "error");
     assert_ne!(err[0]["code"], "input-too-large");
     assert!(err[0]["message"].as_str().unwrap().contains("Parse error"));
-    // the synthetic diagnostic has the shape and key order of `check`'s
     assert_eq!(err.as_array().unwrap().len(), 1);
     assert_eq!(err[0]["code"], "syntax-error");
     let end = 10 * 1024 * 1024 + 1 + "range(0,".len();
@@ -1102,7 +1035,6 @@ fn oversized_invalid_input_still_exits_one_and_prints_nothing_on_stdout() {
         "layout of the diagnostic differs from `check --format json`"
     );
 
-    // human format: one line with the usual prefix, at the position of the failure
     let out = emit_file(&[], &path);
     assert_eq!(out.status.code(), Some(1));
     assert!(out.stdout.is_empty());
@@ -1120,8 +1052,6 @@ fn oversized_invalid_input_still_exits_one_and_prints_nothing_on_stdout() {
 
 #[test]
 fn oversized_invalid_input_has_a_short_escaped_message() {
-    // The raw parse error embeds the offending line twice (23 MB for this file) and whatever
-    // control characters it holds: an escape sequence in the input would reach the terminal.
     let tail = "\nrange(0,\u{1b}]0;pwned\u{7}\u{1b}[31mred";
     let src = format!("{}{tail}", " ".repeat(10 * 1024 * 1024 + 1));
     let path = write_temp("huge_escape.marigold", &src);
@@ -1141,7 +1071,6 @@ fn oversized_invalid_input_has_a_short_escaped_message() {
         );
         assert!(out.stderr.ends_with(b"\n"), "{format}");
     }
-    // the position is the line:column pest names, as an offset into the file
     let json = emit_file(&["--format", "json"], &path);
     let diagnostics: Value = serde_json::from_slice(&json.stderr).unwrap();
     let human = emit_file(&[], &path);
@@ -1164,10 +1093,6 @@ fn oversized_invalid_input_has_a_short_escaped_message() {
     assert_eq!(diagnostics[0]["range"]["start"], json!(offset));
     assert_eq!(diagnostics[0]["range"]["end"], json!(offset));
 }
-
-// ---------------------------------------------------------------------------------------------
-// isolation and robustness
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn emit_has_no_side_effects_and_never_touches_the_marigold_cache() {
@@ -1253,8 +1178,6 @@ fn relative_paths_resolve_against_the_working_directory() {
 
 #[test]
 fn a_closed_stdout_pipe_is_not_a_panic() {
-    // `marigold emit big.marigold | head`: Rust ignores SIGPIPE, so a `println!`-style writer panics
-    // with "failed printing to stdout" and exits 101. The output (>64 KiB) cannot fit the pipe.
     let src: String = (0..3000)
         .map(|i| format!("x{i} = range(0, {i})\nx{i}.return\n"))
         .collect();
@@ -1297,8 +1220,6 @@ fn large_programs_round_trip_and_stay_fast() {
 
 #[test]
 fn check_is_unchanged_by_the_emit_refactor() {
-    // The detailed oracle is the baseline script (`compare_check_baseline.sh`); this is the cheap
-    // in-repo canary for the shared read_source / renderer code path.
     let path = write_temp(
         "canary.marigold",
         "range(0, 1).return\nrange(Colour).return",

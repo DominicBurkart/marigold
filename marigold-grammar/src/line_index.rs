@@ -106,8 +106,6 @@ pub struct LineCol {
 /// Distance in bytes between the character counts remembered for a long non-ASCII line.
 const STRIDE: usize = 256;
 
-// Work counter for the complexity test, in the style of `source_map.rs`: how many characters
-// the column conversions looked at, which does not depend on how loaded the machine is.
 #[cfg(test)]
 thread_local! {
     static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -262,9 +260,7 @@ impl<'a> LineIndex<'a> {
         let start = self.line_starts[line - 1];
         let relative = offset - start;
         let before_offset = match self.checkpoints(line - 1, unit) {
-            // `Bytes` and pure ASCII lines: the byte distance is the answer.
             None => relative,
-            // Count from the last checkpoint at or before the offset.
             Some(checkpoints) => {
                 let before = checkpoints.partition_point(|c| c.byte <= relative);
                 let (byte, units) = match before.checked_sub(1).map(|i| checkpoints[i]) {
@@ -308,13 +304,10 @@ impl<'a> LineIndex<'a> {
         let range = self.line_range(line)?;
         let want = col - 1;
         let Some(checkpoints) = self.checkpoints(line - 1, unit) else {
-            // The unit is the byte distance. `then` rather than `then_some`: the sum would
-            // be evaluated for `usize::MAX` columns too and overflow.
             return (want <= range.end - range.start)
                 .then(|| range.start + want)
                 .filter(|&at| self.text.is_char_boundary(at));
         };
-        // Resume from the last checkpoint that is not past the wanted column.
         let before = checkpoints.partition_point(|c| c.units(unit) <= want);
         let (mut at, mut seen) = match before.checked_sub(1).map(|i| checkpoints[i]) {
             Some(c) => (range.start + c.byte, c.units(unit)),
@@ -389,14 +382,12 @@ mod tests {
                 let mut position = None;
                 worst = worst.max(scanned(|| position = Some(index.line_col(offset, unit))));
                 let position = position.unwrap();
-                // an offset inside a character is moved back to its start
                 let start = (0..=offset).rev().find(|&i| line.is_char_boundary(i));
                 worst = worst.max(scanned(|| {
                     assert_eq!(index.offset(position.line, position.column, unit), start)
                 }));
             }
         }
-        // a stride plus the width of the character that crosses it
         assert!(worst <= STRIDE + 4, "a query scanned {worst} characters");
     }
 
@@ -406,7 +397,6 @@ mod tests {
     fn the_work_counter_is_wired_to_both_conversions() {
         let line = format!("é{}", "a".repeat(5000));
         let index = LineIndex::new(&line);
-        // an offset in the middle of the line: the scan starts at a checkpoint, never at 0
         let n = scanned(|| {
             index.line_col(3000, ColumnUnit::Chars);
         });
@@ -422,11 +412,9 @@ mod tests {
         let line = "é".repeat(10 * STRIDE);
         let index = LineIndex::new(&line);
         let checkpoints = &index.non_ascii[&0];
-        // 5120 bytes of two-byte characters: a checkpoint at every multiple of 256 below that
         assert_eq!(checkpoints.len(), 19);
         assert_eq!(checkpoints[0].byte, STRIDE);
         assert_eq!(checkpoints[0].chars, STRIDE / 2);
-        // ASCII lines get no entry at all, and short non-ASCII lines get an empty one
         let index = LineIndex::new("plain\né\nplain");
         assert_eq!(index.non_ascii.keys().copied().collect::<Vec<_>>(), [1]);
         assert!(index.non_ascii[&1].is_empty());
