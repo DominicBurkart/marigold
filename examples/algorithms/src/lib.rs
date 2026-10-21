@@ -13,24 +13,26 @@ macro_rules! program {
     };
 }
 
+#[cfg(feature = "tokio")]
+pub fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Runtime::new().expect("could not build tokio runtime")
+}
+
+#[cfg(not(feature = "tokio"))]
+pub fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("could not build tokio runtime")
+}
+
 #[cfg(all(feature = "async-std", not(feature = "tokio")))]
 pub fn block_on<F: Future>(future: F) -> F::Output {
     async_std::task::block_on(future)
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(not(all(feature = "async-std", not(feature = "tokio"))))]
 pub fn block_on<F: Future>(future: F) -> F::Output {
-    tokio::runtime::Runtime::new()
-        .expect("could not build tokio runtime")
-        .block_on(future)
-}
-
-#[cfg(not(any(feature = "tokio", feature = "async-std")))]
-pub fn block_on<F: Future>(future: F) -> F::Output {
-    tokio::runtime::Builder::new_current_thread()
-        .build()
-        .expect("could not build tokio runtime")
-        .block_on(future)
+    runtime().block_on(future)
 }
 
 pub mod gcd;
