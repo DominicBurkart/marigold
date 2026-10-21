@@ -185,6 +185,11 @@ namespaced MCP tools, also set `CODEX_TOOL_STYLE=legacy` to use
 `scripts/codex-legacy-*.json`. `VERSIONS.md` records which versions were
 tested and how.
 
+`MOCK_TURN_DELAY_MS` (or `--turn-delay-ms` on the mock) delays every reply
+after the first scripted turn. The Claude Code harness defaults it to 3000
+because Claude Code delivers LSP diagnostics asynchronously and a mock that
+answers instantly can finish the script first.
+
 ## Adding a harness
 
 Add a directory next to `claude/` with a `Containerfile`, a `run.sh` and an

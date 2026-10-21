@@ -34,6 +34,13 @@ below, all on 2026-10-21 without any scenario delay.
   four scripted turns finish before the server's diagnostics arrive. In the
   failing 2.1.6 run the log shows 4 requests, none with `undefined-fn`.
   Versions that pass 3/3 may still be racy, only less often.
+- With the per-turn delay (`MOCK_TURN_DELAY_MS`, default 3000 for Claude
+  Code, assertions unchanged), run on 2026-10-21 with 32 busy CPU loops
+  running: 2.1.6 passed 6/6 (the same load without the delay gave 5/6) and
+  2.1.5 failed 0/3. Idle machine: 2.1.16 3/3, 2.1.53 3/3, 2.1.289 3/3. With
+  the delay, the oldest reliably passing version is therefore 2.1.6 (6/6, one
+  loaded sample set); without it, 2.1.16. The delay removes the observed
+  flake but 6 runs cannot prove it is gone.
 
 ## Codex CLI (`@openai/codex`)
 
