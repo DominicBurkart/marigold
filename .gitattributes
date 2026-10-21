@@ -1,5 +1,6 @@
-# Test inputs whose exact bytes are asserted (CRLF line ends, a byte order mark, multibyte text,
-# byte offsets into generated code): never convert their line endings, whatever core.autocrlf says.
-marigold-grammar/tests/fixtures/remap/** -text
+# Golden files and test programs are compared byte for byte (line endings included, some of them
+# are CRLF on purpose): never let `core.autocrlf` or `text=auto` rewrite them on checkout.
+marigold/tests/golden/** -text
 marigold-grammar/tests/golden_rust/** -text
+marigold-grammar/tests/fixtures/remap/** -text
 marigold-grammar/tests/programs/** -text

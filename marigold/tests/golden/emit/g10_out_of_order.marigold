@@ -1,0 +1,7 @@
+range(0, 2).return
+fn f(x: i32) -> i32 { x }
+x = range(0, 3).map(f)
+struct S { a: u8 }
+enum E { A }
+x.write_file("o.csv", csv)
+range(E).return

@@ -6,12 +6,17 @@ authors = ["Dominic <code@dominic.computer>"]
 description = "The Marigold Programming Language."
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/DominicBurkart/marigold"
+# `tests/emit_cli.rs` includes a validator and reads programs from `marigold-grammar/tests`, which
+# are not part of the published `marigold` crate.
+exclude = ["tests/emit_cli.rs", "tests/golden/**"]
 
 [features]
 tokio = ["marigold-impl/tokio", "marigold-grammar/tokio"]
 async-std = ["marigold-impl/async-std", "marigold-grammar/async-std"]
 io = ["marigold-impl/io", "marigold-grammar/io", "marigold-macros/io"]
-cli = ["clap", "convert_case", "home", "serde_json"]
+# `marigold-grammar/io`: `marigold emit` must generate the code the `m!` macro generates under
+# `marigold run` (the macro is built with grammar feature `io`, see `marigold emit --help`).
+cli = ["clap", "convert_case", "home", "serde_json", "marigold-grammar/io"]
 
 [dependencies]
 anyhow = "1.0"

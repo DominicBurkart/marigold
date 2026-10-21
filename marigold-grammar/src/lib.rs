@@ -48,6 +48,10 @@
 //! - [`source_map`]: Maps the generated Rust back to the Marigold expressions it came from
 //! - [`rustc_json`]: Reads the JSON diagnostics of rustc and cargo
 //! - [`remap`]: Maps those diagnostics (and panic locations) to Marigold source ranges
+//! - [`emit`]: The JSON document (program, generated Rust and source map with line and
+//!   column positions) printed by `marigold emit --format json`
+//! - [`line_index`]: Converts byte offsets to 1-based line and column positions (bytes,
+//!   Unicode scalar values or UTF-16 units) and back
 //!
 //! ## Testing & Validation
 //!
@@ -76,6 +80,8 @@ pub use itertools;
 pub mod bound_resolution;
 pub mod complexity;
 pub mod diagnostics;
+pub mod emit;
+pub mod line_index;
 pub mod nodes;
 pub mod parser;
 mod recovery;

@@ -48,7 +48,7 @@
 //! the remapper and on character boundaries; a map that does not fit that source
 //! gives [`UnmappedReason::StaleSourceMap`].
 //!
-//! Compile-time and run-time positions use different column units; see [`ColumnUnit`].
+//! Compile-time and run-time positions use different column units; see [`TraceColumnUnit`].
 //!
 //! # Recipes
 //!
@@ -167,6 +167,8 @@
 //! ```
 
 use crate::diagnostics::ByteRange;
+pub use crate::line_index::LineCol;
+use crate::line_index::{ColumnUnit, LineIndex};
 use crate::rustc_json::{Level, RustcDiagnostic, RustcSpan};
 use crate::source_map::{GeneratedProgram, Segment, SegmentKind};
 use serde::Serialize;
@@ -175,35 +177,6 @@ use std::path::{Component, Path, PathBuf};
 /// Expansion hops followed from a span in a library file to the call site in the
 /// generated file. A longer chain is [`UnmappedReason::ForeignFile`].
 const MAX_EXPANSION_HOPS: usize = 64;
-
-/// A 1-based line and column in the Marigold source.
-///
-/// The column counts Unicode scalar values (`\r` and tabs count as one), the same
-/// convention as `marigold check`.
-///
-/// ```
-/// use marigold_grammar::marigold_generate;
-/// use marigold_grammar::remap::Remapper;
-/// use marigold_grammar::rustc_json::RustcSpan;
-///
-/// let src = "fn f(x: i32) -> i32 { x }\nrange(0, 1).map(f).write_file(\"o\", csv)";
-/// let program = marigold_generate(src).unwrap();
-/// let is_generated = |_: &str| true;
-/// let remapper = Remapper::new(&program, src, &is_generated);
-///
-/// let at = program.rust.find("{ x }").unwrap() + 2;
-/// let span: RustcSpan = serde_json::from_str(&format!(r#"{{"byte_start":{at},"byte_end":{}}}"#, at + 1)).unwrap();
-/// let start = remapper.map_span(&span).marigold.unwrap().start;
-/// assert_eq!((start.line, start.column), (1, 23));
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-#[non_exhaustive]
-pub struct LineCol {
-    /// 1-based line; only `\n` ends a line.
-    pub line: usize,
-    /// 1-based column in Unicode scalar values.
-    pub column: usize,
-}
 
 /// Where in the Marigold source a span was mapped to.
 ///
@@ -221,10 +194,10 @@ pub struct LineCol {
 /// let remapper = Remapper::new(&program, src, &is_generated);
 ///
 /// // Line 1 of the generated file is the preamble: glue, nothing to map to.
-/// assert!(remapper.locate("gen.rs", 1, None, marigold_grammar::remap::ColumnUnit::Utf8Bytes).marigold.is_none());
+/// assert!(remapper.locate("gen.rs", 1, None, marigold_grammar::remap::TraceColumnUnit::Bytes).marigold.is_none());
 /// let at = program.rust.find("{ x }").unwrap() + 2;
 /// let line = program.rust[..at].matches('\n').count() + 1;
-/// let loc = remapper.locate("gen.rs", line, None, marigold_grammar::remap::ColumnUnit::Utf8Bytes).marigold.unwrap();
+/// let loc = remapper.locate("gen.rs", line, None, marigold_grammar::remap::TraceColumnUnit::Bytes).marigold.unwrap();
 /// assert_eq!((loc.range.start, loc.range.end), (0, 25));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -242,7 +215,7 @@ pub struct MarigoldLocation {
 ///
 /// ```
 /// use marigold_grammar::marigold_generate;
-/// use marigold_grammar::remap::{ColumnUnit, Remapper};
+/// use marigold_grammar::remap::{TraceColumnUnit, Remapper};
 /// use marigold_grammar::source_map::SegmentKind;
 ///
 /// let src = "fn f(x: i32) -> i32 { x }";
@@ -250,7 +223,7 @@ pub struct MarigoldLocation {
 /// let is_generated = |_: &str| true;
 /// let remapper = Remapper::new(&program, src, &is_generated);
 /// let line = program.rust[..program.rust.find("const fn").unwrap()].matches('\n').count() + 1;
-/// let segment = remapper.locate("x.rs", line, None, ColumnUnit::ScalarValues).segment.unwrap();
+/// let segment = remapper.locate("x.rs", line, None, TraceColumnUnit::Chars).segment.unwrap();
 /// assert_eq!((segment.kind, segment.expr_index, segment.name.as_deref()), (SegmentKind::Function, 0, Some("f")));
 /// assert_eq!(program.map.segments()[segment.index].kind, SegmentKind::Function);
 /// ```
@@ -601,14 +574,20 @@ impl MappedDiagnostic {
     }
 }
 
-/// The unit of a column number. Three of them are in use and they must not be mixed.
+/// The unit of a column in a run-time location. Three of them are in use and they must not
+/// be mixed.
+///
+/// [`Chars`](Self::Chars) and [`Bytes`](Self::Bytes) are the units of
+/// [`crate::line_index::ColumnUnit`] (same names, same JSON spelling: `"chars"`, `"bytes"`);
+/// [`DisplayWidth`](Self::DisplayWidth) exists only here, because it needs the width table
+/// that [`Remapper::locate`] describes and is only what panic messages print.
 ///
 /// | where the column comes from | unit |
 /// |---|---|
-/// | rustc's JSON diagnostics (`column_start`, ...) | [`ScalarValues`](Self::ScalarValues) |
-/// | the `column!()` macro | [`ScalarValues`](Self::ScalarValues) |
+/// | rustc's JSON diagnostics (`column_start`, ...) | [`Chars`](Self::Chars) |
+/// | the `column!()` macro | [`Chars`](Self::Chars) |
 /// | the panic message `panicked at src/gen.rs:4:43`, `Location::caller().column()` | [`DisplayWidth`](Self::DisplayWidth) |
-/// | a backtrace frame `at ./src/gen.rs:4:48` (DWARF) | [`Utf8Bytes`](Self::Utf8Bytes) |
+/// | a backtrace frame `at ./src/gen.rs:4:48` (DWARF) | [`Bytes`](Self::Bytes) |
 ///
 /// On a line with text outside ASCII they disagree: for a `panic!` after `"héllo→日本"`
 /// the scalar column is 41, the display column 43 and the byte column 48. Rows were
@@ -617,28 +596,28 @@ impl MappedDiagnostic {
 /// are treated.
 ///
 /// ```
-/// use marigold_grammar::remap::ColumnUnit;
+/// use marigold_grammar::remap::TraceColumnUnit;
 ///
-/// assert_eq!(serde_json::to_string(&ColumnUnit::Utf8Bytes).unwrap(), "\"utf8_bytes\"");
+/// assert_eq!(serde_json::to_string(&TraceColumnUnit::Bytes).unwrap(), "\"bytes\"");
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum ColumnUnit {
+pub enum TraceColumnUnit {
     /// Unicode scalar values (`char`s); a tab is one.
-    ScalarValues,
+    Chars,
     /// Terminal display width: most characters 1, East Asian wide characters and emoji 2,
     /// combining marks and zero-width characters 0, a tab 4.
     DisplayWidth,
     /// UTF-8 bytes.
-    Utf8Bytes,
+    Bytes,
 }
 
 /// A source location found in text such as a panic message or a backtrace.
 ///
 /// ```
 /// use marigold_grammar::marigold_generate;
-/// use marigold_grammar::remap::{ColumnUnit, Remapper};
+/// use marigold_grammar::remap::{TraceColumnUnit, Remapper};
 ///
 /// let src = "range(0, 1).return";
 /// let program = marigold_generate(src).unwrap();
@@ -647,7 +626,7 @@ pub enum ColumnUnit {
 /// let text = "thread 'main' panicked at src/gen.rs:1:1:\nboom";
 /// let hit = &remapper.remap_trace(text)[0];
 /// assert_eq!(&text[hit.token.start..hit.token.end], "src/gen.rs:1:1");
-/// assert_eq!((hit.line, hit.column, hit.unit), (1, Some(1), ColumnUnit::DisplayWidth));
+/// assert_eq!((hit.line, hit.column, hit.unit), (1, Some(1), TraceColumnUnit::DisplayWidth));
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
@@ -661,7 +640,7 @@ pub struct TracedLocation {
     /// 1-based column, if the text had one.
     pub column: Option<usize>,
     /// The unit the column is in, from the context it was found in.
-    pub unit: ColumnUnit,
+    pub unit: TraceColumnUnit,
     /// The result of [`Remapper::locate`] for this location.
     pub mapped: Located,
 }
@@ -779,7 +758,7 @@ fn count(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>) {
 ///
 /// ```
 /// use marigold_grammar::marigold_generate;
-/// use marigold_grammar::remap::{ColumnUnit, Precision, Remapper};
+/// use marigold_grammar::remap::{TraceColumnUnit, Precision, Remapper};
 ///
 /// let src = "fn f(x: i32) -> i32 { x }\nrange(0, 1).map(f).write_file(\"o\", csv)";
 /// let program = marigold_generate(src).unwrap();
@@ -790,7 +769,7 @@ fn count(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>) {
 /// let at = program.rust.find("{ x }").unwrap() + 2;
 /// let line = program.rust[..at].matches('\n').count() + 1;
 /// let column = at - program.rust[..at].rfind('\n').map_or(0, |i| i + 1) + 1;
-/// let mapped = remapper.locate("./src/gen.rs", line, Some(column), ColumnUnit::ScalarValues);
+/// let mapped = remapper.locate("./src/gen.rs", line, Some(column), TraceColumnUnit::Chars);
 /// assert_eq!(mapped.precision, Precision::Exact);
 /// ```
 pub struct Remapper<'a> {
@@ -805,10 +784,10 @@ pub struct Remapper<'a> {
     prefix_tail: String,
     /// Usable segments in generated order.
     slots: Vec<Slot>,
-    /// Byte offsets where the lines of the generated program start.
-    rust_lines: Vec<usize>,
-    /// Byte offsets where the lines of the Marigold source start.
-    source_lines: Vec<usize>,
+    /// The lines of the generated program.
+    rust_index: LineIndex<'a>,
+    /// The lines of the Marigold source.
+    source_index: LineIndex<'a>,
     /// Segments whose generated range does not fit the program.
     unusable: usize,
 }
@@ -820,6 +799,12 @@ impl<'a> Remapper<'a> {
     /// `program.rust` exactly the text of the generated file (after
     /// [`with_prefix`](Self::with_prefix)): the checks described in the
     /// [module documentation](self) detect a mismatch but cannot repair it.
+    ///
+    /// The generated code depends on the cargo features of this crate that were compiled in
+    /// (`io`, `tokio`, `async-std`; `marigold emit --format json` records them under
+    /// `features`). The program and map given here must come from the same features as the
+    /// code that was compiled, for example `["io"]` for the command line tool; a map from
+    /// other features describes other code, and shows up as stale spans.
     ///
     /// `is_generated` decides whether a file name, exactly as rustc printed it
     /// (`src/gen.rs`, `./src/gen.rs`, an absolute path), is the generated file; see
@@ -887,8 +872,8 @@ impl<'a> Remapper<'a> {
             prefix_newlines: 0,
             prefix_tail: String::new(),
             slots,
-            rust_lines: line_starts(rust),
-            source_lines: line_starts(source),
+            rust_index: LineIndex::new(rust),
+            source_index: LineIndex::new(source),
             unusable,
         }
     }
@@ -1136,7 +1121,7 @@ impl<'a> Remapper<'a> {
     ///
     /// ```
     /// use marigold_grammar::marigold_generate;
-    /// use marigold_grammar::remap::{ColumnUnit, Precision, Remapper};
+    /// use marigold_grammar::remap::{TraceColumnUnit, Precision, Remapper};
     ///
     /// let src = "fn f(x: i32) -> i32 { x }\nrange(0, 1).map(f).write_file(\"o\", csv)";
     /// let program = marigold_generate(src).unwrap();
@@ -1146,20 +1131,20 @@ impl<'a> Remapper<'a> {
     /// let at = program.rust.find("{ x }").unwrap() + 2;
     /// let line_start = program.rust[..at].rfind('\n').map_or(0, |i| i + 1);
     /// let line = program.rust[..at].matches('\n').count() + 1;
-    /// let located = remapper.locate("src/gen.rs", line, Some(at - line_start + 1), ColumnUnit::Utf8Bytes);
+    /// let located = remapper.locate("src/gen.rs", line, Some(at - line_start + 1), TraceColumnUnit::Bytes);
     /// assert_eq!(located.precision, Precision::Exact);
     /// let range = located.marigold.unwrap().range;
     /// assert_eq!(range.start, 22); // the position of `x` in the Marigold function
     /// assert_eq!(range.start, range.end);
     ///
-    /// assert!(remapper.locate("src/other.rs", line, None, ColumnUnit::Utf8Bytes).marigold.is_none());
+    /// assert!(remapper.locate("src/other.rs", line, None, TraceColumnUnit::Bytes).marigold.is_none());
     /// ```
     pub fn locate(
         &self,
         file: &str,
         line: usize,
         column: Option<usize>,
-        unit: ColumnUnit,
+        unit: TraceColumnUnit,
     ) -> Located {
         let outcome = if (self.is_generated)(file) {
             self.place_location(line, column.unwrap_or(0), unit)
@@ -1188,7 +1173,7 @@ impl<'a> Remapper<'a> {
     /// assert_eq!(&src[range.start..range.end], "fn f(x: i32) -> i32 { x }");
     /// ```
     pub fn locate_line(&self, file: &str, line: usize) -> Located {
-        self.locate(file, line, None, ColumnUnit::ScalarValues)
+        self.locate(file, line, None, TraceColumnUnit::Chars)
     }
 
     /// Find every `file:line` and `file:line:column` in `text` whose file is the
@@ -1198,15 +1183,15 @@ impl<'a> Remapper<'a> {
     /// A file is the text before the location, back to the nearest whitespace, quote,
     /// `(`, `[`, `<` or backtick; a path that contains a space is therefore not
     /// recognised, rather than guessed. The column unit follows the context: the `at`
-    /// line under a numbered backtrace frame (`   2: name`) is [`ColumnUnit::Utf8Bytes`]
+    /// line under a numbered backtrace frame (`   2: name`) is [`TraceColumnUnit::Bytes`]
     /// (DWARF), and anything else, `panicked at` and an `at file:line:col` in a message the
-    /// program formatted from a `Location`, is [`ColumnUnit::DisplayWidth`]. The
+    /// program formatted from a `Location`, is [`TraceColumnUnit::DisplayWidth`]. The
     /// context is a guess from the text, so a program that prints its own numbered lines
     /// followed by an `at` line can still be misread.
     ///
     /// ```
     /// use marigold_grammar::marigold_generate;
-    /// use marigold_grammar::remap::{ColumnUnit, Remapper};
+    /// use marigold_grammar::remap::{TraceColumnUnit, Remapper};
     ///
     /// let src = "range(0, 1).return";
     /// let program = marigold_generate(src).unwrap();
@@ -1217,8 +1202,8 @@ impl<'a> Remapper<'a> {
     /// let hits = remapper.remap_trace(stderr);
     /// let units: Vec<_> = hits.iter().map(|h| (h.file.as_str(), h.line, h.column, h.unit)).collect();
     /// assert_eq!(units, [
-    ///     ("src/gen.rs", 1, Some(1), ColumnUnit::DisplayWidth),
-    ///     ("./src/gen.rs", 2, Some(3), ColumnUnit::Utf8Bytes),
+    ///     ("src/gen.rs", 1, Some(1), TraceColumnUnit::DisplayWidth),
+    ///     ("./src/gen.rs", 2, Some(3), TraceColumnUnit::Bytes),
     /// ]);
     /// ```
     pub fn remap_trace(&self, text: &str) -> Vec<TracedLocation> {
@@ -1260,9 +1245,9 @@ impl<'a> Remapper<'a> {
                     .strip_suffix("at")
                     .is_some_and(is_frame_header_before);
                 let unit = if frame {
-                    ColumnUnit::Utf8Bytes
+                    TraceColumnUnit::Bytes
                 } else {
-                    ColumnUnit::DisplayWidth
+                    TraceColumnUnit::DisplayWidth
                 };
                 hits.push(TracedLocation {
                     token: ByteRange {
@@ -1384,11 +1369,12 @@ impl Remapper<'_> {
 
     /// Line and column in the Marigold source of an offset on a character boundary.
     fn source_line_col(&self, offset: usize) -> LineCol {
-        let line = line_index(&self.source_lines, offset);
-        LineCol {
-            line: line + 1,
-            column: self.source[self.source_lines[line]..offset].chars().count() + 1,
-        }
+        self.source_index.line_col(offset, ColumnUnit::Chars)
+    }
+
+    /// The 0-based line of the generated program that holds `offset`.
+    fn rust_line(&self, offset: usize) -> usize {
+        self.rust_index.line_col(offset, ColumnUnit::Chars).line - 1
     }
 
     // --- checksum (step 3) ---
@@ -1399,9 +1385,7 @@ impl Remapper<'_> {
 
     /// 1-based scalar column in the generated *file* of a program offset on `line`.
     fn generated_column(&self, line: usize, offset: usize) -> usize {
-        let in_program = self.program.rust[self.rust_lines[line]..offset]
-            .chars()
-            .count();
+        let in_program = self.rust_index.line_col(offset, ColumnUnit::Chars).column - 1;
         let before = if line == 0 {
             self.prefix_tail.chars().count()
         } else {
@@ -1414,11 +1398,14 @@ impl Remapper<'_> {
     /// program (a `\n` follows) or may continue into text after the program.
     fn generated_line(&self, line: usize) -> (&str, bool) {
         let rust = self.program.rust.as_str();
-        let start = self.rust_lines[line];
-        match self.rust_lines.get(line + 1) {
-            Some(&next) => (&rust[start..next - 1], true),
-            None => (&rust[start..], false),
-        }
+        let range = self
+            .rust_index
+            .line_range(line + 1)
+            .expect("callers pass a line of the program");
+        (
+            &rust[range.start..range.end],
+            line + 1 < self.rust_index.line_count(),
+        )
     }
 
     /// Whether rustc's reported line text is the generated file's line `line`.
@@ -1440,10 +1427,7 @@ impl Remapper<'_> {
 
     /// Step 3: do rustc's line, column and text agree with the generated code at `[a, b)`?
     fn is_consistent(&self, s: &RustcSpan, a: usize, b: usize) -> bool {
-        let (first, last) = (
-            line_index(&self.rust_lines, a),
-            line_index(&self.rust_lines, b),
-        );
+        let (first, last) = (self.rust_line(a), self.rust_line(b));
         let (column_a, column_b) = (
             self.generated_column(first, a),
             self.generated_column(last, b),
@@ -1611,18 +1595,17 @@ impl Remapper<'_> {
         &self,
         line: usize,
         column: usize,
-        unit: ColumnUnit,
+        unit: TraceColumnUnit,
     ) -> Result<Placement, UnmappedReason> {
         let outside = UnmappedReason::OutsideGeneratedRegion;
         let index = line.checked_sub(1 + self.prefix_newlines).ok_or(outside)?;
         // A line that starts at the end of the program (after its final `\n`) holds only
         // whatever follows the program in the file.
-        let start = *self.rust_lines.get(index).ok_or(outside)?;
+        let range = self.rust_index.line_range(index + 1).ok_or(outside)?;
+        let (start, end) = (range.start, range.end);
         if start >= self.program.rust.len() {
             return Err(outside);
         }
-        let (content, _) = self.generated_line(index);
-        let end = start + content.len();
         // The text of the line that column counting sees: all of it, including a `\r`.
         let whole_line = &self.program.rust[start..end];
         let whole_line_placement = || {
@@ -1689,23 +1672,6 @@ fn is_frame_header_before(before: &str) -> bool {
     let header = above.rsplit('\n').next().unwrap_or("").trim_start();
     let digits = header.bytes().take_while(u8::is_ascii_digit).count();
     digits > 0 && header.as_bytes().get(digits) == Some(&b':')
-}
-
-/// Byte offsets where the lines of `text` start; always begins with 0.
-fn line_starts(text: &str) -> Vec<usize> {
-    let mut starts = vec![0];
-    starts.extend(
-        text.bytes()
-            .enumerate()
-            .filter(|&(_, b)| b == b'\n')
-            .map(|(i, _)| i + 1),
-    );
-    starts
-}
-
-/// The 0-based line containing `offset`.
-fn line_index(starts: &[usize], offset: usize) -> usize {
-    search(starts, |&s| s <= offset) - 1
 }
 
 fn source_range_fits(source: &str, range: ByteRange) -> bool {
@@ -1821,11 +1787,11 @@ pub(crate) fn display_width_or_1(c: char) -> usize {
 }
 
 /// The width of `c` in `unit`, and whether it is trusted.
-fn char_width(c: char, unit: ColumnUnit) -> (usize, bool) {
+fn char_width(c: char, unit: TraceColumnUnit) -> (usize, bool) {
     match unit {
-        ColumnUnit::ScalarValues => (1, true),
-        ColumnUnit::Utf8Bytes => (c.len_utf8(), true),
-        ColumnUnit::DisplayWidth => match display_width(c) {
+        TraceColumnUnit::Chars => (1, true),
+        TraceColumnUnit::Bytes => (c.len_utf8(), true),
+        TraceColumnUnit::DisplayWidth => match display_width(c) {
             Some(w) => (w, true),
             None => (1, false),
         },
@@ -1833,7 +1799,7 @@ fn char_width(c: char, unit: ColumnUnit) -> (usize, bool) {
 }
 
 /// The width of `text` in `unit`, and whether every character's width is trusted.
-fn measure(text: &str, unit: ColumnUnit) -> (usize, bool) {
+fn measure(text: &str, unit: TraceColumnUnit) -> (usize, bool) {
     text.chars().fold((0, true), |(total, known), c| {
         let (w, ok) = char_width(c, unit);
         (total + w, known && ok)
@@ -1843,7 +1809,11 @@ fn measure(text: &str, unit: ColumnUnit) -> (usize, bool) {
 /// The byte offset in `line` that is `wanted` units from its start, and whether the widths
 /// of the characters before it are trusted. Zero-width characters at the position are skipped.
 /// A position inside a character, or past the end of the line, is an invalid span.
-fn advance(line: &str, wanted: usize, unit: ColumnUnit) -> (Result<usize, UnmappedReason>, bool) {
+fn advance(
+    line: &str,
+    wanted: usize,
+    unit: TraceColumnUnit,
+) -> (Result<usize, UnmappedReason>, bool) {
     let mut width = 0;
     let mut offset = 0;
     let mut known = true;
@@ -2026,46 +1996,55 @@ mod tests {
             assert_eq!(display_width(c), None, "U+{:04X}", c as u32);
         }
         // units that do not depend on a table
-        assert_eq!(char_width('日', ColumnUnit::ScalarValues), (1, true));
-        assert_eq!(char_width('日', ColumnUnit::Utf8Bytes), (3, true));
-        assert_eq!(char_width('\u{0f00}', ColumnUnit::DisplayWidth), (1, false));
+        assert_eq!(char_width('日', TraceColumnUnit::Chars), (1, true));
+        assert_eq!(char_width('日', TraceColumnUnit::Bytes), (3, true));
+        assert_eq!(
+            char_width('\u{0f00}', TraceColumnUnit::DisplayWidth),
+            (1, false)
+        );
     }
 
     #[test]
     fn advance_converts_columns_and_rejects_positions_inside_characters() {
         let line = "a日\u{0301}b";
         // scalar: a=0 日=1 U+0301=4 b=6
-        assert_eq!(advance(line, 0, ColumnUnit::ScalarValues), (Ok(0), true));
-        assert_eq!(advance(line, 2, ColumnUnit::ScalarValues), (Ok(4), true));
-        assert_eq!(advance(line, 4, ColumnUnit::ScalarValues), (Ok(7), true));
+        assert_eq!(advance(line, 0, TraceColumnUnit::Chars), (Ok(0), true));
+        assert_eq!(advance(line, 2, TraceColumnUnit::Chars), (Ok(4), true));
+        assert_eq!(advance(line, 4, TraceColumnUnit::Chars), (Ok(7), true));
         assert_eq!(
-            advance(line, 5, ColumnUnit::ScalarValues),
+            advance(line, 5, TraceColumnUnit::Chars),
             (Err(UnmappedReason::InvalidSpan), true)
         );
         // bytes: 日 occupies 1..4
-        assert_eq!(advance(line, 4, ColumnUnit::Utf8Bytes), (Ok(4), true));
+        assert_eq!(advance(line, 4, TraceColumnUnit::Bytes), (Ok(4), true));
         assert_eq!(
-            advance(line, 2, ColumnUnit::Utf8Bytes),
+            advance(line, 2, TraceColumnUnit::Bytes),
             (Err(UnmappedReason::InvalidSpan), true)
         );
         // display: a=1, 日=2, U+0301=0, b=1; width 3 sits after 日 and after the combining mark
-        assert_eq!(advance(line, 3, ColumnUnit::DisplayWidth), (Ok(6), true));
-        assert_eq!(advance(line, 4, ColumnUnit::DisplayWidth), (Ok(7), true));
+        assert_eq!(
+            advance(line, 3, TraceColumnUnit::DisplayWidth),
+            (Ok(6), true)
+        );
+        assert_eq!(
+            advance(line, 4, TraceColumnUnit::DisplayWidth),
+            (Ok(7), true)
+        );
         // the middle of a wide character
         assert_eq!(
-            advance(line, 2, ColumnUnit::DisplayWidth),
+            advance(line, 2, TraceColumnUnit::DisplayWidth),
             (Err(UnmappedReason::InvalidSpan), true)
         );
         // a width that is not in the table is reported as unknown
-        assert!(!advance("\u{0f00}x", 1, ColumnUnit::DisplayWidth).1);
+        assert!(!advance("\u{0f00}x", 1, TraceColumnUnit::DisplayWidth).1);
         // the end of the line is a valid position, one past it is not
-        assert_eq!(advance("ab", 2, ColumnUnit::ScalarValues), (Ok(2), true));
+        assert_eq!(advance("ab", 2, TraceColumnUnit::Chars), (Ok(2), true));
         assert_eq!(
-            advance("ab", 3, ColumnUnit::ScalarValues),
+            advance("ab", 3, TraceColumnUnit::Chars),
             (Err(UnmappedReason::InvalidSpan), true)
         );
         assert_eq!(
-            advance("ab", usize::MAX, ColumnUnit::Utf8Bytes),
+            advance("ab", usize::MAX, TraceColumnUnit::Bytes),
             (Err(UnmappedReason::InvalidSpan), true)
         );
     }
@@ -2273,13 +2252,13 @@ mod tests {
             let remapper = Remapper::new(&program, &src, &is_generated);
             let segment = &program.map.segments()[n / 2];
             let at = segment.generated.end - 3;
-            // (span, number of searches): two line lookups for the checksum, then for a span
-            // the two ends of the overlapping slots and the container, for a point the
-            // innermost slot, and two line lookups in the Marigold source for the range.
+            // (span, number of searches among the slots): for a span the two ends of the
+            // overlapping slots and the container, for a point the innermost slot. The lines
+            // are looked up in `LineIndex`, whose cost is pinned by its own tests.
             for ((a, b), expected) in [
-                ((at, at + 1), 7),
-                ((at, at), 5),
-                ((at, segment.generated.end + 1), 7),
+                ((at, at + 1), 3),
+                ((at, at), 1),
+                ((at, segment.generated.end + 1), 3),
             ] {
                 clear_searches();
                 let mapped = remapper.map_span(&span(a, b));
@@ -2293,7 +2272,7 @@ mod tests {
                     );
                 }
                 // the searches really run over the whole index, not over a small part of it
-                assert!(log.iter().any(|&(len, _)| len >= n), "n={n}: {log:?}");
+                assert!(log.iter().all(|&(len, _)| len >= n), "n={n}: {log:?}");
             }
         }
     }

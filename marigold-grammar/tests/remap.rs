@@ -1801,12 +1801,12 @@ fn e01_panic_location_uses_display_columns_and_backtrace_uses_byte_columns() {
     let stderr = read("r01_panic_in_fn", "run.stderr.txt");
     assert!(stderr.contains("panicked at src/gen.rs:4:43:"));
     assert!(stderr.contains("at ./src/gen.rs:4:48"));
-    let by_display = r.locate("src/gen.rs", 4, Some(43), ColumnUnit::DisplayWidth);
-    let by_bytes = r.locate("./src/gen.rs", 4, Some(48), ColumnUnit::Utf8Bytes);
-    let by_scalar = r.locate("src/gen.rs", 4, Some(41), ColumnUnit::ScalarValues);
+    let by_display = r.locate("src/gen.rs", 4, Some(43), TraceColumnUnit::DisplayWidth);
+    let by_bytes = r.locate("./src/gen.rs", 4, Some(48), TraceColumnUnit::Bytes);
+    let by_scalar = r.locate("src/gen.rs", 4, Some(41), TraceColumnUnit::Chars);
     // (`./src/gen.rs` is not the test's generated name: the byte one is mapped via the matching name)
     assert_unmapped(&by_bytes, UnmappedReason::ForeignFile);
-    let by_bytes = r.locate("src/gen.rs", 4, Some(48), ColumnUnit::Utf8Bytes);
+    let by_bytes = r.locate("src/gen.rs", 4, Some(48), TraceColumnUnit::Bytes);
     for s in [&by_display, &by_bytes, &by_scalar] {
         assert_mapped(&fx.src, s, Exact, "", (2, 41));
         assert_eq!(
@@ -1817,7 +1817,7 @@ fn e01_panic_location_uses_display_columns_and_backtrace_uses_byte_columns() {
     let want = fx.src.find("panic!").unwrap();
     assert_eq!(by_display.marigold.as_ref().unwrap().range.start, want);
     // using the WRONG unit lands on a different token (this is the bug the unit parameter prevents)
-    let wrong = r.locate("src/gen.rs", 4, Some(43), ColumnUnit::ScalarValues);
+    let wrong = r.locate("src/gen.rs", 4, Some(43), TraceColumnUnit::Chars);
     assert_ne!(wrong.marigold.as_ref().unwrap().range.start, want);
 }
 
@@ -1872,7 +1872,7 @@ fn e02_display_width_table_matches_rustc_for_verified_characters() {
             "gen.rs",
             line_no,
             Some(display_col),
-            ColumnUnit::DisplayWidth,
+            TraceColumnUnit::DisplayWidth,
         );
         let want = src.find(" x }").unwrap() + 1;
         let got = m.marigold.as_ref().map(|l| l.range.start);
@@ -1886,17 +1886,17 @@ fn e03_crlf_source_runtime_location_and_line_only_lookup() {
     remapper!(fx, r);
     let stderr = read("r02_index_oob_crlf", "run.stderr.txt");
     assert!(stderr.contains("panicked at src/gen.rs:5:27:"));
-    let m = r.locate("src/gen.rs", 5, Some(27), ColumnUnit::DisplayWidth);
+    let m = r.locate("src/gen.rs", 5, Some(27), TraceColumnUnit::DisplayWidth);
     assert_eq!(m.precision, Exact);
     assert_eq!(slice(&fx.src, &m), "");
     let loc = m.marigold.as_ref().unwrap();
     assert_eq!((loc.start.line, loc.start.column), (3, 27));
     assert_eq!(&fx.src[loc.range.start..loc.range.start + 4], "v[i]");
     // line only (tracing metadata has no column): the whole line, attributed to the function
-    let m = r.locate("src/gen.rs", 5, None, ColumnUnit::ScalarValues);
+    let m = r.locate("src/gen.rs", 5, None, TraceColumnUnit::Chars);
     assert_eq!(m.precision, Exact);
     assert!(slice(&fx.src, &m).contains("v[i]") && !slice(&fx.src, &m).contains('\r'));
-    let m0 = r.locate("src/gen.rs", 5, Some(0), ColumnUnit::ScalarValues);
+    let m0 = r.locate("src/gen.rs", 5, Some(0), TraceColumnUnit::Chars);
     assert_eq!(m0.marigold, m.marigold, "column 0 means unknown");
 }
 
@@ -1905,26 +1905,26 @@ fn e04_runtime_lines_in_glue_wrapper_and_beyond_the_file() {
     let fx = load("r01_panic_in_fn");
     remapper!(fx, r);
     // the closure/future frame `gen.rs:85:127` of the real trace is the `all_streams.collect()` glue
-    let m = r.locate("src/gen.rs", 85, Some(127), ColumnUnit::Utf8Bytes);
+    let m = r.locate("src/gen.rs", 85, Some(127), TraceColumnUnit::Bytes);
     assert_unmapped(&m, UnmappedReason::Glue);
     assert_unmapped(
-        &r.locate("src/gen.rs", 1, Some(1), ColumnUnit::Utf8Bytes),
+        &r.locate("src/gen.rs", 1, Some(1), TraceColumnUnit::Bytes),
         UnmappedReason::Glue,
     );
     assert_unmapped(
-        &r.locate("src/gen.rs", 10_000, Some(1), ColumnUnit::Utf8Bytes),
+        &r.locate("src/gen.rs", 10_000, Some(1), TraceColumnUnit::Bytes),
         UnmappedReason::OutsideGeneratedRegion,
     );
     assert_unmapped(
-        &r.locate("src/gen.rs", 0, Some(1), ColumnUnit::Utf8Bytes),
+        &r.locate("src/gen.rs", 0, Some(1), TraceColumnUnit::Bytes),
         UnmappedReason::OutsideGeneratedRegion,
     );
     assert_unmapped(
-        &r.locate("src/gen.rs", 4, Some(10_000), ColumnUnit::Utf8Bytes),
+        &r.locate("src/gen.rs", 4, Some(10_000), TraceColumnUnit::Bytes),
         UnmappedReason::InvalidSpan,
     );
     assert_unmapped(
-        &r.locate("src/main.rs", 3, Some(24), ColumnUnit::Utf8Bytes),
+        &r.locate("src/main.rs", 3, Some(24), TraceColumnUnit::Bytes),
         UnmappedReason::ForeignFile,
     );
     // usize extremes
@@ -1936,9 +1936,9 @@ fn e04_runtime_lines_in_glue_wrapper_and_beyond_the_file() {
         (3, Some(usize::MAX / 2)),
         (usize::MAX, None),
     ] {
-        let _ = r.locate("src/gen.rs", l, c, ColumnUnit::DisplayWidth);
-        let _ = r.locate("src/gen.rs", l, c, ColumnUnit::ScalarValues);
-        let _ = r.locate("src/gen.rs", l, c, ColumnUnit::Utf8Bytes);
+        let _ = r.locate("src/gen.rs", l, c, TraceColumnUnit::DisplayWidth);
+        let _ = r.locate("src/gen.rs", l, c, TraceColumnUnit::Chars);
+        let _ = r.locate("src/gen.rs", l, c, TraceColumnUnit::Bytes);
     }
 }
 
@@ -1949,23 +1949,20 @@ fn e05_runtime_columns_on_the_prefixed_first_line() {
     let is_gen = |f: &str| f == "gen.rs";
     let r = Remapper::new(&program, &src, &is_gen).with_prefix(prefix);
     // line 1 of the file = prefix + `async {`
-    let m = r.locate("gen.rs", 1, Some(1), ColumnUnit::ScalarValues);
+    let m = r.locate("gen.rs", 1, Some(1), TraceColumnUnit::Chars);
     assert_unmapped(&m, UnmappedReason::OutsideGeneratedRegion);
     let after = |unit, col| r.locate("gen.rs", 1, Some(col), unit);
+    assert_unmapped(&after(TraceColumnUnit::Chars, 3 + 1), UnmappedReason::Glue);
     assert_unmapped(
-        &after(ColumnUnit::ScalarValues, 3 + 1),
+        &after(TraceColumnUnit::Bytes, prefix.len() + 1),
         UnmappedReason::Glue,
     );
     assert_unmapped(
-        &after(ColumnUnit::Utf8Bytes, prefix.len() + 1),
+        &after(TraceColumnUnit::DisplayWidth, 2 * 2 + 1 + 1),
         UnmappedReason::Glue,
     );
     assert_unmapped(
-        &after(ColumnUnit::DisplayWidth, 2 * 2 + 1 + 1),
-        UnmappedReason::Glue,
-    );
-    assert_unmapped(
-        &after(ColumnUnit::Utf8Bytes, prefix.len()),
+        &after(TraceColumnUnit::Bytes, prefix.len()),
         UnmappedReason::OutsideGeneratedRegion,
     );
 }
@@ -1977,16 +1974,16 @@ fn e06_trace_text_scanning_finds_panic_and_backtrace_locations() {
     let r = Remapper::new(&fx.program, &fx.src, &is_gen);
     let stderr = read("r01_panic_in_fn", "run.stderr.txt");
     let hits = r.remap_trace(&stderr);
-    let key: Vec<(&str, usize, Option<usize>, ColumnUnit)> = hits
+    let key: Vec<(&str, usize, Option<usize>, TraceColumnUnit)> = hits
         .iter()
         .map(|h| (h.file.as_str(), h.line, h.column, h.unit))
         .collect();
     assert_eq!(
         key,
         [
-            ("src/gen.rs", 4, Some(43), ColumnUnit::DisplayWidth),
-            ("./src/gen.rs", 4, Some(48), ColumnUnit::Utf8Bytes),
-            ("./src/gen.rs", 85, Some(127), ColumnUnit::Utf8Bytes),
+            ("src/gen.rs", 4, Some(43), TraceColumnUnit::DisplayWidth),
+            ("./src/gen.rs", 4, Some(48), TraceColumnUnit::Bytes),
+            ("./src/gen.rs", 85, Some(127), TraceColumnUnit::Bytes),
         ]
     );
     for h in &hits {
@@ -2059,11 +2056,11 @@ fn e08_display_width_beyond_the_verified_table_never_claims_exact() {
     let line = p.rust[..off].matches('\n').count() + 1;
     let is_gen = |f: &str| f == "gen.rs";
     let r = Remapper::new(&p, src, &is_gen);
-    let m = r.locate("gen.rs", line, Some(col), ColumnUnit::DisplayWidth);
+    let m = r.locate("gen.rs", line, Some(col), TraceColumnUnit::DisplayWidth);
     assert_eq!(m.precision, Seg, "{m:?}");
     // the exact units stay exact on the same line
     assert_eq!(
-        r.locate("gen.rs", line, Some(col), ColumnUnit::ScalarValues)
+        r.locate("gen.rs", line, Some(col), TraceColumnUnit::Chars)
             .precision,
         Exact
     );
@@ -2072,7 +2069,7 @@ fn e08_display_width_beyond_the_verified_table_never_claims_exact() {
             "gen.rs",
             line,
             Some(off - line_start + 1),
-            ColumnUnit::Utf8Bytes
+            TraceColumnUnit::Bytes
         )
         .precision,
         Exact
@@ -2383,8 +2380,8 @@ fn h04_corrupted_maps_degrade_to_unmapped_never_to_a_wrong_range() {
         serde_json::from_value(json!({"file_name": "gen.rs", "byte_start": 0, "byte_end": 0}))
             .unwrap();
     assert_unmapped(&r.map_span(&empty), UnmappedReason::Glue);
-    let _ = r.locate("gen.rs", 1, Some(1), ColumnUnit::Utf8Bytes);
-    let _ = r.locate("gen.rs", 1, None, ColumnUnit::Utf8Bytes);
+    let _ = r.locate("gen.rs", 1, Some(1), TraceColumnUnit::Bytes);
+    let _ = r.locate("gen.rs", 1, None, TraceColumnUnit::Bytes);
 }
 
 #[test]
@@ -2577,7 +2574,7 @@ proptest! {
         let (src, program) = mini();
         let is_gen = |f: &str| f == "gen.rs";
         let r = Remapper::new(&program, &src, &is_gen).with_prefix(&prefix);
-        let u = [ColumnUnit::ScalarValues, ColumnUnit::DisplayWidth, ColumnUnit::Utf8Bytes][unit as usize];
+        let u = [TraceColumnUnit::Chars, TraceColumnUnit::DisplayWidth, TraceColumnUnit::Bytes][unit as usize];
         for (l, c) in [(line, col), (sl, Some(sc)), (sl, None)] {
             let m = r.locate("gen.rs", l, c, u);
             assert_span_invariants(&src, &m);
@@ -2602,7 +2599,7 @@ proptest! {
         for (a, b) in spans {
             let sp: RustcSpan = serde_json::from_value(json!({"file_name": "gen.rs", "byte_start": a, "byte_end": b})).unwrap();
             assert_span_invariants(src, &r.map_span(&sp));
-            let u = [ColumnUnit::ScalarValues, ColumnUnit::DisplayWidth, ColumnUnit::Utf8Bytes][unit as usize];
+            let u = [TraceColumnUnit::Chars, TraceColumnUnit::DisplayWidth, TraceColumnUnit::Bytes][unit as usize];
             assert_span_invariants(src, &r.locate("gen.rs", a % 9, Some(b), u));
         }
     }
@@ -2868,7 +2865,7 @@ fn x01_json_shapes_have_exactly_these_keys() {
     // unmapped span: same keys, nulls for what is missing
     assert_eq!(m.level, Level::Warning);
     let unmapped =
-        serde_json::to_value(r.locate("other.rs", 1, None, ColumnUnit::Utf8Bytes)).unwrap();
+        serde_json::to_value(r.locate("other.rs", 1, None, TraceColumnUnit::Bytes)).unwrap();
     assert_eq!(unmapped["marigold"], Value::Null);
     assert_eq!(unmapped["segment"], Value::Null);
     assert_eq!(
@@ -2893,9 +2890,9 @@ fn x01_json_shapes_have_exactly_these_keys() {
         assert_eq!(serde_json::to_value(reason).unwrap(), json!(name));
     }
     for (unit, name) in [
-        (ColumnUnit::ScalarValues, "scalar_values"),
-        (ColumnUnit::DisplayWidth, "display_width"),
-        (ColumnUnit::Utf8Bytes, "utf8_bytes"),
+        (TraceColumnUnit::Chars, "chars"),
+        (TraceColumnUnit::DisplayWidth, "display_width"),
+        (TraceColumnUnit::Bytes, "bytes"),
     ] {
         assert_eq!(serde_json::to_value(unit).unwrap(), json!(name));
     }
@@ -3049,15 +3046,15 @@ fn x05_trace_scanner_consumes_a_whole_location_even_when_it_is_not_ours() {
     assert_eq!(
         units,
         [
-            ("a.rs", ColumnUnit::DisplayWidth),
+            ("a.rs", TraceColumnUnit::DisplayWidth),
             // only the `at` line under a numbered frame is a backtrace location (DWARF bytes)
-            ("b.rs", ColumnUnit::Utf8Bytes),
-            ("c.rs", ColumnUnit::Utf8Bytes),
+            ("b.rs", TraceColumnUnit::Bytes),
+            ("c.rs", TraceColumnUnit::Bytes),
             // an `at` that follows a location, a word ending in `at`, a message: display width
-            ("d.rs", ColumnUnit::DisplayWidth),
-            ("e.rs", ColumnUnit::DisplayWidth),
-            ("f.rs", ColumnUnit::DisplayWidth),
-            ("g.rs", ColumnUnit::DisplayWidth),
+            ("d.rs", TraceColumnUnit::DisplayWidth),
+            ("e.rs", TraceColumnUnit::DisplayWidth),
+            ("f.rs", TraceColumnUnit::DisplayWidth),
+            ("g.rs", TraceColumnUnit::DisplayWidth),
         ]
     );
 }
@@ -3097,15 +3094,15 @@ fn x06_a_column_after_an_unverified_width_never_points_across_expressions() {
     let is_gen = |f: &str| f == "gen.rs";
     let r = Remapper::new(&program, &src, &is_gen);
     // the `B`: scalar column 5, byte column 7, display column 5 if U+0F00 had width 1
-    let scalar = r.locate("gen.rs", 2, Some(5), ColumnUnit::ScalarValues);
+    let scalar = r.locate("gen.rs", 2, Some(5), TraceColumnUnit::Chars);
     assert_eq!(scalar.precision, Seg);
     assert_eq!(slice(&src, &scalar), "BBB");
-    let bytes = r.locate("gen.rs", 2, Some(7), ColumnUnit::Utf8Bytes);
+    let bytes = r.locate("gen.rs", 2, Some(7), TraceColumnUnit::Bytes);
     assert_eq!(slice(&src, &bytes), "BBB");
-    let display = r.locate("gen.rs", 2, Some(5), ColumnUnit::DisplayWidth);
+    let display = r.locate("gen.rs", 2, Some(5), TraceColumnUnit::DisplayWidth);
     assert_unmapped(&display, UnmappedReason::MultipleExpressions);
     // before the unknown character the display width is still trusted
-    let before = r.locate("gen.rs", 2, Some(2), ColumnUnit::DisplayWidth);
+    let before = r.locate("gen.rs", 2, Some(2), TraceColumnUnit::DisplayWidth);
     assert_eq!(slice(&src, &before), "AAA");
 }
 
@@ -3122,7 +3119,7 @@ fn x07_lines_without_code_and_the_trailing_empty_line_are_not_mapped() {
         .expect("generated code has blank lines")
         + 1;
     assert_unmapped(
-        &r.locate("gen.rs", blank, None, ColumnUnit::Utf8Bytes),
+        &r.locate("gen.rs", blank, None, TraceColumnUnit::Bytes),
         UnmappedReason::Glue,
     );
     // the generated code ends in "\n": the line after it is not part of the program
@@ -3130,11 +3127,11 @@ fn x07_lines_without_code_and_the_trailing_empty_line_are_not_mapped() {
     assert!(program.rust.ends_with('\n'));
     for line in [lines + 1, lines + 2] {
         assert_unmapped(
-            &r.locate("gen.rs", line, None, ColumnUnit::Utf8Bytes),
+            &r.locate("gen.rs", line, None, TraceColumnUnit::Bytes),
             UnmappedReason::OutsideGeneratedRegion,
         );
         assert_unmapped(
-            &r.locate("gen.rs", line, Some(1), ColumnUnit::Utf8Bytes),
+            &r.locate("gen.rs", line, Some(1), TraceColumnUnit::Bytes),
             UnmappedReason::OutsideGeneratedRegion,
         );
     }
@@ -3330,12 +3327,12 @@ fn x14_a_prefix_with_an_unverified_display_width_is_not_trusted_either() {
     let is_gen = |f: &str| f == "gen.rs";
     let r = Remapper::new(&program, src, &is_gen).with_prefix("\u{0f00}");
     // the `a`: after the 3-byte prefix and `fn ` (6 bytes, 5 scalars)
-    let bytes = r.locate("gen.rs", 1, Some(7), ColumnUnit::Utf8Bytes);
+    let bytes = r.locate("gen.rs", 1, Some(7), TraceColumnUnit::Bytes);
     assert_mapped(src, &bytes, Exact, "", (1, 4));
-    let scalar = r.locate("gen.rs", 1, Some(5), ColumnUnit::ScalarValues);
+    let scalar = r.locate("gen.rs", 1, Some(5), TraceColumnUnit::Chars);
     assert_mapped(src, &scalar, Exact, "", (1, 4));
     // U+0F00 is not in the verified table: the column cannot be trusted
-    let display = r.locate("gen.rs", 1, Some(5), ColumnUnit::DisplayWidth);
+    let display = r.locate("gen.rs", 1, Some(5), TraceColumnUnit::DisplayWidth);
     assert_eq!(display.precision, Seg, "{display:?}");
     assert_eq!(slice(src, &display), "fn a() {}");
 }
@@ -3705,13 +3702,13 @@ fn n07_a_runtime_column_after_a_prefix_is_shifted_on_the_first_line_only() {
     let line_start = before.rfind('\n').map_or(0, |i| i + 1);
     let file_line = 1 + prefix.matches('\n').count() + index;
     for (unit, column) in [
-        (ColumnUnit::Utf8Bytes, plus - line_start + 1),
+        (TraceColumnUnit::Bytes, plus - line_start + 1),
         (
-            ColumnUnit::ScalarValues,
+            TraceColumnUnit::Chars,
             program.rust[line_start..plus].chars().count() + 1,
         ),
         (
-            ColumnUnit::DisplayWidth,
+            TraceColumnUnit::DisplayWidth,
             program.rust[line_start..plus].chars().count() + 1,
         ),
     ] {
@@ -3742,9 +3739,9 @@ fn n08_the_function_on_the_second_line_is_not_shifted_by_a_one_line_prefix() {
     let r = Remapper::new(&program, src, &is_gen).with_prefix("    ");
     let column = "const fn f() { ".len() + 1;
     for unit in [
-        ColumnUnit::ScalarValues,
-        ColumnUnit::Utf8Bytes,
-        ColumnUnit::DisplayWidth,
+        TraceColumnUnit::Chars,
+        TraceColumnUnit::Bytes,
+        TraceColumnUnit::DisplayWidth,
     ] {
         let m = r.locate("gen.rs", 2, Some(column), unit);
         assert_eq!(m.precision, Exact, "{unit:?}");
@@ -3760,9 +3757,9 @@ fn n08_the_function_on_the_second_line_is_not_shifted_by_a_one_line_prefix() {
     let m = r.map_span(&rustc_span("gen.rs", &file, one, one + 1, true));
     assert_mapped(src, &m, Exact, "1", (1, src.find('1').unwrap() + 1));
     // and on the first line the four spaces are columns
-    let m = r.locate("gen.rs", 1, Some(5), ColumnUnit::ScalarValues);
+    let m = r.locate("gen.rs", 1, Some(5), TraceColumnUnit::Chars);
     assert_unmapped(&m, UnmappedReason::Glue);
-    let m = r.locate("gen.rs", 1, Some(2), ColumnUnit::ScalarValues);
+    let m = r.locate("gen.rs", 1, Some(2), TraceColumnUnit::Chars);
     assert_unmapped(&m, UnmappedReason::OutsideGeneratedRegion);
 }
 
@@ -3797,9 +3794,9 @@ fn n09_a_byte_order_mark_in_the_prefix_is_bytes_but_not_a_column() {
     let p2 = GeneratedProgram::new(seg_rust.to_string(), SourceMap::new(vec![seg]));
     let r = Remapper::new(&p2, src, &is_gen).with_prefix("\u{feff}  ");
     for (unit, column) in [
-        (ColumnUnit::ScalarValues, 3 + 3),
-        (ColumnUnit::DisplayWidth, 3 + 3),
-        (ColumnUnit::Utf8Bytes, 3 + 3),
+        (TraceColumnUnit::Chars, 3 + 3),
+        (TraceColumnUnit::DisplayWidth, 3 + 3),
+        (TraceColumnUnit::Bytes, 3 + 3),
     ] {
         let m = r.locate("bom.rs", 1, Some(column), unit);
         assert_eq!(m.precision, Exact, "{unit:?}");
@@ -3824,17 +3821,17 @@ fn n10_a_display_column_after_an_unassigned_combining_range_character_is_not_tru
     let bytes = b - line_start + 1;
     // the units that need no table point at the `b`
     assert_eq!(
-        r.locate("gen.rs", line, Some(scalar), ColumnUnit::ScalarValues)
+        r.locate("gen.rs", line, Some(scalar), TraceColumnUnit::Chars)
             .precision,
         Exact
     );
     assert_eq!(
-        r.locate("gen.rs", line, Some(bytes), ColumnUnit::Utf8Bytes)
+        r.locate("gen.rs", line, Some(bytes), TraceColumnUnit::Bytes)
             .precision,
         Exact
     );
     // the display column is not trusted after a character outside the table: never Exact
-    let m = r.locate("gen.rs", line, Some(scalar), ColumnUnit::DisplayWidth);
+    let m = r.locate("gen.rs", line, Some(scalar), TraceColumnUnit::DisplayWidth);
     assert!(matches!(m.precision, Seg | Expression), "{m:?}");
     assert_eq!(m.marigold.unwrap().range, f.source);
 }
@@ -4224,7 +4221,7 @@ fn n21_the_api_exposes_what_the_next_stages_need() {
     let located = r.locate_line("gen.rs", line);
     assert_eq!(
         located,
-        r.locate("gen.rs", line, None, ColumnUnit::Utf8Bytes)
+        r.locate("gen.rs", line, None, TraceColumnUnit::Bytes)
     );
     assert!(located.marigold.is_some(), "{located:?}");
     assert_unmapped(
@@ -4320,14 +4317,14 @@ fn n23_only_the_at_line_under_a_numbered_frame_is_a_backtrace_location() {
     let any = |_: &str| true;
     let r = Remapper::new(&program, &src, &any);
     for (text, unit) in [
-        ("   0: f\n             at a.rs:1:1", ColumnUnit::Utf8Bytes),
-        ("10: f\n at a.rs:1:1", ColumnUnit::Utf8Bytes),
-        (":\n at a.rs:1:1", ColumnUnit::DisplayWidth),
-        ("  : f\n at a.rs:1:1", ColumnUnit::DisplayWidth),
-        ("12 f\n at a.rs:1:1", ColumnUnit::DisplayWidth),
-        ("f\n at a.rs:1:1", ColumnUnit::DisplayWidth),
-        ("at a.rs:1:1", ColumnUnit::DisplayWidth),
-        ("0: f at a.rs:1:1", ColumnUnit::DisplayWidth),
+        ("   0: f\n             at a.rs:1:1", TraceColumnUnit::Bytes),
+        ("10: f\n at a.rs:1:1", TraceColumnUnit::Bytes),
+        (":\n at a.rs:1:1", TraceColumnUnit::DisplayWidth),
+        ("  : f\n at a.rs:1:1", TraceColumnUnit::DisplayWidth),
+        ("12 f\n at a.rs:1:1", TraceColumnUnit::DisplayWidth),
+        ("f\n at a.rs:1:1", TraceColumnUnit::DisplayWidth),
+        ("at a.rs:1:1", TraceColumnUnit::DisplayWidth),
+        ("0: f at a.rs:1:1", TraceColumnUnit::DisplayWidth),
     ] {
         let hits = r.remap_trace(text);
         assert_eq!(hits.len(), 1, "{text:?}");
