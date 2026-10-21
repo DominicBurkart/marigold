@@ -1127,22 +1127,60 @@ proptest! {
         at in any::<prop::sample::Index>(),
         insert in prop::option::of("[\\PC]"),
     ) {
-        let boundaries: Vec<usize> = (0..=base.len()).filter(|i| base.is_char_boundary(*i)).collect();
-        let pos = boundaries[at.index(boundaries.len())];
-        let mut src = base.clone();
-        match insert {
-            Some(s) => src.insert_str(pos, &s),
-            None => if pos < src.len() { src.remove(pos); },
+        let src = edited(&base, at, insert.as_deref());
+        check_parse_and_generate_agree(&src)?;
+    }
+
+    /// The same, but the edits are the ones that change how a program is spaced or which
+    /// identifier it names: whitespace anywhere, a stray dot, a hyphen. Up to three per program.
+    #[test]
+    fn spacing_and_hyphen_edits_keep_invariants(
+        base in arb_program(),
+        edits in prop::collection::vec(
+            (any::<prop::sample::Index>(), prop::option::of(prop::sample::select(vec![
+                " ", "\t", "\n", "\r\n", "  ", "-", ".", "_", " . ", "\n.\n",
+            ]))),
+            1..4,
+        ),
+    ) {
+        let mut src = base;
+        for (at, insert) in edits {
+            src = edited(&src, at, insert);
         }
-        match marigold_parse(&src) {
-            Ok(rust) => {
-                let g = generate(&src);
-                prop_assert_eq!(&g.rust, &rust);
-                assert_invariants(&src, &g);
+        check_parse_and_generate_agree(&src)?;
+    }
+}
+
+/// `base` with one character removed at a char boundary (`insert` is `None`) or `insert` added.
+fn edited(base: &str, at: prop::sample::Index, insert: Option<&str>) -> String {
+    let boundaries: Vec<usize> = (0..=base.len())
+        .filter(|i| base.is_char_boundary(*i))
+        .collect();
+    let pos = boundaries[at.index(boundaries.len())];
+    let mut src = base.to_string();
+    match insert {
+        Some(s) => src.insert_str(pos, s),
+        None => {
+            if pos < src.len() {
+                src.remove(pos);
             }
-            Err(e) => prop_assert_eq!(marigold_generate(&src).unwrap_err().0, e.0),
         }
     }
+    src
+}
+
+/// Whatever `marigold_parse` makes of `src`, `marigold_generate` agrees, and an accepted program
+/// satisfies every invariant.
+fn check_parse_and_generate_agree(src: &str) -> Result<(), TestCaseError> {
+    match marigold_parse(src) {
+        Ok(rust) => {
+            let g = generate(src);
+            prop_assert_eq!(&g.rust, &rust);
+            assert_invariants(src, &g);
+        }
+        Err(e) => prop_assert_eq!(marigold_generate(src).unwrap_err().0, e.0),
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------
