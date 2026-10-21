@@ -26,7 +26,7 @@ Tests in `src/main.rs` check against plain-loop oracles on the same 48-point dis
 
 - the five best geometric scores equal the five best scores of an exhaustive loop over all 256 polygons (exact equality);
 - every returned palette is a wheel polygon with hues `r`, `r + 4`, `r + 8`;
-- the best geometric score is at most the unrestricted optimum over all C(48,3) = 17,296 triples (the geometric space is a subset) and at least 80% of it (measured 84.1%), and the prisma (f64 CIECAM02) ordering agrees that the geometric winner does not beat the unrestricted optimum.
+- the best geometric score is at most the unrestricted optimum over all C(48,3) = 17,296 triples (the geometric space is a subset) and at least 80% of it. The 80% bound is a measured bound (the measured ratio is 84.1%), not a theorem: no guarantee is claimed for other wheels or metrics. Replacing the search with an arbitrary palette fails this test and the exact-score test, and the prisma (f64 CIECAM02) ordering agrees that the geometric winner does not beat the unrestricted optimum.
 
 ## Complexity estimation
 
