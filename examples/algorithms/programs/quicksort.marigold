@@ -1,0 +1,68 @@
+fn unsorted() -> [i64; 16] {
+    [33, 16, 36, 1, 15, 4, 12, 37, 8, 6, 1, 31, 0, 0, 22, 22]
+}
+
+fn start() -> [i64; 33] {
+    let data = unsorted();
+    let mut state = [0; 33];
+    let mut i = 0;
+    while i < 16 {
+        state[1 + i] = data[i];
+        i += 1;
+    }
+    state[0] = 2;
+    state[17] = 0;
+    state[18] = 15;
+    state
+}
+
+fn partition_step(state: [i64; 33], _round: i32) -> [i64; 33] {
+    let mut next = state;
+    let sp = state[0] as usize;
+    if sp == 0 {
+        return next;
+    }
+    let top = sp - 2;
+    let lo = state[17 + top] as usize;
+    let hi = state[17 + top + 1] as usize;
+    let pivot = next[1 + hi];
+    let mut store = lo;
+    let mut j = lo;
+    while j < hi {
+        if next[1 + j] < pivot {
+            let held = next[1 + store];
+            next[1 + store] = next[1 + j];
+            next[1 + j] = held;
+            store += 1;
+        }
+        j += 1;
+    }
+    let held = next[1 + store];
+    next[1 + store] = next[1 + hi];
+    next[1 + hi] = held;
+    let mut count = top;
+    if store >= lo + 2 {
+        next[17 + count] = lo as i64;
+        next[17 + count + 1] = (store - 1) as i64;
+        count += 2;
+    }
+    if hi >= store + 2 {
+        next[17 + count] = (store + 1) as i64;
+        next[17 + count + 1] = hi as i64;
+        count += 2;
+    }
+    next[0] = count as i64;
+    next
+}
+
+fn sorted(state: [i64; 33]) -> [i64; 16] {
+    let mut out = [0; 16];
+    let mut i = 0;
+    while i < 16 {
+        out[i] = state[1 + i];
+        i += 1;
+    }
+    out
+}
+
+range(0, 16).fold(start, partition_step).map(sorted).return

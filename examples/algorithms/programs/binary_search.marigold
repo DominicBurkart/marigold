@@ -1,0 +1,44 @@
+fn targets() -> [i64; 8] {
+    [-5, 1, 7, 8, 40, 2, 100, 3]
+}
+
+fn sorted() -> [i64; 16] {
+    [1, 3, 3, 7, 9, 12, 12, 12, 20, 25, 31, 40, 40, 55, 70, 99]
+}
+
+fn start() -> [i64; 16] {
+    [0, 16, 0, 16, 0, 16, 0, 16, 0, 16, 0, 16, 0, 16, 0, 16]
+}
+
+fn halve(state: [i64; 16], _round: i32) -> [i64; 16] {
+    let data = sorted();
+    let goals = targets();
+    let mut next = state;
+    let mut k = 0;
+    while k < 8 {
+        let lo = state[2 * k];
+        let hi = state[2 * k + 1];
+        if lo < hi {
+            let mid = (lo + hi) / 2;
+            if data[mid as usize] < goals[k] {
+                next[2 * k] = mid + 1;
+            } else {
+                next[2 * k + 1] = mid;
+            }
+        }
+        k += 1;
+    }
+    next
+}
+
+fn lower_bounds(state: [i64; 16]) -> [i64; 8] {
+    let mut out = [0; 8];
+    let mut k = 0;
+    while k < 8 {
+        out[k] = state[2 * k];
+        k += 1;
+    }
+    out
+}
+
+range(0, 5).fold(start, halve).map(lower_bounds).return

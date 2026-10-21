@@ -33,3 +33,45 @@ fn gcd_diverges_from_canonical_class() {
     let result = analyze_example("gcd");
     assert_ne!(result.streams[0].time_class, canonical);
 }
+
+#[test]
+fn binary_search() {
+    let result = analyze_example("binary_search");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn binary_search_diverges_from_canonical_class() {
+    let result = analyze_example("binary_search");
+    assert_ne!(result.streams[0].time_class, ComplexityClass::OLogN);
+}
+
+#[test]
+fn quicksort() {
+    let result = analyze_example("quicksort");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn quicksort_diverges_from_canonical_class() {
+    let result = analyze_example("quicksort");
+    assert_ne!(result.streams[0].time_class, ComplexityClass::ONLogN);
+}

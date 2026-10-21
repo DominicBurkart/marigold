@@ -58,3 +58,53 @@ per round, including that worst case, a zero operand and LCG-derived pairs, so
 the bound and the arithmetic are exercised together. Tests compare every pair
 with a reference Euclid and assert that the worst case needs fewer rounds than
 the cap.
+
+### binary_search
+
+- Issue: [#412](https://github.com/DominicBurkart/marigold/issues/412)
+- Reference:
+  [Binary search algorithm](https://en.wikipedia.org/wiki/Binary_search_algorithm)
+- Canonical complexity: O(log n) per query
+- Analyzer estimate: O(1), exact O(2): a fold over the constant
+  `range(0, 5)` and a map.
+
+This is a fixed-iteration program, O(1) by construction, not a demonstration
+of O(log n). The 5 rounds are sized for the worst case on 16 elements, and the
+analyzer cannot see data-dependent early exit
+([#429](https://github.com/DominicBurkart/marigold/issues/429)). Symbolic
+input size is [#415](https://github.com/DominicBurkart/marigold/issues/415)
+and per-item fn cost is
+[#416](https://github.com/DominicBurkart/marigold/issues/416).
+
+Each fold round halves the lo/hi interval of 8 queries at once (misses below
+and above the array, hits, duplicate runs); the program returns the 8
+lower-bound indices. The interval starts at 17 candidates (0..=16), so 5
+rounds are needed in the worst case and the cap is exactly that. Tests compare
+every result with `partition_point` and `binary_search`, and assert that a
+cap one round short gives a wrong answer for at least one query.
+
+### quicksort
+
+- Issue: [#413](https://github.com/DominicBurkart/marigold/issues/413)
+- Reference: Hoare, "Quicksort", 1962;
+  [Quicksort](https://en.wikipedia.org/wiki/Quicksort)
+- Canonical complexity: O(n log n) average, O(n^2) worst
+- Analyzer estimate: O(1), exact O(2): a fold over the constant
+  `range(0, 16)` and a map.
+
+This is a fixed-iteration program, O(1) by construction. The 16 steps are
+sized for the O(n^2) worst case on 16 elements, and the partition work lives
+in the fn body, invisible to the analyzer
+([#415](https://github.com/DominicBurkart/marigold/issues/415),
+[#416](https://github.com/DominicBurkart/marigold/issues/416),
+[#429](https://github.com/DominicBurkart/marigold/issues/429)).
+
+Each fold step pops one partition from an explicit work-list held in the
+state array and performs one Lomuto partition (last element as pivot), pushing
+sub-ranges of size >= 2. Lomuto is used instead of Hoare's two-pointer scheme
+for simplicity. Every step fixes a pivot, so at most n-1 = 15 partitions occur;
+the worst case is already-sorted distinct input (O(n^2) comparisons), and the
+program input has duplicates and needs 14 of the 15 possible partitions. Tests
+compare with `slice::sort`, assert sorted distinct input needs 15 partitions
+(under the cap of 16) and that a cap one step short fails on the program's
+input.
