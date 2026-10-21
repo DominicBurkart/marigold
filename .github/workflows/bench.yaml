@@ -140,7 +140,8 @@ jobs:
       run: cargo bench --bench parser_bench -- --baseline main 2>&1 | tee /tmp/bench_parser_bench.txt
       working-directory: marigold-grammar
     - if: steps.restore-baseline.outputs.found == 'true'
-      run: cargo bench --bench color_picker_bench --features tokio -- --baseline main 2>&1 | tee /tmp/bench_color_picker_bench.txt
+      shell: bash -eo pipefail {0}
+      run: cargo bench --bench color_picker_bench --features tokio -- --baseline-lenient main 2>&1 | tee /tmp/bench_color_picker_bench.txt
       working-directory: examples/color-palette-picker
 
     - name: Criterion benches — no baseline available
