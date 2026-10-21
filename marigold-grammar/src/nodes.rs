@@ -171,7 +171,16 @@ impl NamedStreamNode {
         };
         let stream_prefix = &self.out.stream_prefix;
         let stream_postfix = &self.out.stream_postfix;
-        format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{stream_variable}.get(){intermediate}{stream_postfix}}}")
+        let source = if any_collects_input(&self.funs) {
+            defer_until_polled(
+                stream_variable,
+                &format!("{DEFERRED_RECEIVER}{intermediate}"),
+                false,
+            )
+        } else {
+            format!("{stream_variable}.get(){intermediate}")
+        };
+        format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{source}{stream_postfix}}}")
     }
 }
 
@@ -235,7 +244,16 @@ impl StreamVariableFromPriorStreamVariableNode {
                 )
             }
         };
-        format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({prior_stream_variable}.get(){intermediate})}};")
+        let source = if any_collects_input(&self.funs) {
+            defer_until_polled(
+                prior_stream_variable,
+                &format!("{DEFERRED_RECEIVER}{intermediate}"),
+                true,
+            )
+        } else {
+            format!("{prior_stream_variable}.get(){intermediate}")
+        };
+        format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({source})}};")
     }
 
     pub fn runner_code(&self) -> String {
@@ -261,6 +279,41 @@ pub enum StreamFunctionKind {
     Fold,
     Ok,
     OkOrPanic,
+}
+
+impl StreamFunctionKind {
+    pub fn collects_input(&self) -> bool {
+        match self {
+            StreamFunctionKind::Permutations(_)
+            | StreamFunctionKind::PermutationsWithReplacement(_)
+            | StreamFunctionKind::Combinations(_)
+            | StreamFunctionKind::KeepFirstN(_) => true,
+            StreamFunctionKind::Map
+            | StreamFunctionKind::Filter
+            | StreamFunctionKind::FilterMap
+            | StreamFunctionKind::Fold
+            | StreamFunctionKind::Ok
+            | StreamFunctionKind::OkOrPanic => false,
+        }
+    }
+}
+
+pub(crate) const DEFERRED_RECEIVER: &str = "__marigold_receiver";
+
+pub(crate) fn any_collects_input(funs: &[StreamFunctionNode]) -> bool {
+    funs.iter().any(|f| f.kind.collects_input())
+}
+
+pub(crate) fn defer_until_polled(variable: &str, chain: &str, pin: bool) -> String {
+    let lazy = format!(
+        "::marigold::marigold_impl::futures::StreamExt::flatten(::marigold::marigold_impl::futures::stream::once(async move {{ {chain} }}))"
+    );
+    let lazy = if pin {
+        format!("Box::pin({lazy})")
+    } else {
+        lazy
+    };
+    format!("{{ let {DEFERRED_RECEIVER} = {variable}.get(); {lazy} }}")
 }
 
 pub struct StreamFunctionNode {
