@@ -132,9 +132,12 @@
 //!   when *every* replacement of the diagnostic (a multipart suggestion has several) is
 //!   for an [`Precision::Exact`] span reached directly, the diagnostic offers no
 //!   alternatives (several replacements for the same place are a choice, not an edit), and
-//!   each edit survives regeneration: rustc calls it `MachineApplicable` when it says
-//!   anything, it is not in an enum variant, it is an identifier when the span is in
-//!   generated wiring, and it is not a whitespace edit.
+//!   regeneration proves the edit: it is false unless the original source regenerates to
+//!   exactly the program the remapper was given, the edited source is valid Marigold, and
+//!   its regeneration equals the generated text edited the same way. rustc's own
+//!   applicability, when present, must be `MachineApplicable`; that is the only rule that
+//!   is not implied by regeneration. At most one regeneration happens per remapped
+//!   diagnostic; the original is regenerated once per [`Remapper`].
 //! * Warnings from glue the user never wrote (rustc reports 1-3 `unused_mut` warnings
 //!   for every program) are recognisable with [`MappedDiagnostic::likely_generated_noise`]:
 //!   a warning is not noise when it points into code the user wrote, at any precision.
@@ -390,11 +393,12 @@ pub struct Suggestion {
     /// from. Applying one half of a multipart suggestion would break the program, so one
     /// inexact part makes all of them false; a set of alternatives is not an edit at all,
     /// so it is never applicable as a set (to apply one alternative, build that edit from
-    /// the one replacement). It is also false when the edit would not survive regeneration:
-    /// rustc's own applicability is present and not `MachineApplicable`; the span is in an
-    /// enum variant; the span is in generated wiring (an input, a stream stage, an output)
-    /// and the replacement is not a Marigold identifier; the replaced text is only
-    /// whitespace; or the replacement changes only whitespace.
+    /// the one replacement). Exactness says the replaced text is the same on both sides;
+    /// regeneration is what proves the edit: it is false unless regenerating the original
+    /// Marigold source gives the generated program the remapper was given, the edited
+    /// source is valid Marigold, and regenerating it gives the generated text with the same
+    /// edit applied. It is also false when rustc gives an applicability other than
+    /// `MachineApplicable`.
     pub applicable_to_marigold: bool,
 }
 
@@ -805,6 +809,8 @@ pub struct Remapper<'a> {
     source_index: LineIndex<'a>,
     /// Segments whose generated range does not fit the program.
     unusable: usize,
+    /// Whether regenerating `source` gives `program.rust`, computed on first use.
+    regenerates: std::sync::OnceLock<bool>,
 }
 
 impl<'a> Remapper<'a> {
@@ -889,6 +895,7 @@ impl<'a> Remapper<'a> {
             rust_index: LineIndex::new(rust),
             source_index: LineIndex::new(source),
             unusable,
+            regenerates: std::sync::OnceLock::new(),
         }
     }
 
@@ -996,7 +1003,7 @@ impl<'a> Remapper<'a> {
             .position(|s| s.is_primary)
             .or(if d.spans.is_empty() { None } else { Some(0) });
         let mut spans: Vec<MappedSpan> = d.spans.iter().map(|s| self.map_span(s)).collect();
-        number_suggestions(&mut spans, self.source);
+        number_suggestions(&mut spans, self);
         let primary = primary_index.map(|i| spans.remove(i));
         MappedDiagnostic {
             level: d.level.clone(),
@@ -1088,8 +1095,60 @@ impl<'a> Remapper<'a> {
                 applicable_to_marigold: false,
             });
         mapped.via_macro = via_macro;
-        number_suggestions(std::slice::from_mut(&mut mapped), self.source);
+        number_suggestions(std::slice::from_mut(&mut mapped), self);
         mapped
+    }
+
+    /// Whether applying the edits of `parts` (spans that carry a suggestion) to the Marigold
+    /// source and regenerating gives exactly the generated text that applying the same edits
+    /// to the generated program gives. This is the whole safety argument of
+    /// [`Suggestion::applicable_to_marigold`]. It denies by default: the original source must
+    /// regenerate to the program this remapper was given (computed once), the edited source
+    /// must be valid Marigold, and the two texts must be byte-equal. One regeneration happens
+    /// per remapped diagnostic at most, because all of a diagnostic's parts are one edit.
+    fn edit_regenerates(&self, spans: &[MappedSpan], parts: impl Iterator<Item = usize>) -> bool {
+        let rust = self.program.rust.as_str();
+        let mut marigold_edits: Vec<(usize, usize, &str)> = Vec::new();
+        let mut generated_edits: Vec<(usize, usize, &str)> = Vec::new();
+        for i in parts {
+            let span = &spans[i];
+            let (Some(suggestion), Some(location), Some(raw)) =
+                (&span.suggestion, &span.marigold, &span.raw)
+            else {
+                return false;
+            };
+            let (Some(start), Some(end)) = (
+                raw.byte_start.checked_sub(self.prefix_len),
+                raw.byte_end.checked_sub(self.prefix_len),
+            ) else {
+                return false;
+            };
+            if start > end
+                || end > rust.len()
+                || !rust.is_char_boundary(start)
+                || !rust.is_char_boundary(end)
+                || !source_range_fits(self.source, location.range)
+            {
+                return false;
+            }
+            marigold_edits.push((
+                location.range.start,
+                location.range.end,
+                &suggestion.replacement,
+            ));
+            generated_edits.push((start, end, &suggestion.replacement));
+        }
+        let (Some(edited_source), Some(edited_rust)) = (
+            apply_edits(self.source, &mut marigold_edits),
+            apply_edits(rust, &mut generated_edits),
+        ) else {
+            return false;
+        };
+        let original_regenerates = *self.regenerates.get_or_init(|| {
+            crate::marigold_generate(self.source).is_ok_and(|p| p.rust == self.program.rust)
+        });
+        original_regenerates
+            && crate::marigold_generate(&edited_source).is_ok_and(|p| p.rust == edited_rust)
     }
 
     /// Map a run-time location in the generated file: a panic message, a backtrace
@@ -1662,52 +1721,21 @@ impl Remapper<'_> {
     }
 }
 
-/// The identifier form of the Marigold grammar (`free_text_identifier` in `marigold.pest`):
-/// a letter or `_`, then letters, digits, `_`, `<`, `>` and `-`.
-pub(crate) fn is_marigold_identifier(text: &str) -> bool {
-    let mut chars = text.chars();
-    chars
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '<' | '>' | '-'))
-}
-
-/// Whether applying the suggestion of an exact span to the Marigold source gives the program
-/// that applying it to the generated code gives. Exactness says the replaced text is the
-/// same in both; this says the edit survives regeneration:
-///
-/// * rustc must call the suggestion `MachineApplicable` when it says anything about it;
-/// * an enum variant is never edited, because Marigold writes its name a second time in the
-///   generated name-to-variant conversions;
-/// * text the generator wires around the user's expressions (an input, a stream stage, an
-///   output) takes only an identifier, the only argument the grammar reads;
-/// * whitespace is not edited, and an edit that changes only whitespace is not an edit,
-///   because the generator lays code out itself.
-fn edit_commutes(span: &MappedSpan, source: &str) -> bool {
-    let (Some(suggestion), Some(segment), Some(location)) =
-        (&span.suggestion, &span.segment, &span.marigold)
-    else {
-        return false;
-    };
-    if suggestion
-        .applicability
-        .as_deref()
-        .is_some_and(|a| a != "MachineApplicable")
-    {
-        return false;
+/// `text` with each `(start, end, replacement)` applied; `None` if the edits overlap.
+fn apply_edits(text: &str, edits: &mut [(usize, usize, &str)]) -> Option<String> {
+    edits.sort_unstable_by_key(|&(start, end, _)| (start, end));
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for &(start, end, replacement) in edits.iter() {
+        if start < at {
+            return None;
+        }
+        out.push_str(&text[at..start]);
+        out.push_str(replacement);
+        at = end;
     }
-    if segment.kind == SegmentKind::EnumVariant {
-        return false;
-    }
-    let Some(old) = source.get(location.range.start..location.range.end) else {
-        return false;
-    };
-    if !is_user_authored(segment.kind) && !is_marigold_identifier(&suggestion.replacement) {
-        return false;
-    }
-    let squeeze = |t: &str| t.chars().filter(|c| !c.is_whitespace()).collect::<String>();
-    let whitespace_only = !old.is_empty() && old.trim().is_empty();
-    !whitespace_only && squeeze(old) != squeeze(&suggestion.replacement)
+    out.push_str(&text[at..]);
+    Some(out)
 }
 
 /// Whether `before`, the text in front of an `at` that ends right before a location, is a
@@ -1728,7 +1756,7 @@ fn is_frame_header_before(before: &str) -> bool {
 ///
 /// Spans whose reported byte ranges are equal or overlap edit the same place: they are
 /// alternatives. The other spans are the parts of one edit.
-fn number_suggestions(spans: &mut [MappedSpan], source: &str) {
+fn number_suggestions(spans: &mut [MappedSpan], remapper: &Remapper<'_>) {
     let ranges: Vec<(usize, usize)> = spans
         .iter()
         .map(|s| {
@@ -1761,11 +1789,17 @@ fn number_suggestions(spans: &mut [MappedSpan], source: &str) {
         .iter()
         .flatten()
         .all(|&i| spans[i].precision == Precision::Exact && spans[i].via_macro.is_none())
-        && groups
-            .iter()
-            .flatten()
-            .all(|&i| edit_commutes(&spans[i], source));
-    let applicable = all_direct_and_exact && groups.iter().all(|g| g.len() == 1);
+        && groups.iter().flatten().all(|&i| {
+            spans[i].suggestion.as_ref().is_some_and(|g| {
+                g.applicability
+                    .as_deref()
+                    .is_none_or(|a| a == "MachineApplicable")
+            })
+        });
+    let applicable = all_direct_and_exact
+        && groups.iter().all(|g| g.len() == 1)
+        && !groups.is_empty()
+        && remapper.edit_regenerates(spans, groups.iter().flatten().copied());
     let parts = groups.len();
     for (part, group) in groups.iter().enumerate() {
         for (alternative, &i) in group.iter().enumerate() {
@@ -2137,35 +2171,6 @@ mod tests {
                 source.len(),
                 "{kind:?}"
             );
-        }
-    }
-
-    #[test]
-    fn the_identifier_check_agrees_with_the_grammar() {
-        for id in [
-            "f",
-            "_f",
-            "mk",
-            "Ok",
-            "a1",
-            "a_b",
-            "a-b",
-            "a<b>",
-            "string_10",
-            "1a",
-            "",
-            "-a",
-            "<a",
-            "a b",
-            "a::b",
-            "&f",
-            "f()",
-            "crate::mk",
-            "é",
-            "a.b",
-        ] {
-            let parses = crate::marigold_generate(&format!("range(0, 3).map({id}).return")).is_ok();
-            assert_eq!(is_marigold_identifier(id), parses, "{id:?}");
         }
     }
 
