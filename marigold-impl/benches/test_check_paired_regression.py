@@ -58,6 +58,20 @@ class PairedRegression(unittest.TestCase):
         self.fx.put("g/b", [1000.0] * rounds, scaled(bench_factors))
         return self.fx.run(rounds, threshold)
 
+    def test_even_rounds_exactly_half_regressing_passes(self):
+        r = self.check([1.5, 1.5, 1.0, 1.0], rounds=4)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("PASSED", r.stdout)
+
+    def test_even_rounds_three_of_four_regressing_fails(self):
+        r = self.check([1.5, 1.5, 1.5, 1.0], rounds=4)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("3 of 4 rounds", r.stdout)
+
+    def test_even_rounds_one_of_four_regressing_passes(self):
+        r = self.check([1.8, 1.0, 1.0, 1.0], rounds=4)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_identical_passes(self):
         r = self.check([1.0, 1.0, 1.0])
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
