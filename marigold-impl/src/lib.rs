@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 pub use futures;
-pub use std::cmp::Ordering;
 mod async_runtime;
 pub mod collect_and_apply;
 pub mod combinations;
