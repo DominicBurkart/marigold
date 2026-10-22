@@ -9,6 +9,7 @@
     {
       "kind": "stream_variable",
       "name": "x",
+      "ident": "x",
       "expr_index": 0,
       "parent": null,
       "source": {
@@ -29,8 +30,32 @@
       }
     },
     {
+      "kind": "input_range",
+      "name": null,
+      "ident": null,
+      "expr_index": 0,
+      "parent": 0,
+      "source": {
+        "start": 4,
+        "end": 15,
+        "start_line": 1,
+        "start_column": 5,
+        "end_line": 1,
+        "end_column": 16
+      },
+      "generated": {
+        "start": 172,
+        "end": 226,
+        "start_line": 3,
+        "start_column": 127,
+        "end_line": 3,
+        "end_column": 181
+      }
+    },
+    {
       "kind": "returning_stream",
       "name": null,
+      "ident": "returning_stream_0",
       "expr_index": 1,
       "parent": null,
       "source": {
@@ -51,8 +76,32 @@
       }
     },
     {
+      "kind": "input_variable",
+      "name": null,
+      "ident": null,
+      "expr_index": 1,
+      "parent": 2,
+      "source": {
+        "start": 16,
+        "end": 17,
+        "start_line": 2,
+        "start_column": 1,
+        "end_line": 2,
+        "end_column": 2
+      },
+      "generated": {
+        "start": 300,
+        "end": 307,
+        "start_line": 5,
+        "start_column": 70,
+        "end_line": 5,
+        "end_column": 77
+      }
+    },
+    {
       "kind": "stream_variable_runner",
       "name": "x",
+      "ident": "stream_variable_runners_0",
       "expr_index": 0,
       "parent": null,
       "source": {

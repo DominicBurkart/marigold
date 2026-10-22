@@ -93,6 +93,7 @@ pub mod remap;
 mod resolver;
 pub mod rustc_json;
 mod span_index;
+mod sub_spans;
 pub mod symbol_table;
 pub mod symbols;
 mod type_aggregation;
@@ -134,6 +135,11 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
 /// compiles `rust`, so this account of rustc's behaviour is unverified. See
 /// [`source_map`] for details.
 ///
+/// The map holds one segment per statement-level construct (stream, stream variable and its
+/// runner, struct, enum, function) and, nested inside each of them, one segment per part of it:
+/// the stream's input, every stream function of the chain, the output, a function's signature
+/// and body, a struct's fields, an enum's variants.
+///
 /// ```
 /// use marigold_grammar::source_map::SegmentKind;
 /// use marigold_grammar::{marigold_generate, marigold_parse};
@@ -142,19 +148,30 @@ pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
 /// let program = marigold_generate(src).unwrap();
 /// assert_eq!(program.rust, marigold_parse(src).unwrap());
 ///
-/// // Generated order differs from source order: the stream variable is declared,
-/// // then the output stream, and its runner comes last.
 /// let kinds: Vec<_> = program.map.segments().iter().map(|s| s.kind).collect();
 /// assert_eq!(
 ///     kinds,
-///     [SegmentKind::StreamVariable, SegmentKind::ReturningStream, SegmentKind::StreamVariableRunner]
+///     [
+///         SegmentKind::StreamVariable,
+///         SegmentKind::InputRange,
+///         SegmentKind::ReturningStream,
+///         SegmentKind::InputVariable,
+///         SegmentKind::StreamVariableRunner,
+///     ]
 /// );
 ///
-/// let output = &program.map.segments()[1];
+/// let output = program.map.top_level().nth(1).unwrap();
 /// assert_eq!(&src[output.source.start..output.source.end], "x.return");
+/// assert_eq!(output.ident.as_deref(), Some("returning_stream_0"));
 /// assert!(program.rust[output.generated.start..output.generated.end]
 ///     .starts_with("let returning_stream_0"));
 /// assert_eq!(program.map.source_for_generated(output.generated.start), Some(output));
+///
+/// // the innermost segment wins: a byte of `x.get()` maps to the variable reference
+/// let get = program.rust.find("x.get()").unwrap();
+/// let part = program.map.source_for_generated(get).unwrap();
+/// assert_eq!(part.kind, SegmentKind::InputVariable);
+/// assert_eq!(&src[part.source.start..part.source.end], "x");
 ///
 /// assert!(marigold_generate("range(0,").is_err());
 /// ```
@@ -194,6 +211,11 @@ pub fn marigold_parse_instrumented(
 ///
 /// `rust` is byte-for-byte what [`marigold_parse_instrumented`] returns for the same input and
 /// options. Each instrumented statement maps to the expression it was generated from.
+///
+/// The map only has the statement-level segments (and their [`source_map::Segment::ident`]),
+/// not the nested segments [`marigold_generate`] returns for the parts of a statement: the
+/// instrumentation wraps the input and every stream function in nested adapter calls, so the
+/// parts are not adjacent regions of the generated code.
 #[cfg(feature = "otel")]
 pub fn marigold_generate_instrumented(
     s: &str,

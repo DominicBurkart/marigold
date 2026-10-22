@@ -16,7 +16,8 @@
 //!               "rust":    string,                   // the generated code, == marigold_parse(source)
 //!               "segments": [ Segment ] }            // generated order, outer segments first
 //! Segment  := { "kind": string,                      // snake_case of SegmentKind, see "Kinds" below
-//!               "name": string | null,               // declared name; null for output streams
+//!               "name": string | null,               // declared name (also of a struct field / enum variant); null otherwise
+//!               "ident": string | null,              // Rust identifier the generated code defines; null for nested segments
 //!               "expr_index": integer,               // position of the top-level expression in the source
 //!               "parent": integer | null,            // index into "segments"; always less than this index
 //!               "source": Range,                     // where the expression is, in "source"
@@ -52,8 +53,16 @@
 //!   `generated.start`, an enclosing segment before the segments inside it. That is not
 //!   source order. `parent` is the index of the innermost earlier segment whose
 //!   `generated` range contains this one (`null` for top-level segments), so it is
-//!   always smaller than the segment's own index. Every segment of a program built by
-//!   [`crate::marigold_generate`] is currently top-level.
+//!   always smaller than the segment's own index. It is [`SourceMap::parent`].
+//!   The top-level segments are the statement-level ones (one per top-level expression,
+//!   two for a stream variable); the others are the parts of a statement, see
+//!   [`crate::source_map`]. A nested segment has the `expr_index` of its statement, and its
+//!   `source` lies inside its parent's `source`.
+//! * **`ident`** is the Rust identifier the code of a top-level segment defines:
+//!   `returning_stream_0`, `non_returning_stream_0` or `stream_variable_runners_0` (counted
+//!   within that kind in generated order, like the emitted `let`), or the declared name of a
+//!   struct, enum, function or stream variable. It is `null` for nested segments. Use it to
+//!   connect telemetry or a profile that names generated items to the Marigold source.
 //! * A stream variable has two segments with the same `expr_index` and `source`: its
 //!   declaration and its runner.
 //! * The Rust code of a segment can span several lines, and can start in the middle of a
@@ -64,13 +73,21 @@
 //! `kind` is the snake_case name of a [`SegmentKind`]: `"struct"`, `"enum"`, `"function"`,
 //! `"stream_variable"` (the declaration of `x = ...`), `"stream_variable_runner"` (the task
 //! that drives it; same `source` as its declaration), `"returning_stream"` (ends in
-//! `.return`) and `"non_returning_stream"` (ends in a sink such as `.write_file`). More kinds
-//! may be added without changing the version.
+//! `.return`) and `"non_returning_stream"` (ends in a sink such as `.write_file`), and the
+//! parts nested in them: `"input_range"`, `"input_read_file"`, `"input_select_all"`,
+//! `"input_variable"`, `"select_all_branch"`, `"stream_map"`, `"stream_filter"`,
+//! `"stream_filter_map"`, `"stream_permutations"`, `"stream_permutations_with_replacement"`,
+//! `"stream_combinations"`, `"stream_keep_first_n"`, `"stream_fold"`, `"stream_ok"`,
+//! `"stream_ok_or_panic"`, `"output_write_file"` (two segments per `write_file`: the code
+//! before the stream and after it), `"function_signature"`, `"function_body"`,
+//! `"struct_field"` and `"enum_variant"`. More kinds may be added without changing the
+//! version.
 //!
 //! # Compatibility
 //!
 //! * Producers (this module) write exactly the keys above for `"version": 1`. Adding a
-//!   key or a `kind` does not change the version; removing or renaming a key, changing a
+//!   key (`ident` was added to version 1 when nested segments were) or a `kind` does not
+//!   change the version; removing or renaming a key, changing a
 //!   unit or changing the meaning of a field does.
 //! * The types in this module only implement [`serde::Serialize`]; consumers in Rust define
 //!   their own types for the layout above.
@@ -88,8 +105,13 @@
 //! assert_eq!(json["version"], 1);
 //! let first = &json["segments"][0];
 //! assert_eq!(first["kind"], "stream_variable");
+//! assert_eq!(first["ident"], "x");
 //! assert_eq!(first["source"]["end_column"], 16);
 //! assert_eq!(first["parent"], serde_json::Value::Null);
+//! // its input is nested in it
+//! let input = &json["segments"][1];
+//! assert_eq!(input["kind"], "input_range");
+//! assert_eq!(input["parent"], 0);
 //! ```
 
 use crate::diagnostics::ByteRange;
@@ -167,10 +189,6 @@ impl EmitRange {
             end_column: end.column,
         }
     }
-
-    fn contains(&self, inner: &EmitRange) -> bool {
-        self.start <= inner.start && inner.end <= self.end
-    }
 }
 
 /// One entry of [`EmitDocument::segments`]: a [`crate::source_map::Segment`] with
@@ -180,11 +198,16 @@ impl EmitRange {
 pub struct EmitSegment {
     /// What the expression is; serialized as its snake_case name.
     pub kind: SegmentKind,
-    /// The declared name, `null` for output streams.
+    /// The declared name; also the name of a struct field or an enum variant. `null`
+    /// otherwise.
     pub name: Option<String>,
+    /// The Rust identifier the generated code defines, `null` for nested segments. See
+    /// [`crate::source_map::Segment::ident`].
+    pub ident: Option<String>,
     /// Position of the top-level expression in the source.
     pub expr_index: usize,
-    /// Index into [`EmitDocument::segments`] of the innermost enclosing segment.
+    /// Index into [`EmitDocument::segments`] of the innermost enclosing segment
+    /// ([`SourceMap::parent`]).
     pub parent: Option<usize>,
     /// Where the expression is in [`EmitDocument::source`].
     pub source: EmitRange,
@@ -220,9 +243,10 @@ impl EmitDocument {
     /// line for each position when the text is not ASCII, see [`LineIndex`]). Nothing
     /// is checked: if `map` does not belong to `source` and `rust`, ranges outside a
     /// text or inside a character keep their offsets, and their line and column are
-    /// clamped like [`LineIndex::line_col`] does. A segment is nested under the
-    /// closest earlier segment whose generated range contains its own; segments that
-    /// only partly overlap are not nested.
+    /// clamped like [`LineIndex::line_col`] does. `parent` is [`SourceMap::parent`]: the
+    /// closest earlier segment whose generated range contains the segment's own. A map
+    /// whose generated ranges overlap only partly has no defined nesting (see
+    /// [`SourceMap::new`]); the document still lists every segment once.
     ///
     /// ```
     /// use marigold_grammar::{emit::EmitDocument, marigold_generate};
@@ -230,7 +254,8 @@ impl EmitDocument {
     /// let src = "range(0, 3)\n  .return";
     /// let program = marigold_generate(src).unwrap();
     /// let doc = EmitDocument::new(src, &program.rust, &program.map);
-    /// assert_eq!(doc.segments.len(), 1);
+    /// // the stream and its input
+    /// assert_eq!(doc.segments.len(), 2);
     /// let range = &doc.segments[0].source;
     /// assert_eq!((range.start_line, range.start_column), (1, 1));
     /// assert_eq!((range.end_line, range.end_column), (2, 10));
@@ -239,26 +264,20 @@ impl EmitDocument {
         let source_index = LineIndex::new(source);
         let rust_index = LineIndex::new(rust);
 
-        let mut segments: Vec<EmitSegment> = Vec::with_capacity(map.segments().len());
-        let mut open: Vec<usize> = Vec::new();
-        for segment in map.segments() {
-            let generated = EmitRange::new(segment.generated, &rust_index);
-            while open
-                .last()
-                .is_some_and(|&top| !segments[top].generated.contains(&generated))
-            {
-                open.pop();
-            }
-            segments.push(EmitSegment {
+        let segments = map
+            .segments()
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| EmitSegment {
                 kind: segment.kind,
                 name: segment.name.clone(),
+                ident: segment.ident.clone(),
                 expr_index: segment.expr_index,
-                parent: open.last().copied(),
+                parent: map.parent(index),
                 source: EmitRange::new(segment.source, &source_index),
-                generated,
-            });
-            open.push(segments.len() - 1);
-        }
+                generated: EmitRange::new(segment.generated, &rust_index),
+            })
+            .collect();
 
         EmitDocument {
             version: EMIT_SCHEMA_VERSION,

@@ -330,7 +330,7 @@ fn json_is_pretty_printed_with_exactly_one_trailing_newline_and_fixed_key_order(
         "{}",
         &text[..120]
     );
-    assert!(text.contains("\n  \"segments\": [\n    {\n      \"kind\": \"stream_variable\",\n      \"name\": \"x\",\n      \"expr_index\": 0,\n      \"parent\": null,\n      \"source\": {\n        \"start\": 0,\n        \"end\": 15,\n        \"start_line\": 1,\n        \"start_column\": 1,\n        \"end_line\": 1,\n        \"end_column\": 16\n      },"), "{text}");
+    assert!(text.contains("\n  \"segments\": [\n    {\n      \"kind\": \"stream_variable\",\n      \"name\": \"x\",\n      \"ident\": \"x\",\n      \"expr_index\": 0,\n      \"parent\": null,\n      \"source\": {\n        \"start\": 0,\n        \"end\": 15,\n        \"start_line\": 1,\n        \"start_column\": 1,\n        \"end_line\": 1,\n        \"end_column\": 16\n      },"), "{text}");
     assert_eq!(
         text.lines().filter(|l| l.starts_with("  \"")).count(),
         5,
@@ -1215,7 +1215,7 @@ fn large_programs_round_trip_and_stay_fast() {
     let doc = stdout_json(&out);
     validate_v1(&doc).unwrap();
     check_semantics(&doc).unwrap();
-    assert_eq!(doc["segments"].as_array().unwrap().len(), 4 * 3000);
+    assert_eq!(doc["segments"].as_array().unwrap().len(), 7 * 3000);
 }
 
 #[test]

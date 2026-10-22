@@ -485,7 +485,7 @@ mod tests {
             doc = Some(crate::emit::EmitDocument::new(&src, &g.rust, &g.map));
         });
         let doc = doc.unwrap();
-        assert_eq!(doc.segments.len(), 2 * n + 1);
+        assert_eq!(doc.segments.len(), 3 * n + 2);
         let last = doc.segments.iter().find(|s| s.expr_index == n).unwrap();
         assert_eq!(
             (last.source.start_line, last.source.start_column),
