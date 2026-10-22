@@ -138,7 +138,6 @@ pub fn compare_contrast<const N: usize>(
     min_contrast(palette1).total_cmp(&min_contrast(palette2))
 }
 
-#[macro_export]
 macro_rules! geometric_program {
     ($($stream:tt)*) => {
         ::marigold::m!(
@@ -323,4 +322,91 @@ pub async fn geometric_palettes() -> Vec<[[i32; 3]; 3]> {
     .await
     .collect::<Vec<_>>()
     .await
+}
+
+#[cfg(test)]
+mod geometric_program_tests {
+    use marigold::marigold_impl::StreamExt;
+
+    const HUES: [[i32; 3]; 18] = [
+        [255, 0, 0],
+        [255, 85, 0],
+        [255, 170, 0],
+        [255, 255, 0],
+        [170, 255, 0],
+        [85, 255, 0],
+        [0, 255, 0],
+        [0, 255, 85],
+        [0, 255, 170],
+        [0, 255, 255],
+        [0, 170, 255],
+        [0, 85, 255],
+        [0, 0, 255],
+        [85, 0, 255],
+        [170, 0, 255],
+        [255, 0, 255],
+        [255, 0, 170],
+        [255, 0, 85],
+    ];
+
+    fn wheel_color(hue: usize, ring: usize) -> [i32; 3] {
+        match ring {
+            0 => [255, 255, 255],
+            5 => [0, 0, 0],
+            _ => HUES[hue].map(|c| match ring {
+                1 => c + (255 - c) * 2 / 3,
+                2 => c,
+                3 => c * 2 / 3,
+                _ => c / 3,
+            }),
+        }
+    }
+
+    #[allow(dead_code)]
+    #[tokio::test]
+    async fn program_enumerates_exactly_the_oracle_polygons() {
+        let mut enumerated = geometric_program!(
+            range(0, 6)
+                .permutations_with_replacement(4)
+                .map(to_palette)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        let mut oracle = Vec::new();
+        for rotation in 0..6 {
+            for r0 in 0..6 {
+                for r1 in 0..6 {
+                    for r2 in 0..6 {
+                        oracle.push([
+                            wheel_color(rotation, r0),
+                            wheel_color(rotation + 6, r1),
+                            wheel_color(rotation + 12, r2),
+                        ]);
+                    }
+                }
+            }
+        }
+        enumerated.sort_unstable();
+        oracle.sort_unstable();
+        assert_eq!(enumerated.len(), 1296);
+        assert_eq!(enumerated, oracle);
+    }
+
+    #[allow(dead_code)]
+    #[tokio::test]
+    async fn program_scores_a_fixed_palette_with_the_reference_value() {
+        let scores = geometric_program!(
+            fn fixed_score(_i: i32) -> i64 {
+                min_palette_contrast(&[[0, 0, 0], [255, 255, 255], [153, 204, 0]])
+            }
+
+            range(0, 1).map(fixed_score).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(scores, vec![499_574_432_835]);
+    }
 }

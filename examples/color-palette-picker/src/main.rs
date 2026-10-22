@@ -515,49 +515,6 @@ mod integer_lms_tests {
         );
     }
 
-    #[allow(dead_code)]
-    #[tokio::test]
-    async fn program_enumerates_exactly_the_oracle_polygons() {
-        use marigold::marigold_impl::StreamExt;
-
-        let mut enumerated = color_palette_picker::geometric_program!(
-            range(0, 6)
-                .permutations_with_replacement(4)
-                .map(to_palette)
-                .return
-        )
-        .await
-        .collect::<Vec<_>>()
-        .await;
-        let mut oracle = all_polygons();
-        enumerated.sort_unstable();
-        oracle.sort_unstable();
-        assert_eq!(enumerated.len(), 1296);
-        assert_eq!(enumerated, oracle);
-    }
-
-    #[allow(dead_code)]
-    #[tokio::test]
-    async fn program_scores_a_fixed_palette_with_the_reference_value() {
-        use marigold::marigold_impl::StreamExt;
-
-        let scores = color_palette_picker::geometric_program!(
-            fn fixed_score(_i: i32) -> i64 {
-                min_palette_contrast(&[[0, 0, 0], [255, 255, 255], [153, 204, 0]])
-            }
-
-            range(0, 1).map(fixed_score).return
-        )
-        .await
-        .collect::<Vec<_>>()
-        .await;
-        assert_eq!(scores, vec![499_574_432_835]);
-        assert_eq!(
-            min_palette_contrast(&[[0, 0, 0], [255, 255, 255], [153, 204, 0]]),
-            499_574_432_835
-        );
-    }
-
     #[test]
     fn geometric_program_copies_differ_only_in_output_stage() {
         fn squeeze(text: &str) -> String {
