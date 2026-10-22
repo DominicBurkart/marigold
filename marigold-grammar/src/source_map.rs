@@ -886,6 +886,7 @@ pub(crate) struct Emit {
 impl Emit {
     /// Code with no recorded parts, for code that was built as a plain string (the
     /// instrumented code of the `otel` feature).
+    #[cfg(feature = "otel")]
     pub(crate) fn text(s: String) -> Emit {
         Emit {
             s,
