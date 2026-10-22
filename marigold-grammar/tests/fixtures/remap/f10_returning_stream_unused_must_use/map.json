@@ -12,6 +12,19 @@
       "kind": "returning_stream",
       "expr_index": 0,
       "name": null
+    },
+    {
+      "generated": {
+        "start": 119,
+        "end": 173
+      },
+      "source": {
+        "start": 0,
+        "end": 11
+      },
+      "kind": "input_range",
+      "expr_index": 0,
+      "name": null
     }
   ]
 }

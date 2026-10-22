@@ -36,6 +36,26 @@ fn kind_of(s: &str) -> SegmentKind {
         "stream_variable_runner" => SegmentKind::StreamVariableRunner,
         "returning_stream" => SegmentKind::ReturningStream,
         "non_returning_stream" => SegmentKind::NonReturningStream,
+        "input_range" => SegmentKind::InputRange,
+        "input_read_file" => SegmentKind::InputReadFile,
+        "input_select_all" => SegmentKind::InputSelectAll,
+        "input_variable" => SegmentKind::InputVariable,
+        "select_all_branch" => SegmentKind::SelectAllBranch,
+        "stream_map" => SegmentKind::StreamMap,
+        "stream_filter" => SegmentKind::StreamFilter,
+        "stream_filter_map" => SegmentKind::StreamFilterMap,
+        "stream_permutations" => SegmentKind::StreamPermutations,
+        "stream_permutations_with_replacement" => SegmentKind::StreamPermutationsWithReplacement,
+        "stream_combinations" => SegmentKind::StreamCombinations,
+        "stream_keep_first_n" => SegmentKind::StreamKeepFirstN,
+        "stream_fold" => SegmentKind::StreamFold,
+        "stream_ok" => SegmentKind::StreamOk,
+        "stream_ok_or_panic" => SegmentKind::StreamOkOrPanic,
+        "output_write_file" => SegmentKind::OutputWriteFile,
+        "function_signature" => SegmentKind::FunctionSignature,
+        "function_body" => SegmentKind::FunctionBody,
+        "struct_field" => SegmentKind::StructField,
+        "enum_variant" => SegmentKind::EnumVariant,
         other => panic!("unknown segment kind {other}"),
     }
 }
@@ -497,24 +517,18 @@ fn pathologically_nested_json_is_an_error_not_a_stack_overflow() {
 use Precision::{Exact, Expression, Segment as Seg};
 
 #[test]
-fn g01_undefined_fn_in_a_stream_maps_to_the_whole_expression() {
+fn g01_undefined_fn_in_a_stream_stage_maps_exactly_to_the_identifier() {
     let fx = load("f01_undefined_fn");
     remapper!(fx, r);
     let m = r.remap(find(&fx, "cannot find value `undefined_fn`"));
     assert_eq!(m.level, Level::Error);
     assert_eq!(m.code.as_deref(), Some("E0425"));
     let p = m.primary.as_ref().unwrap();
-    assert_mapped(
-        &fx.src,
-        p,
-        Seg,
-        "range(0, 10).map(undefined_fn).write_file(\"out.csv\", csv)",
-        (1, 1),
-    );
+    assert_mapped(&fx.src, p, Exact, "undefined_fn", (1, 18));
     let sg = p.segment.as_ref().unwrap();
     assert_eq!(
         (sg.kind, sg.expr_index, sg.name.as_deref()),
-        (SegmentKind::NonReturningStream, 0, None)
+        (SegmentKind::StreamMap, 0, None)
     );
     assert_eq!(p.label.as_deref(), Some("not found in this scope"));
     assert!(
@@ -538,19 +552,14 @@ fn g01_undefined_fn_in_a_stream_maps_to_the_whole_expression() {
 }
 
 #[test]
-fn g02_error_in_second_stage_still_maps_to_its_own_expression_not_the_function() {
+fn g02_error_in_second_stage_maps_to_its_own_stage_not_the_function() {
     let fx = load("f02_second_stage_undefined");
     remapper!(fx, r);
     let m = r.remap(find(&fx, "also_missing"));
     let p = m.primary.as_ref().unwrap();
-    assert_mapped(
-        &fx.src,
-        p,
-        Seg,
-        "range(0, 10).map(double).filter(also_missing).write_file(\"out.csv\", csv)",
-        (2, 1),
-    );
-    assert_eq!(p.segment.as_ref().unwrap().expr_index, 1);
+    assert_mapped(&fx.src, p, Seg, "filter(also_missing)", (2, 26));
+    let sg = p.segment.as_ref().unwrap();
+    assert_eq!((sg.kind, sg.expr_index), (SegmentKind::StreamFilter, 1));
 }
 
 #[test]
@@ -563,7 +572,7 @@ fn g03_type_error_inside_fn_body_is_exact_and_byte_identical() {
     let sg = p.segment.as_ref().unwrap();
     assert_eq!(
         (sg.kind, sg.name.as_deref()),
-        (SegmentKind::Function, Some("is_big"))
+        (SegmentKind::FunctionBody, None)
     );
     let foreign: Vec<_> = m.children.iter().flat_map(|c| all_spans(c)).collect();
     assert_eq!(foreign.len(), 4);
@@ -705,13 +714,7 @@ fn g08_decl_and_runner_share_one_expression_and_methods_on_the_variable_map_to_t
     let fx = load("f06_mismatched_variable_types");
     remapper!(fx, r);
     let get = r.remap(find(&fx, "the method `get` exists"));
-    assert_mapped(
-        &fx.src,
-        get.primary.as_ref().unwrap(),
-        Seg,
-        "ys.write_file(\"b.csv\", csv)",
-        (6, 1),
-    );
+    assert_mapped(&fx.src, get.primary.as_ref().unwrap(), Seg, "ys", (6, 1));
     let run = r.remap(find(&fx, "the method `run` exists"));
     let p = run.primary.as_ref().unwrap();
     assert_mapped(&fx.src, p, Seg, "ys = xs.map(name)", (4, 1));
@@ -728,20 +731,14 @@ fn g09_primary_is_the_flagged_span_and_secondary_spans_keep_their_order() {
     let m = r.remap(find(&fx, "cannot find value `mk`"));
     let p = m.primary.as_ref().unwrap();
     assert!(p.is_primary);
-    assert_mapped(
-        &fx.src,
-        p,
-        Seg,
-        "range(0, 3).map(mk).write_file(\"o.csv\", csv)",
-        (2, 1),
-    );
+    assert_mapped(&fx.src, p, Exact, "mk", (2, 17));
     assert_eq!(m.secondary.len(), 1);
     assert_unmapped(&m.secondary[0], UnmappedReason::ForeignFile);
     let help = m.children[0].primary.as_ref().unwrap();
     let sug = help.suggestion.as_ref().unwrap();
     assert_eq!(sug.replacement, "Ok");
-    assert!(!sug.applicable_to_marigold);
-    assert_eq!(help.precision, Seg);
+    assert!(sug.applicable_to_marigold);
+    assert_eq!(help.precision, Exact);
 }
 
 #[test]
@@ -749,13 +746,7 @@ fn g10_variable_declared_with_select_all_maps_to_the_declaration() {
     let fx = load("f11_multi_var");
     remapper!(fx, r);
     let m = r.remap(find(&fx, "cannot find value `nope`"));
-    assert_mapped(
-        &fx.src,
-        m.primary.as_ref().unwrap(),
-        Seg,
-        "ys = select_all(range(5, 8), range(1, 2)).map(nope)",
-        (2, 1),
-    );
+    assert_mapped(&fx.src, m.primary.as_ref().unwrap(), Exact, "nope", (2, 47));
 }
 
 #[test]
@@ -766,9 +757,9 @@ fn g11_error_after_a_variable_maps_to_the_consumer_expression() {
     assert_mapped(
         &fx.src,
         m.primary.as_ref().unwrap(),
-        Seg,
-        "xs.map(not_defined).write_file(\"a.csv\", csv)",
-        (3, 1),
+        Exact,
+        "not_defined",
+        (3, 8),
     );
 }
 
@@ -895,13 +886,7 @@ fn g17_inline_layout_with_prefix_maps_like_the_include_layout() {
     remapper!(inline, r);
     let m = r.remap(find(&inline, "undefined_fn"));
     let p = m.primary.as_ref().unwrap();
-    assert_mapped(
-        &inline.src,
-        p,
-        Seg,
-        "range(0, 10).map(undefined_fn).write_file(\"out.csv\", csv)",
-        (1, 1),
-    );
+    assert_mapped(&inline.src, p, Exact, "undefined_fn", (1, 18));
     let inc = load("f01_undefined_fn");
     remapper!(inc, r2);
     let q = r2.remap(find(&inc, "undefined_fn")).primary.unwrap();
@@ -1647,16 +1632,16 @@ fn d16_mapping_is_deterministic_and_serialises_with_a_stable_shape() {
     let v: Value = serde_json::from_str(&a).unwrap();
     assert_eq!(v["level"], "error");
     assert_eq!(v["code"], "E0425");
-    assert_eq!(v["primary"]["precision"], json!({"kind": "segment"}));
+    assert_eq!(v["primary"]["precision"], json!({"kind": "exact"}));
     assert_eq!(
         v["primary"]["marigold"]["range"],
-        json!({"start": 0, "end": 57})
+        json!({"start": 17, "end": 29})
     );
     assert_eq!(
         v["primary"]["marigold"]["start"],
-        json!({"line": 1, "column": 1})
+        json!({"line": 1, "column": 18})
     );
-    assert_eq!(v["primary"]["segment"]["kind"], "non_returning_stream");
+    assert_eq!(v["primary"]["segment"]["kind"], "stream_map");
     assert_eq!(v["primary"]["raw"]["byte_start"], 1549);
     assert!(v["secondary"].as_array().unwrap().is_empty());
     let unm = r.remap(fx.diags.last().unwrap());
@@ -2691,7 +2676,7 @@ fn x01_json_shapes_have_exactly_these_keys() {
         ]
     );
     assert_eq!(p["precision"], json!({"kind": "exact"}));
-    assert_eq!(p["segment"]["kind"], json!("function"));
+    assert_eq!(p["segment"]["kind"], json!("function_body"));
     let help = &v["children"][1]["primary"]["suggestion"];
     assert_eq!(
         key_set(help),

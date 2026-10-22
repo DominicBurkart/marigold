@@ -15,6 +15,32 @@
     },
     {
       "generated": {
+        "start": 59,
+        "end": 77
+      },
+      "source": {
+        "start": 3,
+        "end": 21
+      },
+      "kind": "function_signature",
+      "expr_index": 0,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 78,
+        "end": 87
+      },
+      "source": {
+        "start": 22,
+        "end": 31
+      },
+      "kind": "function_body",
+      "expr_index": 0,
+      "name": null
+    },
+    {
+      "generated": {
         "start": 89,
         "end": 278
       },
@@ -28,6 +54,32 @@
     },
     {
       "generated": {
+        "start": 212,
+        "end": 266
+      },
+      "source": {
+        "start": 37,
+        "end": 48
+      },
+      "kind": "input_range",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 267,
+        "end": 275
+      },
+      "source": {
+        "start": 49,
+        "end": 57
+      },
+      "kind": "stream_map",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
         "start": 280,
         "end": 3439
       },
@@ -36,6 +88,58 @@
         "end": 102
       },
       "kind": "non_returning_stream",
+      "expr_index": 2,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 353,
+        "end": 1715
+      },
+      "source": {
+        "start": 78,
+        "end": 102
+      },
+      "kind": "output_write_file",
+      "expr_index": 2,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1715,
+        "end": 1723
+      },
+      "source": {
+        "start": 58,
+        "end": 60
+      },
+      "kind": "input_variable",
+      "expr_index": 2,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1724,
+        "end": 1740
+      },
+      "source": {
+        "start": 61,
+        "end": 77
+      },
+      "kind": "stream_map",
+      "expr_index": 2,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1740,
+        "end": 3436
+      },
+      "source": {
+        "start": 78,
+        "end": 102
+      },
+      "kind": "output_write_file",
       "expr_index": 2,
       "name": null
     },

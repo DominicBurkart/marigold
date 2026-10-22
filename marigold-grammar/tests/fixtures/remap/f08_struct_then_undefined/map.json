@@ -15,6 +15,19 @@
     },
     {
       "generated": {
+        "start": 143,
+        "end": 148
+      },
+      "source": {
+        "start": 11,
+        "end": 16
+      },
+      "kind": "struct_field",
+      "expr_index": 0,
+      "name": "a"
+    },
+    {
+      "generated": {
         "start": 153,
         "end": 3349
       },
@@ -23,6 +36,58 @@
         "end": 63
       },
       "kind": "non_returning_stream",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 226,
+        "end": 1588
+      },
+      "source": {
+        "start": 39,
+        "end": 63
+      },
+      "kind": "output_write_file",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1588,
+        "end": 1642
+      },
+      "source": {
+        "start": 19,
+        "end": 30
+      },
+      "kind": "input_range",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1643,
+        "end": 1650
+      },
+      "source": {
+        "start": 31,
+        "end": 38
+      },
+      "kind": "stream_map",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1650,
+        "end": 3346
+      },
+      "source": {
+        "start": 39,
+        "end": 63
+      },
+      "kind": "output_write_file",
       "expr_index": 1,
       "name": null
     }

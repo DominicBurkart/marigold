@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Independent (Python) oracle for the T4 remap rules. Usage: oracle.py FIXTURE_DIR -> JSON lines, one per rustc span (flattened, depth-first).
-Written from the spec, NOT from the Rust reference implementation."""
+Written from the spec, NOT from the Rust reference implementation.
+Segments in map.json are listed outer before inner, so the last segment containing a byte is the innermost.
+A segment whose generated text equals its Marigold text is verbatim as a whole, whatever its kind;
+a function segment is also verbatim over its common suffix."""
 import json, sys
 d = sys.argv[1]
 src = open(f"{d}/program.marigold", "rb").read()
@@ -14,7 +17,7 @@ base = len(prefix)
 def is_boundary(b, i):
     return i == len(b) or (i < len(b) and (b[i] & 0xC0) != 0x80)
 
-def lc(b, off):  # 1-based line, scalar column
+def lc(b, off):
     pre = b[:off]
     line = pre.count(b"\n") + 1
     ls = pre.rfind(b"\n") + 1
@@ -30,8 +33,9 @@ def seg_ok(s):
     return a <= b <= len(src) and is_boundary(src, a) and is_boundary(src, b)
 
 def verbatim(s):
-    if s["kind"] != "function" or not seg_ok(s): return 0
+    if not seg_ok(s): return 0
     g = rust[s["generated"]["start"]:s["generated"]["end"]]; t = src[s["source"]["start"]:s["source"]["end"]]
+    if s["kind"] != "function" and g != t: return 0
     v = 0
     while v < min(len(g), len(t)) and g[-1 - v] == t[-1 - v]: v += 1
     while v and not (is_boundary(rust, s["generated"]["end"] - v) and is_boundary(src, s["source"]["end"] - v)): v -= 1
@@ -42,7 +46,7 @@ def covering(a, b):
 
 def innermost(p):
     c = [i for i, s in enumerate(segs) if s["generated"]["start"] <= p < s["generated"]["end"]]
-    return c[-1] if c else None   # segments are in outer-before-inner order
+    return c[-1] if c else None
 
 def cls(a, b):
     if a == b:

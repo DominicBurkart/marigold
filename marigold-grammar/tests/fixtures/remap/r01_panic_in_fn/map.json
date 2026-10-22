@@ -15,6 +15,32 @@
     },
     {
       "generated": {
+        "start": 59,
+        "end": 78
+      },
+      "source": {
+        "start": 3,
+        "end": 22
+      },
+      "kind": "function_signature",
+      "expr_index": 0,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 79,
+        "end": 173
+      },
+      "source": {
+        "start": 23,
+        "end": 117
+      },
+      "kind": "function_body",
+      "expr_index": 0,
+      "name": null
+    },
+    {
+      "generated": {
         "start": 175,
         "end": 3395
       },
@@ -23,6 +49,58 @@
         "end": 175
       },
       "kind": "non_returning_stream",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 248,
+        "end": 1632
+      },
+      "source": {
+        "start": 140,
+        "end": 175
+      },
+      "kind": "output_write_file",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1632,
+        "end": 1686
+      },
+      "source": {
+        "start": 118,
+        "end": 129
+      },
+      "kind": "input_range",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1687,
+        "end": 1696
+      },
+      "source": {
+        "start": 130,
+        "end": 139
+      },
+      "kind": "stream_map",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1696,
+        "end": 3392
+      },
+      "source": {
+        "start": 140,
+        "end": 175
+      },
+      "kind": "output_write_file",
       "expr_index": 1,
       "name": null
     }
