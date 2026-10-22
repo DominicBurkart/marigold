@@ -1,0 +1,7 @@
+{
+ "variant": "inline-tail",
+ "generated_file": "src/main.rs",
+ "prefix": "#[tokio::main]\nasync fn main() {\n    ",
+ "suffix": "\n    .await\n}\n",
+ "cargo_success": false
+}

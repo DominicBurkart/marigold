@@ -1,0 +1,6 @@
+fn dup(x: i32) -> usize {
+    let s = String::from("é");
+    let t = s;
+    s.len() + t.len() + x as usize
+}
+range(0, 3).map(dup).write_file("o.csv", csv)

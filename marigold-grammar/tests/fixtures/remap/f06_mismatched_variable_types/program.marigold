@@ -1,0 +1,6 @@
+fn inc(x: i32) -> i32 { x + 1 }
+fn name(x: i32) -> String { format!("n{x}") }
+xs = range(0, 5).map(inc)
+ys = xs.map(name)
+xs.write_file("a.csv", csv)
+ys.write_file("b.csv", csv)

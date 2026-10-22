@@ -1,0 +1,74 @@
+{
+ "reason": "compiler-message",
+ "package_id": "path+file:///work/research/t1#0.0.1",
+ "manifest_path": "/work/research/t1/Cargo.toml",
+ "target": {
+  "kind": [
+   "bin"
+  ],
+  "crate_types": [
+   "bin"
+  ],
+  "name": "t1",
+  "src_path": "/work/research/t1/src/main.rs",
+  "edition": "2021",
+  "doc": true,
+  "doctest": false,
+  "test": true
+ },
+ "message": {
+  "rendered": "error[E0308]: mismatched types\n --> src/main.rs:7:38\n  |\n7 | fn f() { let s = \"\u00e9\u2192x\"; let z: u32 = \"k\"; }\n  |                                ---   ^^^ expected `u32`, found `&str`\n  |                                |\n  |                                expected due to this\n\n",
+  "$message_type": "diagnostic",
+  "children": [],
+  "level": "error",
+  "message": "mismatched types",
+  "spans": [
+   {
+    "byte_end": 258,
+    "byte_start": 255,
+    "column_end": 41,
+    "column_start": 38,
+    "expansion": null,
+    "file_name": "src/main.rs",
+    "is_primary": true,
+    "label": "expected `u32`, found `&str`",
+    "line_end": 7,
+    "line_start": 7,
+    "suggested_replacement": null,
+    "suggestion_applicability": null,
+    "text": [
+     {
+      "highlight_end": 41,
+      "highlight_start": 38,
+      "text": "fn f() { let s = \"\u00e9\u2192x\"; let z: u32 = \"k\"; }"
+     }
+    ]
+   },
+   {
+    "byte_end": 252,
+    "byte_start": 249,
+    "column_end": 35,
+    "column_start": 32,
+    "expansion": null,
+    "file_name": "src/main.rs",
+    "is_primary": false,
+    "label": "expected due to this",
+    "line_end": 7,
+    "line_start": 7,
+    "suggested_replacement": null,
+    "suggestion_applicability": null,
+    "text": [
+     {
+      "highlight_end": 35,
+      "highlight_start": 32,
+      "text": "fn f() { let s = \"\u00e9\u2192x\"; let z: u32 = \"k\"; }"
+     }
+    ]
+   }
+  ],
+  "code": {
+   "code": "E0308",
+   "explanation": "<elided>"
+  }
+ }
+}

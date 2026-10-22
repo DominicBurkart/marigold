@@ -1,0 +1,69 @@
+{
+  "segments": [
+    {
+      "generated": {
+        "start": 50,
+        "end": 3261
+      },
+      "source": {
+        "start": 0,
+        "end": 57
+      },
+      "kind": "non_returning_stream",
+      "expr_index": 0,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 123,
+        "end": 1489
+      },
+      "source": {
+        "start": 31,
+        "end": 57
+      },
+      "kind": "output_write_file",
+      "expr_index": 0,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1489,
+        "end": 1544
+      },
+      "source": {
+        "start": 0,
+        "end": 12
+      },
+      "kind": "input_range",
+      "expr_index": 0,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1545,
+        "end": 1562
+      },
+      "source": {
+        "start": 13,
+        "end": 30
+      },
+      "kind": "stream_map",
+      "expr_index": 0,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1562,
+        "end": 3258
+      },
+      "source": {
+        "start": 31,
+        "end": 57
+      },
+      "kind": "output_write_file",
+      "expr_index": 0,
+      "name": null
+    }
+  ]
+}

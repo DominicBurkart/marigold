@@ -1,0 +1,2 @@
+#[tokio::main] async fn main() { let x: u32 = "bad"; helper(); }
+fn helper() { let y = undefined_name; }

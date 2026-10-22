@@ -1,0 +1,5 @@
+fn bad(x: i32) -> i32 {
+    let a = x + 1
+    a
+}
+range(0, 3).map(bad).write_file("o.csv", csv)

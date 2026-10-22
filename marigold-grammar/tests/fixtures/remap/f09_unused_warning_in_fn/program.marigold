@@ -1,0 +1,3 @@
+fn id(x: i32) -> i32 { x }
+fn g(x: i32) -> i32 { let unused = 5; x }
+range(0, 3).map(id).map(g).write_file("o.csv", csv)

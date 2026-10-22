@@ -1,0 +1,10 @@
+fn pick(x: i32) -> i32 {
+    let y = match x {
+        0 => 1,
+        _ => {
+            "two"
+        }
+    };
+    y
+}
+range(0, 3).map(pick).write_file("o.csv", csv)

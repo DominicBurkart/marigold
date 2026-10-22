@@ -1,0 +1,4 @@
+{"diag": [0, 0], "end_lc": [2, 19], "label": null, "precision": "exact", "range": [35, 37], "reason": null, "role": "primary", "segment": ["stream_map", 1, null], "slice": "mk", "start_lc": [2, 17], "suggestion": "Ok", "via_macro": null}
+{"diag": [0], "end_lc": [2, 19], "label": null, "precision": "exact", "range": [35, 37], "reason": null, "role": "primary", "segment": ["stream_map", 1, null], "slice": "mk", "start_lc": [2, 17], "suggestion": null, "via_macro": null}
+{"diag": [0], "end_lc": null, "label": "similarly named tuple variant `Ok` defined here", "precision": "unmapped", "range": null, "reason": "foreign_file", "role": "secondary", "segment": null, "slice": null, "start_lc": null, "suggestion": null, "via_macro": null}
+{"diag": [1], "end_lc": null, "label": null, "precision": "unmapped", "range": null, "reason": "no_span", "role": "none", "segment": null, "slice": null, "start_lc": null, "suggestion": null, "via_macro": null}

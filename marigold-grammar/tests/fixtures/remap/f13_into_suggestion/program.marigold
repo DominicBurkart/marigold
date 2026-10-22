@@ -1,0 +1,4 @@
+fn widen(x: i32) -> i64 {
+    x
+}
+range(0, 3).map(widen).write_file("o.csv", csv)

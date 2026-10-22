@@ -1,0 +1,6 @@
+fn label(x: i32) -> String {
+    let s = "héllo → 日本語";
+    let n: u32 = "bad";
+    format!("{s}{x}{n}")
+}
+range(0, 3).map(label).write_file("out.csv", csv)
