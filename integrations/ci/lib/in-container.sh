@@ -8,6 +8,7 @@ start_mock() {
   local protocol=$1 script=$2 log=$3
   node "$CI_DIR/mock-model/mock-model.mjs" --protocol "$protocol" \
     --script "$script" --log "$log" --port 0 \
+    ${MOCK_TURN_DELAY_MS:+--turn-delay-ms "$MOCK_TURN_DELAY_MS"} \
     --var "cwd=$PROJECT" --var "file=$PROJECT/hello_world.marigold" \
     >"$WORK/mock.out" 2>"$WORK/mock.err" &
   MOCK_PID=$!

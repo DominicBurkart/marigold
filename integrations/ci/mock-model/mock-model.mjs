@@ -168,7 +168,7 @@ for (const name of ["openai-chat", "openai-responses"]) {
   }
 }
 
-export function createServer({ protocol, script, vars = {}, logPath }) {
+export function createServer({ protocol, script, vars = {}, logPath, turnDelayMs = 0 }) {
   if (!Object.prototype.hasOwnProperty.call(PROTOCOLS, protocol)) {
     throw new Error(`unknown protocol "${protocol}"`);
   }
@@ -211,6 +211,10 @@ export function createServer({ protocol, script, vars = {}, logPath }) {
         path,
         request: body,
       });
+      if (turnDelayMs > 0 && next > 1) {
+        const id = index;
+        return setTimeout(() => proto.reply(res, body, turn, id), turnDelayMs);
+      }
       return proto.reply(res, body, turn, index);
     });
   });
@@ -228,6 +232,7 @@ export function parseArgs(argv) {
     else if (a === "--script") opts.script = val();
     else if (a === "--log") opts.log = val();
     else if (a === "--port") opts.port = Number(val());
+    else if (a === "--turn-delay-ms") opts.turnDelayMs = Number(val());
     else if (a === "--var") {
       const kv = val();
       const eq = kv.indexOf("=");
@@ -240,6 +245,9 @@ export function parseArgs(argv) {
   }
   if (!Number.isInteger(opts.port) || opts.port < 0) {
     throw new Error("--port must be a non-negative integer");
+  }
+  if (opts.turnDelayMs !== undefined && !(opts.turnDelayMs >= 0)) {
+    throw new Error("--turn-delay-ms must be a non-negative number");
   }
   return opts;
 }
@@ -255,6 +263,7 @@ function main() {
       script,
       vars: opts.vars,
       logPath: opts.log,
+      turnDelayMs: opts.turnDelayMs ?? 0,
     });
     server.listen(opts.port, "0.0.0.0", () => {
       process.stdout.write(`PORT=${server.address().port}\n`);

@@ -156,9 +156,39 @@ purpose and the expectations and the `AGENTS.md` advice should be revised.
   The tool result contains only the `ERROR` entry, which shows the others are
   dropped by opencode and not merely late.
 
-Conclusion: after `write` opencode shows
-the model Error-severity diagnostics only, under the header "LSP errors
-detected in this file, please fix:". Only `write` is exercised here.
+Conclusion: after `write` opencode shows the model Error-severity
+diagnostics only, under the header "LSP errors detected in this file, please
+fix:".
+
+The `edit-error` and `edit-info` scenarios first `write` a valid file, then
+change it with opencode's `edit` tool (`filePath`, `oldString`, `newString`).
+The assertions look at tool results after the `edit` call. `edit-error`
+(`range(Colour).return`) appends "Edit applied successfully." followed by the
+same `LSP errors detected` block with the `'Colour' is not a declared enum`
+error. `edit-info` (`.map(undefined_fn)`) returns only "Edit applied
+successfully." and the Information diagnostic is not shown. So `edit` behaves
+like `write` on opencode 1.19.3.
+
+## HARNESS_VERSION
+
+Each `run.sh` installs the version in its `VERSION` file unless
+`HARNESS_VERSION` is set. The image tag includes the version, so images for
+different versions do not collide.
+
+```bash
+HARNESS_VERSION=2.1.6 MARIGOLD_LSP_BIN=target/release/marigold-lsp \
+  bash integrations/ci/claude/run.sh
+```
+
+For Codex versions older than the ones that expose `exec_command` and
+namespaced MCP tools, also set `CODEX_TOOL_STYLE=legacy` to use
+`scripts/codex-legacy-*.json`. `VERSIONS.md` records which versions were
+tested and how.
+
+`MOCK_TURN_DELAY_MS` (or `--turn-delay-ms` on the mock) delays every reply
+after the first scripted turn. The Claude Code harness defaults it to 3000
+because Claude Code delivers LSP diagnostics asynchronously and a mock that
+answers instantly can finish the script first.
 
 ## Adding a harness
 

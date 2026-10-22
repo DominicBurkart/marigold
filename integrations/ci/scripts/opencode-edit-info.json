@@ -1,0 +1,22 @@
+[
+  {
+    "tool_call": {
+      "name": "write",
+      "arguments": {
+        "filePath": "{file}",
+        "content": "x = range(0, 3)\nx.return\n"
+      }
+    }
+  },
+  {
+    "tool_call": {
+      "name": "edit",
+      "arguments": {
+        "filePath": "{file}",
+        "oldString": "range(0, 3)",
+        "newString": "range(0, 3).map(undefined_fn)"
+      }
+    }
+  },
+  { "text": "Edited hello_world.marigold." }
+]
