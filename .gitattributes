@@ -4,3 +4,5 @@ marigold/tests/golden/** -text
 marigold-grammar/tests/golden_rust/** -text
 marigold-grammar/tests/fixtures/remap/** -text
 marigold-grammar/tests/programs/** -text
+marigold-grammar/tests/fixtures/codegen_golden/** -text
+marigold-lsp/tests/golden/** -text

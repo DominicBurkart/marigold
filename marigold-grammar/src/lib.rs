@@ -66,7 +66,7 @@
 //! - `io`: I/O features (available in other crates)
 //! - `tokio`: Tokio runtime integration (available in other crates)
 //! - `async-std`: async-std runtime integration (available in other crates)
-//! - `otel`: [`marigold_parse_instrumented`] generates OpenTelemetry-instrumented code
+//! - `otel`: `marigold_parse_instrumented` generates OpenTelemetry-instrumented code
 //!
 //! ## Performance Characteristics
 //!
