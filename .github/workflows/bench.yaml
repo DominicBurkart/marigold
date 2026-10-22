@@ -113,6 +113,11 @@ jobs:
     - uses: dtolnay/rust-toolchain@stable
     - uses: Swatinem/rust-cache@v2
 
+    - name: Test the regression-check scripts
+      run: |
+        bash marigold-impl/benches/test_paired_ab.sh
+        cd marigold-impl/benches && python3 -B -m unittest test_check_paired_regression
+
     - name: Restore Criterion baseline (exact base-sha match, no fallback)
       id: restore-baseline
       run: |
@@ -185,8 +190,39 @@ jobs:
       working-directory: marigold-impl
 
     - name: Check for regressions
+      id: first-pass
       if: steps.restore-baseline.outputs.found == 'true'
-      run: bash marigold-impl/benches/check_regression.sh 15 $(ls /tmp/bench_*.txt 2>/dev/null || true)
+      continue-on-error: true
+      run: |
+        set -o pipefail
+        bash marigold-impl/benches/check_regression.sh 15 $(ls /tmp/bench_*.txt 2>/dev/null || true) 2>&1 | tee /tmp/regress.out
+    - name: Paired base-vs-head comparison of flagged benchmarks
+      id: paired
+      if: steps.first-pass.outcome == 'failure'
+      continue-on-error: true
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -euo pipefail
+        git fetch --no-tags --depth=1 origin "$BASE_SHA"
+        {
+          echo "### First-pass regression check failed"
+          echo ""
+          echo '```'
+          cat /tmp/regress.out
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        bash marigold-impl/benches/paired_ab.sh /tmp/regress.out
+    - name: Remove paired-comparison base worktree
+      if: always() && steps.first-pass.outcome == 'failure'
+      run: |
+        git worktree remove --force "$RUNNER_TEMP/base" || true
+        rm -rf "$RUNNER_TEMP/base" "$RUNNER_TEMP/base-target"
+    - name: Fail if the paired comparison failed or could not run
+      if: always() && steps.first-pass.outcome == 'failure' && steps.paired.outcome != 'success'
+      run: |
+        echo "The first pass flagged a regression and the paired base-vs-head comparison did not clear it."
+        exit 1
     - name: No regression check performed
       if: steps.restore-baseline.outputs.found == 'false'
       run: echo "No baseline was available, so no regression check ran (see summary)."
