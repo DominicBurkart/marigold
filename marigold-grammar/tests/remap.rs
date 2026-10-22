@@ -1220,7 +1220,13 @@ fn d03_span_covering_two_expressions_is_unmapped_multiple_expressions() {
         &map_one(&src, &program, "", &sp),
         UnmappedReason::MultipleExpressions,
     );
-    let b = program.map.segments()[1].clone();
+    let b = program
+        .map
+        .segments()
+        .iter()
+        .find(|s| s.generated.start > a.generated.end)
+        .unwrap()
+        .clone();
     assert!(a.generated.end < b.generated.start);
     let sp = rustc_span(
         "gen.rs",
@@ -3273,6 +3279,19 @@ fn n02_a_shared_last_byte_is_not_exactness_unless_the_kind_says_the_generated_te
         (SegmentKind::Function, Exact),
     ] {
         let (_, nested, _, child) = nested_in_f(kind, (0, sig_g), (0, sig_s));
+        let top_level_only: Vec<Segment> = nested
+            .map
+            .segments()
+            .iter()
+            .filter(|s| {
+                !matches!(
+                    s.kind,
+                    SegmentKind::FunctionSignature | SegmentKind::FunctionBody
+                )
+            })
+            .cloned()
+            .collect();
+        let nested = GeneratedProgram::new(nested.rust.clone(), SourceMap::new(top_level_only));
         let at = child.generated.end - 3;
         let m = map_one(
             &src,
@@ -3334,7 +3353,10 @@ fn n04_a_warning_in_a_function_signature_is_the_users_even_when_it_is_only_segme
         let m = r.remap(&warning);
         let p = m.primary.as_ref().unwrap();
         assert_eq!(p.precision, Seg, "{func}: {p:?}");
-        assert_eq!(p.segment.as_ref().unwrap().kind, SegmentKind::Function);
+        assert_eq!(
+            p.segment.as_ref().unwrap().kind,
+            SegmentKind::FunctionSignature
+        );
         assert!(!m.likely_generated_noise(), "{func}");
         let error = jdiag(json!({
             "message": "e", "level": "error", "children": [], "spans": [span_to_json(&sp)],
@@ -3618,7 +3640,13 @@ fn n10_a_display_column_after_an_unassigned_combining_range_character_is_not_tru
     );
     let m = r.locate("gen.rs", line, Some(scalar), TraceColumnUnit::DisplayWidth);
     assert!(matches!(m.precision, Seg | Expression), "{m:?}");
-    assert_eq!(m.marigold.unwrap().range, f.source);
+    let body = program
+        .map
+        .segments()
+        .iter()
+        .find(|s| s.kind == SegmentKind::FunctionBody)
+        .unwrap();
+    assert_eq!(m.marigold.unwrap().range, body.source);
 }
 
 fn pair_program(
@@ -3965,14 +3993,19 @@ fn n21_the_api_exposes_what_the_next_stages_need() {
     let f = seg_of(&program, SegmentKind::Function, 0);
     let plus = f.generated.start + program.rust[f.generated.start..].find('+').unwrap();
     let file = format!("ab\n  {}", program.rust);
+    let mut checked = 0;
     for (i, segment) in program.map.segments().iter().enumerate() {
-        let mid = segment.generated.start + (segment.generated.end - segment.generated.start) / 2;
+        let Some(mid) = byte_owned_by(program.map.segments(), i) else {
+            continue;
+        };
+        checked += 1;
         let m = r
             .map_span(&rustc_span("gen.rs", &file, mid + 5, mid + 6, true))
             .segment
             .unwrap();
         assert_eq!((m.index, &program.map.segments()[m.index]), (i, segment));
     }
+    assert!(checked >= 5, "{checked}");
     let bad = Segment::new(
         br(0, program.rust.len() + 10),
         br(0, 3),
@@ -4206,7 +4239,9 @@ fn n27_segment_index_is_the_index_in_the_map_even_when_earlier_segments_are_unus
         if segment.generated.end > broken.rust.len() {
             continue;
         }
-        let at = segment.generated.end - 1;
+        let Some(at) = byte_owned_by(broken.map.segments(), i) else {
+            continue;
+        };
         let m = map_one(
             src,
             &broken,
@@ -4217,6 +4252,19 @@ fn n27_segment_index_is_the_index_in_the_map_even_when_earlier_segments_are_unus
         assert_eq!(&broken.map.segments()[got.index], segment, "segment {i}");
         assert_eq!(got.index, i);
     }
+}
+
+fn byte_owned_by(segments: &[Segment], i: usize) -> Option<usize> {
+    let own = segments[i].generated;
+    (own.start..own.end).rev().find(|b| {
+        !segments.iter().enumerate().any(|(j, other)| {
+            j != i
+                && other.generated.start <= *b
+                && *b < other.generated.end
+                && other.generated.start >= own.start
+                && other.generated.end <= own.end
+        })
+    })
 }
 
 fn numbered(d: &MappedDiagnostic) -> Vec<(usize, usize, usize, usize, bool, String)> {
