@@ -4582,3 +4582,87 @@ fn regenerate_fixtures() {
         std::fs::write(dir.join("map.json"), map).unwrap();
     }
 }
+
+const T2_SRC: &str = "struct S { a: u8, b: string_10 }\nenum E { Red, Green, Spherical = \"spherical\", default Other(string_10) }\nfn f(x: i32) -> i32 { x + 1 }\nrange(0, 3).map(f).return";
+
+fn t2_map(generated_needle: &str, after: &str) -> (MappedSpan, MappedDiagnostic) {
+    let program = marigold_generate(T2_SRC).unwrap();
+    let base = program.rust.find(after).unwrap();
+    let at = base + program.rust[base..].find(generated_needle).unwrap();
+    let sp = rustc_span(
+        "gen.rs",
+        &program.rust,
+        at,
+        at + generated_needle.len(),
+        true,
+    );
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, T2_SRC, &is_gen);
+    let warning = jdiag(json!({
+        "message": "w", "level": "warning", "children": [], "spans": [span_to_json(&sp)],
+    }));
+    let m = r.remap(&warning);
+    (m.primary.clone().unwrap(), m)
+}
+
+fn assert_t2(span: &MappedSpan, precision: Precision, kind: SegmentKind, source: &str) {
+    assert_eq!(span.precision, precision, "{span:?}");
+    assert_eq!(span.segment.as_ref().unwrap().kind, kind, "{span:?}");
+    assert_eq!(slice(T2_SRC, span), source, "{span:?}");
+}
+
+#[test]
+fn t2_01_a_span_in_a_function_body_is_exact() {
+    let (p, m) = t2_map("x + 1", "const fn f");
+    assert_t2(&p, Exact, SegmentKind::FunctionBody, "x + 1");
+    assert!(!m.likely_generated_noise());
+}
+
+#[test]
+fn t2_02_spans_in_a_function_signature_are_exact() {
+    for needle in ["x: i32", "-> i32"] {
+        let (p, m) = t2_map(needle, "const fn f");
+        assert_t2(&p, Exact, SegmentKind::FunctionSignature, needle);
+        assert!(!m.likely_generated_noise());
+    }
+}
+
+#[test]
+fn t2_03_a_struct_field_is_exact_and_a_rewritten_field_type_maps_to_the_whole_field() {
+    let (p, m) = t2_map("a: u8", "struct S");
+    assert_t2(&p, Exact, SegmentKind::StructField, "a: u8");
+    assert!(!m.likely_generated_noise());
+    let (p, m) = t2_map("ArrayString<10>", "struct S");
+    assert_t2(&p, Seg, SegmentKind::StructField, "b: string_10");
+    assert!(!m.likely_generated_noise());
+}
+
+#[test]
+fn t2_04_enum_variants_map_exactly_or_to_the_whole_variant() {
+    let (p, m) = t2_map("Green", "enum E");
+    assert_t2(&p, Exact, SegmentKind::EnumVariant, "Green");
+    assert!(!m.likely_generated_noise());
+    let (p, m) = t2_map("Spherical", "enum E");
+    assert_t2(
+        &p,
+        Seg,
+        SegmentKind::EnumVariant,
+        "Spherical = \"spherical\"",
+    );
+    assert!(!m.likely_generated_noise());
+    let (p, m) = t2_map("Other(", "enum E");
+    assert_t2(
+        &p,
+        Seg,
+        SegmentKind::EnumVariant,
+        "default Other(string_10)",
+    );
+    assert!(!m.likely_generated_noise());
+}
+
+#[test]
+fn t2_05_a_warning_in_a_stream_stage_is_noise() {
+    let (p, m) = t2_map("iter(0..3)", "returning_stream_0");
+    assert_t2(&p, Seg, SegmentKind::InputRange, "range(0, 3)");
+    assert!(m.likely_generated_noise());
+}
