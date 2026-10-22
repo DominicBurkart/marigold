@@ -138,11 +138,10 @@ pub fn compare_contrast<const N: usize>(
     min_contrast(palette1).total_cmp(&min_contrast(palette2))
 }
 
-pub async fn geometric_palettes() -> Vec<[[i32; 3]; 3]> {
-    use marigold::m;
-    use marigold::marigold_impl::StreamExt;
-
-    m!(
+#[macro_export]
+macro_rules! geometric_program {
+    ($($stream:tt)*) => {
+        ::marigold::m!(
         fn linearize(v: i32) -> i64 {
             const TABLE: [i64; 256] = [
                 0, 304, 607, 911, 1214, 1518, 1821, 2125,
@@ -259,20 +258,34 @@ pub async fn geometric_palettes() -> Vec<[[i32; 3]; 3]> {
             min
         }
 
+        fn hue_rgb(hue: i32) -> [i32; 3] {
+            let f = (hue % 3) * 85;
+            let g = 255 - f;
+            match hue / 3 {
+                0 => [255, f, 0],
+                1 => [g, 255, 0],
+                2 => [0, 255, f],
+                3 => [0, g, 255],
+                4 => [f, 0, 255],
+                _ => [255, 0, g],
+            }
+        }
+
         fn wheel_rgb(hue: i32, ring: i32) -> [i32; 3] {
-            const HUES: [[i32; 3]; 12] = [
-                [255, 0, 0], [255, 128, 0], [255, 255, 0], [128, 255, 0],
-                [0, 255, 0], [0, 255, 128], [0, 255, 255], [0, 128, 255],
-                [0, 0, 255], [128, 0, 255], [255, 0, 255], [255, 0, 128]
-            ];
-            let base = HUES[hue as usize];
+            if ring == 0 {
+                return [255, 255, 255];
+            }
+            if ring == 5 {
+                return [0, 0, 0];
+            }
+            let base = hue_rgb(hue);
             let mut out = [0i32; 3];
             let mut i: usize = 0;
             while i < 3 {
                 let c = base[i];
-                out[i] = if ring == 0 { c + (255 - c) * 2 / 3 }
-                    else if ring == 1 { c }
-                    else if ring == 2 { c * 2 / 3 }
+                out[i] = if ring == 1 { c + (255 - c) * 2 / 3 }
+                    else if ring == 2 { c }
+                    else if ring == 3 { c * 2 / 3 }
                     else { c / 3 };
                 i += 1;
             }
@@ -280,7 +293,7 @@ pub async fn geometric_palettes() -> Vec<[[i32; 3]; 3]> {
         }
 
         fn to_palette(p: [i32; 4]) -> [[i32; 3]; 3] {
-            [wheel_rgb(p[0], p[1]), wheel_rgb(p[0] + 4, p[2]), wheel_rgb(p[0] + 8, p[3])]
+            [wheel_rgb(p[0], p[1]), wheel_rgb(p[0] + 6, p[2]), wheel_rgb(p[0] + 12, p[3])]
         }
 
         fn compare_polygons(a: &[i32; 4], b: &[i32; 4]) -> Ordering {
@@ -291,7 +304,17 @@ pub async fn geometric_palettes() -> Vec<[[i32; 3]; 3]> {
             else { Ordering::Equal }
         }
 
-        range(0, 4)
+
+            $($stream)*
+        )
+    };
+}
+
+pub async fn geometric_palettes() -> Vec<[[i32; 3]; 3]> {
+    use marigold::marigold_impl::StreamExt;
+
+    geometric_program!(
+        range(0, 6)
             .permutations_with_replacement(4)
             .keep_first_n(5, compare_polygons)
             .map(to_palette)

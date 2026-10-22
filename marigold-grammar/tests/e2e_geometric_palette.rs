@@ -35,6 +35,24 @@ fn test_program_mirrors_example() {
     assert_eq!(read(GEOMETRIC_PROGRAM), read(GEOMETRIC_EXAMPLE));
 }
 
+fn stage_prefixes(path: &str) -> Vec<String> {
+    let source = read(path);
+    let start = source.find("\nrange(").expect("stream line") + 1;
+    let stages: Vec<&str> = source[start..].split("\n    .").map(str::trim).collect();
+    let transforms = stages.len() - 1;
+    (0..transforms)
+        .map(|end| {
+            let mut prefix = stages[0].to_string();
+            for stage in &stages[1..=end] {
+                prefix.push('.');
+                prefix.push_str(stage);
+            }
+            prefix.push_str(".return");
+            prefix
+        })
+        .collect()
+}
+
 #[test]
 fn geometric_estimate_is_pinned() {
     let geometric = analyze_file(GEOMETRIC_PROGRAM);
@@ -54,42 +72,44 @@ fn geometric_estimate_is_pinned() {
 
 #[test]
 fn geometric_intermediate_cardinalities_match_canonical_counts() {
-    let rotations = 12 / 3;
-    let rings = 4u64;
+    let hues = 18u64;
+    let rotations = hues / 3;
+    let rings = 6u64;
     let polygons = rotations * rings.pow(3);
+    assert_eq!(polygons, 1296);
 
-    assert_eq!(analyze_source("range(0, 4).return").cardinality, exact(4));
-
-    let enumerated = analyze_source("range(0, 4).permutations_with_replacement(4).return");
-    assert_eq!(enumerated.cardinality, exact(polygons));
-    assert_eq!(enumerated.cardinality, exact(4u64.pow(4)));
-    assert_eq!(enumerated.time_class, ComplexityClass::O1);
-    assert!(enumerated.collects_input);
-
-    let kept = analyze_source(
-        "range(0, 4).permutations_with_replacement(4).keep_first_n(5, compare_polygons).return",
+    let prefixes = stage_prefixes(GEOMETRIC_PROGRAM);
+    assert_eq!(prefixes.len(), 4);
+    let cardinalities: Vec<Cardinality> = prefixes
+        .iter()
+        .map(|prefix| analyze_source(prefix).cardinality)
+        .collect();
+    assert_eq!(
+        cardinalities,
+        vec![
+            exact(rings),
+            exact(polygons),
+            exact(polygons.min(5)),
+            exact(polygons.min(5)),
+        ]
     );
-    assert_eq!(kept.cardinality, exact(polygons.min(5)));
-
-    let mapped = analyze_source(
-        "range(0, 4).permutations_with_replacement(4).keep_first_n(5, compare_polygons).map(to_palette).return",
-    );
-    assert_eq!(mapped.cardinality, exact(polygons.min(5)));
+    assert!(analyze_source(&prefixes[1]).collects_input);
+    assert_eq!(analyze_source(&prefixes[1]).time_class, ComplexityClass::O1);
 }
 
 #[test]
 fn unrestricted_wheel_brute_force_has_canonical_cardinality_but_same_class_as_geometric() {
-    let wheel_points = 12 * 4;
-    let all_triples = analyze_source("range(0, 48).combinations(3).return");
+    let wheel_points = 18 * 4 + 2;
+    let all_triples = analyze_source("range(0, 74).combinations(3).return");
     assert_eq!(all_triples.cardinality, exact(choose_three(wheel_points)));
     assert_eq!(all_triples.time_class, ComplexityClass::O1);
 
-    let top = analyze_source("range(0, 48).combinations(3).keep_first_n(5, compare).return");
+    let top = analyze_source("range(0, 74).combinations(3).keep_first_n(5, compare).return");
     let geometric = analyze_file(GEOMETRIC_PROGRAM);
     assert_eq!(top.cardinality, geometric.cardinality);
     assert_eq!(top.time_class, geometric.time_class);
     assert_eq!(top.space_class, geometric.space_class);
-    assert!(choose_three(wheel_points) > 4u64.pow(4));
+    assert!(choose_three(wheel_points) > 6u64.pow(4));
 }
 
 #[test]
