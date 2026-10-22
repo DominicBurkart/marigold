@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCENARIO=${1:?usage: in-container.sh error|info|warning|mixed|valid}
+SCENARIO=${1:?usage: in-container.sh error|info|warning|mixed|valid|edit-error|edit-info}
 CI_DIR=/repo/integrations/ci
 WORK=/work
 PROJECT=$WORK/project
@@ -60,6 +60,7 @@ ERROR_MSG="is not a declared enum"
 INFO_MSG="undefined_fn"
 WARNING_MSG="is read before it is declared"
 SCOPE="--scope tool-results --after 1"
+EDIT_SCOPE="--scope tool-results --after 2"
 rc=0
 case "$SCENARIO" in
   error) assert $SCOPE --contains "$ERROR_MSG" || rc=$? ;;
@@ -69,6 +70,8 @@ case "$SCENARIO" in
     assert $SCOPE --contains "$ERROR_MSG" --absent "$INFO_MSG" || rc=$?
     assert $SCOPE --contains "$ERROR_MSG" --absent "$WARNING_MSG" || rc=$?
     ;;
+  edit-error) assert $EDIT_SCOPE --contains "$ERROR_MSG" || rc=$? ;;
+  edit-info) assert $EDIT_SCOPE --contains "Edit applied successfully" --absent "$INFO_MSG" || rc=$? ;;
   valid) assert $SCOPE --contains "Wrote file successfully" --absent "$ERROR_MSG" || rc=$? ;;
   *) echo "unknown scenario $SCENARIO" >&2; rc=2 ;;
 esac

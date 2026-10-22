@@ -1,0 +1,25 @@
+[
+  {
+    "tool_call": {
+      "name": "shell",
+      "arguments": {
+        "command": [
+          "bash",
+          "-c",
+          "printf 'range(Colour).return\\n' > {file}"
+        ]
+      }
+    }
+  },
+  {
+    "tool_call": {
+      "name": "mcp__marigold__marigold_check",
+      "arguments": {
+        "path": "{file}"
+      }
+    }
+  },
+  {
+    "text": "Wrote hello_world.marigold and checked it."
+  }
+]

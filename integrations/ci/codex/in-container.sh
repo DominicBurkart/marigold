@@ -12,7 +12,9 @@ ASSERT="node $CI_DIR/assert/assert-diagnostic.mjs"
 
 mkdir -p "$PROJECT" "$HOME" "$CODEX_HOME"
 trap stop_mock EXIT
-start_mock openai-responses "$CI_DIR/scripts/codex-$SCENARIO.json" "$LOG"
+SCRIPT_PREFIX=codex
+[ "${CODEX_TOOL_STYLE:-}" = legacy ] && SCRIPT_PREFIX=codex-legacy
+start_mock openai-responses "$CI_DIR/scripts/$SCRIPT_PREFIX-$SCENARIO.json" "$LOG"
 
 {
   cat <<CONF
