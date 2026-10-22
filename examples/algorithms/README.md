@@ -130,3 +130,81 @@ DOI or URL for either):
 
 [tsp-exact]: https://en.wikipedia.org/wiki/Travelling_salesman_problem#Exact_algorithms
 [held-karp]: https://en.wikipedia.org/wiki/Held%E2%80%93Karp_algorithm
+
+### tsp_nearest_neighbour
+
+- Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
+- Reference: Rosenkrantz, Stearns, Lewis 1977,
+  [Nearest neighbour algorithm](https://en.wikipedia.org/wiki/Nearest_neighbour_algorithm)
+- Canonical complexity: O(n^2) time, tour within (ceil(log2 n)+1)/2 of optimal
+- Analyzer estimate: O(1), exact O(2), cardinality 1.
+
+`range(0, 9).fold(extend_tour).map(close_tour)`. Each fold step appends the
+nearest unvisited city, ties broken by lowest index. The O(n) scan lives in
+the fn body
+([#416](https://github.com/DominicBurkart/marigold/issues/416)) and the city
+count is a literal, so the n^2 collapses to a constant
+([#415](https://github.com/DominicBurkart/marigold/issues/415)). The test
+compares against an independent Rust nearest neighbour and checks the
+Rosenkrantz et al. bound against the optimum.
+
+### tsp_christofides
+
+- Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
+- Reference: Christofides 1976,
+  [Christofides algorithm](https://en.wikipedia.org/wiki/Christofides_algorithm)
+- Canonical complexity: O(n^3) time with a polynomial matching, tour within
+  1.5 of optimal
+- Analyzer estimate: O(1), exact O(5), cardinality 1.
+
+`range(0, 9).fold(prim_step)` then
+`.map(add_matching).map(euler_circuit).map(shortcut).map(finish)`. Prim is the
+fold (one vertex per step); each later stage is one map and is a whole phase
+of the algorithm. The same collapse and hidden per-item cost apply
+([#415](https://github.com/DominicBurkart/marigold/issues/415),
+[#416](https://github.com/DominicBurkart/marigold/issues/416)).
+
+Simplification: the minimum-weight perfect matching of the odd-degree
+vertices is found by brute-force recursion over bitmasks. That is exponential
+in the number of odd vertices and is acceptable only because N=10 leaves at
+most 945 matchings; a real implementation would use Edmonds' blossom
+algorithm. The Eulerian circuit is Hierholzer's algorithm on the multigraph
+and the shortcut keeps first visits. The output carries the tour, the MST
+weight, the matching weight and the odd-vertex mask. Tests assert a valid
+tour of length at most 1.5 times optimal, the MST weight equals Kruskal's,
+the matching weight equals an independent brute-force minimum over the odd
+set, and the tour is no longer than MST plus matching.
+
+### tsp_lkh
+
+- Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
+- Reference: Helsgaun 2017, LKH-3 paper "An Extension of the
+  Lin-Kernighan-Helsgaun TSP Solver for Constrained Traveling Salesman and
+  Vehicle Routing Problems",
+  [LKH-3 page](http://webhotel4.ruc.dk/~keld/research/LKH-3/)
+- Canonical complexity: heuristic local search, no polynomial worst case
+- Analyzer estimate: O(1), exact O(2), cardinality 1.
+
+**This is NOT LKH-3.** It is a simplified local search standing in for the
+Lin-Kernighan family: `range(0, 30).fold(improve_once).map(with_length)`.
+From a tour made by a seeded LCG shuffle, each fold step evaluates every
+2-opt reversal and every Or-opt move (segments of 1 to 3 cities, either
+orientation) and applies the best improving one, for at most 30 steps.
+LKH-3's alpha-nearness candidate sets, 5-opt sequential moves, constraint
+handling and variable-depth Lin-Kernighan search are not implemented. Tests
+assert a valid tour, equality with an independent Rust best-improvement
+search, and an independent 2-opt and Or-opt local-optimum check. Optimality
+is not claimed.
+
+### Analyzer divergence for the constructive TSP programs
+
+The analyzer sees only the stream shape. Every pipeline starts from a
+constant `range`, so the estimate is O(1) with exact O(k), where k is the
+number of stream stages, and the cardinality is exactly one. The canonical
+polynomial costs live in `while` loops inside the fold and map bodies, which
+the analyzer cannot see
+([#416](https://github.com/DominicBurkart/marigold/issues/416)), and in the
+city count, which is a literal rather than a symbolic input size
+([#415](https://github.com/DominicBurkart/marigold/issues/415)). The analyzer
+does not expose intermediate cardinalities (9 fold steps for the first two
+programs, 30 for `tsp_lkh`), so only the final cardinality is pinned.

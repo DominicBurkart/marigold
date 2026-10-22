@@ -20,5 +20,21 @@ fn bench_tsp_exact(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_gcd, bench_tsp_exact);
+fn bench_tsp_constructive(c: &mut Criterion) {
+    let rt = algorithms::runtime();
+    let mut group = c.benchmark_group("tsp_constructive");
+    group.sample_size(10);
+    group.bench_function("tsp_nearest_neighbour", |b| {
+        b.to_async(&rt).iter(algorithms::tsp_nearest_neighbour::run);
+    });
+    group.bench_function("tsp_christofides", |b| {
+        b.to_async(&rt).iter(algorithms::tsp_christofides::run);
+    });
+    group.bench_function("tsp_lkh", |b| {
+        b.to_async(&rt).iter(algorithms::tsp_lkh::run);
+    });
+    group.finish();
+}
+
+criterion_group!(benches, bench_gcd, bench_tsp_exact, bench_tsp_constructive);
 criterion_main!(benches);

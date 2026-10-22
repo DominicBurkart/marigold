@@ -39,4 +39,7 @@ pub mod gcd;
 #[cfg(test)]
 mod tsp;
 pub mod tsp_brute_force;
+pub mod tsp_christofides;
 pub mod tsp_held_karp;
+pub mod tsp_lkh;
+pub mod tsp_nearest_neighbour;

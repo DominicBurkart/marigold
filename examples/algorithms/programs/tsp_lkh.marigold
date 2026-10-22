@@ -1,0 +1,128 @@
+fn dist(a: usize, b: usize) -> i64 {
+    let xs = [0i64, 4, 9, 13, 6, 15, 2, 11, 8, 17];
+    let ys = [0i64, 7, 2, 8, 12, 15, 14, 5, 9, 3];
+    (xs[a] - xs[b]).abs() + (ys[a] - ys[b]).abs()
+}
+
+fn tour_len(t: [i64;10]) -> i64 {
+    let mut total = 0i64;
+    let mut i = 0usize;
+    while i < 10 {
+        total += dist(t[i] as usize, t[(i + 1) % 10] as usize);
+        i += 1;
+    }
+    total
+}
+
+fn seeded_start() -> [i64;10] {
+    let mut t = [0i64, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let mut seed = 12345u64;
+    let mut i = 9usize;
+    while i >= 1 {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        let j = 1 + ((seed >> 16) as usize) % i;
+        let tmp = t[i];
+        t[i] = t[j];
+        t[j] = tmp;
+        i -= 1;
+    }
+    t
+}
+
+fn two_opt(t: [i64;10], i: usize, j: usize) -> [i64;10] {
+    let mut c = t;
+    let mut k = 0usize;
+    while i + k <= j {
+        c[i + k] = t[j - k];
+        k += 1;
+    }
+    c
+}
+
+fn or_opt(t: [i64;10], start: usize, len: usize, gap: usize, reversed: bool) -> [i64;10] {
+    let mut rest = [0i64; 10];
+    let mut r = 0usize;
+    let mut k = 0usize;
+    while k < 10 {
+        if k < start || k >= start + len {
+            rest[r] = t[k];
+            r += 1;
+        }
+        k += 1;
+    }
+    let mut c = [0i64; 10];
+    let mut w = 0usize;
+    let mut p = 0usize;
+    while p < gap {
+        c[w] = rest[p];
+        w += 1;
+        p += 1;
+    }
+    let mut s = 0usize;
+    while s < len {
+        c[w] = if reversed { t[start + len - 1 - s] } else { t[start + s] };
+        w += 1;
+        s += 1;
+    }
+    while p < 10 - len {
+        c[w] = rest[p];
+        w += 1;
+        p += 1;
+    }
+    c
+}
+
+fn improve_once(t: [i64;10], _round: i32) -> [i64;10] {
+    let mut best = t;
+    let mut best_len = tour_len(t);
+    let mut i = 1usize;
+    while i < 9 {
+        let mut j = i + 1;
+        while j < 10 {
+            let c = two_opt(t, i, j);
+            let l = tour_len(c);
+            if l < best_len {
+                best_len = l;
+                best = c;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    let mut len = 1usize;
+    while len <= 3 {
+        let mut start = 1usize;
+        while start + len <= 10 {
+            let mut gap = 1usize;
+            while gap <= 10 - len {
+                let mut flip = 0usize;
+                while flip < 2 {
+                    let c = or_opt(t, start, len, gap, flip == 1);
+                    let l = tour_len(c);
+                    if l < best_len {
+                        best_len = l;
+                        best = c;
+                    }
+                    flip += 1;
+                }
+                gap += 1;
+            }
+            start += 1;
+        }
+        len += 1;
+    }
+    best
+}
+
+fn with_length(t: [i64;10]) -> [i64;11] {
+    let mut out = [0i64; 11];
+    let mut i = 0usize;
+    while i < 10 {
+        out[i] = t[i];
+        i += 1;
+    }
+    out[10] = tour_len(t);
+    out
+}
+
+range(0, 30).fold(seeded_start, improve_once).map(with_length).return

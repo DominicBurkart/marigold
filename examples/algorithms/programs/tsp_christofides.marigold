@@ -1,0 +1,161 @@
+fn dist(a: usize, b: usize) -> i64 {
+    let xs = [0i64, 4, 9, 13, 6, 15, 2, 11, 8, 17];
+    let ys = [0i64, 7, 2, 8, 12, 15, 14, 5, 9, 3];
+    (xs[a] - xs[b]).abs() + (ys[a] - ys[b]).abs()
+}
+
+fn match_cost(mask: i64) -> i64 {
+    if mask == 0 {
+        return 0;
+    }
+    let i = mask.trailing_zeros() as usize;
+    let rest = mask & !(1i64 << i);
+    let mut best = i64::MAX;
+    let mut j = i + 1;
+    while j < 10 {
+        if (rest >> j) & 1 == 1 {
+            let c = dist(i, j) + match_cost(rest & !(1i64 << j));
+            if c < best {
+                best = c;
+            }
+        }
+        j += 1;
+    }
+    best
+}
+
+fn mst_start() -> [i64;146] {
+    let mut s = [0i64; 146];
+    s[100] = 1;
+    s
+}
+
+fn prim_step(state: [i64;146], _round: i32) -> [i64;146] {
+    let mut s = state;
+    let mut best_u = 0usize;
+    let mut best_v = 0usize;
+    let mut best_d = i64::MAX;
+    let mut u = 0usize;
+    while u < 10 {
+        if (state[100] >> u) & 1 == 1 {
+            let mut v = 0usize;
+            while v < 10 {
+                if (state[100] >> v) & 1 == 0 {
+                    let d = dist(u, v);
+                    if d < best_d {
+                        best_d = d;
+                        best_u = u;
+                        best_v = v;
+                    }
+                }
+                v += 1;
+            }
+        }
+        u += 1;
+    }
+    s[best_u * 10 + best_v] += 1;
+    s[best_v * 10 + best_u] += 1;
+    s[100] = state[100] | (1i64 << best_v);
+    s[101] = state[101] + best_d;
+    s
+}
+
+fn add_matching(state: [i64;146]) -> [i64;146] {
+    let mut s = state;
+    let mut odd = 0i64;
+    let mut v = 0usize;
+    while v < 10 {
+        let mut deg = 0i64;
+        let mut u = 0usize;
+        while u < 10 {
+            deg += state[v * 10 + u];
+            u += 1;
+        }
+        if deg % 2 == 1 {
+            odd |= 1i64 << v;
+        }
+        v += 1;
+    }
+    s[144] = odd;
+    let mut mask = odd;
+    while mask != 0 {
+        let i = mask.trailing_zeros() as usize;
+        let rest = mask & !(1i64 << i);
+        let target = match_cost(mask);
+        let mut j = i + 1;
+        let mut found = false;
+        while j < 10 && !found {
+            if (rest >> j) & 1 == 1 && dist(i, j) + match_cost(rest & !(1i64 << j)) == target {
+                s[i * 10 + j] += 1;
+                s[j * 10 + i] += 1;
+                s[143] += dist(i, j);
+                mask = rest & !(1i64 << j);
+                found = true;
+            }
+            j += 1;
+        }
+    }
+    s
+}
+
+fn euler_circuit(state: [i64;146]) -> [i64;146] {
+    let mut s = state;
+    let mut stack = [0usize; 40];
+    let mut sp = 1usize;
+    let mut n = 0usize;
+    while sp > 0 {
+        let v = stack[sp - 1];
+        let mut next = 10usize;
+        let mut u = 0usize;
+        while u < 10 && next == 10 {
+            if s[v * 10 + u] > 0 {
+                next = u;
+            }
+            u += 1;
+        }
+        if next < 10 {
+            s[v * 10 + next] -= 1;
+            s[next * 10 + v] -= 1;
+            stack[sp] = next;
+            sp += 1;
+        } else {
+            s[102 + n] = v as i64;
+            n += 1;
+            sp -= 1;
+        }
+    }
+    s[132] = n as i64;
+    s
+}
+
+fn shortcut(state: [i64;146]) -> [i64;146] {
+    let mut s = state;
+    let mut seen = 0i64;
+    let mut t = 0usize;
+    let mut k = 0usize;
+    while k < state[132] as usize {
+        let v = state[102 + k];
+        if (seen >> v) & 1 == 0 {
+            seen |= 1i64 << v;
+            s[133 + t] = v;
+            t += 1;
+        }
+        k += 1;
+    }
+    s
+}
+
+fn finish(state: [i64;146]) -> [i64;13] {
+    let mut out = [0i64; 13];
+    let mut i = 0usize;
+    while i < 10 {
+        out[i] = state[133 + i];
+        i += 1;
+    }
+    out[10] = state[101];
+    out[11] = state[143];
+    out[12] = state[144];
+    out
+}
+
+range(0, 9).fold(mst_start, prim_step).map(add_matching).map(euler_circuit).map(shortcut).map(finish).return
