@@ -1746,7 +1746,27 @@ fn suffix_is_verbatim(kind: SegmentKind) -> bool {
         | SegmentKind::StreamVariable
         | SegmentKind::StreamVariableRunner
         | SegmentKind::ReturningStream
-        | SegmentKind::NonReturningStream => false,
+        | SegmentKind::NonReturningStream
+        | SegmentKind::InputRange
+        | SegmentKind::InputReadFile
+        | SegmentKind::InputSelectAll
+        | SegmentKind::InputVariable
+        | SegmentKind::SelectAllBranch
+        | SegmentKind::StreamMap
+        | SegmentKind::StreamFilter
+        | SegmentKind::StreamFilterMap
+        | SegmentKind::StreamPermutations
+        | SegmentKind::StreamPermutationsWithReplacement
+        | SegmentKind::StreamCombinations
+        | SegmentKind::StreamKeepFirstN
+        | SegmentKind::StreamFold
+        | SegmentKind::StreamOk
+        | SegmentKind::StreamOkOrPanic
+        | SegmentKind::OutputWriteFile
+        | SegmentKind::FunctionSignature
+        | SegmentKind::FunctionBody
+        | SegmentKind::StructField
+        | SegmentKind::EnumVariant => false,
     }
 }
 
@@ -1763,11 +1783,33 @@ fn suffix_is_verbatim(kind: SegmentKind) -> bool {
 /// the line it is on.
 fn is_user_authored(kind: SegmentKind) -> bool {
     match kind {
-        SegmentKind::Function | SegmentKind::Struct | SegmentKind::Enum => true,
+        SegmentKind::Function
+        | SegmentKind::Struct
+        | SegmentKind::Enum
+        | SegmentKind::FunctionSignature
+        | SegmentKind::FunctionBody
+        | SegmentKind::StructField
+        | SegmentKind::EnumVariant => true,
         SegmentKind::StreamVariable
         | SegmentKind::StreamVariableRunner
         | SegmentKind::ReturningStream
-        | SegmentKind::NonReturningStream => false,
+        | SegmentKind::NonReturningStream
+        | SegmentKind::InputRange
+        | SegmentKind::InputReadFile
+        | SegmentKind::InputSelectAll
+        | SegmentKind::InputVariable
+        | SegmentKind::SelectAllBranch
+        | SegmentKind::StreamMap
+        | SegmentKind::StreamFilter
+        | SegmentKind::StreamFilterMap
+        | SegmentKind::StreamPermutations
+        | SegmentKind::StreamPermutationsWithReplacement
+        | SegmentKind::StreamCombinations
+        | SegmentKind::StreamKeepFirstN
+        | SegmentKind::StreamFold
+        | SegmentKind::StreamOk
+        | SegmentKind::StreamOkOrPanic
+        | SegmentKind::OutputWriteFile => false,
     }
 }
 
@@ -1976,7 +2018,7 @@ mod tests {
     use crate::source_map::SourceMap;
     use std::path::Path;
 
-    fn existing_kinds() -> [(SegmentKind, bool, bool); 7] {
+    fn all_kinds() -> [(SegmentKind, bool, bool); 27] {
         [
             (SegmentKind::Struct, true, false),
             (SegmentKind::Enum, true, false),
@@ -1985,12 +2027,32 @@ mod tests {
             (SegmentKind::StreamVariableRunner, false, false),
             (SegmentKind::ReturningStream, false, false),
             (SegmentKind::NonReturningStream, false, false),
+            (SegmentKind::InputRange, false, false),
+            (SegmentKind::InputReadFile, false, false),
+            (SegmentKind::InputSelectAll, false, false),
+            (SegmentKind::InputVariable, false, false),
+            (SegmentKind::SelectAllBranch, false, false),
+            (SegmentKind::StreamMap, false, false),
+            (SegmentKind::StreamFilter, false, false),
+            (SegmentKind::StreamFilterMap, false, false),
+            (SegmentKind::StreamPermutations, false, false),
+            (SegmentKind::StreamPermutationsWithReplacement, false, false),
+            (SegmentKind::StreamCombinations, false, false),
+            (SegmentKind::StreamKeepFirstN, false, false),
+            (SegmentKind::StreamFold, false, false),
+            (SegmentKind::StreamOk, false, false),
+            (SegmentKind::StreamOkOrPanic, false, false),
+            (SegmentKind::OutputWriteFile, false, false),
+            (SegmentKind::FunctionSignature, true, false),
+            (SegmentKind::FunctionBody, true, false),
+            (SegmentKind::StructField, true, false),
+            (SegmentKind::EnumVariant, true, false),
         ]
     }
 
     #[test]
-    fn segment_kind_helpers_decide_every_existing_kind_new_kinds_must_be_added_when_t2_merges() {
-        let kinds = existing_kinds();
+    fn segment_kind_helpers_decide_every_kind() {
+        let kinds = all_kinds();
         let distinct: std::collections::HashSet<_> = kinds.iter().map(|k| k.0).collect();
         assert_eq!(distinct.len(), kinds.len());
         let rust = "const fn f(x: i32) -> i32 { x }";
