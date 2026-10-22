@@ -5,6 +5,7 @@ members = [
   "marigold-grammar",
   "marigold-lsp",
   "marigold-impl",
+  "examples/algorithms",
   "examples/color-palette-picker",
   "examples/csv",
   "examples/multi-consumer",
