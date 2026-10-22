@@ -130,8 +130,11 @@
 //! * Suggestions (`suggested_replacement`) edit generated text. They are carried
 //!   along and flagged with [`Suggestion::applicable_to_marigold`], which is true only
 //!   when *every* replacement of the diagnostic (a multipart suggestion has several) is
-//!   for an [`Precision::Exact`] span reached directly and the diagnostic offers no
-//!   alternatives (several replacements for the same place are a choice, not an edit).
+//!   for an [`Precision::Exact`] span reached directly, the diagnostic offers no
+//!   alternatives (several replacements for the same place are a choice, not an edit), and
+//!   each edit survives regeneration: rustc calls it `MachineApplicable` when it says
+//!   anything, it is not in an enum variant, it is an identifier when the span is in
+//!   generated wiring, and it is not a whitespace edit.
 //! * Warnings from glue the user never wrote (rustc reports 1-3 `unused_mut` warnings
 //!   for every program) are recognisable with [`MappedDiagnostic::likely_generated_noise`]:
 //!   a warning is not noise when it points into code the user wrote, at any precision.
@@ -387,8 +390,11 @@ pub struct Suggestion {
     /// from. Applying one half of a multipart suggestion would break the program, so one
     /// inexact part makes all of them false; a set of alternatives is not an edit at all,
     /// so it is never applicable as a set (to apply one alternative, build that edit from
-    /// the one replacement). A suggestion that edits generated text, like "a tuple variant
-    /// with a similar name exists: `Ok`", is never applicable.
+    /// the one replacement). It is also false when the edit would not survive regeneration:
+    /// rustc's own applicability is present and not `MachineApplicable`; the span is in an
+    /// enum variant; the span is in generated wiring (an input, a stream stage, an output)
+    /// and the replacement is not a Marigold identifier; the replaced text is only
+    /// whitespace; or the replacement changes only whitespace.
     pub applicable_to_marigold: bool,
 }
 
@@ -990,7 +996,7 @@ impl<'a> Remapper<'a> {
             .position(|s| s.is_primary)
             .or(if d.spans.is_empty() { None } else { Some(0) });
         let mut spans: Vec<MappedSpan> = d.spans.iter().map(|s| self.map_span(s)).collect();
-        number_suggestions(&mut spans);
+        number_suggestions(&mut spans, self.source);
         let primary = primary_index.map(|i| spans.remove(i));
         MappedDiagnostic {
             level: d.level.clone(),
@@ -1082,7 +1088,7 @@ impl<'a> Remapper<'a> {
                 applicable_to_marigold: false,
             });
         mapped.via_macro = via_macro;
-        number_suggestions(std::slice::from_mut(&mut mapped));
+        number_suggestions(std::slice::from_mut(&mut mapped), self.source);
         mapped
     }
 
@@ -1656,6 +1662,54 @@ impl Remapper<'_> {
     }
 }
 
+/// The identifier form of the Marigold grammar (`free_text_identifier` in `marigold.pest`):
+/// a letter or `_`, then letters, digits, `_`, `<`, `>` and `-`.
+pub(crate) fn is_marigold_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '<' | '>' | '-'))
+}
+
+/// Whether applying the suggestion of an exact span to the Marigold source gives the program
+/// that applying it to the generated code gives. Exactness says the replaced text is the
+/// same in both; this says the edit survives regeneration:
+///
+/// * rustc must call the suggestion `MachineApplicable` when it says anything about it;
+/// * an enum variant is never edited, because Marigold writes its name a second time in the
+///   generated name-to-variant conversions;
+/// * text the generator wires around the user's expressions (an input, a stream stage, an
+///   output) takes only an identifier, the only argument the grammar reads;
+/// * whitespace is not edited, and an edit that changes only whitespace is not an edit,
+///   because the generator lays code out itself.
+fn edit_commutes(span: &MappedSpan, source: &str) -> bool {
+    let (Some(suggestion), Some(segment), Some(location)) =
+        (&span.suggestion, &span.segment, &span.marigold)
+    else {
+        return false;
+    };
+    if suggestion
+        .applicability
+        .as_deref()
+        .is_some_and(|a| a != "MachineApplicable")
+    {
+        return false;
+    }
+    if segment.kind == SegmentKind::EnumVariant {
+        return false;
+    }
+    let Some(old) = source.get(location.range.start..location.range.end) else {
+        return false;
+    };
+    if !is_user_authored(segment.kind) && !is_marigold_identifier(&suggestion.replacement) {
+        return false;
+    }
+    let squeeze = |t: &str| t.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+    let whitespace_only = !old.is_empty() && old.trim().is_empty();
+    !whitespace_only && squeeze(old) != squeeze(&suggestion.replacement)
+}
+
 /// Whether `before`, the text in front of an `at` that ends right before a location, is a
 /// backtrace frame's second line: the `at` starts its line, and the line above it is a frame
 /// header, `<number>:`.
@@ -1674,7 +1728,7 @@ fn is_frame_header_before(before: &str) -> bool {
 ///
 /// Spans whose reported byte ranges are equal or overlap edit the same place: they are
 /// alternatives. The other spans are the parts of one edit.
-fn number_suggestions(spans: &mut [MappedSpan]) {
+fn number_suggestions(spans: &mut [MappedSpan], source: &str) {
     let ranges: Vec<(usize, usize)> = spans
         .iter()
         .map(|s| {
@@ -1706,7 +1760,11 @@ fn number_suggestions(spans: &mut [MappedSpan]) {
     let all_direct_and_exact = groups
         .iter()
         .flatten()
-        .all(|&i| spans[i].precision == Precision::Exact && spans[i].via_macro.is_none());
+        .all(|&i| spans[i].precision == Precision::Exact && spans[i].via_macro.is_none())
+        && groups
+            .iter()
+            .flatten()
+            .all(|&i| edit_commutes(&spans[i], source));
     let applicable = all_direct_and_exact && groups.iter().all(|g| g.len() == 1);
     let parts = groups.len();
     for (part, group) in groups.iter().enumerate() {
@@ -2079,6 +2137,35 @@ mod tests {
                 source.len(),
                 "{kind:?}"
             );
+        }
+    }
+
+    #[test]
+    fn the_identifier_check_agrees_with_the_grammar() {
+        for id in [
+            "f",
+            "_f",
+            "mk",
+            "Ok",
+            "a1",
+            "a_b",
+            "a-b",
+            "a<b>",
+            "string_10",
+            "1a",
+            "",
+            "-a",
+            "<a",
+            "a b",
+            "a::b",
+            "&f",
+            "f()",
+            "crate::mk",
+            "é",
+            "a.b",
+        ] {
+            let parses = crate::marigold_generate(&format!("range(0, 3).map({id}).return")).is_ok();
+            assert_eq!(is_marigold_identifier(id), parses, "{id:?}");
         }
     }
 

@@ -737,7 +737,8 @@ fn g09_primary_is_the_flagged_span_and_secondary_spans_keep_their_order() {
     let help = m.children[0].primary.as_ref().unwrap();
     let sug = help.suggestion.as_ref().unwrap();
     assert_eq!(sug.replacement, "Ok");
-    assert!(sug.applicable_to_marigold);
+    assert_eq!(sug.applicability.as_deref(), Some("MaybeIncorrect"));
+    assert!(!sug.applicable_to_marigold);
     assert_eq!(help.precision, Exact);
 }
 
@@ -3302,7 +3303,7 @@ fn n03_exactness_in_a_nested_segment_carries_to_suggestions_and_to_the_noise_dec
     let r = Remapper::new(&nested, &src, &is_gen);
     let plus = body.generated.start + "{ x ".len();
     let mut at_plus = rustc_span("gen.rs", &nested.rust, plus, plus + 1, true);
-    at_plus.suggested_replacement = Some("-".into());
+    at_plus.suggested_replacement = Some("minus".into());
     let warning = jdiag(json!({
         "message": "unused", "level": "warning", "children": [],
         "spans": [span_to_json(&rustc_span("gen.rs", &nested.rust, plus, plus + 1, true))],
@@ -3383,7 +3384,7 @@ fn n05_a_warning_in_stream_glue_stays_noise_at_any_precision() {
 fn suggestion_part(text: &str, file: &str, a: usize, b: usize, replacement: &str) -> RustcSpan {
     let mut s = rustc_span(file, text, a, b, true);
     s.suggested_replacement = Some(replacement.to_string());
-    s.suggestion_applicability = Some("MaybeIncorrect".to_string());
+    s.suggestion_applicability = Some("MachineApplicable".to_string());
     s
 }
 
@@ -4363,11 +4364,12 @@ fn n28_alternatives_at_one_place_are_not_the_parts_of_one_edit() {
             (1, 2, 0, 1, false, ")".to_string()),
         ]
     );
+    let y = f.generated.start + program.rust[f.generated.start..].find("-> i32").unwrap() + 3;
     let d = help(vec![
-        suggestion_part(t, "gen.rs", x, x + 1, "a"),
-        suggestion_part(t, "gen.rs", x + 1, x + 2, "b"),
-        suggestion_part(t, "gen.rs", x + 2, x + 2, "c"),
-        suggestion_part(t, "gen.rs", x + 2, x + 3, "d"),
+        suggestion_part(t, "gen.rs", y, y + 1, "a"),
+        suggestion_part(t, "gen.rs", y + 1, y + 2, "b"),
+        suggestion_part(t, "gen.rs", y + 2, y + 2, "c"),
+        suggestion_part(t, "gen.rs", y + 2, y + 3, "d"),
     ]);
     assert_eq!(numbered(&d).len(), 4);
     assert!(numbered(&d).iter().all(|n| n.1 == 4 && n.3 == 1 && n.4));
@@ -4488,17 +4490,22 @@ fn n31_a_line_with_an_escape_sequence_is_never_better_than_segment() {
 }
 
 fn numbered_ranges(ranges: &[(usize, usize)]) -> Vec<(usize, usize, usize, usize, bool, String)> {
-    let (src, program) = mini();
+    let src = "fn abcdefghijkl(x: i32) -> i32 { x + 1 }\nrange(0, 2).map(abcdefghijkl).return";
+    let program = marigold_generate(src).unwrap();
     let f = seg_of(&program, SegmentKind::Function, 0);
-    let base = f.generated.start + program.rust[f.generated.start..].find("x + 1").unwrap();
+    let base = f.generated.start
+        + program.rust[f.generated.start..]
+            .find("abcdefghijkl")
+            .unwrap();
     let is_gen = |name: &str| name == "gen.rs";
-    let r = Remapper::new(&program, &src, &is_gen);
+    let r = Remapper::new(&program, src, &is_gen);
     let spans: Vec<Value> = ranges
         .iter()
         .enumerate()
         .map(|(i, &(a, b))| {
             json!({"file_name": "gen.rs", "byte_start": base + a, "byte_end": base + b,
-                   "suggested_replacement": format!("r{i}")})
+                   "suggested_replacement": format!("r{i}"),
+                   "suggestion_applicability": "MachineApplicable"})
         })
         .collect();
     let m = r.remap(&jdiag(
@@ -4698,4 +4705,123 @@ fn t2_05_a_warning_in_a_stream_stage_is_noise() {
     let (p, m) = t2_map("iter(0..3)", "returning_stream_0");
     assert_t2(&p, Seg, SegmentKind::InputRange, "range(0, 3)");
     assert!(m.likely_generated_noise());
+}
+
+#[cfg(not(any(feature = "io", feature = "tokio", feature = "async-std")))]
+fn apply_edits(text: &str, edits: &mut Vec<(usize, usize, String)>) -> String {
+    edits.sort();
+    let mut out = String::new();
+    let mut at = 0;
+    for (a, b, r) in edits.iter() {
+        out.push_str(&text[at..*a]);
+        out.push_str(r);
+        at = *b;
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
+#[cfg(not(any(feature = "io", feature = "tokio", feature = "async-std")))]
+fn commutes(src: &str, rust: &str, prefix_len: usize, d: &MappedDiagnostic) -> bool {
+    let spans = d.suggestion_spans();
+    let mut marigold_edits = vec![];
+    let mut generated_edits = vec![];
+    for s in &spans {
+        let replacement = s.suggestion.as_ref().unwrap().replacement.clone();
+        let loc = s.marigold.as_ref().unwrap();
+        let raw = s.raw.as_ref().unwrap();
+        marigold_edits.push((loc.range.start, loc.range.end, replacement.clone()));
+        generated_edits.push((
+            raw.byte_start - prefix_len,
+            raw.byte_end - prefix_len,
+            replacement,
+        ));
+    }
+    let edited_src = apply_edits(src, &mut marigold_edits);
+    let want = apply_edits(rust, &mut generated_edits);
+    match marigold_generate(&edited_src) {
+        Ok(program) => program.rust == want,
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(any(feature = "io", feature = "tokio", feature = "async-std")))]
+fn applicable_diagnostics<'a>(d: &'a MappedDiagnostic, out: &mut Vec<&'a MappedDiagnostic>) {
+    if d.suggestion_spans()
+        .iter()
+        .any(|s| s.suggestion.as_ref().unwrap().applicable_to_marigold)
+    {
+        out.push(d);
+    }
+    for c in &d.children {
+        applicable_diagnostics(c, out);
+    }
+}
+
+#[cfg(not(any(feature = "io", feature = "tokio", feature = "async-std")))]
+#[test]
+fn applicable_suggestions_commute() {
+    let mut checked = 0;
+    for name in scenario_names() {
+        let fx = load(&name);
+        remapper!(fx, r);
+        for d in &fx.diags {
+            let mapped = r.remap(d);
+            let mut found = vec![];
+            applicable_diagnostics(&mapped, &mut found);
+            for m in found {
+                assert!(
+                    commutes(&fx.src, &fx.program.rust, fx.prefix.len(), m),
+                    "{name}: {m:?}"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked >= 2, "{checked}");
+
+    let program = marigold_generate(T2_SRC).unwrap();
+    let is_gen = |name: &str| name == "gen.rs";
+    let r = Remapper::new(&program, T2_SRC, &is_gen);
+    let table: &[(&str, &str, usize, usize, &str, bool)] = &[
+        ("enum E", "Red", 0, 3, "Zed", false),
+        ("enum E", "Green", 0, 5, "Zed", false),
+        ("returning_stream_0", "map(f)", 4, 1, "crate::mk", false),
+        ("returning_stream_0", "map(f)", 4, 1, "&f", false),
+        ("returning_stream_0", "map(f)", 4, 1, "f()", false),
+        ("returning_stream_0", "map(f)", 4, 1, "g", true),
+        ("returning_stream_0", "map(f)", 4, 1, "Ok", true),
+        ("const fn f", "x + 1", 0, 5, "x + 2", true),
+        ("const fn f", "-> i32", 3, 3, "i64", true),
+        ("const fn f", "(x: i32)", 1, 1, "y", true),
+        ("struct S", "a: u8", 3, 2, "u16", true),
+        ("const fn f", ") -> i32", 1, 1, "", false),
+        ("const fn f", ") -> i32", 1, 1, "  ", false),
+        ("const fn f", "-> i32", 2, 1, "", false),
+    ];
+    let mut applicable = 0;
+    for (after, needle, offset, len, replacement, want) in table {
+        let base = program.rust.find(after).unwrap();
+        let at = base + program.rust[base..].find(needle).unwrap() + offset;
+        let mut sp = rustc_span("gen.rs", &program.rust, at, at + len, true);
+        sp.suggested_replacement = Some((*replacement).to_string());
+        sp.suggestion_applicability = Some("MachineApplicable".to_string());
+        let help = jdiag(json!({
+            "message": "h", "level": "help", "children": [], "spans": [span_to_json(&sp)],
+        }));
+        let m = r.remap(&help);
+        let got = m
+            .suggestion_spans()
+            .iter()
+            .all(|s| s.suggestion.as_ref().unwrap().applicable_to_marigold);
+        assert_eq!(got, *want, "{after} {needle} -> {replacement:?}: {m:?}");
+        if got {
+            applicable += 1;
+            assert!(
+                commutes(T2_SRC, &program.rust, 0, &m),
+                "{after} {needle} -> {replacement:?}"
+            );
+        }
+    }
+    assert!(applicable >= 5);
 }
