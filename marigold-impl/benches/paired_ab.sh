@@ -39,9 +39,13 @@ target_spec() {
     esac
 }
 
-if ! grep -q '^FAILED:' "$regress_out" 2> /dev/null; then
-    echo "No benchmarks flagged by the first pass; no paired comparison needed."
-    exit 0
+if ! grep -qE '^FAILED: [0-9]+ benchmark\(s\) exceeded' "$regress_out" 2> /dev/null; then
+    note "### First-pass check failed without reporting regressions"
+    note ""
+    note '```'
+    { cat "$regress_out" 2> /dev/null || true; } | tee -a "$summary"
+    note '```'
+    fail "the first pass failed but did not report benchmark regressions, so it cannot be cleared."
 fi
 
 flagged="$(grep -E '^  - ' "$regress_out" | grep -E '\[[^]]*bench_[^]/]*\.txt\]$' || true)"

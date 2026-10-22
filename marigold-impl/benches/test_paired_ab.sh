@@ -128,11 +128,27 @@ expect_rc() {
 
 export STUB_BASE_VAL=1000000
 
-setup_case none
+setup_case passed_output
 regress_out_for "$case_dir/regress.out"
 run_case "$case_dir/regress.out"
-expect_rc "no flagged benchmarks exits 0" 0
-[[ ! -s "$case_dir/stub.log" ]] && check "no flagged benchmarks never invokes cargo" 1 || check "no flagged benchmarks never invokes cargo" 0
+expect_rc "first-pass output without a FAILED line fails closed" nonzero
+[[ ! -s "$case_dir/stub.log" ]] && check "first-pass output without a FAILED line never invokes cargo" 1 || check "first-pass output without a FAILED line never invokes cargo" 0
+grep -q "PASSED" "$case_dir/summary.md" && check "summary shows the first-pass output" 1 || check "summary shows the first-pass output" 0
+
+setup_case crashed_first_pass
+echo "error: no benchmark output files" > "$case_dir/regress.out"
+run_case "$case_dir/regress.out"
+expect_rc "crashed first pass fails closed" nonzero
+grep -q "no benchmark output files" "$case_dir/summary.md" && check "summary shows the crash output" 1 || check "summary shows the crash output" 0
+
+setup_case empty_first_pass
+: > "$case_dir/regress.out"
+run_case "$case_dir/regress.out"
+expect_rc "empty first-pass output fails closed" nonzero
+
+setup_case missing_first_pass
+run_case "$case_dir/does-not-exist.out"
+expect_rc "missing first-pass output fails closed" nonzero
 
 setup_case equal
 regress_out_for "$case_dir/regress.out" keep_first_n
