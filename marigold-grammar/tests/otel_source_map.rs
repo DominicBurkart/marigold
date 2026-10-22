@@ -42,7 +42,7 @@ fn is_stream_kind(kind: SegmentKind) -> bool {
 fn outside_segments(program: &GeneratedProgram) -> Vec<&str> {
     let mut gaps = Vec::new();
     let mut at = 0;
-    let mut segments: Vec<_> = program.map.segments().iter().collect();
+    let mut segments: Vec<_> = program.map.top_level().collect();
     segments.sort_by_key(|s| s.generated.start);
     for s in segments {
         gaps.push(&program.rust[at..s.generated.start]);
@@ -91,8 +91,7 @@ fn instrumentation_does_not_change_the_shape_of_the_map() {
         };
         let shape = |p: &GeneratedProgram| {
             p.map
-                .segments()
-                .iter()
+                .top_level()
                 .map(|s| (s.kind, s.expr_index, s.name.clone(), s.source))
                 .collect::<Vec<_>>()
         };

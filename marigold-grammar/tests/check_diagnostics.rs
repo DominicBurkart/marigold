@@ -790,7 +790,9 @@ fn timed<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
     (out, start.elapsed())
 }
 
-const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(60);
+/// A backstop against a hang, not a performance claim: the 60_000-function programs take a few
+/// seconds in a debug build, and over a minute when the machine is saturated by other processes.
+const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(600);
 
 fn assert_output_is_capped_at_every_size(build: impl Fn(usize) -> String) {
     for n in [5_000, 10_000] {

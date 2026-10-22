@@ -13,9 +13,10 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 
 pub const TOP_KEYS: [&str; 5] = ["version", "features", "source", "rust", "segments"];
-pub const SEGMENT_KEYS: [&str; 6] = [
+pub const SEGMENT_KEYS: [&str; 7] = [
     "kind",
     "name",
+    "ident",
     "expr_index",
     "parent",
     "source",
@@ -125,8 +126,10 @@ pub fn validate_v1(doc: &Value) -> Result<(), String> {
                 ))
             }
         }
-        if !(s["name"].is_null() || s["name"].is_string()) {
-            return Err(format!("{at}.name: expected string or null"));
+        for key in ["name", "ident"] {
+            if !(s[key].is_null() || s[key].is_string()) {
+                return Err(format!("{at}.{key}: expected string or null"));
+            }
         }
         uint(&s["expr_index"], &format!("{at}.expr_index"))?;
         if !s["parent"].is_null() {

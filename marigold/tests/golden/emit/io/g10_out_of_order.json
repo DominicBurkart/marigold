@@ -9,6 +9,7 @@
     {
       "kind": "struct",
       "name": "S",
+      "ident": "S",
       "expr_index": 3,
       "parent": null,
       "source": {
@@ -29,8 +30,32 @@
       }
     },
     {
+      "kind": "struct_field",
+      "name": "a",
+      "ident": null,
+      "expr_index": 3,
+      "parent": 0,
+      "source": {
+        "start": 79,
+        "end": 84,
+        "start_line": 4,
+        "start_column": 12,
+        "end_line": 4,
+        "end_column": 17
+      },
+      "generated": {
+        "start": 300,
+        "end": 305,
+        "start_line": 7,
+        "start_column": 13,
+        "end_line": 7,
+        "end_column": 18
+      }
+    },
+    {
       "kind": "enum",
       "name": "E",
+      "ident": "E",
       "expr_index": 4,
       "parent": null,
       "source": {
@@ -51,8 +76,32 @@
       }
     },
     {
+      "kind": "enum_variant",
+      "name": "A",
+      "ident": null,
+      "expr_index": 4,
+      "parent": 2,
+      "source": {
+        "start": 96,
+        "end": 97,
+        "start_line": 5,
+        "start_column": 10,
+        "end_line": 5,
+        "end_column": 11
+      },
+      "generated": {
+        "start": 508,
+        "end": 509,
+        "start_line": 12,
+        "start_column": 1,
+        "end_line": 12,
+        "end_column": 2
+      }
+    },
+    {
       "kind": "function",
       "name": "f",
+      "ident": "f",
       "expr_index": 1,
       "parent": null,
       "source": {
@@ -73,8 +122,55 @@
       }
     },
     {
+      "kind": "function_signature",
+      "name": null,
+      "ident": null,
+      "expr_index": 1,
+      "parent": 4,
+      "source": {
+        "start": 22,
+        "end": 38,
+        "start_line": 2,
+        "start_column": 4,
+        "end_line": 2,
+        "end_column": 20
+      },
+      "generated": {
+        "start": 616,
+        "end": 632,
+        "start_line": 21,
+        "start_column": 10,
+        "end_line": 21,
+        "end_column": 26
+      }
+    },
+    {
+      "kind": "function_body",
+      "name": null,
+      "ident": null,
+      "expr_index": 1,
+      "parent": 4,
+      "source": {
+        "start": 39,
+        "end": 44,
+        "start_line": 2,
+        "start_column": 21,
+        "end_line": 2,
+        "end_column": 26
+      },
+      "generated": {
+        "start": 633,
+        "end": 638,
+        "start_line": 21,
+        "start_column": 27,
+        "end_line": 21,
+        "end_column": 32
+      }
+    },
+    {
       "kind": "stream_variable",
       "name": "x",
+      "ident": "x",
       "expr_index": 2,
       "parent": null,
       "source": {
@@ -95,8 +191,55 @@
       }
     },
     {
+      "kind": "input_range",
+      "name": null,
+      "ident": null,
+      "expr_index": 2,
+      "parent": 7,
+      "source": {
+        "start": 49,
+        "end": 60,
+        "start_line": 3,
+        "start_column": 5,
+        "end_line": 3,
+        "end_column": 16
+      },
+      "generated": {
+        "start": 762,
+        "end": 816,
+        "start_line": 23,
+        "start_column": 123,
+        "end_line": 23,
+        "end_column": 177
+      }
+    },
+    {
+      "kind": "stream_map",
+      "name": null,
+      "ident": null,
+      "expr_index": 2,
+      "parent": 7,
+      "source": {
+        "start": 61,
+        "end": 67,
+        "start_line": 3,
+        "start_column": 17,
+        "end_line": 3,
+        "end_column": 23
+      },
+      "generated": {
+        "start": 817,
+        "end": 823,
+        "start_line": 23,
+        "start_column": 178,
+        "end_line": 23,
+        "end_column": 184
+      }
+    },
+    {
       "kind": "returning_stream",
       "name": null,
+      "ident": "returning_stream_0",
       "expr_index": 0,
       "parent": null,
       "source": {
@@ -117,8 +260,32 @@
       }
     },
     {
+      "kind": "input_range",
+      "name": null,
+      "ident": null,
+      "expr_index": 0,
+      "parent": 10,
+      "source": {
+        "start": 0,
+        "end": 11,
+        "start_line": 1,
+        "start_column": 1,
+        "end_line": 1,
+        "end_column": 12
+      },
+      "generated": {
+        "start": 897,
+        "end": 951,
+        "start_line": 25,
+        "start_column": 70,
+        "end_line": 25,
+        "end_column": 124
+      }
+    },
+    {
       "kind": "returning_stream",
       "name": null,
+      "ident": "returning_stream_1",
       "expr_index": 6,
       "parent": null,
       "source": {
@@ -139,8 +306,32 @@
       }
     },
     {
+      "kind": "input_range",
+      "name": null,
+      "ident": null,
+      "expr_index": 6,
+      "parent": 12,
+      "source": {
+        "start": 127,
+        "end": 135,
+        "start_line": 7,
+        "start_column": 1,
+        "end_line": 7,
+        "end_column": 9
+      },
+      "generated": {
+        "start": 1024,
+        "end": 1098,
+        "start_line": 26,
+        "start_column": 70,
+        "end_line": 26,
+        "end_column": 144
+      }
+    },
+    {
       "kind": "non_returning_stream",
       "name": null,
+      "ident": "non_returning_stream_0",
       "expr_index": 5,
       "parent": null,
       "source": {
@@ -161,8 +352,78 @@
       }
     },
     {
+      "kind": "output_write_file",
+      "name": null,
+      "ident": null,
+      "expr_index": 5,
+      "parent": 14,
+      "source": {
+        "start": 102,
+        "end": 126,
+        "start_line": 6,
+        "start_column": 3,
+        "end_line": 6,
+        "end_column": 27
+      },
+      "generated": {
+        "start": 1175,
+        "end": 2537,
+        "start_line": 27,
+        "start_column": 74,
+        "end_line": 59,
+        "end_column": 12
+      }
+    },
+    {
+      "kind": "input_variable",
+      "name": null,
+      "ident": null,
+      "expr_index": 5,
+      "parent": 14,
+      "source": {
+        "start": 100,
+        "end": 101,
+        "start_line": 6,
+        "start_column": 1,
+        "end_line": 6,
+        "end_column": 2
+      },
+      "generated": {
+        "start": 2537,
+        "end": 2544,
+        "start_line": 59,
+        "start_column": 12,
+        "end_line": 59,
+        "end_column": 19
+      }
+    },
+    {
+      "kind": "output_write_file",
+      "name": null,
+      "ident": null,
+      "expr_index": 5,
+      "parent": 14,
+      "source": {
+        "start": 102,
+        "end": 126,
+        "start_line": 6,
+        "start_column": 3,
+        "end_line": 6,
+        "end_column": 27
+      },
+      "generated": {
+        "start": 2544,
+        "end": 4240,
+        "start_line": 59,
+        "start_column": 19,
+        "end_line": 100,
+        "end_column": 12
+      }
+    },
+    {
       "kind": "stream_variable_runner",
       "name": "x",
+      "ident": "stream_variable_runners_0",
       "expr_index": 2,
       "parent": null,
       "source": {
