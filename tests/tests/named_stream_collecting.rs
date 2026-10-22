@@ -219,3 +219,31 @@ async fn collecting_and_non_collecting_consumers_of_one_variable() {
 fn wrap_one(i: i32) -> [i32; 1] {
     [i]
 }
+
+#[tokio::test]
+async fn late_polled_collecting_consumer_receives_every_item() {
+    fn double(i: i32) -> i32 {
+        i * 2
+    }
+    let run = async {
+        let mut stream = m!(
+            x = range(0, 5)
+            x.map(double).map(wrap_one).return
+            x.permutations(1).return
+        )
+        .await;
+        let mut out = vec![stream.next().await.unwrap()];
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        while let Some(item) = stream.next().await {
+            out.push(item);
+        }
+        out
+    };
+    let mut out = tokio::time::timeout(GUARD, run)
+        .await
+        .unwrap_or_else(|_| panic!("HANG: late polled consumer did not complete within {GUARD:?}"));
+    out.sort();
+    let mut expected: Vec<[i32; 1]> = (0..5).map(|i| [i * 2]).chain((0..5).map(|i| [i])).collect();
+    expected.sort();
+    assert_eq!(out, expected);
+}

@@ -25,7 +25,7 @@
 
 use crate::node_ids::{node_infos, site_hash, NodeKind};
 use crate::nodes::{
-    any_collects_input, defer_until_polled, NamedStreamNode, OutputFunctionNode,
+    any_awaits_whole_input, defer_until_polled, NamedStreamNode, OutputFunctionNode,
     StreamFunctionKind, StreamFunctionNode, StreamVariableFromPriorStreamVariableNode,
     StreamVariableNode, UnnamedStreamNode, DEFERRED_RECEIVER,
 };
@@ -308,7 +308,7 @@ impl Plan {
         node: &NamedStreamNode,
     ) -> Result<String, String> {
         let nodes = self.expr_nodes(expr_index, node.funs.len() + 2)?;
-        let deferred = any_collects_input(&node.funs);
+        let deferred = any_awaits_whole_input(&node.funs);
         let start = if deferred {
             DEFERRED_RECEIVER.to_string()
         } else {
@@ -346,7 +346,7 @@ impl Plan {
         node: &StreamVariableFromPriorStreamVariableNode,
     ) -> Result<String, String> {
         let nodes = self.expr_nodes(expr_index, node.funs.len() + 1)?;
-        let deferred = any_collects_input(&node.funs);
+        let deferred = any_awaits_whole_input(&node.funs);
         let start = if deferred {
             DEFERRED_RECEIVER.to_string()
         } else {

@@ -171,7 +171,7 @@ impl NamedStreamNode {
         };
         let stream_prefix = &self.out.stream_prefix;
         let stream_postfix = &self.out.stream_postfix;
-        let source = if any_collects_input(&self.funs) {
+        let source = if any_awaits_whole_input(&self.funs) {
             defer_until_polled(
                 stream_variable,
                 &format!("{DEFERRED_RECEIVER}{intermediate}"),
@@ -244,7 +244,7 @@ impl StreamVariableFromPriorStreamVariableNode {
                 )
             }
         };
-        let source = if any_collects_input(&self.funs) {
+        let source = if any_awaits_whole_input(&self.funs) {
             defer_until_polled(
                 prior_stream_variable,
                 &format!("{DEFERRED_RECEIVER}{intermediate}"),
@@ -282,7 +282,7 @@ pub enum StreamFunctionKind {
 }
 
 impl StreamFunctionKind {
-    pub fn collects_input(&self) -> bool {
+    pub(crate) fn awaits_whole_input(&self) -> bool {
         match self {
             StreamFunctionKind::Permutations(_)
             | StreamFunctionKind::PermutationsWithReplacement(_)
@@ -300,8 +300,8 @@ impl StreamFunctionKind {
 
 pub(crate) const DEFERRED_RECEIVER: &str = "__marigold_receiver";
 
-pub(crate) fn any_collects_input(funs: &[StreamFunctionNode]) -> bool {
-    funs.iter().any(|f| f.kind.collects_input())
+pub(crate) fn any_awaits_whole_input(funs: &[StreamFunctionNode]) -> bool {
+    funs.iter().any(|f| f.kind.awaits_whole_input())
 }
 
 pub(crate) fn defer_until_polled(variable: &str, chain: &str, pin: bool) -> String {
