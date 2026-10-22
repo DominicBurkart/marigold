@@ -1,9 +1,14 @@
 # color-palette-picker
 
-Two ways to pick a maximally contrasting three-colour palette, both written as
-Marigold stream programs and scored by the same integer LMS contrast function
-(minimum pairwise contrast across normal vision, deutan, protan, tritan and
-achromat).
+Two ways to pick a maximally contrasting three-colour palette.
+
+`src/main.rs` runs the original brute force with Rust closures and the prisma
+f64 CIECAM02 `compare_contrast` over `range(0, 255)` filtered to multiples
+of 51. The two `.marigold` programs
+(`examples/color-palette-picker.marigold` and
+`examples/color-palette-picker-geometric.marigold`) are scored by the same
+integer LMS contrast function: the minimum pairwise contrast across normal
+vision, deutan, protan, tritan and achromat.
 
 ## Brute force
 
@@ -11,66 +16,79 @@ achromat).
 `range(0, 256).filter(mod_fifty_one).permutations_with_replacement(3)`
 `.combinations(3).keep_first_n(5, compare_contrast)`.
 Canonical work: 6 channel values, 216 colours, C(216,3) = 1,656,360 palettes
-scored.
+scored. An independent triple loop over those 216 colours (in the tests) gives
+the grid optimum 499,574,432,835, reached by (0,0,0), (153,204,0) and
+(255,255,255).
 
 ## Geometric (colour wheel)
 
-`examples/color-palette-picker-geometric.marigold`, run by
+`examples/color-palette-picker-geometric.marigold` ends in
+`.write_file("/dev/stdout", csv)` and runs with `marigold run`. The same
+program is embedded in `src/lib.rs` ending in `.return`, run by
 `color_palette_picker::geometric_palettes()`, by `main`, by the tests in
-`src/main.rs` and by the `bench_geometric_picker` bench.
+`src/main.rs` and by the `bench_geometric_picker` bench. A third copy,
+`marigold-grammar/tests/programs/geometric_palette.marigold`, is analysed by
+the grammar tests. `m!` cannot include a file, so the copies are kept and
+guarded: tests require the grammar copy to equal the example file, and the
+`lib.rs` copy to equal it except for the output stage.
 
-The wheel has 12 hues (30 degree steps) and 4 brightness rings per hue (pastel
-toward the white centre, pure, two-thirds, one-third toward black): 48 wheel
-points. A candidate is an equilateral polygon: vertices at hues `r`, `r + 4`,
-`r + 8` (120 degrees apart), each with its own ring, so brightness varies
-between vertices (irregular in brightness, regular in hue). `r` ranges over
-the 4 distinct rotations. The search is
+The wheel has 18 hues (20 degree steps) and 6 rings per hue: the white centre
+pole, a pastel (two thirds toward white), the pure hue, two thirds and one
+third brightness, and the black rim pole. The poles are the same colour at
+every hue. A candidate is an equilateral polygon: vertices at hues `r`,
+`r + 6`, `r + 12` (120 degrees apart), each with its own ring, so brightness
+varies between vertices. The search is
 
 ```text
-range(0, 4).permutations_with_replacement(4).keep_first_n(5, compare_polygons).map(to_palette).return
+range(0, 6).permutations_with_replacement(4).keep_first_n(5, compare_polygons).map(to_palette)
 ```
 
-Each item `[r, ring0, ring1, ring2]` is one polygon: 4 x 4^3 = 4^4 = 256
-candidates instead of 1,656,360.
+Each item `[r, ring0, ring1, ring2]` is one polygon: 6 rotations x 6^3 rings
+= 6^4 = 1,296 candidates (polygons with pole vertices repeat colours)
+instead of 1,656,360.
 
-Simplifications: the vision types are not separate wheels but separate
-contrast metrics over the same wheel, minimised per pair exactly as in the
-brute force; polygons are triangles only; the white-centre and black-rim poles
-are not wheel points; only equilateral hue spacing is searched.
+Limits relative to issue #414, stated plainly:
+
+- The five vision models are not separate wheels that are compared or
+  summed. They are combined as a per-pair minimum of five contrast metrics on
+  one wheel.
+- Only triangles are searched, and only equilateral hue spacing.
+- `range(0, 6)` is reused for the rotation and for the three rings, so the
+  rotation count and ring count are coupled (both 6).
 
 ### Correctness oracle
 
-Tests in `src/main.rs` check against plain-loop oracles on the same 48-point
-discretization:
+Tests in `src/main.rs` check against plain-loop oracles on the same wheel:
 
 - the five best geometric scores equal the five best scores of an exhaustive
-  loop over all 256 polygons (exact equality);
-- every returned palette is a wheel polygon with hues `r`, `r + 4`, `r + 8`;
-- the best geometric score is at most the unrestricted optimum over all
-  C(48,3) = 17,296 triples (the geometric space is a subset) and at least 80%
-  of it. The 80% bound is a measured bound (the measured ratio is 84.1%), not
-  a theorem: no guarantee is claimed for other wheels or metrics. Replacing
-  the search with an arbitrary palette fails this test and the exact-score
-  test. The prisma (f64 CIECAM02) ordering also agrees that the geometric
-  winner does not beat the unrestricted optimum;
-- the best geometric score is pinned to the literal 384,514,391,494, and every
-  LMS and luminance weight in the program text must equal the weights of the
-  oracle (which the existing tests validate against prisma ordering).
+  loop over all 1,296 polygons (exact equality), and the program enumerates
+  exactly the oracle's polygons;
+- the best geometric score, 499,851,629,344, is at least the brute-force
+  grid optimum 499,574,432,835 (100.06% of it) and equals the optimum over
+  all C(74,3) triples of the 74 distinct wheel colours. Both relations are
+  measured on this wheel, not theorems: the wheel channel values are not the
+  51-step grid, and no guarantee is claimed for other wheels or metrics;
+- the prisma (f64 CIECAM02) ordering agrees that the geometric winner does
+  not beat the unrestricted wheel optimum;
+- the program scores (0,0,0), (255,255,255), (153,204,0) as 499,574,432,835,
+  the value an independent script and the grid loop both give, so changing an
+  LMS or luminance weight that affects output fails a test.
 
 ## Complexity estimation
 
 `marigold-grammar/tests/e2e_geometric_palette.rs` pins the analyzer output for
-both programs.
+both programs. The stage prefixes are cut from the program file itself.
 
-| quantity               | canonical | analyzer             |
-| ---------------------- | --------- | -------------------- |
-| geometric after pwr(4) | 256       | `Exact(256)`         |
-| geometric output       | 5         | `Exact(5)`           |
-| geometric time         | 256 evals | `O(1)`, exact `O(3)` |
-| geometric space        | 5 kept    | `O(1)`, exact `O(3)` |
-| wheel combinations(3)  | 17,296    | `Exact(17296)`       |
-| brute-force time       | 1,656,360 | `O(C(n,3))`          |
-| brute-force space      | constant  | `O(n^3)`             |
+| quantity                       | canonical | analyzer             |
+| ------------------------------ | --------- | -------------------- |
+| geometric `range(0, 6)`        | 6         | `Exact(6)`           |
+| geometric after pwr(4)         | 1,296     | `Exact(1296)`        |
+| geometric output               | 5         | `Exact(5)`           |
+| geometric time                 | 1,296     | `O(1)`, exact `O(3)` |
+| geometric space                | 5 kept    | `O(1)`, exact `O(3)` |
+| `range(0, 74).combinations(3)` | 64,824    | `Exact(64824)`       |
+| brute-force time               | 1,656,360 | `O(C(n,3))`          |
+| brute-force space              | constant  | `O(n^3)`             |
 
 Brute-force exact time is `O(2C(n,3) + n^3)` and exact space is
 `O(n^3 + n)`. The analyzer's upper bound on brute-force palettes enumerated
@@ -83,14 +101,15 @@ Divergences from the canonical count:
   combinatorial although its input is the constant 6 values; the geometric
   program avoids `filter` and stays exact.
 - All inputs are constants, so every class collapses to `O(1)`; the exact
-  complexity counts stream steps, not candidate evaluations. The 256 versus
-  1,656,360 versus 17,296 difference is visible only in the cardinalities, not
+  complexity counts stream steps, not candidate evaluations. The 1,296 versus
+  1,656,360 versus 64,824 difference is visible only in the cardinalities, not
   in the time class. See #415 (symbolic input size).
 - The cost of `compare_polygons` / `compare_contrast` per item is not
   modelled. See #416 (per-item function cost).
 - The analyzer ranks the geometric program below the brute-force example in
   time and space, agreeing with the canonical order, but for the
   filter-related reason above rather than the work saved.
-- The pinned program file's own estimate is `Exact(5)` whatever the range
-  bound, so changing `range(0, 4)` in the program is caught by the mirror
-  guard and the example-crate tests, not by the analyzer.
+- The final `Exact(5)` of the program file hides the range bound and the
+  permutation kind, so the tests analyse each stage prefix cut from the file
+  (6, then 1,296, then 5) and a change to `range(0, 6)` or
+  `permutations_with_replacement(4)` fails a cardinality test.
