@@ -34,6 +34,14 @@ fn bench_keep_first_n(c: &mut Criterion) {
         b.iter_batched(
             || items.to_vec(),
             |v| {
+                let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+                for _ in 0..(v.len() as u64 * 16) {
+                    x = std::hint::black_box(
+                        x.wrapping_mul(6364136223846793005)
+                            .wrapping_add(1442695040888963407),
+                    );
+                }
+                std::hint::black_box(x);
                 rt.block_on(async move {
                     futures::stream::iter(v)
                         .keep_first_n(20, compare_by_sum)
