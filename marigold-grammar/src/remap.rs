@@ -136,8 +136,14 @@
 //!   exactly the program the remapper was given, the edited source is valid Marigold, and
 //!   its regeneration equals the generated text edited the same way. rustc's own
 //!   applicability, when present, must be `MachineApplicable`; that is the only rule that
-//!   is not implied by regeneration. At most one regeneration happens per remapped
-//!   diagnostic; the original is regenerated once per [`Remapper`].
+//!   is not implied by regeneration. The original is regenerated once per [`Remapper`] and
+//!   each distinct edit once (a memo answers repeats); a [`Remapper`] regenerates at most
+//!   [`MAX_REGENERATIONS_PER_REMAPPER`] distinct edits, and later ones are reported as not
+//!   applicable, so a valid suggestion can be reported as not applicable when the budget is
+//!   exhausted. The program given to the remapper must equal what *this build* of the crate
+//!   generates from the source, features included (`io`, `tokio`, `async-std`): a remapper
+//!   given a program generated with other features reports nothing as applicable, by
+//!   design.
 //! * Warnings from glue the user never wrote (rustc reports 1-3 `unused_mut` warnings
 //!   for every program) are recognisable with [`MappedDiagnostic::likely_generated_noise`]:
 //!   a warning is not noise when it points into code the user wrote, at any precision.
@@ -724,6 +730,7 @@ struct Placement {
 #[cfg(test)]
 thread_local! {
     /// Slots looked at while collecting the segments a span overlaps.
+    static REGENERATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Parent links followed while looking for the innermost segment around a position.
     static WALKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -756,6 +763,13 @@ fn search<T>(items: &[T], pred: impl FnMut(&T) -> bool) -> usize {
 fn count(counter: &'static std::thread::LocalKey<std::cell::Cell<usize>>) {
     counter.with(|c| c.set(c.get() + 1));
 }
+
+/// How many edited sources one [`Remapper`] regenerates, in total, to decide whether
+/// suggestions apply. Each regeneration costs a full code generation of the program, and a
+/// stream of diagnostics is input the remapper does not control, so beyond this budget
+/// suggestions are reported as not applicable. Identical edits are answered from a memo and
+/// cost nothing after the first.
+pub const MAX_REGENERATIONS_PER_REMAPPER: usize = 256;
 
 /// Maps rustc diagnostics and run-time locations in generated Rust to the Marigold source.
 ///
@@ -811,7 +825,11 @@ pub struct Remapper<'a> {
     unusable: usize,
     /// Whether regenerating `source` gives `program.rust`, computed on first use.
     regenerates: std::sync::OnceLock<bool>,
+    /// Verdicts of the edits regenerated so far, by edit.
+    edit_verdicts: std::sync::Mutex<std::collections::HashMap<EditKey, bool>>,
 }
+
+type EditKey = Vec<(usize, usize, usize, usize, String)>;
 
 impl<'a> Remapper<'a> {
     /// Index a generated program and the Marigold source it was generated from.
@@ -896,6 +914,7 @@ impl<'a> Remapper<'a> {
             source_index: LineIndex::new(source),
             unusable,
             regenerates: std::sync::OnceLock::new(),
+            edit_verdicts: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -1147,8 +1166,28 @@ impl<'a> Remapper<'a> {
         let original_regenerates = *self.regenerates.get_or_init(|| {
             crate::marigold_generate(self.source).is_ok_and(|p| p.rust == self.program.rust)
         });
-        original_regenerates
-            && crate::marigold_generate(&edited_source).is_ok_and(|p| p.rust == edited_rust)
+        if !original_regenerates {
+            return false;
+        }
+        let key: EditKey = marigold_edits
+            .iter()
+            .zip(&generated_edits)
+            .map(|(m, g)| (m.0, m.1, g.0, g.1, m.2.to_string()))
+            .collect();
+        let Ok(mut verdicts) = self.edit_verdicts.lock() else {
+            return false;
+        };
+        if let Some(&verdict) = verdicts.get(&key) {
+            return verdict;
+        }
+        if verdicts.len() >= MAX_REGENERATIONS_PER_REMAPPER {
+            return false;
+        }
+        #[cfg(test)]
+        count(&REGENERATIONS);
+        let verdict = crate::marigold_generate(&edited_source).is_ok_and(|p| p.rust == edited_rust);
+        verdicts.insert(key, verdict);
+        verdict
     }
 
     /// Map a run-time location in the generated file: a panic message, a backtrace
@@ -2172,6 +2211,55 @@ mod tests {
                 "{kind:?}"
             );
         }
+    }
+
+    fn regeneration_remap(replacements: impl Iterator<Item = String>) -> (Vec<bool>, usize) {
+        let src = "fn f(x: i32) -> i32 { x + 1 }\nrange(0, 3).map(f).return";
+        let program = crate::marigold_generate(src).unwrap();
+        let is_gen = |name: &str| name == "gen.rs";
+        let remapper = Remapper::new(&program, src, &is_gen);
+        let at = program.rust.find("x + 1").unwrap();
+        let line = program.rust[..at].matches('\n').count() + 1;
+        let column = at - program.rust[..at].rfind('\n').map_or(0, |i| i + 1) + 1;
+        let text = program.rust.lines().nth(line - 1).unwrap().to_string();
+        REGENERATIONS.with(|c| c.set(0));
+        let flags = replacements
+            .map(|replacement| {
+                let d: RustcDiagnostic = serde_json::from_value(serde_json::json!({
+                    "message": "h", "level": "help", "children": [], "spans": [{
+                        "file_name": "gen.rs", "byte_start": at, "byte_end": at + 1,
+                        "line_start": line, "line_end": line, "column_start": column, "column_end": column + 1,
+                        "text": [{"text": text, "highlight_start": column, "highlight_end": column + 1}],
+                        "is_primary": true, "suggested_replacement": replacement,
+                        "suggestion_applicability": "MachineApplicable"
+                    }]
+                }))
+                .unwrap();
+                remapper
+                    .remap(&d)
+                    .primary
+                    .unwrap()
+                    .suggestion
+                    .unwrap()
+                    .applicable_to_marigold
+            })
+            .collect();
+        (flags, REGENERATIONS.with(|c| c.get()))
+    }
+
+    #[test]
+    fn identical_suggestions_cost_one_regeneration() {
+        let (flags, regenerations) = regeneration_remap((0..5000).map(|_| "y".to_string()));
+        assert!(flags.iter().all(|&f| f));
+        assert_eq!(regenerations, 1);
+    }
+
+    #[test]
+    fn distinct_suggestions_stop_regenerating_at_the_budget_and_fail_closed() {
+        let (flags, regenerations) = regeneration_remap((0..5000).map(|i| format!("y{i}")));
+        assert_eq!(regenerations, MAX_REGENERATIONS_PER_REMAPPER);
+        assert!(flags[..MAX_REGENERATIONS_PER_REMAPPER].iter().all(|&f| f));
+        assert!(flags[MAX_REGENERATIONS_PER_REMAPPER..].iter().all(|&f| !f));
     }
 
     fn counters() -> (usize, usize) {
