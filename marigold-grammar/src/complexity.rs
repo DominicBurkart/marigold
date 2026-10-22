@@ -967,6 +967,13 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
         .join(".")
 }
 
+/// Analyzes every stream expression in a program.
+///
+/// For every program whose stream variables are all declared, each stream's
+/// `space_class` equals `exact_space.simplified()`, so a named stream variable
+/// and the same pipeline written inline report identical space. A stream
+/// variable that is never declared is a source the analyzer cannot see, and
+/// its streams report an unknown (`O(?)`) `space_class`.
 pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
     analyze_nodes(expressions).0
 }
@@ -1003,7 +1010,7 @@ pub(crate) fn analyze_nodes(
                     var_exact_space.add_work(space_work, 1);
                     current_card = propagate_cardinality(current_card, &f.kind);
                 }
-                let space = var_exact_space.simplified().max(ComplexityClass::ON);
+                let space = var_exact_space.simplified();
                 let desc = if v.funs.is_empty() {
                     format!("{} = input", v.variable_name)
                 } else {
@@ -1014,7 +1021,7 @@ pub(crate) fn analyze_nodes(
                     )
                 };
                 let mut node_sc = analyze_stream_fns(&v.funs, card, &desc);
-                node_sc.space_class = node_sc.exact_space.simplified().max(ComplexityClass::ON);
+                node_sc.space_class = node_sc.exact_space.simplified();
                 let collects = node_sc.collects_input;
                 nodes.push((expr_index, Some(v.variable_name.clone()), node_sc));
                 stream_vars.insert(
@@ -1537,7 +1544,7 @@ mod tests {
             "fn double(x: i32) -> i32 { x * 2 }\ndigits = range(0, 10)\ndigits.map(double).return";
         let result = crate::parser::PestParser::analyze(input).unwrap();
         assert_eq!(result.streams.len(), 1);
-        assert_eq!(result.streams[0].space_class, ComplexityClass::ON);
+        assert_eq!(result.streams[0].space_class, ComplexityClass::O1);
     }
 
     #[test]
