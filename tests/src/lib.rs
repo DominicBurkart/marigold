@@ -392,4 +392,74 @@ mod tests {
         sorted.sort();
         assert_eq!(sorted, vec![0, 1, 10, 11, 20, 21]);
     }
+
+    /// Issue #85: take(n) on a longer input yields exactly the first n items.
+    #[tokio::test]
+    async fn test_take_basic() {
+        let result = m!(
+            range(0, 10).take(5).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2, 3, 4]);
+    }
+
+    /// Issue #85: take(n) where n exceeds input yields the full input.
+    #[tokio::test]
+    async fn test_take_exceeds_input() {
+        let result = m!(
+            range(0, 5).take(10).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 1, 2, 3, 4]);
+    }
+
+    /// Issue #85: take(0) yields no items.
+    #[tokio::test]
+    async fn test_take_zero() {
+        let result = m!(
+            range(0, 10).take(0).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert!(result.is_empty(), "take(0) should yield no items");
+    }
+
+    /// Issue #85: take composes with downstream stream functions (this is
+    /// also the shape `take_while` (#103) will build on).
+    #[tokio::test]
+    async fn test_take_then_map() {
+        fn double(x: i32) -> i32 {
+            x * 2
+        }
+
+        let result = m!(
+            range(0, 100).take(3).map(double).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 2, 4]);
+    }
+
+    /// Issue #85: take after filter yields the first n items that match the
+    /// filter — the canonical "first n matching" pattern.
+    #[tokio::test]
+    async fn test_filter_then_take() {
+        fn is_even(x: i32) -> bool {
+            x % 2 == 0
+        }
+
+        let result = m!(
+            range(0, 100).filter(is_even).take(3).return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(result, vec![0, 2, 4]);
+    }
 }
