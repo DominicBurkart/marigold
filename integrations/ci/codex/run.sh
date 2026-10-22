@@ -3,7 +3,7 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
-VERSION=$(tr -d '[:space:]' <"$HERE/VERSION")
+VERSION=${HARNESS_VERSION:-$(tr -d '[:space:]' <"$HERE/VERSION")}
 CF_HASH=$(sha256sum "$HERE/Containerfile" | cut -c1-8)
 IMAGE=localhost/marigold-ci-codex:$VERSION-$CF_HASH
 RUN_ID=$$
@@ -49,6 +49,7 @@ run_scenario() {
   podman run --name "$name" --security-opt label=disable \
     -v "$REPO:/repo:ro" \
     -v "$MARIGOLD_LSP_BIN:/usr/local/bin/marigold-lsp:ro" \
+    -e CODEX_TOOL_STYLE="${CODEX_TOOL_STYLE:-}" \
     "${work[@]}" \
     "$IMAGE" bash /repo/integrations/ci/codex/in-container.sh "$scenario"
   local rc=$?

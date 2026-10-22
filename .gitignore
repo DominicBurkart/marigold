@@ -2,3 +2,5 @@
 Cargo.lock
 **/.DS_Store
 worktrees/
+__pycache__/
+*.pyc
