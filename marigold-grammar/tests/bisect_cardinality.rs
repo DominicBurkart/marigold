@@ -29,7 +29,7 @@ fn commit_hash(dir: &std::path::Path) -> String {
 fn write_and_commit(dir: &std::path::Path, content: &str, message: &str) -> String {
     std::fs::write(dir.join("program.marigold"), content).unwrap();
     git(dir, &["add", "program.marigold"]);
-    git(dir, &["commit", "-m", message]);
+    git(dir, &["commit", "--no-gpg-sign", "-m", message]);
     commit_hash(dir)
 }
 
@@ -47,7 +47,6 @@ fn test_bisect_detects_exact_to_bounded_regression() {
     git(dir, &["init"]);
     git(dir, &["config", "user.email", "test@test.com"]);
     git(dir, &["config", "user.name", "Test"]);
-    git(dir, &["config", "commit.gpgsign", "false"]);
 
     let commit_a = write_and_commit(
         dir,
