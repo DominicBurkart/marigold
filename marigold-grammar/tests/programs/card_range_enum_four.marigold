@@ -1,0 +1,7 @@
+enum Direction {
+    North = "north",
+    South = "south",
+    East = "east",
+    West = "west",
+}
+range(Direction).return
