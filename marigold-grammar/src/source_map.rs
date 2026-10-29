@@ -156,22 +156,25 @@ thread_local! {
     static SEGMENTS_RECORDED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Source ranges computed for the top-level expressions.
     static RANGES_COMPUTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Segment labels (name and identifier strings) built.
+    static LABELS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
 pub(crate) fn reset_map_work() {
     reset_subspan_steps();
-    for c in [&MAPS_BUILT, &SEGMENTS_RECORDED, &RANGES_COMPUTED] {
+    for c in [&MAPS_BUILT, &SEGMENTS_RECORDED, &RANGES_COMPUTED, &LABELS_BUILT] {
         c.with(|c| c.set(0));
     }
 }
 
 #[cfg(test)]
-pub(crate) fn map_work() -> [(&'static str, usize); 4] {
+pub(crate) fn map_work() -> [(&'static str, usize); 5] {
     [
         ("maps built", MAPS_BUILT.with(|c| c.get())),
         ("segments recorded", SEGMENTS_RECORDED.with(|c| c.get())),
         ("source ranges computed", RANGES_COMPUTED.with(|c| c.get())),
+        ("labels built", LABELS_BUILT.with(|c| c.get())),
         ("sub-span steps", subspan_steps()),
     ]
 }
@@ -1136,6 +1139,11 @@ impl CodeBuilder {
     ) {
         #[cfg(test)]
         count(&CODEGEN_STEPS);
+        let label = || {
+            #[cfg(test)]
+            count(&LABELS_BUILT);
+            label()
+        };
         if !self.recording {
             self.out.push_str(&code.s);
             return;
