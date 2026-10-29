@@ -460,7 +460,22 @@ impl SourceMap {
     /// assert_eq!(map.segments()[0].kind, SegmentKind::Enum);
     /// assert!(SourceMap::new(Vec::new()).segments().is_empty());
     /// ```
-    pub fn new(mut segments: Vec<Segment>) -> SourceMap {
+    pub fn new(segments: Vec<Segment>) -> SourceMap {
+        SourceMap::build(segments)
+    }
+
+    pub(crate) fn empty() -> SourceMap {
+        SourceMap {
+            segments: Vec::new(),
+            parents: Vec::new(),
+            subtree_end: Vec::new(),
+            by_ident: HashMap::new(),
+            by_source: Vec::new(),
+            max_source_end: Vec::new(),
+        }
+    }
+
+    fn build(mut segments: Vec<Segment>) -> SourceMap {
         #[cfg(test)]
         count(&MAPS_BUILT);
         segments.sort_by_key(|s| {
@@ -915,9 +930,7 @@ pub(crate) struct Emit {
 }
 
 impl Emit {
-    /// Code with no recorded parts, for code that was built as a plain string (the
-    /// instrumented code of the `otel` feature).
-    #[cfg(feature = "otel")]
+    /// Code with no recorded parts, for code that was built as a plain string.
     pub(crate) fn text(s: String) -> Emit {
         Emit {
             s,
@@ -1088,13 +1101,18 @@ fn attach_parts(
 #[derive(Debug)]
 pub(crate) struct CodeBuilder {
     out: String,
+    recording: bool,
     segments: Vec<GeneratedSegment>,
 }
 
 impl CodeBuilder {
-    pub(crate) fn new(prefix: &str) -> Self {
+    /// A builder that records segments if `recording`; otherwise it only builds the text,
+    /// allocates nothing for the map and never calls the `label` closure of
+    /// [`CodeBuilder::segment`].
+    pub(crate) fn new(prefix: &str, recording: bool) -> Self {
         CodeBuilder {
             out: prefix.to_string(),
+            recording,
             segments: Vec::new(),
         }
     }
@@ -1106,20 +1124,25 @@ impl CodeBuilder {
         self.out.push_str(code);
     }
 
-    /// Append the code generated for expression `expr_index` and record where it went,
-    /// together with the layout of its parts.
+    /// Append the code generated for expression `expr_index` and, if recording, record where
+    /// it went, together with the layout of its parts. `label` returns the segment's name and
+    /// identifier and is only called when recording.
     pub(crate) fn segment(
         &mut self,
         kind: SegmentKind,
         expr_index: usize,
-        name: Option<String>,
-        ident: Option<String>,
+        label: impl FnOnce() -> (Option<String>, Option<String>),
         code: Emit,
     ) {
         #[cfg(test)]
         count(&CODEGEN_STEPS);
+        if !self.recording {
+            self.out.push_str(&code.s);
+            return;
+        }
         #[cfg(test)]
         count(&SEGMENTS_RECORDED);
+        let (name, ident) = label();
         let start = self.out.len();
         self.out.push_str(&code.s);
         self.segments.push(GeneratedSegment {
