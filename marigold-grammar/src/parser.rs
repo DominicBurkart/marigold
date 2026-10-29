@@ -102,6 +102,8 @@ impl PestParser {
     /// output: the range of `expressions[i]` is `ranges[i]`. A stream variable's
     /// `expr` pair includes its trailing whitespace, which is trimmed here.
     fn expr_ranges(pairs: &pest::iterators::Pairs<'_, Rule>) -> Vec<crate::diagnostics::ByteRange> {
+        #[cfg(test)]
+        crate::source_map::count_ranges_computed();
         pairs
             .clone()
             .flatten()
@@ -2445,6 +2447,64 @@ mod function_grammar_tests {
                 crate::source_map::subspan_steps() > 0,
                 "marigold_generate_instrumented did no sub-span work for {program:?}"
             );
+            assert_eq!(parsed, generated.rust);
+        }
+    }
+
+    const MAP_PROGRAMS: &[&str] = &[
+        "range(0, 1).return",
+        "range(0, 5).map(f).filter(g).return",
+        "x = range(0, 3).map(f)\nx.return",
+        "x = range(0, 3)\ny = x.map(f)\ny.return\nx.return",
+        "struct S { a: u8, b: u8 }\nrange(0, 5).return",
+        "enum E { A, B }\nrange(E).return",
+        "fn f(x: u32) -> u32 { x }\nrange(0, 5).map(f).return",
+        "select_all(range(0, 2), range(2, 4)).return",
+        "range(0, 5).write_file(\"o.csv\", csv)",
+        "range(0, 3).return\nrange(0, 3).return",
+        "struct P { v: int[0, 9] }\nfn g(i: i32) -> P { P { v: 1 } }\nrange(0, 2).map(g).return",
+        "range(0, 9).fold(0, add).return",
+    ];
+
+    fn assert_no_map_work(what: &str, program: &str) {
+        for (name, n) in crate::source_map::map_work() {
+            assert_eq!(n, 0, "{what} did {name} for {program:?}");
+        }
+    }
+
+    #[test]
+    fn marigold_parse_builds_no_map_segment_range_or_layout() {
+        for program in MAP_PROGRAMS {
+            crate::source_map::reset_map_work();
+            let rust = crate::marigold_parse(program).unwrap();
+            assert!(!rust.is_empty());
+            assert_no_map_work("marigold_parse", program);
+        }
+    }
+
+    #[test]
+    fn marigold_generate_builds_the_map_segments_ranges_and_layout() {
+        for program in MAP_PROGRAMS {
+            crate::source_map::reset_map_work();
+            let generated = crate::marigold_generate(program).unwrap();
+            assert!(!generated.map.segments().is_empty());
+            for (name, n) in crate::source_map::map_work() {
+                assert!(n > 0, "marigold_generate did no {name} for {program:?}");
+            }
+        }
+    }
+
+    #[cfg(feature = "otel")]
+    #[test]
+    fn instrumented_parse_builds_no_map_segment_range_or_layout() {
+        let options = crate::instrument::CodegenOptions::new("t");
+        for program in MAP_PROGRAMS {
+            crate::source_map::reset_map_work();
+            let parsed = crate::marigold_parse_instrumented(program, &options).unwrap();
+            assert_no_map_work("marigold_parse_instrumented", program);
+            crate::source_map::reset_map_work();
+            let generated = crate::marigold_generate_instrumented(program, &options).unwrap();
+            assert!(crate::source_map::map_work()[1].1 > 0, "{program:?}");
             assert_eq!(parsed, generated.rust);
         }
     }

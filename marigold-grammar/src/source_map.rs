@@ -150,6 +150,35 @@ thread_local! {
     static SUBSPAN_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Expressions visited by the passes of code generation plus `CodeBuilder` appends.
     static CODEGEN_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// `SourceMap::new` calls.
+    static MAPS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// `GeneratedSegment`s recorded by `CodeBuilder::segment`.
+    static SEGMENTS_RECORDED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Source ranges computed for the top-level expressions.
+    static RANGES_COMPUTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_map_work() {
+    reset_subspan_steps();
+    for c in [&MAPS_BUILT, &SEGMENTS_RECORDED, &RANGES_COMPUTED] {
+        c.with(|c| c.set(0));
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn map_work() -> [(&'static str, usize); 4] {
+    [
+        ("maps built", MAPS_BUILT.with(|c| c.get())),
+        ("segments recorded", SEGMENTS_RECORDED.with(|c| c.get())),
+        ("source ranges computed", RANGES_COMPUTED.with(|c| c.get())),
+        ("sub-span steps", subspan_steps()),
+    ]
+}
+
+#[cfg(test)]
+pub(crate) fn count_ranges_computed() {
+    count(&RANGES_COMPUTED);
 }
 
 #[cfg(test)]
@@ -432,6 +461,8 @@ impl SourceMap {
     /// assert!(SourceMap::new(Vec::new()).segments().is_empty());
     /// ```
     pub fn new(mut segments: Vec<Segment>) -> SourceMap {
+        #[cfg(test)]
+        count(&MAPS_BUILT);
         segments.sort_by_key(|s| {
             #[cfg(test)]
             count(&BUILD_STEPS);
@@ -1087,6 +1118,8 @@ impl CodeBuilder {
     ) {
         #[cfg(test)]
         count(&CODEGEN_STEPS);
+        #[cfg(test)]
+        count(&SEGMENTS_RECORDED);
         let start = self.out.len();
         self.out.push_str(&code.s);
         self.segments.push(GeneratedSegment {
