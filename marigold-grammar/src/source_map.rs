@@ -163,7 +163,12 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn reset_map_work() {
     reset_subspan_steps();
-    for c in [&MAPS_BUILT, &SEGMENTS_RECORDED, &RANGES_COMPUTED, &LABELS_BUILT] {
+    for c in [
+        &MAPS_BUILT,
+        &SEGMENTS_RECORDED,
+        &RANGES_COMPUTED,
+        &LABELS_BUILT,
+    ] {
         c.with(|c| c.set(0));
     }
 }
