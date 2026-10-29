@@ -304,8 +304,6 @@ impl PestParser {
         let (rust, generated) =
             Self::generate_rust_code_mapped(expressions, resolved_bounds, plan, layout)?;
 
-        // Stage 5: Attach the source ranges. Without layout nothing was recorded and the map is
-        // empty, which is built without being constructed.
         if !layout {
             return Ok(crate::source_map::GeneratedProgram {
                 rust,
