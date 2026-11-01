@@ -169,6 +169,48 @@ error. `edit-info` (`.map(undefined_fn)`) returns only "Edit applied
 successfully." and the Information diagnostic is not shown. So `edit` behaves
 like `write` on opencode 1.19.3.
 
+### MCP server registered in opencode
+
+Set `OPENCODE_MARIGOLD_MCP=1` to also register `marigold-lsp mcp` in the
+generated `opencode.json`. The switch is off by default and then the scenarios
+above are run unchanged. With it set, `run.sh` runs only `mcp-info`,
+`mcp-warning` and `mcp-valid`, using `scripts/opencode-mcp-*.json`.
+
+```bash
+OPENCODE_MARIGOLD_MCP=1 MARIGOLD_LSP_BIN=target/release/marigold-lsp \
+  bash integrations/ci/opencode/run.sh
+```
+
+The block follows the local MCP format of
+<https://opencode.ai/docs/mcp-servers/> (`type: "local"`, `command` array,
+`enabled`):
+
+```json
+"mcp": {"marigold": {"type": "local", "command": ["marigold-lsp", "mcp"], "enabled": true}}
+```
+
+Turn 1 writes the file with `write`, turn 2 calls the MCP tool
+`marigold_marigold_check` (opencode names MCP tools `<server>_<tool>`, and the
+tools array of the first request lists it with the server's other tools) and
+turn 3 is the final text. Every scenario asserts that `opencode mcp list`
+shows `marigold` and that the tools array offers `marigold_marigold_check`.
+Tool results after turn 2 are then checked:
+
+- `mcp-info`: contains `information[undefined-fn]` and `0 errors, 0 warnings,
+  1 information`.
+- `mcp-warning` (`b = a.map(f)` before `a` is declared): contains
+  `warning[undefined-stream-variable]`.
+- `mcp-valid` (control): contains `no diagnostics in` and none of
+  `undefined-fn`, `information[` or `warning[`.
+
+opencode forwards only the text content of the MCP result, not the server's
+`structuredContent`, so the model sees the text form
+(`information[undefined-fn]: ...`) and not the JSON that Codex receives.
+
+Result, opencode 1.19.3: registering the MCP server gives the model
+information and warning diagnostics on demand: yes. After `write` hides them,
+one call to `marigold_marigold_check` returns both.
+
 ## HARNESS_VERSION
 
 Each `run.sh` installs the version in its `VERSION` file unless
