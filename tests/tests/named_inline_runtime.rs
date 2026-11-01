@@ -211,9 +211,8 @@ async fn dropping_the_output_early_terminates() {
     assert_eq!(taken.len(), 3);
 }
 
-macro_rules! hangs_when_named {
-    ($name:ident, $reason:literal, named { $($n:tt)* }, inline { $($i:tt)* }) => {
-        #[ignore = $reason]
+macro_rules! terminates_when_named {
+    ($name:ident, named { $($n:tt)* }, inline { $($i:tt)* }) => {
         #[tokio::test(flavor = "multi_thread")]
         async fn $name() {
             let inlined = bounded(m!($($i)*).await).await;
@@ -227,9 +226,8 @@ macro_rules! hangs_when_named {
     };
 }
 
-hangs_when_named!(
+terminates_when_named!(
     collecting_permutations_consumer,
-    "see #436",
     named {
         x = range(0, 5)
         x.permutations(2).map(first).return
@@ -239,9 +237,8 @@ hangs_when_named!(
     }
 );
 
-hangs_when_named!(
+terminates_when_named!(
     collecting_keep_first_n_consumer,
-    "see #436",
     named {
         x = range(0, 5)
         x.keep_first_n(2, compare).return
@@ -251,9 +248,8 @@ hangs_when_named!(
     }
 );
 
-hangs_when_named!(
+terminates_when_named!(
     collecting_permutations_with_replacement_consumer,
-    "see #436",
     named {
         x = range(0, 3)
         x.permutations_with_replacement(2).map(first).return
@@ -263,9 +259,8 @@ hangs_when_named!(
     }
 );
 
-hangs_when_named!(
+terminates_when_named!(
     variable_declared_through_a_collecting_step,
-    "see #436",
     named {
         x = range(0, 3)
         y = x.permutations(2)
@@ -276,9 +271,8 @@ hangs_when_named!(
     }
 );
 
-hangs_when_named!(
+terminates_when_named!(
     collecting_consumer_next_to_streaming_consumer,
-    "see #436",
     named {
         x = range(0, 5)
         x.permutations(2).map(first).return
