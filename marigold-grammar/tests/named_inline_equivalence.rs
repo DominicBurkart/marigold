@@ -578,6 +578,11 @@ mod shadowing_semantics {
     }
 
     #[test]
+    fn self_reference_with_no_earlier_binding_is_an_undeclared_source() {
+        assert_eq!(last_cardinality("a = a.map(f)\na.return\n"), "?");
+    }
+
+    #[test]
     fn variable_from_a_name_declared_only_later_is_an_undeclared_source() {
         assert_eq!(
             last_cardinality("y = x.map(f)\nx = range(0, 5)\ny.return\n"),
