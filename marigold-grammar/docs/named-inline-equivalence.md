@@ -163,6 +163,6 @@ tests in `shadowing_semantics` pin it:
   source with unknown figures, and the checker warns that the variable is read
   before it is declared.
 
-These rules describe what the tool does now. The decided behaviour is a `marigold check`
-error for redeclaration (#444); the tests that assert it are ignored
-with a reference to #444.
+These rules describe what the tool does now. The decided behaviour is a
+`marigold check` error for redeclaration (#444); the tests that assert it are
+ignored with a reference to #444.
