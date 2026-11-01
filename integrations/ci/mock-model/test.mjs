@@ -288,3 +288,31 @@ test("openai-chat tolerates model listing and unknown probes", async () => {
     server.close();
   }
 });
+
+test("turnDelayMs delays replies after the first scripted turn only", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mm-"));
+  const server = createServer({
+    protocol: "anthropic",
+    script: SCRIPT,
+    vars: VARS,
+    logPath: path.join(dir, "log.jsonl"),
+    turnDelayMs: 300,
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const t0 = Date.now();
+  await (await post(base, MAIN)).text();
+  const first = Date.now() - t0;
+  const t1 = Date.now();
+  await (await post(base, MAIN)).text();
+  const second = Date.now() - t1;
+  server.close();
+  assert.ok(first < 250, `first reply took ${first}ms`);
+  assert.ok(second >= 290, `second reply took ${second}ms`);
+});
+
+test("parseArgs accepts --turn-delay-ms and rejects a negative value", () => {
+  const base = ["--protocol", "anthropic", "--script", "s", "--log", "l"];
+  assert.equal(parseArgs([...base, "--turn-delay-ms", "50"]).turnDelayMs, 50);
+  assert.throws(() => parseArgs([...base, "--turn-delay-ms", "-1"]));
+});

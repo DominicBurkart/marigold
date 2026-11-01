@@ -76,6 +76,10 @@ const PROGRAMS: &[(&str, &str)] = &[
         "rows = range(0, 3).map(to_row)\nrows.write_file(\"rows.csv\", csv)\nrows.return",
     ),
     (
+        "named_collecting",
+        "digits = range(0, 5)\n\ndigits.permutations(2).return\n\nodd = digits.combinations(2)\n\nodd.return",
+    ),
+    (
         "multiple_streams",
         "range(0, 3).return\nrange(5, 8).map(double).return",
     ),
