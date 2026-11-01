@@ -82,3 +82,13 @@ Once #441 is fixed, add a test in `marigold-lsp` that builds `complexity_line` f
 - #436: named stream consumed by a collecting step hangs.
 - #444: redeclaration is accepted by check and fails to compile.
 - #445: named streams require `Copy` items and a `Send` source.
+
+## Current redeclaration semantics (pinned until a check error exists)
+
+Code generation emits structs and enums, then functions, then every variable declaration in source order (`let mut x = ...`, so a later declaration shadows an earlier one), then all streams. The analyzer follows the same order and the tests in `shadowing_semantics` pin it:
+
+- A variable declared from another variable reads the most recent preceding declaration of that name, including its own previous binding (`x = x.map(f)`).
+- A stream consumer sees every variable declaration, so it uses the last declaration of its variable wherever that sits in the program, including a declaration that appears after the consumer.
+- A variable declared from a name that is declared only later is an undeclared source with unknown figures, and the checker warns that the variable is read before it is declared.
+
+These rules describe what the tool does now. The recommended behaviour is still a `marigold check` error for redeclaration; the tests that assert it are ignored with a reference to #444.

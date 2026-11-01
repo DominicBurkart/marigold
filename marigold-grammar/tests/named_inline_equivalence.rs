@@ -537,6 +537,55 @@ mod redeclaration {
     }
 }
 
+mod shadowing_semantics {
+    use super::*;
+
+    fn last_cardinality(body: &str) -> String {
+        let src = format!("{PRELUDE}{body}");
+        marigold_analyze(&src)
+            .unwrap()
+            .streams
+            .last()
+            .unwrap()
+            .cardinality
+            .to_string()
+    }
+
+    #[test]
+    fn consumer_before_a_redeclaration_sees_the_last_declaration() {
+        assert_eq!(
+            last_cardinality("x = range(0, 5)\nx.map(f).return\nx = range(0, 100).filter(keep)\n"),
+            "\u{2264}100"
+        );
+    }
+
+    #[test]
+    fn variable_from_variable_reads_the_preceding_declaration() {
+        assert_eq!(
+            last_cardinality(
+                "x = range(0, 5)\ny = x.map(f)\nx = range(0, 100).filter(keep)\ny.return\n"
+            ),
+            "5"
+        );
+    }
+
+    #[test]
+    fn variable_from_variable_reads_its_own_previous_binding() {
+        assert_eq!(
+            last_cardinality("x = range(0, 5)\nx = x.map(f)\nx.return\n"),
+            "5"
+        );
+    }
+
+    #[test]
+    fn variable_from_a_name_declared_only_later_is_an_undeclared_source() {
+        assert_eq!(
+            last_cardinality("y = x.map(f)\nx = range(0, 5)\ny.return\n"),
+            "?"
+        );
+    }
+}
+
 mod absolute_contracts {
     use super::*;
 
