@@ -1165,6 +1165,58 @@ pub(crate) fn analyze_nodes(
 mod tests {
     use super::*;
 
+    fn every_stream_function_kind() -> Vec<StreamFunctionKind> {
+        let kinds = vec![
+            StreamFunctionKind::Map,
+            StreamFunctionKind::Filter,
+            StreamFunctionKind::FilterMap,
+            StreamFunctionKind::Permutations(2),
+            StreamFunctionKind::PermutationsWithReplacement(2),
+            StreamFunctionKind::Combinations(2),
+            StreamFunctionKind::KeepFirstN(2),
+            StreamFunctionKind::Fold,
+            StreamFunctionKind::Ok,
+            StreamFunctionKind::OkOrPanic,
+        ];
+        for kind in &kinds {
+            match kind {
+                StreamFunctionKind::Map
+                | StreamFunctionKind::Filter
+                | StreamFunctionKind::FilterMap
+                | StreamFunctionKind::Permutations(_)
+                | StreamFunctionKind::PermutationsWithReplacement(_)
+                | StreamFunctionKind::Combinations(_)
+                | StreamFunctionKind::KeepFirstN(_)
+                | StreamFunctionKind::Fold
+                | StreamFunctionKind::Ok
+                | StreamFunctionKind::OkOrPanic => {}
+            }
+        }
+        kinds
+    }
+
+    #[test]
+    fn awaits_whole_input_is_superset_of_analyzer_collects_input() {
+        let mut differing = Vec::new();
+        for kind in every_stream_function_kind() {
+            let node = crate::nodes::StreamFunctionNode {
+                kind: kind.clone(),
+                code: String::new(),
+            };
+            let analyzed = analyze_stream_fns(&[node], Symbolic::Unknown, "t");
+            if analyzed.collects_input {
+                assert!(
+                    kind.awaits_whole_input(),
+                    "{kind:?} is reported as collecting but would not be deferred"
+                );
+            }
+            if kind.awaits_whole_input() != analyzed.collects_input {
+                differing.push(kind);
+            }
+        }
+        assert_eq!(differing, vec![StreamFunctionKind::KeepFirstN(2)]);
+    }
+
     #[test]
     fn test_parse_o1() {
         assert_eq!(
