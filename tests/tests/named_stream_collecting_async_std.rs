@@ -1,4 +1,4 @@
-#![cfg(feature = "async-std")]
+#![cfg(all(feature = "async-std", not(feature = "tokio"), not(feature = "io")))]
 
 use marigold::m;
 use marigold::marigold_impl::futures::Stream;

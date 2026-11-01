@@ -222,17 +222,25 @@ fn wrap_one(i: i32) -> [i32; 1] {
 
 #[tokio::test]
 async fn late_polled_collecting_consumer_receives_every_item() {
-    fn double(i: i32) -> i32 {
-        i * 2
+    fn shifted(i: i32) -> i32 {
+        i + 1000
     }
+    const N: i32 = 50;
     let run = async {
         let mut stream = m!(
-            x = range(0, 5)
-            x.map(double).map(wrap_one).return
+            x = range(0, 50)
+            x.map(shifted).map(wrap_one).return
             x.permutations(1).return
         )
         .await;
-        let mut out = vec![stream.next().await.unwrap()];
+        let mut out = Vec::new();
+        for _ in 0..40 {
+            out.push(stream.next().await.expect("mapped consumer ended early"));
+        }
+        assert!(
+            out.iter().all(|[v]| *v >= 1000),
+            "the collecting consumer yielded before the mapped consumer had drained the shared stream: {out:?}"
+        );
         tokio::time::sleep(Duration::from_millis(200)).await;
         while let Some(item) = stream.next().await {
             out.push(item);
@@ -242,8 +250,15 @@ async fn late_polled_collecting_consumer_receives_every_item() {
     let mut out = tokio::time::timeout(GUARD, run)
         .await
         .unwrap_or_else(|_| panic!("HANG: late polled consumer did not complete within {GUARD:?}"));
+    let mapped = out.iter().filter(|[v]| *v >= 1000).count();
+    let collected = out.iter().filter(|[v]| *v < 1000).count();
+    assert_eq!(mapped, N as usize, "mapped consumer item count");
+    assert_eq!(collected, N as usize, "collecting consumer item count");
     out.sort();
-    let mut expected: Vec<[i32; 1]> = (0..5).map(|i| [i * 2]).chain((0..5).map(|i| [i])).collect();
+    let mut expected: Vec<[i32; 1]> = (0..N)
+        .map(|i| [i + 1000])
+        .chain((0..N).map(|i| [i]))
+        .collect();
     expected.sort();
     assert_eq!(out, expected);
 }
