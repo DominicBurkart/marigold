@@ -901,9 +901,10 @@ fn step_space_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> Comple
     }
 }
 
-fn analyze_stream_fns(
-    funs: &[crate::nodes::StreamFunctionNode],
+fn analyze_stream_fns<'f>(
+    funs: impl IntoIterator<Item = &'f crate::nodes::StreamFunctionNode>,
     initial_cardinality: Symbolic,
+    unknown_source: bool,
     description: &str,
 ) -> StreamComplexity {
     let mut cardinality = initial_cardinality;
@@ -915,7 +916,11 @@ fn analyze_stream_fns(
         let time_work = step_work_class(&cardinality, &f.kind);
         exact_time.add_work(time_work, 1);
 
-        let space_work = step_space_class(&cardinality, &f.kind);
+        let space_work = if unknown_source {
+            ComplexityClass::Unknown
+        } else {
+            step_space_class(&cardinality, &f.kind)
+        };
         exact_space.add_work(space_work, 1);
 
         if matches!(
@@ -931,6 +936,10 @@ fn analyze_stream_fns(
 
     if exact_time.is_empty() {
         exact_time.add_work(cardinality_to_time_class(&cardinality), 1);
+    }
+
+    if unknown_source && exact_space.is_empty() {
+        exact_space.add_work(ComplexityClass::Unknown, 1);
     }
 
     let time = exact_time.simplified();
@@ -969,13 +978,57 @@ fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
 
 /// Analyzes every stream expression in a program.
 ///
-/// For every program whose stream variables are all declared, each stream's
-/// `space_class` equals `exact_space.simplified()`, so a named stream variable
-/// and the same pipeline written inline report identical space. A stream
-/// variable that is never declared is a source the analyzer cannot see, and
-/// its streams report an unknown (`O(?)`) `space_class`.
+/// A stream variable is analyzed by substitution: each consumer is analyzed as
+/// the pipeline obtained by replacing the variable with its definition, so a
+/// named stream and the same pipeline written inline report identical
+/// cardinality, time, space and `collects_input`. A variable declared from
+/// another variable reads the most recent preceding declaration; a consumer
+/// reads the last declaration in the program. A variable that is never
+/// declared (or is declared only after it is read) is a source the analyzer
+/// cannot see, and its streams report unknown (`O(?)`) space and time.
+/// For every stream, `space_class` equals `exact_space.simplified()`.
 pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
     analyze_nodes(expressions).0
+}
+
+#[derive(Clone)]
+struct ResolvedPipeline<'a> {
+    cardinality: Symbolic,
+    unknown_source: bool,
+    funs: Vec<&'a crate::nodes::StreamFunctionNode>,
+}
+
+impl<'a> ResolvedPipeline<'a> {
+    fn from_source(cardinality: Symbolic, funs: &'a [crate::nodes::StreamFunctionNode]) -> Self {
+        ResolvedPipeline {
+            cardinality,
+            unknown_source: false,
+            funs: funs.iter().collect(),
+        }
+    }
+
+    fn undeclared() -> Self {
+        ResolvedPipeline {
+            cardinality: Symbolic::Unknown,
+            unknown_source: true,
+            funs: Vec::new(),
+        }
+    }
+
+    fn extended(&self, funs: &'a [crate::nodes::StreamFunctionNode]) -> Self {
+        let mut extended = self.clone();
+        extended.funs.extend(funs.iter());
+        extended
+    }
+
+    fn analyze(&self, description: &str) -> StreamComplexity {
+        analyze_stream_fns(
+            self.funs.iter().copied(),
+            self.cardinality.clone(),
+            self.unknown_source,
+            description,
+        )
+    }
 }
 
 pub(crate) fn analyze_nodes(
@@ -985,32 +1038,13 @@ pub(crate) fn analyze_nodes(
     Vec<(usize, Option<String>, StreamComplexity)>,
 ) {
     let mut nodes: Vec<(usize, Option<String>, StreamComplexity)> = Vec::new();
-    let mut stream_vars: std::collections::HashMap<
-        String,
-        (
-            Symbolic,
-            ComplexityClass,
-            ExactComplexity,
-            ExactComplexity,
-            bool,
-        ),
-    > = std::collections::HashMap::new();
+    let mut declared: std::collections::HashMap<String, ResolvedPipeline> =
+        std::collections::HashMap::new();
 
     for (expr_index, expr) in expressions.iter().enumerate() {
         match expr {
             TypedExpression::StreamVariable(v) => {
-                let card = input_cardinality(&v.inp);
-                let mut current_card = card.clone();
-                let mut var_exact_time = ExactComplexity::new();
-                let mut var_exact_space = ExactComplexity::new();
-                for f in &v.funs {
-                    let time_work = step_work_class(&current_card, &f.kind);
-                    var_exact_time.add_work(time_work, 1);
-                    let space_work = step_space_class(&current_card, &f.kind);
-                    var_exact_space.add_work(space_work, 1);
-                    current_card = propagate_cardinality(current_card, &f.kind);
-                }
-                let space = var_exact_space.simplified();
+                let pipeline = ResolvedPipeline::from_source(input_cardinality(&v.inp), &v.funs);
                 let desc = if v.funs.is_empty() {
                     format!("{} = input", v.variable_name)
                 } else {
@@ -1020,44 +1054,19 @@ pub(crate) fn analyze_nodes(
                         describe_stream_fns(&v.funs)
                     )
                 };
-                let mut node_sc = analyze_stream_fns(&v.funs, card, &desc);
-                node_sc.space_class = node_sc.exact_space.simplified();
-                let collects = node_sc.collects_input;
-                nodes.push((expr_index, Some(v.variable_name.clone()), node_sc));
-                stream_vars.insert(
-                    v.variable_name.clone(),
-                    (
-                        current_card,
-                        space,
-                        var_exact_time,
-                        var_exact_space,
-                        collects,
-                    ),
-                );
+                nodes.push((
+                    expr_index,
+                    Some(v.variable_name.clone()),
+                    pipeline.analyze(&desc),
+                ));
+                declared.insert(v.variable_name.clone(), pipeline);
             }
             TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                let (prior_card, prior_space, prior_exact_time, prior_exact_space, prior_collects) =
-                    stream_vars
-                        .get(&v.prior_stream_variable)
-                        .cloned()
-                        .unwrap_or((
-                            Symbolic::Unknown,
-                            ComplexityClass::Unknown,
-                            ExactComplexity::new(),
-                            ExactComplexity::new(),
-                            false,
-                        ));
-                let mut current_card = prior_card.clone();
-                let mut var_exact_time = prior_exact_time.clone();
-                let mut var_exact_space = prior_exact_space.clone();
-                for f in &v.funs {
-                    let time_work = step_work_class(&current_card, &f.kind);
-                    var_exact_time.add_work(time_work, 1);
-                    let space_work = step_space_class(&current_card, &f.kind);
-                    var_exact_space.add_work(space_work, 1);
-                    current_card = propagate_cardinality(current_card, &f.kind);
-                }
-                let space = var_exact_space.simplified().max(prior_space.clone());
+                let pipeline = declared
+                    .get(&v.prior_stream_variable)
+                    .cloned()
+                    .unwrap_or_else(ResolvedPipeline::undeclared)
+                    .extended(&v.funs);
                 let desc = if v.funs.is_empty() {
                     format!("{} = {}", v.variable_name, v.prior_stream_variable)
                 } else {
@@ -1068,24 +1077,12 @@ pub(crate) fn analyze_nodes(
                         describe_stream_fns(&v.funs)
                     )
                 };
-                let mut node_sc = analyze_stream_fns(&v.funs, prior_card, &desc);
-                node_sc.exact_time.merge(&prior_exact_time);
-                node_sc.time_class = node_sc.exact_time.simplified();
-                node_sc.exact_space.merge(&prior_exact_space);
-                node_sc.space_class = node_sc.exact_space.simplified().max(prior_space);
-                node_sc.collects_input |= prior_collects;
-                let collects = node_sc.collects_input;
-                nodes.push((expr_index, Some(v.variable_name.clone()), node_sc));
-                stream_vars.insert(
-                    v.variable_name.clone(),
-                    (
-                        current_card,
-                        space,
-                        var_exact_time,
-                        var_exact_space,
-                        collects,
-                    ),
-                );
+                nodes.push((
+                    expr_index,
+                    Some(v.variable_name.clone()),
+                    pipeline.analyze(&desc),
+                ));
+                declared.insert(v.variable_name.clone(), pipeline);
             }
             _ => {}
         }
@@ -1102,7 +1099,6 @@ pub(crate) fn analyze_nodes(
         let sc = match expr {
             TypedExpression::UnnamedReturningStream(s)
             | TypedExpression::UnnamedNonReturningStream(s) => {
-                let card = input_cardinality(&s.inp_and_funs.inp);
                 let funs_desc = describe_stream_fns(&s.inp_and_funs.funs);
                 let out_desc = if s.out.returning {
                     "return"
@@ -1114,18 +1110,14 @@ pub(crate) fn analyze_nodes(
                 } else {
                     format!("input.{funs_desc}.{out_desc}")
                 };
-                analyze_stream_fns(&s.inp_and_funs.funs, card, &desc)
+                ResolvedPipeline::from_source(
+                    input_cardinality(&s.inp_and_funs.inp),
+                    &s.inp_and_funs.funs,
+                )
+                .analyze(&desc)
             }
             TypedExpression::NamedReturningStream(s)
             | TypedExpression::NamedNonReturningStream(s) => {
-                let (card, var_space, var_exact_time, var_exact_space, _) =
-                    stream_vars.get(&s.stream_variable).cloned().unwrap_or((
-                        Symbolic::Unknown,
-                        ComplexityClass::Unknown,
-                        ExactComplexity::new(),
-                        ExactComplexity::new(),
-                        false,
-                    ));
                 let funs_desc = describe_stream_fns(&s.funs);
                 let out_desc = if s.out.returning {
                     "return"
@@ -1137,12 +1129,12 @@ pub(crate) fn analyze_nodes(
                 } else {
                     format!("{}.{funs_desc}.{out_desc}", s.stream_variable)
                 };
-                let mut sc = analyze_stream_fns(&s.funs, card, &desc);
-                sc.exact_time.merge(&var_exact_time);
-                sc.time_class = sc.exact_time.simplified();
-                sc.exact_space.merge(&var_exact_space);
-                sc.space_class = sc.exact_space.simplified().max(var_space);
-                sc
+                declared
+                    .get(&s.stream_variable)
+                    .cloned()
+                    .unwrap_or_else(ResolvedPipeline::undeclared)
+                    .extended(&s.funs)
+                    .analyze(&desc)
             }
             _ => continue,
         };
@@ -1210,7 +1202,7 @@ mod tests {
                 kind: kind.clone(),
                 code: String::new(),
             };
-            let analyzed = analyze_stream_fns(&[node], Symbolic::Unknown, "t");
+            let analyzed = analyze_stream_fns(&[node], Symbolic::Unknown, false, "t");
             if analyzed.collects_input {
                 assert!(
                     kind.awaits_whole_input(),
