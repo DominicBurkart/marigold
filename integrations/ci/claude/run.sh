@@ -3,7 +3,7 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
-VERSION=$(tr -d '[:space:]' <"$HERE/VERSION")
+VERSION=${HARNESS_VERSION:-$(tr -d '[:space:]' <"$HERE/VERSION")}
 CF_HASH=$(sha256sum "$HERE/Containerfile" | cut -c1-8)
 IMAGE=localhost/marigold-ci-claude:$VERSION-$CF_HASH
 RUN_ID=$$

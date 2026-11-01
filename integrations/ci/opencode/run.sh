@@ -3,7 +3,7 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
-VERSION=$(tr -d '[:space:]' <"$HERE/VERSION")
+VERSION=${HARNESS_VERSION:-$(tr -d '[:space:]' <"$HERE/VERSION")}
 CF_HASH=$(sha256sum "$HERE/Containerfile" | cut -c1-8)
 IMAGE=localhost/marigold-ci-opencode:$VERSION-$CF_HASH
 RUN_ID=$$
@@ -60,6 +60,8 @@ run_scenario info
 run_scenario warning
 run_scenario mixed
 run_scenario valid
+run_scenario edit-error
+run_scenario edit-info
 
 echo
 echo "=== summary (opencode $VERSION) ==="
@@ -68,5 +70,7 @@ echo "${RESULT[info]}  information-severity file: characterization (see README)"
 echo "${RESULT[warning]}  warning-severity file: characterization (see README)"
 echo "${RESULT[mixed]}  error plus information plus warning in one file: only the error is shown"
 echo "${RESULT[valid]}  valid file (control): no diagnostics"
+echo "${RESULT[edit-error]}  edit tool turns a valid file into an error-severity one: diagnostic shown"
+echo "${RESULT[edit-info]}  edit tool turns a valid file into an information-severity one: characterization (see README)"
 if [ "$FAILED" -eq 0 ]; then echo "PASS"; else echo "FAIL"; fi
 exit "$FAILED"
