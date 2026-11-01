@@ -221,7 +221,7 @@ macro_rules! hangs_when_named {
                 m!($($n)*).await.collect::<Vec<_>>().await
             })
             .await
-            .expect("named form hangs");
+            .expect("HANG: named form did not terminate within 3s");
             assert_eq!(sorted(named), sorted(inlined));
         }
     };
