@@ -647,6 +647,21 @@ mod absolute_contracts {
     }
 
     #[test]
+    #[ignore = "see #448"]
+    fn undeclared_variable_exact_space_carries_the_unknown() {
+        for body in ["nope.map(f).return", "y = nope.map(f)\ny.return"] {
+            let r = marigold_analyze(&format!("{PRELUDE}{body}")).unwrap();
+            let s = r.streams.last().unwrap();
+            assert_eq!(
+                s.exact_space.simplified(),
+                ComplexityClass::Unknown,
+                "{body}"
+            );
+            assert_eq!(s.space_class, s.exact_space.simplified(), "{body}");
+        }
+    }
+
+    #[test]
     fn fan_out_counts_each_consumer_as_if_inline() {
         let named = marigold_analyze(&format!(
             "{PRELUDE}x = range(0, 5).map(f)\nx.map(g).return\nx.map(g).return"

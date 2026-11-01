@@ -45,7 +45,7 @@ The same holds through chains (`y = x.map(g)` is `y = <definition of x>.map(g)`)
 
 ## Accounting for several consumers
 
-Analysis is done as if inline: each consumer is charged the full cost of the variable's definition plus its own steps. The program totals therefore count a shared prefix once per consumer. The runtime computes the prefix once, so the reported time is an upper bound for the shared case and equals the inline figure by definition. This keeps the rule local (a stream's figures depend on its own text after substitution) and the totals independent of how the program was written.
+Analysis is done as if inline: each consumer is charged the full cost of the variable's definition plus its own steps. The program totals therefore count a shared prefix once per consumer. The runtime computes the prefix once, so the reported time is an upper bound for the shared case and equals the inline figure by definition. Decided: program totals are not deduplicated for shared prefixes. This keeps the rule local (a stream's figures depend on its own text after substitution) and the totals independent of how the program was written.
 
 Space is the same: each consumer reports the space of its own expanded pipeline. The channels between a variable and its consumers hold one item each, so `k` consumers add `k` items, which is a program constant and is not charged. Collecting steps are charged as they are inline.
 
@@ -61,7 +61,7 @@ If the language later allows shadowing, each consumer must see the nearest decla
 
 A reference to a name with no declaration in the program is an external source: a Rust binding in scope inside `m!()` that has a `get()` method returning a stream. The analyzer reports unknown cardinality, time and space (`O(?)`) for it, `collects_input: false`, and `marigold check` reports an information-level diagnostic. The inline twin of such a program is the program itself. The same unknown-ness must apply to `y = nope.f` and to consumers of `y`, with the same `exact_time` as a stream that starts at an unknown source.
 
-Open question: for these streams `space_class` is `O(?)` while `exact_space` is `O(1)`, so the invariant `space_class == exact_space.simplified()` does not hold. The tests pin the current values; the invariant should either exempt unknown sources or `exact_space` should carry the unknown.
+Decided: for these streams `exact_space` carries the unknown, as `exact_time` already does (`O(2?)`), so `space_class == exact_space.simplified()` holds with no exemption. Today `space_class` is `O(?)` while `exact_space` is `O(1)`; the test asserting the decided behaviour is ignored until #448 is fixed.
 
 ## Implementation guidance
 
