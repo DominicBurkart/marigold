@@ -901,27 +901,51 @@ fn step_space_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> Comple
     }
 }
 
-fn analyze_stream_fns<'f>(
-    funs: impl IntoIterator<Item = &'f crate::nodes::StreamFunctionNode>,
-    initial_cardinality: Symbolic,
+#[cfg(test)]
+thread_local! {
+    static STEPS_APPLIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[derive(Clone)]
+struct PipelineState {
+    cardinality: Symbolic,
     unknown_source: bool,
-    description: &str,
-) -> StreamComplexity {
-    let mut cardinality = initial_cardinality;
-    let mut exact_time = ExactComplexity::new();
-    let mut exact_space = ExactComplexity::new();
-    let mut collects = false;
+    exact_time: ExactComplexity,
+    exact_space: ExactComplexity,
+    collects: bool,
+}
 
-    for f in funs {
-        let time_work = step_work_class(&cardinality, &f.kind);
-        exact_time.add_work(time_work, 1);
+impl PipelineState {
+    fn from_source(cardinality: Symbolic) -> Self {
+        PipelineState {
+            cardinality,
+            unknown_source: false,
+            exact_time: ExactComplexity::new(),
+            exact_space: ExactComplexity::new(),
+            collects: false,
+        }
+    }
 
-        let space_work = if unknown_source {
+    fn undeclared() -> Self {
+        PipelineState {
+            unknown_source: true,
+            ..PipelineState::from_source(Symbolic::Unknown)
+        }
+    }
+
+    fn step(&mut self, f: &crate::nodes::StreamFunctionNode) {
+        #[cfg(test)]
+        STEPS_APPLIED.with(|c| c.set(c.get() + 1));
+
+        let time_work = step_work_class(&self.cardinality, &f.kind);
+        self.exact_time.add_work(time_work, 1);
+
+        let space_work = if self.unknown_source {
             ComplexityClass::Unknown
         } else {
-            step_space_class(&cardinality, &f.kind)
+            step_space_class(&self.cardinality, &f.kind)
         };
-        exact_space.add_work(space_work, 1);
+        self.exact_space.add_work(space_work, 1);
 
         if matches!(
             f.kind,
@@ -929,30 +953,43 @@ fn analyze_stream_fns<'f>(
                 | StreamFunctionKind::PermutationsWithReplacement(_)
                 | StreamFunctionKind::Combinations(_)
         ) {
-            collects = true;
+            self.collects = true;
         }
-        cardinality = propagate_cardinality(cardinality, &f.kind);
+        self.cardinality = propagate_cardinality(
+            std::mem::replace(&mut self.cardinality, Symbolic::Unknown),
+            &f.kind,
+        );
     }
 
-    if exact_time.is_empty() {
-        exact_time.add_work(cardinality_to_time_class(&cardinality), 1);
+    fn extended(&self, funs: &[crate::nodes::StreamFunctionNode]) -> Self {
+        let mut extended = self.clone();
+        for f in funs {
+            extended.step(f);
+        }
+        extended
     }
 
-    if unknown_source && exact_space.is_empty() {
-        exact_space.add_work(ComplexityClass::Unknown, 1);
-    }
+    fn finish(&self, description: &str) -> StreamComplexity {
+        let mut exact_time = self.exact_time.clone();
+        let mut exact_space = self.exact_space.clone();
 
-    let time = exact_time.simplified();
-    let space = exact_space.simplified();
+        if exact_time.is_empty() {
+            exact_time.add_work(cardinality_to_time_class(&self.cardinality), 1);
+        }
 
-    StreamComplexity {
-        description: description.to_string(),
-        cardinality: cardinality.classify_as_cardinality(),
-        time_class: time,
-        exact_time,
-        space_class: space,
-        exact_space,
-        collects_input: collects,
+        if self.unknown_source && exact_space.is_empty() {
+            exact_space.add_work(ComplexityClass::Unknown, 1);
+        }
+
+        StreamComplexity {
+            description: description.to_string(),
+            cardinality: self.cardinality.classify_as_cardinality(),
+            time_class: exact_time.simplified(),
+            exact_time,
+            space_class: exact_space.simplified(),
+            exact_space,
+            collects_input: self.collects,
+        }
     }
 }
 
@@ -991,46 +1028,6 @@ pub fn analyze_program(expressions: &[TypedExpression]) -> ProgramComplexity {
     analyze_nodes(expressions).0
 }
 
-#[derive(Clone)]
-struct ResolvedPipeline<'a> {
-    cardinality: Symbolic,
-    unknown_source: bool,
-    funs: Vec<&'a crate::nodes::StreamFunctionNode>,
-}
-
-impl<'a> ResolvedPipeline<'a> {
-    fn from_source(cardinality: Symbolic, funs: &'a [crate::nodes::StreamFunctionNode]) -> Self {
-        ResolvedPipeline {
-            cardinality,
-            unknown_source: false,
-            funs: funs.iter().collect(),
-        }
-    }
-
-    fn undeclared() -> Self {
-        ResolvedPipeline {
-            cardinality: Symbolic::Unknown,
-            unknown_source: true,
-            funs: Vec::new(),
-        }
-    }
-
-    fn extended(&self, funs: &'a [crate::nodes::StreamFunctionNode]) -> Self {
-        let mut extended = self.clone();
-        extended.funs.extend(funs.iter());
-        extended
-    }
-
-    fn analyze(&self, description: &str) -> StreamComplexity {
-        analyze_stream_fns(
-            self.funs.iter().copied(),
-            self.cardinality.clone(),
-            self.unknown_source,
-            description,
-        )
-    }
-}
-
 pub(crate) fn analyze_nodes(
     expressions: &[TypedExpression],
 ) -> (
@@ -1038,13 +1035,13 @@ pub(crate) fn analyze_nodes(
     Vec<(usize, Option<String>, StreamComplexity)>,
 ) {
     let mut nodes: Vec<(usize, Option<String>, StreamComplexity)> = Vec::new();
-    let mut declared: std::collections::HashMap<String, ResolvedPipeline> =
+    let mut declared: std::collections::HashMap<String, PipelineState> =
         std::collections::HashMap::new();
 
     for (expr_index, expr) in expressions.iter().enumerate() {
         match expr {
             TypedExpression::StreamVariable(v) => {
-                let pipeline = ResolvedPipeline::from_source(input_cardinality(&v.inp), &v.funs);
+                let state = PipelineState::from_source(input_cardinality(&v.inp)).extended(&v.funs);
                 let desc = if v.funs.is_empty() {
                     format!("{} = input", v.variable_name)
                 } else {
@@ -1057,15 +1054,15 @@ pub(crate) fn analyze_nodes(
                 nodes.push((
                     expr_index,
                     Some(v.variable_name.clone()),
-                    pipeline.analyze(&desc),
+                    state.finish(&desc),
                 ));
-                declared.insert(v.variable_name.clone(), pipeline);
+                declared.insert(v.variable_name.clone(), state);
             }
             TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                let pipeline = declared
+                let state = declared
                     .get(&v.prior_stream_variable)
                     .cloned()
-                    .unwrap_or_else(ResolvedPipeline::undeclared)
+                    .unwrap_or_else(PipelineState::undeclared)
                     .extended(&v.funs);
                 let desc = if v.funs.is_empty() {
                     format!("{} = {}", v.variable_name, v.prior_stream_variable)
@@ -1080,9 +1077,9 @@ pub(crate) fn analyze_nodes(
                 nodes.push((
                     expr_index,
                     Some(v.variable_name.clone()),
-                    pipeline.analyze(&desc),
+                    state.finish(&desc),
                 ));
-                declared.insert(v.variable_name.clone(), pipeline);
+                declared.insert(v.variable_name.clone(), state);
             }
             _ => {}
         }
@@ -1110,11 +1107,9 @@ pub(crate) fn analyze_nodes(
                 } else {
                     format!("input.{funs_desc}.{out_desc}")
                 };
-                ResolvedPipeline::from_source(
-                    input_cardinality(&s.inp_and_funs.inp),
-                    &s.inp_and_funs.funs,
-                )
-                .analyze(&desc)
+                PipelineState::from_source(input_cardinality(&s.inp_and_funs.inp))
+                    .extended(&s.inp_and_funs.funs)
+                    .finish(&desc)
             }
             TypedExpression::NamedReturningStream(s)
             | TypedExpression::NamedNonReturningStream(s) => {
@@ -1132,9 +1127,9 @@ pub(crate) fn analyze_nodes(
                 declared
                     .get(&s.stream_variable)
                     .cloned()
-                    .unwrap_or_else(ResolvedPipeline::undeclared)
+                    .unwrap_or_else(PipelineState::undeclared)
                     .extended(&s.funs)
-                    .analyze(&desc)
+                    .finish(&desc)
             }
             _ => continue,
         };
@@ -1202,7 +1197,9 @@ mod tests {
                 kind: kind.clone(),
                 code: String::new(),
             };
-            let analyzed = analyze_stream_fns(&[node], Symbolic::Unknown, false, "t");
+            let analyzed = PipelineState::from_source(Symbolic::Unknown)
+                .extended(&[node])
+                .finish("t");
             if analyzed.collects_input {
                 assert!(
                     kind.awaits_whole_input(),
@@ -2330,5 +2327,45 @@ mod proptests {
             let parsed = Symbolic::from_str(&s).unwrap();
             prop_assert_eq!(sym, parsed);
         }
+    }
+
+    fn chain_source(declarations: usize) -> String {
+        let mut src = String::from("fn f(a: i32) -> i32 { a }\nv0 = range(0, 3)\n");
+        for i in 1..=declarations {
+            src.push_str(&format!("v{i} = v{}.map(f)\n", i - 1));
+        }
+        src.push_str(&format!("v{declarations}.return\n"));
+        src
+    }
+
+    fn steps_applied_for(src: &str) -> usize {
+        STEPS_APPLIED.with(|c| c.set(0));
+        crate::parser::PestParser::analyze(src).unwrap();
+        STEPS_APPLIED.with(|c| c.get())
+    }
+
+    #[test]
+    fn variable_chain_applies_each_step_once() {
+        for declarations in [1, 10, 100, 1000] {
+            assert_eq!(
+                steps_applied_for(&chain_source(declarations)),
+                declarations,
+                "{declarations} chained declarations"
+            );
+        }
+    }
+
+    #[test]
+    fn consumers_apply_only_their_own_steps_on_top_of_the_variable() {
+        let mut src = chain_source(50);
+        src.push_str("v50.map(f).map(f).return\nv50.return\n");
+        assert_eq!(steps_applied_for(&src), 50 + 2);
+    }
+
+    #[test]
+    fn step_count_grows_linearly_with_chain_length() {
+        let small = steps_applied_for(&chain_source(500));
+        let large = steps_applied_for(&chain_source(2000));
+        assert_eq!(large, small * 4);
     }
 }

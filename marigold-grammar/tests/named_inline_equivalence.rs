@@ -512,6 +512,73 @@ mod shadowing_semantics {
         );
     }
 
+    fn consumer_streams(body: &str) -> Vec<(String, bool)> {
+        let src = format!("{PRELUDE}{body}");
+        marigold_analyze(&src)
+            .unwrap()
+            .streams
+            .iter()
+            .map(|s| (s.cardinality.to_string(), s.collects_input))
+            .collect()
+    }
+
+    #[test]
+    fn every_consumer_between_two_redeclarations_sees_the_last_declaration() {
+        assert_eq!(
+            consumer_streams(
+                "x = range(0, 5)\nx.return\nx = range(0, 7).filter(keep)\nx.return\nx = range(0, 9).permutations(2)\nx.return\n"
+            ),
+            vec![("72".to_string(), true); 3]
+        );
+    }
+
+    #[test]
+    fn a_variable_derived_from_an_earlier_declaration_keeps_it_while_consumers_of_the_name_see_the_last(
+    ) {
+        assert_eq!(
+            consumer_streams(
+                "x = range(0, 5)\ny = x.map(f)\nx = range(0, 100).filter(keep)\nx.return\ny.return\n"
+            ),
+            vec![("\u{2264}100".to_string(), false), ("5".to_string(), false)]
+        );
+    }
+
+    #[test]
+    fn redeclaring_from_collecting_to_plain_and_back_follows_the_last_declaration() {
+        assert_eq!(
+            consumer_streams(
+                "x = range(0, 5).permutations(2)\nx.return\nx = range(0, 5)\nx.return\nx = range(0, 6).permutations(2)\nx.return\n"
+            ),
+            vec![("30".to_string(), true); 3]
+        );
+        assert_eq!(
+            consumer_streams(
+                "x = range(0, 5)\nx.return\nx = range(0, 5).permutations(2)\nx.return\nx = range(0, 7)\nx.return\n"
+            ),
+            vec![("7".to_string(), false); 3]
+        );
+    }
+
+    #[test]
+    fn derived_variables_keep_the_collecting_flag_of_the_declaration_they_read() {
+        assert_eq!(
+            consumer_streams(
+                "x = range(0, 5).permutations(2)\ny = x.map(f)\nx = range(0, 3)\nz = x.map(f)\ny.return\nz.return\n"
+            ),
+            vec![("20".to_string(), true), ("3".to_string(), false)]
+        );
+    }
+
+    #[test]
+    fn a_redeclared_derived_variable_uses_its_last_declaration() {
+        assert_eq!(
+            consumer_streams(
+                "x = range(0, 5)\ny = x.map(f)\ny.return\ny = x.permutations(2)\ny.return\n"
+            ),
+            vec![("20".to_string(), true); 2]
+        );
+    }
+
     #[test]
     fn variable_from_variable_reads_the_preceding_declaration() {
         assert_eq!(
