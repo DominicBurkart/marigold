@@ -187,7 +187,16 @@ fn undefined_variable_reports_unknown_space() {
         let r = marigold_analyze(&format!("{F}{body}")).unwrap();
         let s = r.streams.last().unwrap();
         assert_eq!(s.space_class, ComplexityClass::Unknown, "{body}");
-        assert_eq!(s.exact_space.simplified(), ComplexityClass::O1, "{body}");
+        assert_eq!(
+            s.exact_space.simplified(),
+            ComplexityClass::Unknown,
+            "{body}"
+        );
         assert_eq!(r.program_space, ComplexityClass::Unknown, "{body}");
+        assert_eq!(
+            r.program_exact_space.simplified(),
+            ComplexityClass::Unknown,
+            "{body}"
+        );
     }
 }
