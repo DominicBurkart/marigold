@@ -88,3 +88,5 @@ below, all on 2026-10-21 without any scenario delay.
   the "information is dropped" pin does not hold there either.
 - Tested lower bound for the integration itself (error diagnostic reaches the
   model after `write` and `edit`): 1.0.142 or older, not searched.
+- MCP scenarios (`OPENCODE_MARIGOLD_MCP=1`, see the README): pinned 1.19.3
+  only, PASS on 2026-11-01. Other versions were not run.
