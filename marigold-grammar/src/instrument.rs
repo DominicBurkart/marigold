@@ -25,8 +25,9 @@
 
 use crate::node_ids::{node_infos, site_hash, NodeKind};
 use crate::nodes::{
-    NamedStreamNode, OutputFunctionNode, StreamFunctionKind, StreamFunctionNode,
-    StreamVariableFromPriorStreamVariableNode, StreamVariableNode, UnnamedStreamNode,
+    any_awaits_whole_input, defer_until_polled, NamedStreamNode, OutputFunctionNode,
+    StreamFunctionKind, StreamFunctionNode, StreamVariableFromPriorStreamVariableNode,
+    StreamVariableNode, UnnamedStreamNode, DEFERRED_RECEIVER,
 };
 
 use std::collections::HashMap;
@@ -307,12 +308,16 @@ impl Plan {
         node: &NamedStreamNode,
     ) -> Result<String, String> {
         let nodes = self.expr_nodes(expr_index, node.funs.len() + 2)?;
-        let chain = Self::chain(
-            format!("{}.get()", node.stream_variable),
-            nodes[0],
-            &node.funs,
-            &nodes[1..=node.funs.len()],
-        );
+        let deferred = any_awaits_whole_input(&node.funs);
+        let start = if deferred {
+            DEFERRED_RECEIVER.to_string()
+        } else {
+            format!("{}.get()", node.stream_variable)
+        };
+        let mut chain = Self::chain(start, nodes[0], &node.funs, &nodes[1..=node.funs.len()]);
+        if deferred {
+            chain = defer_until_polled(&node.stream_variable, &chain, false);
+        }
         Ok(Self::output(&chain, nodes[node.funs.len() + 1], &node.out))
     }
 
@@ -341,12 +346,16 @@ impl Plan {
         node: &StreamVariableFromPriorStreamVariableNode,
     ) -> Result<String, String> {
         let nodes = self.expr_nodes(expr_index, node.funs.len() + 1)?;
-        let chain = Self::chain(
-            format!("{}.get()", node.prior_stream_variable),
-            nodes[0],
-            &node.funs,
-            &nodes[1..=node.funs.len()],
-        );
+        let deferred = any_awaits_whole_input(&node.funs);
+        let start = if deferred {
+            DEFERRED_RECEIVER.to_string()
+        } else {
+            format!("{}.get()", node.prior_stream_variable)
+        };
+        let mut chain = Self::chain(start, nodes[0], &node.funs, &nodes[1..=node.funs.len()]);
+        if deferred {
+            chain = defer_until_polled(&node.prior_stream_variable, &chain, true);
+        }
         Ok(Self::declaration(&node.variable_name, &chain))
     }
 }
