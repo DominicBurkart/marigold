@@ -148,6 +148,10 @@ impl PestParser {
             None
         };
 
+        if Self::first_redeclared_stream_variable(&expressions).is_some() {
+            return Vec::new();
+        }
+
         match Self::generate_rust_code(expressions, resolved_bounds, None) {
             Ok(_) => Vec::new(),
             Err(msg) => vec![Diagnostic::whole(input, "codegen-error", msg)],
@@ -319,12 +323,33 @@ impl PestParser {
         }
     }
 
+    fn first_redeclared_stream_variable(
+        expressions: &[crate::nodes::TypedExpression],
+    ) -> Option<&str> {
+        let mut seen = std::collections::HashSet::new();
+        expressions.iter().find_map(|expr| {
+            let name = match expr {
+                crate::nodes::TypedExpression::StreamVariable(v) => v.variable_name.as_str(),
+                crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
+                    v.variable_name.as_str()
+                }
+                _ => return None,
+            };
+            (!seen.insert(name)).then_some(name)
+        })
+    }
+
     /// Generate Rust code from AST expressions
     fn generate_rust_code(
         expressions: Vec<crate::nodes::TypedExpression>,
         resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
         plan: Option<&Plan>,
     ) -> Result<String, String> {
+        if let Some(name) = Self::first_redeclared_stream_variable(&expressions) {
+            return Err(format!(
+                "stream variable '{name}' is declared more than once in this program"
+            ));
+        }
         let struct_bounds = Self::build_struct_bounds_map(&resolved_bounds);
         let mut output = "async {\n    use ::marigold::marigold_impl::*;\n    ".to_string();
 

@@ -136,6 +136,9 @@ pub fn marigold_parse_instrumented(
 /// with a `get()` method returning a stream) never affect [`marigold_parse`].
 /// At most 50 resolver diagnostics are reported per file.
 ///
+/// Declaring the same stream variable twice is an error (`redeclared-stream-variable`),
+/// reported at each later declaration, and [`marigold_parse`] rejects such a program.
+///
 /// A syntax error anywhere in the file hides the resolver diagnostics (warnings and
 /// information) for the whole file; only the syntax error is reported until it is fixed.
 /// This is intended.
@@ -156,6 +159,12 @@ pub fn marigold_parse_instrumented(
 /// assert_eq!(diags[0].code, "undefined-fn");
 /// assert_eq!(diags[0].severity, Severity::Information);
 /// assert!(marigold_grammar::marigold_parse("range(0, 10).map(double).return").is_ok());
+///
+/// let twice = "x = range(0, 5)\nx.return\nx = range(0, 7)\nx.return";
+/// let diags = marigold_check(twice);
+/// assert_eq!(diags[0].code, "redeclared-stream-variable");
+/// assert_eq!(diags[0].severity, Severity::Error);
+/// assert!(marigold_grammar::marigold_parse(twice).is_err());
 /// ```
 pub fn marigold_check(s: &str) -> Vec<diagnostics::Diagnostic> {
     if s.len() > diagnostics::MAX_CHECK_INPUT_BYTES {
