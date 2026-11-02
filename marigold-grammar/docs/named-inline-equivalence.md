@@ -1,7 +1,7 @@
 # Named and inline streams are equivalent
 
-Status: recommended specification. It is not yet implemented: see the open
-issues below.
+Status: specification. The analysis rules are implemented (#449) and
+redeclaration is rejected (#444). Open issues are listed at the end.
 
 ## Principle
 
@@ -88,11 +88,11 @@ Its declaration node still reports the variable's own pipeline.
 
 ## Redeclaration
 
-Declaring the same variable name twice is an error. `marigold check` must report
-a diagnostic with severity error on the second declaration. The generated Rust
-binds each variable to a name and runs it once, so a second declaration cannot
-work, and the current analyzer rule (every consumer sees the last declaration)
-matches no other reading of the program. See #444.
+Declaring the same variable name twice is an error. `marigold check` reports
+`redeclared-stream-variable` with severity error on each later declaration, and
+code generation rejects the program, so the macro fails at expansion. The
+generated Rust binds each variable to a name and runs it once, so a second
+declaration cannot work (#444).
 
 If the language later allows shadowing, each consumer must see the nearest
 declaration above it and codegen must give each declaration a unique binding.
@@ -109,50 +109,45 @@ diagnostic. The inline twin of such a program is the program itself. The same
 unknown-ness must apply to `y = nope.f` and to consumers of `y`, with the same
 `exact_time` as a stream that starts at an unknown source.
 
-Decided: for these streams `exact_space` carries the unknown, as `exact_time`
-already does (`O(2?)`), so `space_class == exact_space.simplified()` holds with
-no exemption. Today `space_class` is `O(?)` while `exact_space` is `O(1)`; the
-test asserting the decided behaviour is ignored until #448 is fixed.
+For these streams `exact_space` carries the unknown, as `exact_time` does, so
+`space_class == exact_space.simplified()` holds with no exemption (#448).
 
 ## Implementation guidance
 
-Expand variable references by substitution before analysis (#441), so equality
-holds by construction and the per-variable summary tuple disappears. For the
-runtime, a consumer that awaits its whole input must not be awaited while it is
-being built (#436), and `MultiConsumerStream` should not require `Copy` items or
-a `Send` source (#445).
+The analysis continues one fold over the steps of a pipeline: a variable stores
+the state after its own steps, and a consumer or derived variable continues from
+it, so equality holds by construction and each step is applied once (#449). For
+the runtime, `MultiConsumerStream` should not require `Copy` items or a `Send`
+source (#445).
 
-## Post-fix requirement: hover and MCP test
+## Pending: hover and MCP test
 
-Once #441 is fixed, add a test in `marigold-lsp` that builds `complexity_line`
-for each consumer node of a named program and for its inline twin and asserts
-the strings are equal, for at least a collecting variable consumed with zero
-functions, a chain, and a fan-out. It is deliberately not added now because
-today it would pin the wrong behaviour (`collects input: no` for a consumer of a
-collecting variable).
+With #441 fixed, a test can be added in `marigold-lsp` that builds
+`complexity_line` for each consumer node of a named program and for its inline
+twin and asserts the strings are equal, for at least a collecting variable
+consumed with zero functions, a chain, and a fan-out. It is not part of the
+analysis change; before #441 it would have pinned the wrong behaviour
+(`collects input: no` for a consumer of a collecting variable).
 
 ## Tests
 
 `marigold-grammar/tests/named_inline_equivalence.rs` generates the inline twin
 of each named program with a textual substitution helper and compares every
 field above. `tests/tests/named_inline_runtime.rs` compares output multisets and
-per-consumer order at run time. Cases blocked by an open issue are `#[ignore]`
+per-consumer order at run time. A case blocked by an open issue is `#[ignore]`
 with the issue number and must be un-ignored by the fix.
 
 ## Open issues
 
-- #441: `collects_input` and `exact_time` differ.
-- #442: a filtered variable consumed with no functions reports `O(n)` time.
-- #436: named stream consumed by a collecting step hangs.
-- #444: redeclaration is accepted by check and fails to compile.
 - #445: named streams require `Copy` items and a `Send` source.
 
-## Current redeclaration semantics (pinned until a check error exists)
+## Analyzer semantics for redeclared names
 
-Code generation emits structs and enums, then functions, then every variable
-declaration in source order (`let mut x = ...`, so a later declaration shadows
-an earlier one), then all streams. The analyzer follows the same order and the
-tests in `shadowing_semantics` pin it:
+`marigold_analyze` does not run the checker, so it still analyzes a program that
+declares a name twice. Code generation emits structs and enums, then functions,
+then every variable declaration in source order (`let mut x = ...`, so a later
+declaration shadows an earlier one), then all streams. The analyzer follows the
+same order and the tests in `shadowing_semantics` pin it:
 
 - A variable declared from another variable reads the most recent preceding
   declaration of that name, including its own previous binding (`x = x.map(f)`).
@@ -163,6 +158,5 @@ tests in `shadowing_semantics` pin it:
   source with unknown figures, and the checker warns that the variable is read
   before it is declared.
 
-These rules describe what the tool does now. The decided behaviour is a
-`marigold check` error for redeclaration (#444); the tests that assert it are
-ignored with a reference to #444.
+These rules apply only to programs analyzed directly. `marigold check` and code
+generation reject such a program (#444).

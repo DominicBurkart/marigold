@@ -323,7 +323,6 @@ impl PestParser {
         }
     }
 
-    /// Generate Rust code from AST expressions
     fn first_redeclared_stream_variable(
         expressions: &[crate::nodes::TypedExpression],
     ) -> Option<&str> {
@@ -340,6 +339,7 @@ impl PestParser {
         })
     }
 
+    /// Generate Rust code from AST expressions
     fn generate_rust_code(
         expressions: Vec<crate::nodes::TypedExpression>,
         resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
