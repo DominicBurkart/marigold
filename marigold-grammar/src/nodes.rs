@@ -1,3 +1,5 @@
+use crate::source_map::{Emit, Piece, Role};
+
 const MAX_CUSTOM_TYPE_SIZE: usize = 9_999;
 const MAX_TYPE_REFERENCE_SIZE: usize = 256;
 
@@ -119,10 +121,37 @@ pub struct UnnamedStreamNode {
 
 impl UnnamedStreamNode {
     pub fn code(&self) -> String {
-        let inp_and_funs_code = self.inp_and_funs.code();
-        let stream_prefix = &self.out.stream_prefix;
-        let stream_postfix = &self.out.stream_postfix;
-        format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{inp_and_funs_code}{stream_postfix}}}")
+        self.emit().s
+    }
+
+    /// The code of the stream with the layout of its parts: the output's prefix, the input
+    /// and every stream function, and the output's postfix.
+    pub(crate) fn emit(&self) -> Emit {
+        let mut emit = Emit::default();
+        emit.push("{use ::marigold::marigold_impl::*; ");
+        emit_output_prefix(&mut emit, &self.out);
+        self.inp_and_funs.emit_into(&mut emit);
+        emit_output_postfix(&mut emit, &self.out);
+        emit.push("}");
+        emit
+    }
+}
+
+/// The generated code of an output function before the stream (empty for `return`).
+fn emit_output_prefix(emit: &mut Emit, out: &OutputFunctionNode) {
+    emit.piece(Role::OutPrefix, |e| e.push(&out.stream_prefix));
+}
+
+/// The generated code of an output function after the stream (empty for `return`).
+fn emit_output_postfix(emit: &mut Emit, out: &OutputFunctionNode) {
+    emit.piece(Role::OutPostfix, |e| e.push(&out.stream_postfix));
+}
+
+/// `.f0.f1...` with a piece around each function and none around the dots between them.
+fn emit_stream_functions(emit: &mut Emit, funs: &[StreamFunctionNode]) {
+    for (index, fun) in funs.iter().enumerate() {
+        emit.push(".");
+        emit.piece(Role::Fn(index), |e| e.push(&fun.code));
     }
 }
 
@@ -133,19 +162,21 @@ pub struct InputAndMaybeStreamFunctions {
 
 impl InputAndMaybeStreamFunctions {
     pub fn code(&self) -> String {
-        let inp = &self.inp.code;
-        match self.funs.len() {
-            0 => inp.to_string(),
-            _ => {
-                let intermediate = self
-                    .funs
-                    .iter()
-                    .map(|f| f.code.as_str())
-                    .collect::<Vec<_>>()
-                    .join(".");
-                format!("{inp}.{intermediate}")
-            }
-        }
+        self.emit().s
+    }
+
+    /// The code of the input and the chain of stream functions, with the layout of its parts.
+    pub(crate) fn emit(&self) -> Emit {
+        let mut emit = Emit::default();
+        self.emit_into(&mut emit);
+        emit
+    }
+
+    fn emit_into(&self, emit: &mut Emit) {
+        emit.piece(Role::Input, |e| {
+            e.push_with(&self.inp.code, &self.inp.layout)
+        });
+        emit_stream_functions(emit, &self.funs);
     }
 }
 
@@ -157,30 +188,19 @@ pub struct NamedStreamNode {
 
 impl NamedStreamNode {
     pub fn code(&self) -> String {
-        let stream_variable = &self.stream_variable;
-        let intermediate = match self.funs.len() {
-            0 => "".to_string(),
-            _ => format!(
-                ".{}",
-                self.funs
-                    .iter()
-                    .map(|f| f.code.as_str())
-                    .collect::<Vec<_>>()
-                    .join(".")
-            ),
-        };
-        let stream_prefix = &self.out.stream_prefix;
-        let stream_postfix = &self.out.stream_postfix;
-        let source = if any_awaits_whole_input(&self.funs) {
-            defer_until_polled(
-                stream_variable,
-                &format!("{DEFERRED_RECEIVER}{intermediate}"),
-                false,
-            )
-        } else {
-            format!("{stream_variable}.get(){intermediate}")
-        };
-        format!("{{use ::marigold::marigold_impl::*; {stream_prefix}{source}{stream_postfix}}}")
+        self.emit().s
+    }
+
+    /// The code of the stream with the layout of its parts. The stream variable the stream
+    /// reads from is its input: `x.get()`.
+    pub(crate) fn emit(&self) -> Emit {
+        let mut emit = Emit::default();
+        emit.push("{use ::marigold::marigold_impl::*; ");
+        emit_output_prefix(&mut emit, &self.out);
+        emit_stream_source(&mut emit, &self.stream_variable, &self.funs, false);
+        emit_output_postfix(&mut emit, &self.out);
+        emit.push("}");
+        emit
     }
 }
 
@@ -192,22 +212,20 @@ pub struct StreamVariableNode {
 
 impl StreamVariableNode {
     pub fn declaration_code(&self) -> String {
-        let variable_name = &self.variable_name;
-        let inp = &self.inp.code;
-        let intermediate = match self.funs.len() {
-            0 => "".to_string(),
-            _ => {
-                format!(
-                    ".{}",
-                    self.funs
-                        .iter()
-                        .map(|f| f.code.as_str())
-                        .collect::<Vec<_>>()
-                        .join(".")
-                )
-            }
-        };
-        format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({inp}{intermediate})}};")
+        self.declaration_emit().s
+    }
+
+    /// The declaration with the layout of its parts: the input and every stream function.
+    pub(crate) fn declaration_emit(&self) -> Emit {
+        let mut emit = Emit::default();
+        emit.push(&format!("let mut {} = ", self.variable_name));
+        emit.push("{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new(");
+        emit.piece(Role::Input, |e| {
+            e.push_with(&self.inp.code, &self.inp.layout)
+        });
+        emit_stream_functions(&mut emit, &self.funs);
+        emit.push(")};");
+        emit
     }
 
     pub fn runner_code(&self) -> String {
@@ -229,31 +247,18 @@ pub struct StreamVariableFromPriorStreamVariableNode {
 
 impl StreamVariableFromPriorStreamVariableNode {
     pub fn declaration_code(&self) -> String {
-        let variable_name = &self.variable_name;
-        let prior_stream_variable = &self.prior_stream_variable;
-        let intermediate = match self.funs.len() {
-            0 => "".to_string(),
-            _ => {
-                format!(
-                    ".{}",
-                    self.funs
-                        .iter()
-                        .map(|f| f.code.as_str())
-                        .collect::<Vec<_>>()
-                        .join(".")
-                )
-            }
-        };
-        let source = if any_awaits_whole_input(&self.funs) {
-            defer_until_polled(
-                prior_stream_variable,
-                &format!("{DEFERRED_RECEIVER}{intermediate}"),
-                true,
-            )
-        } else {
-            format!("{prior_stream_variable}.get(){intermediate}")
-        };
-        format!("let mut {variable_name} = {{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new({source})}};")
+        self.declaration_emit().s
+    }
+
+    /// The declaration with the layout of its parts. The prior stream variable is the
+    /// input (`x.get()`); the name being declared is not a part.
+    pub(crate) fn declaration_emit(&self) -> Emit {
+        let mut emit = Emit::default();
+        emit.push(&format!("let mut {} = ", self.variable_name));
+        emit.push("{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new(");
+        emit_stream_source(&mut emit, &self.prior_stream_variable, &self.funs, true);
+        emit.push(")};");
+        emit
     }
 
     pub fn runner_code(&self) -> String {
@@ -304,16 +309,52 @@ pub(crate) fn any_awaits_whole_input(funs: &[StreamFunctionNode]) -> bool {
     funs.iter().any(|f| f.kind.awaits_whole_input())
 }
 
+pub(crate) fn emit_deferred(
+    emit: &mut Emit,
+    variable: &str,
+    pin: bool,
+    chain: impl FnOnce(&mut Emit),
+) {
+    emit.push("{ let ");
+    emit.push(DEFERRED_RECEIVER);
+    emit.push(" = ");
+    emit.piece(Role::Input, |e| {
+        e.push(variable);
+        e.push(".get()");
+    });
+    emit.push("; ");
+    if pin {
+        emit.push("Box::pin(");
+    }
+    emit.push("::marigold::marigold_impl::futures::StreamExt::flatten(::marigold::marigold_impl::futures::stream::once(async move { ");
+    chain(emit);
+    emit.push(" }))");
+    if pin {
+        emit.push(")");
+    }
+    emit.push(" }");
+}
+
+#[cfg(feature = "otel")]
 pub(crate) fn defer_until_polled(variable: &str, chain: &str, pin: bool) -> String {
-    let lazy = format!(
-        "::marigold::marigold_impl::futures::StreamExt::flatten(::marigold::marigold_impl::futures::stream::once(async move {{ {chain} }}))"
-    );
-    let lazy = if pin {
-        format!("Box::pin({lazy})")
+    let mut emit = Emit::default();
+    emit_deferred(&mut emit, variable, pin, |e| e.push(chain));
+    emit.s
+}
+
+fn emit_stream_source(emit: &mut Emit, variable: &str, funs: &[StreamFunctionNode], pin: bool) {
+    if any_awaits_whole_input(funs) {
+        emit_deferred(emit, variable, pin, |e| {
+            e.push(DEFERRED_RECEIVER);
+            emit_stream_functions(e, funs);
+        });
     } else {
-        lazy
-    };
-    format!("{{ let {DEFERRED_RECEIVER} = {variable}.get(); {lazy} }}")
+        emit.piece(Role::Input, |e| {
+            e.push(variable);
+            e.push(".get()");
+        });
+        emit_stream_functions(emit, funs);
+    }
 }
 
 pub struct StreamFunctionNode {
@@ -342,6 +383,9 @@ pub struct InputFunctionNode {
     pub variability: InputVariability,
     pub input_count: InputCount,
     pub code: String,
+    /// Parts of `code` that stand for parts of the Marigold source, relative to the start
+    /// of `code`. Only `select_all` has any: its arguments. Empty for the other inputs.
+    pub(crate) layout: Vec<Piece>,
 }
 
 pub struct OutputFunctionNode {
@@ -376,6 +420,15 @@ impl StructDeclarationNode {
         &self,
         field_bounds: Option<&std::collections::HashMap<String, ResolvedFieldBounds>>,
     ) -> String {
+        self.emit_with_bounds(field_bounds).s
+    }
+
+    /// The code of the struct with the layout of its parts: one piece per field,
+    /// `name: type` without the separating `,\n`.
+    pub(crate) fn emit_with_bounds(
+        &self,
+        field_bounds: Option<&std::collections::HashMap<String, ResolvedFieldBounds>>,
+    ) -> Emit {
         #[cfg(not(feature = "io"))]
         let traits = &["Copy", "Clone", "Debug", "Eq", "PartialEq"].join(", ");
         #[cfg(feature = "io")]
@@ -391,24 +444,23 @@ impl StructDeclarationNode {
         .join(", ");
         let name = &self.name;
         #[cfg(not(feature = "io"))]
-        let mut struct_rep = format!(
+        let opening = format!(
             "
             #[derive({traits})]
             struct {name} {{
             "
         );
         #[cfg(feature = "io")]
-        let mut struct_rep = format!(
+        let opening = format!(
             "
             #[derive({traits})]
             #[serde(crate = \"::marigold::marigold_impl::serde\")]
             struct {name} {{
             "
         );
-        for (field_name, field_type) in &self.fields {
-            struct_rep.push_str(field_name.as_str());
-            struct_rep.push_str(": ");
-
+        let mut struct_rep = Emit::default();
+        struct_rep.push(&opening);
+        for (index, (field_name, field_type)) in self.fields.iter().enumerate() {
             let type_str = if let Some(bounds_map) = field_bounds {
                 if let Some(bounds) = bounds_map.get(field_name) {
                     field_type.primitive_to_type_string_with_resolved_bounds(
@@ -421,10 +473,14 @@ impl StructDeclarationNode {
             } else {
                 field_type.primitive_to_type_string()
             };
-            struct_rep.push_str(&type_str);
-            struct_rep.push_str(",\n");
+            struct_rep.piece(Role::Field(index), |e| {
+                e.push(field_name);
+                e.push(": ");
+                e.push(&type_str);
+            });
+            struct_rep.push(",\n");
         }
-        struct_rep.push('}');
+        struct_rep.push("}");
 
         if let Some(bounds_map) = field_bounds {
             let bounded_fields: Vec<_> = self
@@ -440,7 +496,7 @@ impl StructDeclarationNode {
                 .collect();
 
             if !bounded_fields.is_empty() {
-                struct_rep.push_str(&format!("\nimpl {name} {{\n"));
+                struct_rep.push(&format!("\nimpl {name} {{\n"));
                 for (field_name, field_type) in bounded_fields {
                     if let Some(bounds) = bounds_map.get(field_name) {
                         let upper_field = field_name.to_uppercase();
@@ -451,20 +507,20 @@ impl StructDeclarationNode {
                                 Some(bounds.max),
                             );
                         let card_type = select_smallest_unsigned_type(cardinality);
-                        struct_rep.push_str(&format!(
+                        struct_rep.push(&format!(
                             "    pub const {upper_field}_MIN: {field_type_str} = {};\n",
                             bounds.min
                         ));
-                        struct_rep.push_str(&format!(
+                        struct_rep.push(&format!(
                             "    pub const {upper_field}_MAX: {field_type_str} = {};\n",
                             bounds.max
                         ));
-                        struct_rep.push_str(&format!(
+                        struct_rep.push(&format!(
                             "    pub const {upper_field}_CARDINALITY: {card_type} = {cardinality};\n"
                         ));
                     }
                 }
-                struct_rep.push('}');
+                struct_rep.push("}");
             }
         }
 
@@ -619,6 +675,14 @@ impl EnumDeclarationNode {
     }
 
     pub fn code(&self) -> String {
+        self.emit().s
+    }
+
+    /// The code of the enum with the layout of its parts: one piece per variant, the
+    /// `default` variant last. A piece is just the variant (`A`, or `Other(..)` for a sized
+    /// default variant): not the serde attributes before it, the value it is renamed to
+    /// or the `,\n` after it, so its extent does not depend on the `io` feature.
+    pub(crate) fn emit(&self) -> Emit {
         #[cfg(not(feature = "io"))]
         let traits = &["Copy", "Clone", "Debug", "Eq", "PartialEq"].join(", ");
         #[cfg(feature = "io")]
@@ -633,21 +697,25 @@ impl EnumDeclarationNode {
         ]
         .join(", ");
         let name = &self.name;
-        let mut enum_rep = format!("#[derive({traits})]");
+        let mut enum_rep = Emit::default();
+        enum_rep.push(&format!("#[derive({traits})]"));
         #[cfg(feature = "io")]
-        enum_rep.push_str("\n#[serde(crate = \"::marigold::marigold_impl::serde\")]");
+        enum_rep.push("\n#[serde(crate = \"::marigold::marigold_impl::serde\")]");
         if let Some(default_variant) = &self.default_variant {
             #[cfg(feature = "io")]
             {
-                enum_rep.push_str("\n#[serde(try_from=\"String\")]");
-                enum_rep.push_str(format!("\nenum {name} {{\n").as_str());
+                enum_rep.push("\n#[serde(try_from=\"String\")]");
+                enum_rep.push(format!("\nenum {name} {{\n").as_str());
 
                 let mut serialized_to_name_mapping = String::new();
-                for (field_name, serialization_definition) in &self.variants {
+                for (index, (field_name, serialization_definition)) in
+                    self.variants.iter().enumerate()
+                {
                     if let Some(s) = Self::definition_to_serde(serialization_definition) {
-                        enum_rep.push_str(format!("#[serde({s})]\n").as_str());
+                        enum_rep.push(format!("#[serde({s})]\n").as_str());
                     }
-                    enum_rep.push_str(format!("{},\n", field_name.as_str()).as_str());
+                    enum_rep.piece(Role::Variant(index), |e| e.push(field_name.as_str()));
+                    enum_rep.push(",\n");
 
                     let serialized = serialization_definition
                         .as_ref()
@@ -661,8 +729,11 @@ impl EnumDeclarationNode {
                 let mut default_serialized_mapping = String::new();
                 match default_variant {
                     DefaultEnumVariant::Sized(default_name, size) => {
-                        enum_rep.push_str("#[serde(skip_deserializing)]\n");
-                        enum_rep.push_str(format!("{default_name}(::marigold::marigold_impl::arrayvec::ArrayString<{size}>),\n").as_str());
+                        enum_rep.push("#[serde(skip_deserializing)]\n");
+                        enum_rep.piece(Role::Variant(self.variants.len()), |e| {
+                            e.push(format!("{default_name}(::marigold::marigold_impl::arrayvec::ArrayString<{size}>)").as_str())
+                        });
+                        enum_rep.push(",\n");
 
                         default_serialized_mapping =
                             "unknown_value => Other({{
@@ -674,13 +745,22 @@ impl EnumDeclarationNode {
                             }})".to_string();
                     }
                     DefaultEnumVariant::WithDefaultValue(default_name, serialized_value) => {
-                        enum_rep.push_str(format!("#[serde(skip_deserializing, rename = \"{serialized_value}\")]\n{default_name},\n").as_str());
+                        enum_rep.push(
+                            format!(
+                                "#[serde(skip_deserializing, rename = \"{serialized_value}\")]\n"
+                            )
+                            .as_str(),
+                        );
+                        enum_rep.piece(Role::Variant(self.variants.len()), |e| {
+                            e.push(default_name.as_str())
+                        });
+                        enum_rep.push(",\n");
 
                         default_serialized_mapping = format!("_ => {default_name}");
                     }
                 }
-                enum_rep.push('}');
-                enum_rep.push_str(
+                enum_rep.push("}");
+                enum_rep.push(
                     format!(
                         r#"
 
@@ -704,36 +784,43 @@ impl EnumDeclarationNode {
             }
             #[cfg(not(feature = "io"))]
             {
-                enum_rep.push_str(format!("enum {name} {{\n").as_str());
+                enum_rep.push(format!("enum {name} {{\n").as_str());
 
-                for (field_name, _) in &self.variants {
-                    enum_rep.push_str(field_name.as_str());
-                    enum_rep.push_str(",\n");
+                for (index, (field_name, _)) in self.variants.iter().enumerate() {
+                    enum_rep.piece(Role::Variant(index), |e| e.push(field_name.as_str()));
+                    enum_rep.push(",\n");
                 }
                 match default_variant {
                     DefaultEnumVariant::Sized(name, size) => {
-                        enum_rep.push_str(format!("{name}(::marigold::marigold_impl::arrayvec::ArrayString<{size}>),\n").as_str());
+                        enum_rep.piece(Role::Variant(self.variants.len()), |e| {
+                            e.push(format!("{name}(::marigold::marigold_impl::arrayvec::ArrayString<{size}>)").as_str())
+                        });
+                        enum_rep.push(",\n");
                     }
                     DefaultEnumVariant::WithDefaultValue(name, _) => {
-                        enum_rep.push_str(format!("{name},\n").as_str());
+                        enum_rep.piece(Role::Variant(self.variants.len()), |e| {
+                            e.push(name.as_str())
+                        });
+                        enum_rep.push(",\n");
                     }
                 };
-                enum_rep.push('}');
+                enum_rep.push("}");
             }
         } else {
-            enum_rep.push_str(format!("enum {name} {{\n").as_str());
+            enum_rep.push(format!("enum {name} {{\n").as_str());
 
             #[allow(unused_variables)] // serialization_definition only used if io/serde enabled
-            for (field_name, serialization_definition) in &self.variants {
+            for (index, (field_name, serialization_definition)) in self.variants.iter().enumerate()
+            {
                 #[cfg(feature = "io")]
                 if let Some(serde_def) = Self::definition_to_serde(serialization_definition) {
-                    enum_rep.push_str(format!("#[serde({serde_def})]\n").as_str());
+                    enum_rep.push(format!("#[serde({serde_def})]\n").as_str());
                 }
-                enum_rep.push_str(field_name.as_str());
-                enum_rep.push_str(",\n");
+                enum_rep.piece(Role::Variant(index), |e| e.push(field_name.as_str()));
+                enum_rep.push(",\n");
             }
 
-            enum_rep.push('}');
+            enum_rep.push("}");
         }
 
         let mut unit_variants: Vec<String> = self.variants.iter().map(|(n, _)| n.clone()).collect();
@@ -749,7 +836,7 @@ impl EnumDeclarationNode {
             .map(|v| format!("{name}::{v}"))
             .collect::<Vec<_>>()
             .join(", ");
-        enum_rep.push_str(&format!(
+        enum_rep.push(&format!(
             "\n#[allow(dead_code)]\nimpl {name} {{\n    fn __marigold_variants() -> [{name}; {variant_count}] \
              {{\n        [{variants_list}]\n    }}\n}}"
         ));
@@ -777,6 +864,13 @@ pub struct FnDeclarationNode {
 
 impl FnDeclarationNode {
     pub fn code(&self) -> String {
+        self.emit().s
+    }
+
+    /// The code of the function with the layout of its parts: the signature (name,
+    /// parameters and return type) and the body, braces included. The body is the source
+    /// text of the function body verbatim.
+    pub(crate) fn emit(&self) -> Emit {
         let name = &self.name;
         let parameters_string = self
             .parameters
@@ -787,7 +881,14 @@ impl FnDeclarationNode {
         let output_type = &self.output_type;
         let body = &self.body;
 
-        format!("const fn {name}({parameters_string}) -> {output_type} {{{body}}}")
+        let mut emit = Emit::default();
+        emit.push("const fn ");
+        emit.piece(Role::Signature, |e| {
+            e.push(&format!("{name}({parameters_string}) -> {output_type}"))
+        });
+        emit.push(" ");
+        emit.piece(Role::Body, |e| e.push(&format!("{{{body}}}")));
+        emit
     }
 }
 

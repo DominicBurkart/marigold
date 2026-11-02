@@ -1400,6 +1400,7 @@ mod tests {
             variability: InputVariability::Constant,
             input_count: InputCount::Known(BigUint::from(100u64)),
             code: String::new(),
+            layout: vec![],
         };
         let card = input_cardinality(&inp);
         assert_eq!(card, Symbolic::Constant(BigUint::from(100u64)));

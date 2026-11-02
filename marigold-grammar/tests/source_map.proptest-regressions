@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a0813171512feb2dcb3799ba274deaf5b7ebf1d8a6e90321fe65a07ed637cedc # shrinks to base = "\r\nv0.write_file(\"日0.csv\", csv)\nv0.write_file(\"日1.csv\", csv)\nv2 = range(0, 1).map(f2)\nstruct S3 { a: u8, b: string_1 }\n", at = Index(775073280407964354), insert = Some(" ")
