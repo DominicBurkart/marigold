@@ -228,6 +228,17 @@ const RUN_STREAM: &str = "::marigold::marigold_impl::run_stream::run_stream(";
 /// `rust[open..close]` exactly: nothing but `.` between neighbours, texts as the formulas say,
 /// select_all recursively.
 fn check_chain(src: &str, g: &GeneratedProgram, chain: &[usize], open: usize, close: usize) {
+    check_chain_gap(src, g, chain, open, close, ".");
+}
+
+fn check_chain_gap(
+    src: &str,
+    g: &GeneratedProgram,
+    chain: &[usize],
+    open: usize,
+    close: usize,
+    input_gap: &str,
+) {
     let segs = g.map.segments();
     assert!(!chain.is_empty(), "a chain starts with an input");
     assert_eq!(segs[chain[0]].generated.start, open, "chain start");
@@ -246,9 +257,10 @@ fn check_chain(src: &str, g: &GeneratedProgram, chain: &[usize], open: usize, cl
         } else {
             assert!(is_stream_fn(s.kind), "{s:?}");
             let prev = &segs[chain[n - 1]];
+            let gap = if n == 1 { input_gap } else { "." };
             assert_eq!(
                 &g.rust[prev.generated.end..s.generated.start],
-                ".",
+                gap,
                 "exactly one dot between chain elements"
             );
             assert_eq!(
@@ -351,7 +363,27 @@ fn check_statement_layout(src: &str, g: &GeneratedProgram, i: usize) {
                 }
                 None => s.generated.end - tail.len(),
             };
-            check_chain(src, g, &chain, open, close);
+            let collecting = chain.iter().skip(1).any(|&k| {
+                matches!(
+                    segs[k].kind,
+                    K::StreamPermutations
+                        | K::StreamPermutationsWithReplacement
+                        | K::StreamCombinations
+                        | K::StreamKeepFirstN
+                )
+            });
+            if segs[chain[0]].kind == K::InputVariable && collecting {
+                let pin = s.kind == K::StreamVariable;
+                let (box_open, box_close) = if pin { ("Box::pin(", ")") } else { ("", "") };
+                let first = segs[chain[0]].generated.start;
+                assert_eq!(&g.rust[open..first], "{ let __marigold_receiver = ");
+                let gap = format!("; {box_open}::marigold::marigold_impl::futures::StreamExt::flatten(::marigold::marigold_impl::futures::stream::once(async move {{ __marigold_receiver.");
+                let last = segs[*chain.last().unwrap()].generated.end;
+                assert_eq!(&g.rust[last..close], format!(" }})){box_close} }}"));
+                check_chain_gap(src, g, &chain, first, last, &gap);
+            } else {
+                check_chain(src, g, &chain, open, close);
+            }
             if let (Some(p), Some(q)) = (prefix, postfix) {
                 let (p, q) = (&segs[p], &segs[q]);
                 assert_eq!(p.source, q.source, "both regions come from the same call");
@@ -2022,9 +2054,15 @@ fn user_names_that_collide_with_generated_identifiers_are_both_reported() {
         .map(|s| s.kind)
         .collect();
     assert_eq!(kinds, [K::Struct, K::StreamVariable]);
-    let src = "x = range(0, 1)\nx = range(1, 2)\nx.return";
+    let src = "stream_variable_runners_0 = range(0, 1)\nstream_variable_runners_0.return";
     let g = generate(src);
-    assert_eq!(g.map.segments_for_ident("x").len(), 2);
+    let kinds: Vec<K> = g
+        .map
+        .segments_for_ident("stream_variable_runners_0")
+        .iter()
+        .map(|s| s.kind)
+        .collect();
+    assert_eq!(kinds, [K::StreamVariable, K::StreamVariableRunner]);
 }
 
 #[test]

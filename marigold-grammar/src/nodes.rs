@@ -197,11 +197,7 @@ impl NamedStreamNode {
         let mut emit = Emit::default();
         emit.push("{use ::marigold::marigold_impl::*; ");
         emit_output_prefix(&mut emit, &self.out);
-        emit.piece(Role::Input, |e| {
-            e.push(&self.stream_variable);
-            e.push(".get()");
-        });
-        emit_stream_functions(&mut emit, &self.funs);
+        emit_stream_source(&mut emit, &self.stream_variable, &self.funs, false);
         emit_output_postfix(&mut emit, &self.out);
         emit.push("}");
         emit
@@ -260,11 +256,7 @@ impl StreamVariableFromPriorStreamVariableNode {
         let mut emit = Emit::default();
         emit.push(&format!("let mut {} = ", self.variable_name));
         emit.push("{use ::marigold::marigold_impl::*; ::marigold::marigold_impl::multi_consumer_stream::MultiConsumerStream::new(");
-        emit.piece(Role::Input, |e| {
-            e.push(&self.prior_stream_variable);
-            e.push(".get()");
-        });
-        emit_stream_functions(&mut emit, &self.funs);
+        emit_stream_source(&mut emit, &self.prior_stream_variable, &self.funs, true);
         emit.push(")};");
         emit
     }
@@ -292,6 +284,77 @@ pub enum StreamFunctionKind {
     Fold,
     Ok,
     OkOrPanic,
+}
+
+impl StreamFunctionKind {
+    pub(crate) fn awaits_whole_input(&self) -> bool {
+        match self {
+            StreamFunctionKind::Permutations(_)
+            | StreamFunctionKind::PermutationsWithReplacement(_)
+            | StreamFunctionKind::Combinations(_)
+            | StreamFunctionKind::KeepFirstN(_) => true,
+            StreamFunctionKind::Map
+            | StreamFunctionKind::Filter
+            | StreamFunctionKind::FilterMap
+            | StreamFunctionKind::Fold
+            | StreamFunctionKind::Ok
+            | StreamFunctionKind::OkOrPanic => false,
+        }
+    }
+}
+
+pub(crate) const DEFERRED_RECEIVER: &str = "__marigold_receiver";
+
+pub(crate) fn any_awaits_whole_input(funs: &[StreamFunctionNode]) -> bool {
+    funs.iter().any(|f| f.kind.awaits_whole_input())
+}
+
+pub(crate) fn emit_deferred(
+    emit: &mut Emit,
+    variable: &str,
+    pin: bool,
+    chain: impl FnOnce(&mut Emit),
+) {
+    emit.push("{ let ");
+    emit.push(DEFERRED_RECEIVER);
+    emit.push(" = ");
+    emit.piece(Role::Input, |e| {
+        e.push(variable);
+        e.push(".get()");
+    });
+    emit.push("; ");
+    if pin {
+        emit.push("Box::pin(");
+    }
+    emit.push("::marigold::marigold_impl::futures::StreamExt::flatten(::marigold::marigold_impl::futures::stream::once(async move { ");
+    chain(emit);
+    emit.push(" }))");
+    if pin {
+        emit.push(")");
+    }
+    emit.push(" }");
+}
+
+#[cfg(feature = "otel")]
+pub(crate) fn defer_until_polled(variable: &str, chain: &str, pin: bool) -> String {
+    let mut emit = Emit::default();
+    emit_deferred(&mut emit, variable, pin, |e| e.push(chain));
+    emit.s
+}
+
+fn emit_stream_source(emit: &mut Emit, variable: &str, funs: &[StreamFunctionNode], pin: bool) {
+    if any_awaits_whole_input(funs) {
+        emit_deferred(emit, variable, pin, |e| {
+            e.push(DEFERRED_RECEIVER);
+            emit_stream_functions(e, funs);
+        });
+    } else {
+        emit.piece(Role::Input, |e| {
+            e.push(variable);
+            e.push(".get()");
+        });
+        emit_stream_functions(emit, funs);
+    }
 }
 
 pub struct StreamFunctionNode {

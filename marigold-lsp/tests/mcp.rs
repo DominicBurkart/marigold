@@ -516,7 +516,7 @@ fn complexity_per_stream() {
     assert_eq!(streams[0]["name"], "x");
     assert_eq!(streams[0]["cardinality"], "5");
     assert_eq!(streams[0]["time"], "O(1)");
-    assert_eq!(streams[0]["space"], "O(n)");
+    assert_eq!(streams[0]["space"], "O(1)");
     assert_eq!(streams[0]["collects_input"], false);
     assert_eq!(streams[0]["line"], 1);
     assert_eq!(streams[1]["name"], Value::Null);
