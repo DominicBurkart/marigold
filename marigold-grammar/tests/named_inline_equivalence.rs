@@ -467,19 +467,12 @@ mod redeclaration {
     }
 
     rejected_cases! {
-        #[ignore = "see #444"]
         redeclaration_streaming => "x = range(0, 5)\nx.return\nx = range(0, 7)\nx.return";
-        #[ignore = "see #444"]
         redeclaration_to_collecting => "x = range(0, 5)\nx.return\nx = range(0, 7).permutations(2)\nx.return";
-        #[ignore = "see #444"]
         redeclaration_from_collecting => "x = range(0, 5).permutations(2)\nx.return\nx = range(0, 7)\nx.map(f).return";
-        #[ignore = "see #444"]
         self_referential_redeclaration => "x = range(0, 5)\nx = x.permutations(2)\nx.return";
-        #[ignore = "see #444"]
         self_referential_redeclaration_streaming_consumer => "x = range(0, 5)\nx = x.map(f)\nx.map(g).return";
-        #[ignore = "see #444"]
         redeclaration_in_chain => "x = range(0, 5)\ny = x.permutations(2)\nx = range(0, 9)\nz = y.map(f)\nz.return\nx.return";
-        #[ignore = "see #444"]
         redeclaration_in_the_middle_of_consumers => "x = range(0, 5)\nx.return\nx = range(0, 7).permutations(2)\nx.return";
     }
 
