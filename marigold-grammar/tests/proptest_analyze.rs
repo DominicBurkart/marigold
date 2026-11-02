@@ -122,9 +122,8 @@ struct GeneratedProgram {
     source: String,
     /// Number of streams with output functions (return/write_file).
     expected_stream_count: usize,
-    /// Per-stream: whether the output chain has collecting ops.
-    /// Note: for named streams, this only reflects the output chain's ops,
-    /// not the variable definition's ops, matching `collects_input` semantics.
+    /// Per-stream: whether the full pipeline (variable definition then output chain)
+    /// has collecting ops, matching `collects_input` semantics.
     stream_output_has_collecting: Vec<bool>,
     /// Per-stream: whether the effective last op in the full pipeline is a fold.
     /// For named streams with empty out_chain, this checks var_chain's last op,
@@ -167,8 +166,10 @@ fn arb_stream_var_program() -> impl Strategy<Value = GeneratedProgram> {
         arb_output(),
     )
         .prop_map(|(input, var_chain, out_chain, output)| {
-            // collects_input only reflects the output chain's collecting ops for named streams
-            let output_has_collecting = out_chain.iter().any(|f| f.is_collecting);
+            let output_has_collecting = var_chain
+                .iter()
+                .chain(out_chain.iter())
+                .any(|f| f.is_collecting);
             // The analyzer propagates cardinality through var_chain then out_chain.
             // When out_chain is empty, the variable's final cardinality applies directly,
             // so checking var_chain.last() via .or() is correct.
@@ -225,9 +226,14 @@ fn arb_multi_consumer_program() -> impl Strategy<Value = GeneratedProgram> {
                 .map(|f| format!(".{}", f.text))
                 .collect::<String>();
 
-            // collects_input only reflects each output chain's own collecting ops
-            let output_has_collecting_1 = chain1.iter().any(|f| f.is_collecting);
-            let output_has_collecting_2 = chain2.iter().any(|f| f.is_collecting);
+            let output_has_collecting_1 = var_chain
+                .iter()
+                .chain(chain1.iter())
+                .any(|f| f.is_collecting);
+            let output_has_collecting_2 = var_chain
+                .iter()
+                .chain(chain2.iter())
+                .any(|f| f.is_collecting);
             // See comment in arb_stream_var_program for why .or(var_chain.last()) is correct
             let ends_fold_1 = chain1
                 .last()
@@ -381,8 +387,8 @@ proptest! {
         }
     }
 
-    /// collects_input matches the presence of collecting ops in the output chain.
-    /// For named streams, collects_input only reflects the output chain's ops (not variable def).
+    /// collects_input matches the presence of collecting ops in the full pipeline.
+    /// For named streams, that is the variable definition followed by the output chain.
     #[test]
     fn collects_input_matches_collecting_ops(prog in arb_program()) {
         let result = marigold_grammar::marigold_analyze(&prog.source).unwrap();
