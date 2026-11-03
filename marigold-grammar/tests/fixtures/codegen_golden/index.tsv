@@ -23,6 +23,7 @@ write_file_no_compression	range(0, 3).map(to_row).write_file("out.csv.gz", csv, 
 named_variable_multi_consumer	fn doubled_plus_ten(i: i32) -> i32 {\n    (i * 2) + 10\n}\n\ndigits = range(0, 10)\n\ndigits\n    .return\n\ndigits\n    .filter(is_even)\n    .map(doubled_plus_ten)\n    .return
 named_from_prior_variable	digits = range(0, 10)\n\nodd_digits = digits\n    .filter(is_odd)\n\nodd_digits\n    .map(double)\n    .return\n\ndigits.return
 named_variable_write_file	rows = range(0, 3).map(to_row)\nrows.write_file("rows.csv", csv)\nrows.return
+named_collecting	digits = range(0, 5)\n\ndigits.permutations(2).return\n\nodd = digits.combinations(2)\n\nodd.return
 multiple_streams	range(0, 3).return\nrange(5, 8).map(double).return
 struct_decl	struct Ship { class: string_8, hull: u32, tag: Option<u8> }\nrange(0, 3).map(make_ship).return
 bounded_struct	struct Sensor { reading: int[-40, 85] }\nfn to_sensor(i: i32) -> Sensor { Sensor { reading: i as i8 } }\nrange(0, 3).map(to_sensor).return

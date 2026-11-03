@@ -1,0 +1,5 @@
+fn first(x: i32) -> i32 {
+  let v: [i32; 2] = [1, 2];
+  let i = x as usize + 5; v[i]
+}
+range(0, 4).map(first).write_file("/tmp/t4_first.csv", csv)

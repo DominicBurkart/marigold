@@ -1,0 +1,2 @@
+fn double(x: i32) -> i32 { x * 2 }
+range(0, 10).map(double).filter(also_missing).write_file("out.csv", csv)

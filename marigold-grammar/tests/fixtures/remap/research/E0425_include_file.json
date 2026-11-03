@@ -1,0 +1,53 @@
+{
+ "reason": "compiler-message",
+ "package_id": "path+file:///work/research/t2#0.0.1",
+ "manifest_path": "/work/research/t2/Cargo.toml",
+ "target": {
+  "kind": [
+   "bin"
+  ],
+  "crate_types": [
+   "bin"
+  ],
+  "name": "t2",
+  "src_path": "/work/research/t2/src/main.rs",
+  "edition": "2021",
+  "doc": true,
+  "doctest": false,
+  "test": true
+ },
+ "message": {
+  "rendered": "error[E0425]: cannot find value `undefined_name` in this scope\n --> src/gen.rs:2:23\n  |\n2 | fn helper() { let y = undefined_name; }\n  |                       ^^^^^^^^^^^^^^ not found in this scope\n\n",
+  "$message_type": "diagnostic",
+  "children": [],
+  "level": "error",
+  "message": "cannot find value `undefined_name` in this scope",
+  "spans": [
+   {
+    "byte_end": 101,
+    "byte_start": 87,
+    "column_end": 37,
+    "column_start": 23,
+    "expansion": null,
+    "file_name": "src/gen.rs",
+    "is_primary": true,
+    "label": "not found in this scope",
+    "line_end": 2,
+    "line_start": 2,
+    "suggested_replacement": null,
+    "suggestion_applicability": null,
+    "text": [
+     {
+      "highlight_end": 37,
+      "highlight_start": 23,
+      "text": "fn helper() { let y = undefined_name; }"
+     }
+    ]
+   }
+  ],
+  "code": {
+   "code": "E0425",
+   "explanation": "<elided>"
+  }
+ }
+}
