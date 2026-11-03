@@ -461,88 +461,155 @@ Mutations run against the program:
 ### tsp_simulated_annealing
 
 - Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
-- Reference:
-  [Kirkpatrick, Gelatt, Vecchi 1983](https://en.wikipedia.org/wiki/Simulated_annealing)
-- Canonical complexity: O(I x n) for I iterations on n cities
-- Analyzer estimate: O(1), exact O(2), space O(1), cardinality exactly 1, no
-  input collection. The fold over a constant `range` collapses to one item and
-  the per-step cost is a function body the analyzer cannot see
-  ([#415](https://github.com/DominicBurkart/marigold/issues/415),
-  [#416](https://github.com/DominicBurkart/marigold/issues/416)).
-
-2000 iterations of 2-opt reversal, integer linear cooling, and a linear integer
-approximation of Metropolis acceptance (accept a worse move when
-`delta * 100 < u * T`, `u` in 0..100). One fold step is one move; the best tour
-seen is kept. Tests pin the O(1) estimate and assert it differs from the
-canonical class. The 10-city Manhattan instance from `src/tsp.rs` is repeated in
-the program because programs are standalone. An in-program LCG
-(`r * 1103515245 + 12345 mod 2^31`, high bits) with a fixed seed makes runs
-deterministic.
+- Reference: Kirkpatrick, Gelatt and Vecchi, "Optimization by Simulated
+  Annealing", Science 220(4598):671-680, 1983,
+  [doi:10.1126/science.220.4598.671][sa-doi], and the Wikipedia article
+  [Simulated annealing][sa-wiki]
+- Canonical complexity: O(I n) for I iterations on n cities (each move
+  re-evaluates the whole tour)
+- Analyzer estimate: O(1), exact O(2), exact space O(2), cardinality 1, does
+  not collect input
 
 ### tsp_genetic
 
 - Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
-- Reference: [Holland 1975](https://en.wikipedia.org/wiki/Genetic_algorithm),
-  order crossover per Davis 1985
-- Canonical complexity: O(G x P x n) for G generations and population P
-- Analyzer estimate: O(1), exact O(2), space O(1), cardinality exactly 1, no
-  input collection. The fold over a constant `range` collapses to one item and
-  the per-step cost is a function body the analyzer cannot see
-  ([#415](https://github.com/DominicBurkart/marigold/issues/415),
-  [#416](https://github.com/DominicBurkart/marigold/issues/416)).
-
-150 generations, population 16, tournament selection, order crossover, swap
-mutation, elitism. One fold step is one generation. Tests pin the O(1) estimate
-and assert it differs from the canonical class. The 10-city Manhattan instance
-from `src/tsp.rs` is repeated in the program because programs are standalone. An
-in-program LCG (`r * 1103515245 + 12345 mod 2^31`, high bits) with a fixed seed
-makes runs deterministic.
+- Reference: John Holland, "Adaptation in Natural and Artificial Systems", MIT
+  Press, 1992 (the edition the Wikipedia article lists;
+  [doi:10.7551/mitpress/1090.001.0001][ga-doi]), and the Wikipedia article
+  [Genetic algorithm][ga-wiki]. Order crossover (OX1) is implemented as
+  described in the Wikipedia article [Crossover (evolutionary
+  algorithm)][ox-wiki], which attributes it to Davis and cites Lawrence Davis,
+  "Handbook of Genetic Algorithms", Van Nostrand Reinhold, 1991.
+- Canonical complexity: O(G P n) for G generations and population P (each
+  child re-evaluates tours of length n)
+- Analyzer estimate: O(1), exact O(2), exact space O(2), cardinality 1, does
+  not collect input
 
 ### tsp_ant_colony
 
 - Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
-- Reference:
-  [Dorigo, Maniezzo, Colorni 1996, Ant System](https://en.wikipedia.org/wiki/Ant_colony_optimization_algorithms)
-- Canonical complexity: O(I x m x n^2) for I iterations and m ants
-- Analyzer estimate: O(1), exact O(2), space O(1), cardinality exactly 1, no
-  input collection. The fold over a constant `range` collapses to one item and
-  the per-step cost is a function body the analyzer cannot see
-  ([#415](https://github.com/DominicBurkart/marigold/issues/415),
-  [#416](https://github.com/DominicBurkart/marigold/issues/416)).
+- Reference: Dorigo, Maniezzo and Colorni, "Ant system: optimization by a
+  colony of cooperating agents", IEEE Transactions on Systems, Man, and
+  Cybernetics, Part B 26(1):29-41, 1996,
+  [doi:10.1109/3477.484436][aco-doi], and the Wikipedia article
+  [Ant colony optimization algorithms][aco-wiki]
+- Canonical complexity: O(I m n^2) for I iterations and m ants (each ant step
+  scans the n cities)
+- Analyzer estimate: O(1), exact O(2), exact space O(2), cardinality 1, does
+  not collect input
 
-200 iterations, 8 ants, integer fixed-point pheromone (scale 1000), weight
-`tau * (10000 / d^2)`, roulette selection, evaporation 0.9. One fold step is one
-colony iteration. Tests pin the O(1) estimate and assert it differs from the
-canonical class. The 10-city Manhattan instance from `src/tsp.rs` is repeated in
-the program because programs are standalone. An in-program LCG
-(`r * 1103515245 + 12345 mod 2^31`, high bits) with a fixed seed makes runs
-deterministic.
+The three programs share one shape: a fold over a constant `range` (2000
+iterations, 150 generations, 200 iterations) whose step function is exactly one
+algorithmic iteration, followed by a map that extracts the best tour. The whole
+algorithm state travels through the fold in one fixed array: tour, length, RNG
+and best tour for annealing; 16 tours and the RNG for the genetic algorithm;
+the 10 x 10 pheromone matrix, best tour and RNG for ant colony. The loops over
+cities, individuals and ants are `while` loops inside the step functions,
+because generated functions are `const fn`. The stream therefore carries only
+the iteration structure. The iteration counts are constants, so the analyzer
+reports O(1) by construction, and it cannot see the loops in the step
+functions ([#429](https://github.com/DominicBurkart/marigold/issues/429),
+[#416](https://github.com/DominicBurkart/marigold/issues/416),
+[#415](https://github.com/DominicBurkart/marigold/issues/415),
+[#435](https://github.com/DominicBurkart/marigold/issues/435)). The canonical
+bounds above are the textbook statements, not measurements of these programs.
 
-#### Metaheuristic notes
+Each `<name>_canonical_class_is_not_representable` test in
+`tests/complexity.rs` pins the prefix cardinality read from the program file
+(`analyze_prefix(name, None)` for the range, `Some("fold")` for the fold)
+and asserts that the estimate differs from the canonical class.
 
-- The fold state is one fixed array (tour, length, RNG and best tour; 16 tours
-  and RNG; pheromone matrix, best tour and RNG). Loops over cities, ants and
-  individuals are `while` loops inside the step function because generated
-  functions are `const fn`.
-- Genetic and ant colony tours may start at any city; tours are cyclic, so
-  lengths are comparable.
-- All three reach the optimum (84) for the committed seeds. Manual seed
-  sweeps (the LCG seed edited in the `.marigold` file, outside the test
-  suite) tried seeds 1, 777, 4242, 99991 and 31337 for each program, plus
-  one more for each (annealing 54321, genetic 11111, ant colony 13579).
-  Annealing and ant colony reached 84 for all six; genetic failed for 99991
-  and 11111. So the guarantee is "reaches the optimum for these seeds and
-  many others", not a proof, and genetic is the most seed-sensitive. Seeds
-  are compile-time constants in the generated `const fn`s, so the tests
-  cannot sweep seeds at run time; this is a stated limitation. Tests assert
-  a valid permutation, a length strictly below the identity tour (128), and
-  equality with the optimum.
-- Mutation checks run: the annealing and ant colony tests fail when the
-  iteration count is cut to 5 and 1, the genetic test fails when generations are
-  cut to 1 and when the seed changes. Changing the annealing or ant colony seed
-  still reaches 84, so the tests do not pin their seed-dependent trajectory.
+Parameters, all fixed in the program file and asserted by
+`program_embeds_the_seed_and_parameters_the_reference_uses` in each module:
+
+- Every program uses the LCG `(r * 1103515245 + 12345) % 2147483648` and reads
+  the high bits (`r >> 16`, or `r >> 8` for the ant colony roulette).
+- Annealing: seed 12345, 2000 iterations, 2-opt reversal of positions in
+  1..=9 (position 0 holds city 0 for the whole run), temperature
+  `30 * (2000 - round) / 2000`, and a worse move is accepted when
+  `delta * 100 < u * temp` with `u` in 0..100.
+- Genetic: seed 987654321, 150 generations, population 16, binary tournament,
+  OX1 with two random cuts, a swap mutation with probability 20 percent, and
+  the best tour carried over unchanged.
+- Ant colony: seed 24680, 200 iterations, 8 ants, initial pheromone 1000,
+  weight `tau * (10000 / d^2)`, roulette selection, evaporation to 90 percent
+  with a floor of 10, and a deposit of `100000 / length` on each edge of each
+  ant's tour.
+
+The programs embed the 10 city coordinates as `[i32; 10]` arrays, and
+`programs_embed_the_shared_cities` in `src/tsp.rs` parses them from the
+program files and compares them with `tsp::CITIES`.
+
+What the run tests assert, for each program: the output is one tour that
+contains every city exactly once (`returns_every_city_exactly_once`); its
+length is at least `tsp::optimum()` (84) and below the identity tour, whose
+length is 128 (`length_is_at_least_the_optimum_and_below_the_identity_tour`);
+and the tour and its length equal the values from an independent Python
+re-implementation of the same LCG and algorithm
+(`matches_independent_python_reference_for_the_fixed_seed`). The pinned values
+are:
+
+- Annealing: tour `0 2 7 9 3 5 6 4 8 1` (starts at city 0), length 84.
+- Genetic: tour `1 8 4 6 5 3 7 9 2 0`, length 84.
+- Ant colony: tour `3 8 4 6 1 0 2 7 9 5`, length 84.
+
+Tours are cyclic, so the genetic and ant colony tours start at an arbitrary
+city. All three lengths equal the optimum for the pinned seeds. That is the
+only guarantee: it is not a property of the algorithms.
+
+Seeds tried. The Python reference was run with 20 seeds per program (1, 2, 3,
+5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 777, 4242, 11111, 13579, 31337, 54321
+and 99991). The program files were also run with 8 edited seeds (1, 777, 4242,
+31337, 99991, 54321, 11111, 13579), and every tour equalled the Python tour for
+the same seed. Annealing and ant colony reached length 84 for all 20 seeds. The
+genetic algorithm reached 84 for 18 of 20; seed 99991 gave 90 and seed 11111
+gave 86. These sweeps are manual and are not part of the test suite: seeds are
+compile-time constants of the generated `const fn`s, so the tests cannot vary
+them at run time.
+
+Mutation checks, run on the program files with `cargo test -p algorithms`
+(default features), one edit at a time. Killed means at least one test failed.
+
+- Annealing, killed by the pinned tour test: iterations 2000 to 5, accepting
+  `delta <= 0` changed to `delta < 0`, the reversal loop `lo < hi` changed to
+  `lo + 1 < hi`, acceptance `<` changed to `<=`, the acceptance draw shift 16
+  changed to 15, the best-tour update `<` changed to `<=`, the temperature
+  factor 30 changed to 0, and the LCG multiplier incremented.
+- Annealing, killed by the parameter test: seed 12345 to 54321, iterations 2000
+  to 1999, temperature 30 to 0, LCG multiplier. Iterations 2000 to 1999 is not
+  caught by the pinned tour (the last iteration does not change the best
+  tour); the parameter test and the complexity prefix test catch it.
+- Genetic, killed by the pinned tour test: generations 150 to 1, mutation rate
+  20 to 0 and to 21, elitism copying individual 0, tournament `<=` changed to
+  `<`, the OX fill start position, the OX donor index, seed 987654321 to
+  987654322, and the LCG multiplier. Generations 150 to 149 is caught only by
+  the parameter test and the complexity prefix test.
+- Ant colony, killed by the pinned tour test: iterations 200 to 1, evaporation
+  90 to 100 percent, heuristic weight removed, no deposit, best update `<`
+  changed to `<=`, roulette shift 8 to 7, and seed 24680 to 24681. Iterations
+  200 to 199 is caught only by the parameter test and the complexity prefix
+  test.
+- Every city coordinate edit (the second x of each program from 4 to 5) is
+  killed by `programs_embed_the_shared_cities` and by the pinned tour test.
+- Inserting a second `fold` stage after the `map` stops the build, because the
+  generated code no longer type checks.
+- Equivalent survivors, for the ant colony: the pheromone floor. Removing it,
+  or raising it from 10 to 11, changes no test result. The floor binds
+  (1600 of the 20000 evaporation updates in the Python reference are below 10
+  before clamping), but the Python reference produces identical tours for all
+  1600 ants across 200 iterations with the floor at 10, at 11 and removed, so
+  the mutant cannot be observed for this seed.
+- The complexity tests do not see mutations inside step functions, which the
+  analyzer does not inspect. They do catch range edits, as listed above.
 
 [tsp-exact]: https://en.wikipedia.org/wiki/Travelling_salesman_problem#Exact_algorithms
 [held-karp]: https://en.wikipedia.org/wiki/Held%E2%80%93Karp_algorithm
 [binary-search]: https://en.wikipedia.org/wiki/Binary_search_algorithm
 [quicksort]: https://en.wikipedia.org/wiki/Quicksort
+[sa-doi]: https://doi.org/10.1126/science.220.4598.671
+[sa-wiki]: https://en.wikipedia.org/wiki/Simulated_annealing
+[ga-doi]: https://doi.org/10.7551/mitpress/1090.001.0001
+[ga-wiki]: https://en.wikipedia.org/wiki/Genetic_algorithm
+[ox-wiki]: https://en.wikipedia.org/wiki/Crossover_(evolutionary_algorithm)
+[aco-doi]: https://doi.org/10.1109/3477.484436
+[aco-wiki]: https://en.wikipedia.org/wiki/Ant_colony_optimization_algorithms
