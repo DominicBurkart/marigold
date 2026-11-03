@@ -9,7 +9,7 @@ mod tests {
     const PROGRAM: &str = include_str!("../programs/tsp_simulated_annealing.marigold");
     const SEED_LINE: &str = "s[11] = 12345;";
     const ITERATIONS_STAGE: &str = "range(0, 2000)";
-    const PINNED_TOUR: [i64; N] = [0, 2, 7, 9, 3, 5, 6, 4, 8, 1];
+    const PINNED_TOUR: [i64; N] = [0, 1, 8, 4, 6, 5, 3, 7, 9, 2];
     const PINNED_LENGTH: i32 = 84;
 
     fn solve() -> Vec<usize> {
@@ -46,7 +46,10 @@ mod tests {
         assert!(PROGRAM.contains(SEED_LINE));
         assert!(PROGRAM.contains(ITERATIONS_STAGE));
         assert!(PROGRAM.contains("(r * 1103515245 + 12345) % 2147483648"));
-        assert!(PROGRAM.contains("30 * (2000 - round as i64) / 2000"));
+        assert!(PROGRAM.contains("let mut temp = 480 * (2000 - round as i64) / 2000;"));
+        assert!(PROGRAM.contains("let k = (delta * 256 + temp / 2) / temp;"));
+        assert!(PROGRAM.contains("k <= 96 && draw < table[k as usize]"));
+        assert!(PROGRAM.contains("let u = r >> 16;"));
     }
 
     #[test]
