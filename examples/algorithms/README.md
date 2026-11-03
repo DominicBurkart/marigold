@@ -151,24 +151,31 @@ correct for every target from -5 to 105 and 4 rounds are wrong for the query
 Mutations run against the program, each with `cargo test -p algorithms
 --no-fail-fast`:
 
-- Killed by the oracle comparisons: 4 rounds (also by the round-count pin
-  and the complexity pin); mid rounded up; `lo = mid`; `hi = mid - 1`;
+- Killed by the behavior tests: 4 rounds (also by the round-count pin and
+  the complexity pin); mid rounded up; `lo = mid`; `hi = mid - 1`;
   `hi = mid + 1`; `<=` in the comparison (upper bound instead of lower
-  bound); guard `lo <= hi`; guard removed; initial `hi` 15; a changed sorted
-  element (also by the drift test).
-- Killed only by the drift test: changing the target `100` to `101` (the
-  result is the same, so no behavior test can see it).
+  bound); guard `lo <= hi`; guard removed; initial `hi` 15; changing the
+  sorted element `7` to `6` or `99` to `98` (both move a query's lower bound,
+  and the drift test also fails).
+- Killed only by the drift test: changes that leave every lower bound
+  unchanged, namely `40, 40` to `40, 41`, `70` to `71`, target `8` to `9`
+  (still a miss at index 4) and target `100` to `101` (still index 16). No
+  behavior test can see these; a sorted element or target change is caught by
+  a behavior test only when it moves some query's lower bound or hit flag.
 - Survivors, equivalent: `lo + (hi - lo) / 2` for the midpoint (same value);
   returning `hi` instead of `lo` (after 5 rounds every interval has
   `lo == hi`, so the mutation is equivalent under the cap).
-- 6 rounds is output-equivalent (a spare round does nothing once `lo == hi`)
-  and is caught only by the round-count pin, not by behavior.
+- 6 rounds is output-equivalent (a spare round does nothing once `lo == hi`).
+  It fails two pins, not a behavior test: the round-count drift test
+  `program_data_equals_the_oracle_data` and
+  `binary_search_canonical_class_is_not_representable` (the 5-round prefix
+  cardinality).
 
 ### quicksort
 
 - Issue: [#413](https://github.com/DominicBurkart/marigold/issues/413)
-- Reference: Hoare, "Quicksort", Computer Journal 5:1, 1962;
-  [Quicksort][quicksort]
+- Reference: Hoare, "Quicksort", The Computer Journal 5:1, 1962, pp. 10-16
+  (doi 10.1093/comjnl/5.1.10), [Quicksort][quicksort]
 - Canonical complexity: O(n log n) average, O(n^2) worst
 - Analyzer estimate: O(1), exact O(2), cardinality 1: a fold over the
   constant `range(0, 15)` and a map.
@@ -202,18 +209,30 @@ the oracle's arrays and lengths.
 Mutations run against the program, each with `cargo test -p algorithms
 --no-fail-fast`:
 
-- Killed: 14 steps; `>` instead of `<` (descending); left or right bound
-  `+ 3`; left or right sub-range including the pivot; pivot taken from the
-  first element; final pivot swap dropped; initial range `n - 2`; pair not
-  pushed (`>= 3`); a changed length; a changed data value in the equal or
-  duplicates arrays; the last instance never stepped.
+- Killed by the behavior tests: 14 steps; `>` instead of `<` (descending);
+  left or right bound `+ 3`; left or right sub-range including the pivot;
+  pivot taken from the first element; final pivot swap dropped; initial range
+  `n - 2`; pair not pushed (`>= 3`); the last instance never stepped; a
+  changed data value in the equal or duplicates arrays; a changed length on
+  the reversed, duplicates, single or pair instance.
+- Killed only by the drift test: a changed length on the sorted or all-equal
+  instance (16 to 15), because those instances never move data.
 - Survivors, equivalent: `<=` instead of `<` (still a valid partition, equal
-  keys go left); pushing size-1 sub-ranges on either side or initially (a
-  singleton pop is a no-op that costs a step but stays under the cap); the
-  push order of the two sub-ranges (the ranges are disjoint, so order does not
-  change the result).
-- 16 steps is output-equivalent (a spare step) and is caught only by the
-  step-count pin, not by behavior.
+  keys go left); `while j <= hi` (the extra iteration compares the pivot with
+  itself, and `a[hi] < a[hi]` is false); the push order of the two
+  sub-ranges (the ranges are disjoint, so order does not change the result);
+  pushing size-1 sub-ranges on the left, on the right or initially. The last
+  one does need more pops than the cap: left singletons make the sorted
+  instance need 16 pops, and right singletons make the reversed, duplicates
+  and all-equal instances need 16 each, against a cap of 15. It is still
+  equivalent. Every pop fixes one distinct position as pivot, so there are at
+  most n = 16 pops; if there are 16, every position was a pivot, so the last
+  pop is a size-1 range that pushes nothing and moves nothing. Under a cap of
+  n - 1 = 15 the result equals the original's.
+- 16 steps is output-equivalent (a spare step). It fails two pins, not a
+  behavior test: the step-count drift test `program_data_equals_the_oracle_data`
+  and `quicksort_canonical_class_is_not_representable` (the 15-step prefix
+  cardinality).
 
 ### tsp_brute_force
 
