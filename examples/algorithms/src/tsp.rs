@@ -80,6 +80,9 @@ mod tests {
             include_str!("../programs/tsp_simulated_annealing.marigold"),
             include_str!("../programs/tsp_genetic.marigold"),
             include_str!("../programs/tsp_ant_colony.marigold"),
+            include_str!("../programs/tsp_nearest_neighbour.marigold"),
+            include_str!("../programs/tsp_christofides.marigold"),
+            include_str!("../programs/tsp_lkh.marigold"),
         ];
         let xs: Vec<i32> = CITIES.iter().map(|c| c.0).collect();
         let ys: Vec<i32> = CITIES.iter().map(|c| c.1).collect();
