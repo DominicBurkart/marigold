@@ -1,0 +1,162 @@
+{
+ "reason": "compiler-message",
+ "package_id": "path+file:///work/research/t1#0.0.1",
+ "manifest_path": "/work/research/t1/Cargo.toml",
+ "target": {
+  "kind": [
+   "bin"
+  ],
+  "crate_types": [
+   "bin"
+  ],
+  "name": "t1",
+  "src_path": "/work/research/t1/src/main.rs",
+  "edition": "2021",
+  "doc": true,
+  "doctest": false,
+  "test": true
+ },
+ "message": {
+  "rendered": "error[E0308]: mismatched types\n --> src/main.rs:1:42\n  |\n1 | macro_rules! bad { () => { let _q: u32 = \"s\"; } }\n  |                                    ---   ^^^ expected `u32`, found `&str`\n  |                                    |\n  |                                    expected due to this\n...\n6 | fn e() { bad!(); }\n  |          ------ in this macro invocation\n  |\n  = note: this error originates in the macro `bad` (in Nightly builds, run with -Z macro-backtrace for more info)\n\n",
+  "$message_type": "diagnostic",
+  "children": [],
+  "level": "error",
+  "message": "mismatched types",
+  "spans": [
+   {
+    "byte_end": 44,
+    "byte_start": 41,
+    "column_end": 45,
+    "column_start": 42,
+    "expansion": {
+     "def_site_span": {
+      "byte_end": 16,
+      "byte_start": 0,
+      "column_end": 17,
+      "column_start": 1,
+      "expansion": null,
+      "file_name": "src/main.rs",
+      "is_primary": false,
+      "label": null,
+      "line_end": 1,
+      "line_start": 1,
+      "suggested_replacement": null,
+      "suggestion_applicability": null,
+      "text": [
+       {
+        "highlight_end": 17,
+        "highlight_start": 1,
+        "text": "macro_rules! bad { () => { let _q: u32 = \"s\"; } }"
+       }
+      ]
+     },
+     "macro_decl_name": "bad!",
+     "span": {
+      "byte_end": 211,
+      "byte_start": 205,
+      "column_end": 16,
+      "column_start": 10,
+      "expansion": null,
+      "file_name": "src/main.rs",
+      "is_primary": false,
+      "label": null,
+      "line_end": 6,
+      "line_start": 6,
+      "suggested_replacement": null,
+      "suggestion_applicability": null,
+      "text": [
+       {
+        "highlight_end": 16,
+        "highlight_start": 10,
+        "text": "fn e() { bad!(); }"
+       }
+      ]
+     }
+    },
+    "file_name": "src/main.rs",
+    "is_primary": true,
+    "label": "expected `u32`, found `&str`",
+    "line_end": 1,
+    "line_start": 1,
+    "suggested_replacement": null,
+    "suggestion_applicability": null,
+    "text": [
+     {
+      "highlight_end": 45,
+      "highlight_start": 42,
+      "text": "macro_rules! bad { () => { let _q: u32 = \"s\"; } }"
+     }
+    ]
+   },
+   {
+    "byte_end": 38,
+    "byte_start": 35,
+    "column_end": 39,
+    "column_start": 36,
+    "expansion": {
+     "def_site_span": {
+      "byte_end": 16,
+      "byte_start": 0,
+      "column_end": 17,
+      "column_start": 1,
+      "expansion": null,
+      "file_name": "src/main.rs",
+      "is_primary": false,
+      "label": null,
+      "line_end": 1,
+      "line_start": 1,
+      "suggested_replacement": null,
+      "suggestion_applicability": null,
+      "text": [
+       {
+        "highlight_end": 17,
+        "highlight_start": 1,
+        "text": "macro_rules! bad { () => { let _q: u32 = \"s\"; } }"
+       }
+      ]
+     },
+     "macro_decl_name": "bad!",
+     "span": {
+      "byte_end": 211,
+      "byte_start": 205,
+      "column_end": 16,
+      "column_start": 10,
+      "expansion": null,
+      "file_name": "src/main.rs",
+      "is_primary": false,
+      "label": null,
+      "line_end": 6,
+      "line_start": 6,
+      "suggested_replacement": null,
+      "suggestion_applicability": null,
+      "text": [
+       {
+        "highlight_end": 16,
+        "highlight_start": 10,
+        "text": "fn e() { bad!(); }"
+       }
+      ]
+     }
+    },
+    "file_name": "src/main.rs",
+    "is_primary": false,
+    "label": "expected due to this",
+    "line_end": 1,
+    "line_start": 1,
+    "suggested_replacement": null,
+    "suggestion_applicability": null,
+    "text": [
+     {
+      "highlight_end": 39,
+      "highlight_start": 36,
+      "text": "macro_rules! bad { () => { let _q: u32 = \"s\"; } }"
+     }
+    ]
+   }
+  ],
+  "code": {
+   "code": "E0308",
+   "explanation": "<elided>"
+  }
+ }
+}

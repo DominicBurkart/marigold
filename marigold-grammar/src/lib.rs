@@ -12,6 +12,10 @@
 //! - **Pest-based parser**: Fast, maintainable PEG parser
 //! - **AST definitions**: Complete abstract syntax tree for Marigold programs
 //! - **Code generation**: Transforms Marigold programs into valid Rust code
+//! - **Source maps**: [`marigold_generate`] returns that code together with a
+//!   [`source_map::SourceMap`] from generated Rust back to Marigold source and forward
+//! - **Diagnostic remapping**: [`remap::Remapper`] maps rustc's JSON diagnostics
+//!   ([`rustc_json`]) and run-time locations in the generated Rust back to Marigold source
 //!
 //! ## Quick Start
 //!
@@ -41,6 +45,13 @@
 //! - [`nodes`]: AST node definitions for all Marigold constructs
 //! - Code generation: Internal function that transforms AST to Rust code
 //! - [`pest_ast_builder`]: Transforms Pest parse trees into the AST
+//! - [`source_map`]: Maps the generated Rust back to the Marigold expressions it came from
+//! - [`rustc_json`]: Reads the JSON diagnostics of rustc and cargo
+//! - [`remap`]: Maps those diagnostics (and panic locations) to Marigold source ranges
+//! - [`emit`]: The JSON document (program, generated Rust and source map with line and
+//!   column positions) printed by `marigold emit --format json`
+//! - [`line_index`]: Converts byte offsets to 1-based line and column positions (bytes,
+//!   Unicode scalar values or UTF-16 units) and back
 //!
 //! ## Testing & Validation
 //!
@@ -55,7 +66,7 @@
 //! - `io`: I/O features (available in other crates)
 //! - `tokio`: Tokio runtime integration (available in other crates)
 //! - `async-std`: async-std runtime integration (available in other crates)
-//! - `otel`: [`marigold_parse_instrumented`] generates OpenTelemetry-instrumented code
+//! - `otel`: `marigold_parse_instrumented` generates OpenTelemetry-instrumented code
 //!
 //! ## Performance Characteristics
 //!
@@ -70,19 +81,25 @@ pub use itertools;
 pub mod bound_resolution;
 pub mod complexity;
 pub mod diagnostics;
+pub mod emit;
 #[cfg(feature = "otel")]
 pub mod instrument;
+pub mod line_index;
 pub mod node_ids;
 pub mod nodes;
 pub mod parser;
 mod recovery;
+pub mod remap;
 mod resolver;
+pub mod rustc_json;
 mod span_index;
+mod sub_spans;
 pub mod symbol_table;
 pub mod symbols;
 mod type_aggregation;
 
 pub mod pest_ast_builder;
+pub mod source_map;
 
 /// Convenience function for parsing Marigold code
 ///
@@ -99,6 +116,69 @@ pub mod pest_ast_builder;
 /// ```
 pub fn marigold_parse(s: &str) -> Result<String, parser::MarigoldParseError> {
     parser::parse_marigold(s)
+}
+
+/// Generate Rust code together with a map from it back to the Marigold source.
+///
+/// `rust` is byte-for-byte what [`marigold_parse`] returns, and this fails exactly when
+/// [`marigold_parse`] fails, with the same message. Unlike [`marigold_check`], input
+/// size is not limited, because [`marigold_parse`] has no limit either.
+///
+/// # What the offsets refer to
+///
+/// Source offsets in the map are valid only against the exact string passed here, and
+/// generated offsets only against the returned `rust`. Inside `m!()` the macro sees
+/// rustc's re-printed tokens (comments dropped, whitespace normalized), wraps the
+/// generated code in `{\n` ... `\n}\n` and gives every token a call-site span, so rustc
+/// diagnostics cannot be mapped through `m!()`. Mapping them requires writing `rust`
+/// verbatim to a real file and compiling that. UNTESTED: no test expands `m!()` or
+/// compiles `rust`, so this account of rustc's behaviour is unverified. See
+/// [`source_map`] for details.
+///
+/// The map holds one segment per statement-level construct (stream, stream variable and its
+/// runner, struct, enum, function) and, nested inside each of them, one segment per part of it:
+/// the stream's input, every stream function of the chain, the output, a function's signature
+/// and body, a struct's fields, an enum's variants.
+///
+/// ```
+/// use marigold_grammar::source_map::SegmentKind;
+/// use marigold_grammar::{marigold_generate, marigold_parse};
+///
+/// let src = "x = range(0, 5)\nx.return";
+/// let program = marigold_generate(src).unwrap();
+/// assert_eq!(program.rust, marigold_parse(src).unwrap());
+///
+/// let kinds: Vec<_> = program.map.segments().iter().map(|s| s.kind).collect();
+/// assert_eq!(
+///     kinds,
+///     [
+///         SegmentKind::StreamVariable,
+///         SegmentKind::InputRange,
+///         SegmentKind::ReturningStream,
+///         SegmentKind::InputVariable,
+///         SegmentKind::StreamVariableRunner,
+///     ]
+/// );
+///
+/// let output = program.map.top_level().nth(1).unwrap();
+/// assert_eq!(&src[output.source.start..output.source.end], "x.return");
+/// assert_eq!(output.ident.as_deref(), Some("returning_stream_0"));
+/// assert!(program.rust[output.generated.start..output.generated.end]
+///     .starts_with("let returning_stream_0"));
+/// assert_eq!(program.map.source_for_generated(output.generated.start), Some(output));
+///
+/// // the innermost segment wins: a byte of `x.get()` maps to the variable reference
+/// let get = program.rust.find("x.get()").unwrap();
+/// let part = program.map.source_for_generated(get).unwrap();
+/// assert_eq!(part.kind, SegmentKind::InputVariable);
+/// assert_eq!(&src[part.source.start..part.source.end], "x");
+///
+/// assert!(marigold_generate("range(0,").is_err());
+/// ```
+pub fn marigold_generate(
+    s: &str,
+) -> Result<source_map::GeneratedProgram, parser::MarigoldParseError> {
+    parser::PestParser::generate_input(s).map_err(parser::MarigoldParseError)
 }
 
 /// Generate Rust code in which every input, stream function and output is wrapped with the
@@ -127,6 +207,23 @@ pub fn marigold_parse_instrumented(
     parser::PestParser::parse_instrumented(s, options).map_err(parser::MarigoldParseError)
 }
 
+/// Like [`marigold_parse_instrumented`], together with the map back to the Marigold source.
+///
+/// `rust` is byte-for-byte what [`marigold_parse_instrumented`] returns for the same input and
+/// options. Each instrumented statement maps to the expression it was generated from.
+///
+/// The map only has the statement-level segments (and their [`source_map::Segment::ident`]),
+/// not the nested segments [`marigold_generate`] returns for the parts of a statement: the
+/// instrumentation wraps the input and every stream function in nested adapter calls, so the
+/// parts are not adjacent regions of the generated code.
+#[cfg(feature = "otel")]
+pub fn marigold_generate_instrumented(
+    s: &str,
+    options: &instrument::CodegenOptions,
+) -> Result<source_map::GeneratedProgram, parser::MarigoldParseError> {
+    parser::PestParser::generate_instrumented(s, options).map_err(parser::MarigoldParseError)
+}
+
 /// Check Marigold source and return every diagnostic found, with byte ranges.
 ///
 /// No diagnostic has [`diagnostics::Severity::Error`] exactly when [`marigold_parse`]
@@ -135,6 +232,9 @@ pub fn marigold_parse_instrumented(
 /// be Rust items in scope inside `m!()`; a stream variable may be any Rust binding
 /// with a `get()` method returning a stream) never affect [`marigold_parse`].
 /// At most 50 resolver diagnostics are reported per file.
+///
+/// Declaring the same stream variable twice is an error (`redeclared-stream-variable`),
+/// reported at each later declaration, and [`marigold_parse`] rejects such a program.
 ///
 /// A syntax error anywhere in the file hides the resolver diagnostics (warnings and
 /// information) for the whole file; only the syntax error is reported until it is fixed.
@@ -156,6 +256,12 @@ pub fn marigold_parse_instrumented(
 /// assert_eq!(diags[0].code, "undefined-fn");
 /// assert_eq!(diags[0].severity, Severity::Information);
 /// assert!(marigold_grammar::marigold_parse("range(0, 10).map(double).return").is_ok());
+///
+/// let twice = "x = range(0, 5)\nx.return\nx = range(0, 7)\nx.return";
+/// let diags = marigold_check(twice);
+/// assert_eq!(diags[0].code, "redeclared-stream-variable");
+/// assert_eq!(diags[0].severity, Severity::Error);
+/// assert!(marigold_grammar::marigold_parse(twice).is_err());
 /// ```
 pub fn marigold_check(s: &str) -> Vec<diagnostics::Diagnostic> {
     if s.len() > diagnostics::MAX_CHECK_INPUT_BYTES {

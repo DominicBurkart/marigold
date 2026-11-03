@@ -1,0 +1,97 @@
+{
+ "reason": "compiler-message",
+ "package_id": "path+file:///work/research/t3#0.0.1",
+ "manifest_path": "/work/research/t3/Cargo.toml",
+ "target": {
+  "kind": [
+   "bin"
+  ],
+  "crate_types": [
+   "bin"
+  ],
+  "name": "t3",
+  "src_path": "/work/research/t3/src/main.rs",
+  "edition": "2021",
+  "doc": true,
+  "doctest": false,
+  "test": true
+ },
+ "message": {
+  "rendered": "error[E0425]: cannot find value `undefined_fn` in this scope\n --> src/main.rs:1:34\n  |\n1 | #[tokio::main] async fn main() { marigold::m!(range(0, 5).map(undefined_fn).return) .await }\n  |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope\n  |\n  = note: this error originates in the macro `marigold::m` (in Nightly builds, run with -Z macro-backtrace for more info)\n\n",
+  "$message_type": "diagnostic",
+  "children": [],
+  "level": "error",
+  "message": "cannot find value `undefined_fn` in this scope",
+  "spans": [
+   {
+    "byte_end": 83,
+    "byte_start": 33,
+    "column_end": 84,
+    "column_start": 34,
+    "expansion": {
+     "def_site_span": {
+      "byte_end": 181,
+      "byte_start": 132,
+      "column_end": 50,
+      "column_start": 1,
+      "expansion": null,
+      "file_name": "/work/marigold/marigold-macros/src/lib.rs",
+      "is_primary": false,
+      "label": null,
+      "line_end": 8,
+      "line_start": 8,
+      "suggested_replacement": null,
+      "suggestion_applicability": null,
+      "text": [
+       {
+        "highlight_end": 50,
+        "highlight_start": 1,
+        "text": "pub fn marigold(item: TokenStream) -> TokenStream {"
+       }
+      ]
+     },
+     "macro_decl_name": "marigold::m!",
+     "span": {
+      "byte_end": 83,
+      "byte_start": 33,
+      "column_end": 84,
+      "column_start": 34,
+      "expansion": null,
+      "file_name": "src/main.rs",
+      "is_primary": false,
+      "label": null,
+      "line_end": 1,
+      "line_start": 1,
+      "suggested_replacement": null,
+      "suggestion_applicability": null,
+      "text": [
+       {
+        "highlight_end": 84,
+        "highlight_start": 34,
+        "text": "#[tokio::main] async fn main() { marigold::m!(range(0, 5).map(undefined_fn).return) .await }"
+       }
+      ]
+     }
+    },
+    "file_name": "src/main.rs",
+    "is_primary": true,
+    "label": "not found in this scope",
+    "line_end": 1,
+    "line_start": 1,
+    "suggested_replacement": null,
+    "suggestion_applicability": null,
+    "text": [
+     {
+      "highlight_end": 84,
+      "highlight_start": 34,
+      "text": "#[tokio::main] async fn main() { marigold::m!(range(0, 5).map(undefined_fn).return) .await }"
+     }
+    ]
+   }
+  ],
+  "code": {
+   "code": "E0425",
+   "explanation": "<elided>"
+  }
+ }
+}

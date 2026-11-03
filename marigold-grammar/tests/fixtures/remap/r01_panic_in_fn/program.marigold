@@ -1,0 +1,5 @@
+fn boom(x: i32) -> i32 {
+    let label = "héllo→日本"; if x == 2 { panic!("boom") }
+    x + label.len() as i32
+}
+range(0, 4).map(boom).write_file("/tmp/t4_boom.csv", csv)

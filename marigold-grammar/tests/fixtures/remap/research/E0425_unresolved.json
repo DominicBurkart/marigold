@@ -1,0 +1,53 @@
+{
+ "reason": "compiler-message",
+ "package_id": "path+file:///work/research/t1#0.0.1",
+ "manifest_path": "/work/research/t1/Cargo.toml",
+ "target": {
+  "kind": [
+   "bin"
+  ],
+  "crate_types": [
+   "bin"
+  ],
+  "name": "t1",
+  "src_path": "/work/research/t1/src/main.rs",
+  "edition": "2021",
+  "doc": true,
+  "doctest": false,
+  "test": true
+ },
+ "message": {
+  "rendered": "error[E0425]: cannot find value `nope` in this scope\n --> src/main.rs:3:18\n  |\n3 | fn b() { let y = nope; }\n  |                  ^^^^ not found in this scope\n\n",
+  "$message_type": "diagnostic",
+  "children": [],
+  "level": "error",
+  "message": "cannot find value `nope` in this scope",
+  "spans": [
+   {
+    "byte_end": 101,
+    "byte_start": 97,
+    "column_end": 22,
+    "column_start": 18,
+    "expansion": null,
+    "file_name": "src/main.rs",
+    "is_primary": true,
+    "label": "not found in this scope",
+    "line_end": 3,
+    "line_start": 3,
+    "suggested_replacement": null,
+    "suggestion_applicability": null,
+    "text": [
+     {
+      "highlight_end": 22,
+      "highlight_start": 18,
+      "text": "fn b() { let y = nope; }"
+     }
+    ]
+   }
+  ],
+  "code": {
+   "code": "E0425",
+   "explanation": "<elided>"
+  }
+ }
+}

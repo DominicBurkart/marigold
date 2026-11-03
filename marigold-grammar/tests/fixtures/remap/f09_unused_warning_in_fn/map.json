@@ -1,0 +1,160 @@
+{
+  "segments": [
+    {
+      "generated": {
+        "start": 50,
+        "end": 82
+      },
+      "source": {
+        "start": 0,
+        "end": 26
+      },
+      "kind": "function",
+      "expr_index": 0,
+      "name": "id"
+    },
+    {
+      "generated": {
+        "start": 59,
+        "end": 76
+      },
+      "source": {
+        "start": 3,
+        "end": 20
+      },
+      "kind": "function_signature",
+      "expr_index": 0,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 77,
+        "end": 82
+      },
+      "source": {
+        "start": 21,
+        "end": 26
+      },
+      "kind": "function_body",
+      "expr_index": 0,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 84,
+        "end": 131
+      },
+      "source": {
+        "start": 27,
+        "end": 68
+      },
+      "kind": "function",
+      "expr_index": 1,
+      "name": "g"
+    },
+    {
+      "generated": {
+        "start": 93,
+        "end": 109
+      },
+      "source": {
+        "start": 30,
+        "end": 46
+      },
+      "kind": "function_signature",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 110,
+        "end": 131
+      },
+      "source": {
+        "start": 47,
+        "end": 68
+      },
+      "kind": "function_body",
+      "expr_index": 1,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 133,
+        "end": 3336
+      },
+      "source": {
+        "start": 69,
+        "end": 120
+      },
+      "kind": "non_returning_stream",
+      "expr_index": 2,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 206,
+        "end": 1568
+      },
+      "source": {
+        "start": 96,
+        "end": 120
+      },
+      "kind": "output_write_file",
+      "expr_index": 2,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1568,
+        "end": 1622
+      },
+      "source": {
+        "start": 69,
+        "end": 80
+      },
+      "kind": "input_range",
+      "expr_index": 2,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1623,
+        "end": 1630
+      },
+      "source": {
+        "start": 81,
+        "end": 88
+      },
+      "kind": "stream_map",
+      "expr_index": 2,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1631,
+        "end": 1637
+      },
+      "source": {
+        "start": 89,
+        "end": 95
+      },
+      "kind": "stream_map",
+      "expr_index": 2,
+      "name": null
+    },
+    {
+      "generated": {
+        "start": 1637,
+        "end": 3333
+      },
+      "source": {
+        "start": 96,
+        "end": 120
+      },
+      "kind": "output_write_file",
+      "expr_index": 2,
+      "name": null
+    }
+  ]
+}

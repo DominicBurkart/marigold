@@ -192,16 +192,37 @@ fn explain(r: &Reference, noun: &Noun, names: &Names, problem: &Problem) -> Diag
     Diagnostic::new(r.range, severity, noun.code, message).with_help(help)
 }
 
+fn redeclaration(d: &crate::span_index::Declaration) -> Diagnostic {
+    let name = &d.name;
+    Diagnostic::new(
+        d.range,
+        Severity::Error,
+        "redeclared-stream-variable",
+        format!("stream variable '{name}' is declared more than once in this program"),
+    )
+    .with_help(format!(
+        "a stream variable can be declared only once; rename this declaration, because every use of '{name}' would otherwise refer to the last declaration"
+    ))
+}
+
 pub(crate) fn warnings(index: &SpanIndex) -> Vec<Diagnostic> {
     let variables = Names::of(index, SymbolKind::StreamVariable);
     let functions = Names::of(index, SymbolKind::Function);
     let structs = Names::of(index, SymbolKind::Struct);
     let mut first_declared: HashMap<Name, usize> = HashMap::new();
+    let mut redeclared: Vec<&crate::span_index::Declaration> = Vec::new();
     for d in declarations_of(index, SymbolKind::StreamVariable) {
-        let entry = first_declared
-            .entry(Name(d.name.as_str()))
-            .or_insert(d.expr_index);
-        *entry = (*entry).min(d.expr_index);
+        match first_declared.entry(Name(d.name.as_str())) {
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(d.expr_index);
+            }
+            std::collections::hash_map::Entry::Occupied(mut slot) => {
+                if d.expr_index < *slot.get() {
+                    slot.insert(d.expr_index);
+                }
+                redeclared.push(d);
+            }
+        }
     }
     let mut found: Vec<(&Reference, &'static Noun, &Names, Problem)> = Vec::new();
     for r in &index.references {
@@ -239,11 +260,27 @@ pub(crate) fn warnings(index: &SpanIndex) -> Vec<Diagnostic> {
     found.sort_by_key(|(_, _, _, problem)| !matches!(problem, Problem::ReadBeforeDeclared));
     let omitted = found.len().saturating_sub(MAX_DIAGNOSTICS);
     let first_omitted = found.get(MAX_DIAGNOSTICS).map(|(r, ..)| r.range);
-    let mut out: Vec<Diagnostic> = found
+    let mut out: Vec<Diagnostic> = redeclared
         .iter()
         .take(MAX_DIAGNOSTICS)
-        .map(|(r, noun, names, problem)| explain(r, noun, names, problem))
+        .map(|d| redeclaration(d))
         .collect();
+    if let Some(d) = redeclared.get(MAX_DIAGNOSTICS) {
+        out.push(Diagnostic::information(
+            d.range,
+            "resolver-diagnostics-truncated",
+            format!(
+                "{} more redeclaration diagnostics were omitted; only the first {MAX_DIAGNOSTICS} are reported per file",
+                redeclared.len() - MAX_DIAGNOSTICS
+            ),
+        ));
+    }
+    out.extend(
+        found
+            .iter()
+            .take(MAX_DIAGNOSTICS)
+            .map(|(r, noun, names, problem)| explain(r, noun, names, problem)),
+    );
     if let Some(range) = first_omitted {
         out.push(Diagnostic::information(
             range,

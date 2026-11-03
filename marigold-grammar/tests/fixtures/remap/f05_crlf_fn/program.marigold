@@ -1,0 +1,6 @@
+fn f(x: i32) -> i32 {
+  let y: bool = x;
+  x
+}
+
+range(0, 3).map(f).write_file("o.csv", csv)
