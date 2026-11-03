@@ -304,6 +304,114 @@ fn dijkstra_canonical_class_is_not_representable() {
 }
 
 #[test]
+fn tsp_simulated_annealing() {
+    let result = analyze_example("tsp_simulated_annealing");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_space,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn tsp_simulated_annealing_canonical_class_is_not_representable() {
+    let rounds = analyze_prefix("tsp_simulated_annealing", None);
+    assert_eq!(
+        rounds.streams[0].cardinality,
+        Cardinality::Exact(2000u32.into())
+    );
+    let folded = analyze_prefix("tsp_simulated_annealing", Some("fold"));
+    assert_eq!(
+        folded.streams[0].cardinality,
+        Cardinality::Exact(1u32.into())
+    );
+    let result = analyze_example("tsp_simulated_annealing");
+    assert_ne!(result.streams[0].time_class, ComplexityClass::ON);
+}
+
+#[test]
+fn tsp_genetic() {
+    let result = analyze_example("tsp_genetic");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_space,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn tsp_genetic_canonical_class_is_not_representable() {
+    let rounds = analyze_prefix("tsp_genetic", None);
+    assert_eq!(
+        rounds.streams[0].cardinality,
+        Cardinality::Exact(150u32.into())
+    );
+    let folded = analyze_prefix("tsp_genetic", Some("fold"));
+    assert_eq!(
+        folded.streams[0].cardinality,
+        Cardinality::Exact(1u32.into())
+    );
+    let result = analyze_example("tsp_genetic");
+    assert_ne!(result.streams[0].time_class, ComplexityClass::ON);
+}
+
+#[test]
+fn tsp_ant_colony() {
+    let result = analyze_example("tsp_ant_colony");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_space,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn tsp_ant_colony_canonical_class_is_not_representable() {
+    let rounds = analyze_prefix("tsp_ant_colony", None);
+    assert_eq!(
+        rounds.streams[0].cardinality,
+        Cardinality::Exact(200u32.into())
+    );
+    let folded = analyze_prefix("tsp_ant_colony", Some("fold"));
+    assert_eq!(
+        folded.streams[0].cardinality,
+        Cardinality::Exact(1u32.into())
+    );
+    let result = analyze_example("tsp_ant_colony");
+    assert_ne!(
+        result.streams[0].time_class,
+        ComplexityClass::OPolynomial(2)
+    );
+}
+
+#[test]
 fn kruskal() {
     let result = analyze_example("kruskal");
     assert_eq!(result.streams.len(), 1);

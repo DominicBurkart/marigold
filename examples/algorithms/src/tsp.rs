@@ -77,6 +77,9 @@ mod tests {
         let programs = [
             include_str!("../programs/tsp_brute_force.marigold"),
             include_str!("../programs/tsp_held_karp.marigold"),
+            include_str!("../programs/tsp_simulated_annealing.marigold"),
+            include_str!("../programs/tsp_genetic.marigold"),
+            include_str!("../programs/tsp_ant_colony.marigold"),
         ];
         let xs: Vec<i32> = CITIES.iter().map(|c| c.0).collect();
         let ys: Vec<i32> = CITIES.iter().map(|c| c.1).collect();
