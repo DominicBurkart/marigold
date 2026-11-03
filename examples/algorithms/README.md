@@ -84,8 +84,10 @@ The run test compares the program with an enumeration of all 2^14 subsets and
 with the pinned optimum 136. The optimum is not unique (three subsets reach
 it), so some single-item edits leave the result unchanged. Nearby instances
 have other optima: 101 without the last item, 134 at capacity 49, 1000 if the
-step reads the in-place row instead of the previous one (the unbounded
-variant), 127 if every candidate is taken, 0 if none is. A test compares the
+step reads the in-place row with an ascending capacity loop (the unbounded
+variant), 127 if every candidate is taken, 0 if none is. Reading the in-place
+row with the descending loop is the textbook 0/1 update and gives 136, as
+does reading the previous row with either loop direction. A test compares the
 item arrays in the program text with the oracle's constants.
 
 ### floyd_warshall
