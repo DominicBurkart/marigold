@@ -7,21 +7,16 @@ mod tests {
 
     const V: usize = 8;
     const INF: i64 = 1_000_000;
-    const EDGES: [(usize, usize, i64); 14] = [
+    const EDGES: [(usize, usize, i64); 9] = [
         (0, 1, 4),
         (1, 2, 3),
         (2, 3, 5),
         (3, 0, 2),
-        (0, 2, 9),
         (3, 4, 6),
         (4, 5, 2),
         (5, 6, 3),
         (6, 7, 4),
         (7, 4, 1),
-        (5, 7, 8),
-        (1, 3, 10),
-        (6, 4, 9),
-        (2, 0, 12),
     ];
 
     fn bellman_ford(source: usize) -> [i64; V] {
@@ -35,6 +30,27 @@ mod tests {
             }
         }
         dist
+    }
+
+    fn program_edges() -> Vec<i64> {
+        let source = include_str!("../programs/floyd_warshall.marigold");
+        let start = source.find("let edges").unwrap();
+        let body = &source[start..start + source[start..].find("\n    ];").unwrap() + 7];
+        let after_type = &body[body.find("= [").unwrap()..];
+        after_type
+            .split(|c: char| !c.is_ascii_digit())
+            .filter(|t| !t.is_empty())
+            .map(|t| t.parse().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn program_edge_list_equals_the_oracle_edge_list() {
+        let expected: Vec<i64> = EDGES
+            .iter()
+            .flat_map(|&(u, v, w)| [u as i64, v as i64, w])
+            .collect();
+        assert_eq!(program_edges(), expected);
     }
 
     #[test]
