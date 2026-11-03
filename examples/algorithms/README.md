@@ -814,9 +814,15 @@ moves are never the best improvement. Seed 624 is one of two seeds in the sweep
 (the other is 982) for which removing 2-opt, removing Or-opt, removing the
 reversed Or-opt orientation, shortening the Or-opt gap range or shortening the
 2-opt range `j` each changes the final tour. No seed in the sweep also makes the
-limit of 3 cities per Or-opt segment matter (see the survivors below). Among
-the seeds 1 to 399 the local search ends at length 84 for 373 seeds and at 90
-for 26, so reaching the optimum is typical here, not special to seed 624.
+limit of 3 cities per Or-opt segment matter (see the survivors below). The
+sweep was re-run to check these figures. Over the seeds 1 to 1499 the local
+search ends at length 84 for 1383 seeds and at 90 for 116; over the seeds 1 to
+399 it ends at 84 for 373 and at 90 for 26. Seeds 624 and 982 are the only two
+of the 1499 for which all five of those mutants change the final tour. The
+pinned result (length 84, the optimum) is therefore not evidence about the
+algorithm's typical quality: the seed was chosen for mutation sensitivity, and
+a length of 84 is what most seeds give on this one small instance, which says
+little about larger instances or about LKH-3.
 
 ### Constructive and local-search TSP programs: shared notes
 
