@@ -34,6 +34,9 @@ Every example has three checks:
   stream shape, so loops that live inside a function body are invisible to it.
 - Keep this file within 80 columns (markdownlint enforces it, tables
   included): one `###` section per program, as below.
+- The `program!` macro allows `clippy::clone_on_copy` because the default
+  `filter` codegen calls `.clone()` on the item, which is a `Copy` array for
+  programs such as `kruskal`.
 
 ## Programs
 
