@@ -575,6 +575,12 @@ Tours are cyclic, so the genetic and ant colony tours start at an arbitrary
 city. All three lengths equal the optimum for the pinned seeds. That is the
 only guarantee: it is not a property of the algorithms.
 
+An earlier version of the annealing program used a truncated linear
+acceptance rule (accept with probability about 1 - delta/T, never when
+delta >= T); it reached 84 on all 20 seeds below. The Metropolis rule, which is
+what the cited paper describes, reaches 84 on 14 of 20 (see below).
+Faithfulness to the cited algorithm was preferred over the better score.
+
 Seeds tried. The Python reference was run with 20 seeds per program (1, 2, 3,
 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 777, 4242, 11111, 13579, 31337, 54321
 and 99991). The program files were also run with 8 edited seeds (1, 777, 4242,
@@ -597,9 +603,8 @@ Mutation checks, run on the program files with `cargo test -p algorithms`
   `temp / 2`), comparison direction reversed, draw shift 16 to 15, temperature
   start 480 to 240, seed 12345 to 54321, iterations 2000 to 5, the reversal
   loop `lo < hi` changed to `lo + 1 < hi`, and the LCG multiplier incremented.
-  The seed mutant 54321 also changes the pinned tour in the current rule (the
-  tour changes to `0 2 9 7 3 5 6 4 8 1`, length 84); the parameter test fails
-  too.
+  The seed mutant 54321 changes the pinned tour (to `0 2 9 7 3 5 6 4 8 1`,
+  length 84); the parameter test fails too.
 - Annealing, killed by the table test: changing table entry 0, 1 or 5 by one.
   These do not change the pinned tour.
 - Annealing, caught only by the parameter test (the tour is unchanged, so the
@@ -613,11 +618,12 @@ Mutation checks, run on the program files with `cargo test -p algorithms`
 - Annealing, survivors (no test fails): accepting `delta < 0` instead of
   `delta <= 0` is structurally equivalent, because `delta = 0` gives `k = 0`,
   `table[0] = 32768` and every draw is below it. Raising the temperature floor
-  from 1 to 2 is equivalent: the floor only applies in the last four rounds, and
-  there every worse move has `delta >= 2` (tour lengths are even), so
-  `k >= 256 > 96` and the move is rejected either way. Changing the best-tour
-  update from `<` to `<=` leaves the tour unchanged in the Python reference for
-  this seed (observed, not structural).
+  from 1 to 2 is equivalent: with floor 1 the clamp fires in rounds 1996 to
+  1999 (where `temp` computes to 0), with floor 2 it fires in rounds 1992 to
+  1999 (rounds 1992 to 1995 compute 1). In all of those rounds `temp <= 2`, so
+  any worse move (`delta >= 1`) has `k >= 128 > 96` and is rejected either
+  way. Changing the best-tour update from `<` to `<=` leaves the tour unchanged
+  in the Python reference for this seed (observed, not structural).
 - Genetic, killed by the pinned tour test: generations 150 to 1, mutation rate
   20 to 0 and to 21, elitism copying individual 0, tournament `<=` changed to
   `<`, the OX fill start position, the OX donor index, seed 987654321 to
