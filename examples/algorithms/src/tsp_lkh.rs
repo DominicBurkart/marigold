@@ -154,6 +154,7 @@ mod tests {
         assert!(PROGRAM.contains(ROUNDS_STAGE));
         assert!(PROGRAM.contains("(seed * 1103515245 + 12345) % 2147483648"));
         assert!(PROGRAM.contains("let j = 1 + ((seed >> 16) as usize) % i;"));
+        assert!(PROGRAM.contains("let tmp = t[i];\n        t[i] = t[j];\n        t[j] = tmp;"));
         assert!(PROGRAM.contains("while len <= 3 {"));
         assert!(PROGRAM.contains("while i < 9 {"));
     }
