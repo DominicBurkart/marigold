@@ -53,6 +53,27 @@ mod tests {
     }
 
     #[test]
+    fn exp_table_in_the_program_matches_f64_exp_within_half_a_unit() {
+        let opening = "let table: [i64; 97] = [";
+        let start = PROGRAM.find(opening).expect("table declaration") + opening.len();
+        let body = &PROGRAM[start..];
+        let table: Vec<i64> = body[..body.find("];").expect("table end")]
+            .split(',')
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(|v| v.parse().unwrap())
+            .collect();
+        assert_eq!(table.len(), 97);
+        for (k, &entry) in table.iter().enumerate() {
+            let exact = 32768.0 * (-(k as f64) / 16.0).exp();
+            assert!(
+                (entry as f64 - exact).abs() <= 0.5,
+                "entry {k} is {entry}, exp gives {exact}"
+            );
+        }
+    }
+
+    #[test]
     fn is_deterministic() {
         assert_eq!(block_on(run()), block_on(run()));
     }
