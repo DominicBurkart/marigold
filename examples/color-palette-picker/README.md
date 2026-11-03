@@ -58,7 +58,8 @@ Limits relative to issue #414, stated plainly:
 
 ### Correctness oracle
 
-Tests in `src/main.rs` and `src/lib.rs` check against plain-loop oracles on the same wheel:
+Tests in `src/main.rs` and `src/lib.rs` check against plain-loop oracles on
+the same wheel:
 
 - the five best geometric scores equal the five best scores of an exhaustive
   loop over all 1,296 polygons (exact equality), and the program enumerates
