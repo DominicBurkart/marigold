@@ -4,15 +4,16 @@ program!("tsp_lkh" => [i64; 11]);
 mod tests {
     use super::*;
     use crate::block_on;
-    use crate::tsp::{self, N};
+    use crate::tsp::{optimum, tour_length, N};
 
-    fn optimum() -> i64 {
-        i64::from(tsp::optimum())
-    }
-
-    fn tour_length(t: &[usize]) -> i64 {
-        i64::from(tsp::tour_length(t))
-    }
+    const PROGRAM: &str = include_str!("../programs/tsp_lkh.marigold");
+    const SEED_LINE: &str = "let mut seed = 12345u64;";
+    const ROUNDS_STAGE: &str = "range(0, 30).fold(seeded_start, improve_once)";
+    const PINNED_START: [usize; N] = [0, 7, 6, 9, 2, 3, 1, 8, 5, 4];
+    const PINNED_START_LENGTH: i32 = 138;
+    const PINNED_TOUR: [i64; N] = [0, 1, 8, 4, 6, 5, 3, 7, 9, 2];
+    const PINNED_LENGTH: i32 = 84;
+    const PINNED_IMPROVING_STEPS: usize = 5;
 
     fn seeded_start() -> Vec<usize> {
         let mut t: Vec<usize> = (0..N).collect();
@@ -62,40 +63,63 @@ mod tests {
         best
     }
 
-    #[test]
-    fn matches_reference_best_improvement_search() {
-        let mut t = seeded_start();
-        for _ in 0..30 {
-            t = reference_best_move(&t);
-        }
-        assert_eq!(result().0, t);
-    }
-
-    fn result() -> (Vec<usize>, i64) {
+    fn solve() -> (Vec<usize>, i64) {
         let out = block_on(run());
         assert_eq!(out.len(), 1);
         (out[0][..N].iter().map(|&c| c as usize).collect(), out[0][N])
     }
 
     #[test]
-    fn tour_is_valid_and_reported_length_is_correct() {
-        let (tour, len) = result();
+    fn returns_every_city_exactly_once() {
+        let (tour, _) = solve();
         let mut sorted = tour.clone();
         sorted.sort();
         assert_eq!(sorted, (0..N).collect::<Vec<_>>());
-        assert_eq!(len, tour_length(&tour));
-        assert!(len >= optimum());
     }
 
     #[test]
-    fn improves_on_the_seeded_start() {
-        let (_, len) = result();
+    fn seeded_start_matches_independent_python_reference() {
+        assert_eq!(seeded_start(), PINNED_START);
+        assert_eq!(tour_length(&seeded_start()), PINNED_START_LENGTH);
+    }
+
+    #[test]
+    fn matches_independent_python_reference() {
+        let (tour, reported) = solve();
+        let expected: Vec<usize> = PINNED_TOUR.iter().map(|&c| c as usize).collect();
+        assert_eq!(tour, expected);
+        assert_eq!(tour_length(&tour), PINNED_LENGTH);
+        assert_eq!(reported, i64::from(PINNED_LENGTH));
+    }
+
+    #[test]
+    fn length_is_at_least_the_optimum_and_below_the_seeded_start() {
+        let (tour, _) = solve();
+        let len = tour_length(&tour);
+        assert!(len >= optimum());
         assert!(len < tour_length(&seeded_start()));
     }
 
     #[test]
-    fn is_two_opt_and_or_opt_local_optimum() {
-        let (tour, len) = result();
+    fn matches_reference_best_improvement_search_and_converges_before_the_round_cap() {
+        let mut t = seeded_start();
+        let mut improving = 0;
+        for _ in 0..30 {
+            let next = reference_best_move(&t);
+            if next != t {
+                improving += 1;
+            }
+            t = next;
+        }
+        assert_eq!(improving, PINNED_IMPROVING_STEPS);
+        assert_eq!(solve().0, t);
+        assert_eq!(reference_best_move(&t), t);
+    }
+
+    #[test]
+    fn result_is_a_two_opt_and_or_opt_local_optimum() {
+        let (tour, _) = solve();
+        let len = tour_length(&tour);
         for i in 1..N - 1 {
             for j in i + 1..N {
                 let mut c = tour.clone();
@@ -122,5 +146,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn program_embeds_the_seed_round_cap_and_move_neighbourhood() {
+        assert!(PROGRAM.contains(SEED_LINE));
+        assert!(PROGRAM.contains(ROUNDS_STAGE));
+        assert!(PROGRAM.contains("(seed * 1103515245 + 12345) % 2147483648"));
+        assert!(PROGRAM.contains("let j = 1 + ((seed >> 16) as usize) % i;"));
+        assert!(PROGRAM.contains("while len <= 3 {"));
+        assert!(PROGRAM.contains("while i < 9 {"));
+    }
+
+    #[test]
+    fn is_deterministic() {
+        assert_eq!(block_on(run()), block_on(run()));
     }
 }
