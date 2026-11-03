@@ -194,3 +194,73 @@ fn floyd_warshall_canonical_class_is_not_representable() {
         ComplexityClass::OPolynomial(2)
     );
 }
+
+#[test]
+fn binary_search() {
+    let result = analyze_example("binary_search");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_space,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn binary_search_canonical_class_is_not_representable() {
+    let rounds = analyze_prefix("binary_search", None);
+    assert_eq!(
+        rounds.streams[0].cardinality,
+        Cardinality::Exact(5u32.into())
+    );
+    let folded = analyze_prefix("binary_search", Some("fold"));
+    assert_eq!(
+        folded.streams[0].cardinality,
+        Cardinality::Exact(1u32.into())
+    );
+    let result = analyze_example("binary_search");
+    assert_ne!(result.streams[0].time_class, ComplexityClass::OLogN);
+}
+
+#[test]
+fn quicksort() {
+    let result = analyze_example("quicksort");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_space,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn quicksort_canonical_class_is_not_representable() {
+    let rounds = analyze_prefix("quicksort", None);
+    assert_eq!(
+        rounds.streams[0].cardinality,
+        Cardinality::Exact(15u32.into())
+    );
+    let folded = analyze_prefix("quicksort", Some("fold"));
+    assert_eq!(
+        folded.streams[0].cardinality,
+        Cardinality::Exact(1u32.into())
+    );
+    let result = analyze_example("quicksort");
+    assert_ne!(result.streams[0].time_class, ComplexityClass::ONLogN);
+}

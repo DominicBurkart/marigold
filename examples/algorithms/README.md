@@ -113,6 +113,127 @@ source, and with a pinned 64-entry matrix that includes the `1000000`
 unreachable sentinel. A test compares the edge list in the program text with
 the oracle's. Weights are nonnegative; there is no negative-cycle case.
 
+### binary_search
+
+- Issue: [#412](https://github.com/DominicBurkart/marigold/issues/412)
+- Reference: [Binary search algorithm][binary-search]
+- Canonical complexity: O(log n) per query
+- Analyzer estimate: O(1), exact O(2), cardinality 1: a fold over the
+  constant `range(0, 5)` and a map.
+
+The spine is a fold with one halving round per step, over the sorted
+16-element array declared in `sorted()`. Each round halves the `[lo, hi)`
+interval of all 8 queries in `targets()` at once and the final map returns the
+8 lower-bound indices (the first index whose element is not less than the
+target). The program is a fixed-iteration fold sized for the worst case: the
+interval starts with 17 candidates (0 through 16), so 5 rounds are needed and
+5 is the cap. It is O(1) by construction, not a demonstration of O(log n). The
+analyzer cannot see data-dependent early exit
+([#429](https://github.com/DominicBurkart/marigold/issues/429)), the per-round
+work lives in the fn body
+([#416](https://github.com/DominicBurkart/marigold/issues/416)) and sizes are
+constants ([#415](https://github.com/DominicBurkart/marigold/issues/415)).
+`tests/complexity.rs` pins the 5-round prefix (derived from the program file),
+the single folded state and exact O(2), and asserts the class is not `OLogN`.
+
+The queries are `0` (below the minimum), `1` (first element), `3` (duplicate
+run, returns its first index 1), `7` (unique hit), `8` (miss between
+elements), `12` (duplicate run of three, index 5), `99` (last element) and
+`100` (above the maximum, index 16 = length). Tests compare the result with
+`partition_point`, with `binary_search().is_ok()` for found versus absent, and
+with the pinned vector `[0, 0, 1, 3, 4, 5, 15, 16]`. The pinned numbers were
+checked with an independent Python script. A test reads `sorted`, `targets`
+and the round count out of the program text and compares them with the
+oracle's constants. The cap tests simulate the same loop: 5 rounds are
+correct for every target from -5 to 105 and 4 rounds are wrong for the query
+`3`.
+
+Mutations run against the program, each with `cargo test -p algorithms
+--no-fail-fast`:
+
+- Killed by the behavior tests: 4 rounds (also by the round-count pin and
+  the complexity pin); mid rounded up; `lo = mid`; `hi = mid - 1`;
+  `hi = mid + 1`; `<=` in the comparison (upper bound instead of lower
+  bound); guard `lo <= hi`; guard removed; initial `hi` 15; changing the
+  sorted element `7` to `6` or `99` to `98` (both move a query's lower bound,
+  and the drift test also fails).
+- Killed only by the drift test: changes that leave every lower bound
+  unchanged, namely `40, 40` to `40, 41`, `70` to `71`, target `8` to `9`
+  (still a miss at index 4) and target `100` to `101` (still index 16). No
+  behavior test can see these; a sorted element or target change is caught by
+  a behavior test only when it moves some query's lower bound or hit flag.
+- Survivors, equivalent: `lo + (hi - lo) / 2` for the midpoint (same value);
+  returning `hi` instead of `lo` (after 5 rounds every interval has
+  `lo == hi`, so the mutation is equivalent under the cap).
+- 6 rounds is output-equivalent (a spare round does nothing once `lo == hi`).
+  It fails two pins, not a behavior test: the round-count drift test
+  `program_data_equals_the_oracle_data` and
+  `binary_search_canonical_class_is_not_representable` (the 5-round prefix
+  cardinality).
+
+### quicksort
+
+- Issue: [#413](https://github.com/DominicBurkart/marigold/issues/413)
+- Reference: Hoare, "Quicksort", The Computer Journal 5:1, 1962, pp. 10-16
+  (doi 10.1093/comjnl/5.1.10), [Quicksort][quicksort]
+- Canonical complexity: O(n log n) average, O(n^2) worst
+- Analyzer estimate: O(1), exact O(2), cardinality 1: a fold over the
+  constant `range(0, 15)` and a map.
+
+The spine is a fold with one partition per step. The state is a flat
+`[i64; 198]` holding six independent instances of 33 slots each: a stack
+pointer, 16 data slots and a 16-slot work-list of `(lo, hi)` pairs. A step
+pops one range per instance, performs one Lomuto partition (last element as
+pivot, not Hoare's two-pointer scheme) and pushes the sub-ranges of size 2 or
+more. Every step fixes a pivot, so at most n - 1 = 15 partitions occur and 15
+is the cap. This is a fixed-iteration fold sized for the O(n^2) worst case, so
+the analyzer reports O(1) by construction. Data-dependent termination is
+[#429](https://github.com/DominicBurkart/marigold/issues/429), the partition
+work in the fn body is
+[#416](https://github.com/DominicBurkart/marigold/issues/416) and constant
+sizes are [#415](https://github.com/DominicBurkart/marigold/issues/415).
+`tests/complexity.rs` pins the 15-step prefix from the program file, the
+single folded state and exact O(2), and asserts the class is not `ONLogN`.
+
+The six instances are fixed arrays declared in the program (the program stays
+standalone): already sorted, reversed, with duplicates, all equal, a single
+element (length 1) and a pair (length 2, padding left untouched). Partitions
+needed, from an independent Python script: 15, 15, 14, 15, 0 and 1. Sorted and
+reversed distinct input are the worst case for a last-element pivot, so the
+cap is tight. Sorted and all-equal input never move data, so they check the
+step bookkeeping but not the cap; the reversed, duplicate and pair instances
+do move data and fail one step short. Tests compare each instance with
+`slice::sort` on its first `length` elements and compare the program text with
+the oracle's arrays and lengths.
+
+Mutations run against the program, each with `cargo test -p algorithms
+--no-fail-fast`:
+
+- Killed by the behavior tests: 14 steps; `>` instead of `<` (descending);
+  left or right bound `+ 3`; left or right sub-range including the pivot;
+  pivot taken from the first element; final pivot swap dropped; initial range
+  `n - 2`; pair not pushed (`>= 3`); the last instance never stepped; a
+  changed data value in the equal or duplicates arrays; a changed length on
+  the reversed, duplicates, single or pair instance.
+- Killed only by the drift test: a changed length on the sorted or all-equal
+  instance (16 to 15), because those instances never move data.
+- Survivors, equivalent: `<=` instead of `<` (still a valid partition, equal
+  keys go left); `while j <= hi` (the extra iteration compares the pivot with
+  itself, and `a[hi] < a[hi]` is false); the push order of the two
+  sub-ranges (the ranges are disjoint, so order does not change the result);
+  pushing size-1 sub-ranges on the left, on the right or initially. The last
+  one does need more pops than the cap: left singletons make the sorted
+  instance need 16 pops, and right singletons make the reversed, duplicates
+  and all-equal instances need 16 each, against a cap of 15. It is still
+  equivalent. Every pop fixes one distinct position as pivot, so there are at
+  most n = 16 pops; if there are 16, every position was a pivot, so the last
+  pop is a size-1 range that pushes nothing and moves nothing. Under a cap of
+  n - 1 = 15 the result equals the original's.
+- 16 steps is output-equivalent (a spare step). It fails two pins, not a
+  behavior test: the step-count drift test `program_data_equals_the_oracle_data`
+  and `quicksort_canonical_class_is_not_representable` (the 15-step prefix
+  cardinality).
+
 ### tsp_brute_force
 
 - Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
@@ -184,3 +305,5 @@ DOI or URL for either):
 
 [tsp-exact]: https://en.wikipedia.org/wiki/Travelling_salesman_problem#Exact_algorithms
 [held-karp]: https://en.wikipedia.org/wiki/Held%E2%80%93Karp_algorithm
+[binary-search]: https://en.wikipedia.org/wiki/Binary_search_algorithm
+[quicksort]: https://en.wikipedia.org/wiki/Quicksort
