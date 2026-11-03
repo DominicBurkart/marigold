@@ -1,0 +1,7 @@
+{
+ "variant": "include",
+ "generated_file": "src/gen.rs",
+ "prefix": "",
+ "suffix": "",
+ "cargo_success": false
+}

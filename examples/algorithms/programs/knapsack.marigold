@@ -1,0 +1,29 @@
+fn start() -> [i64; 51] {
+    [0; 51]
+}
+
+fn step(row: [i64; 51], item: i32) -> [i64; 51] {
+    let weights: [usize; 14] = [12, 7, 11, 8, 9, 6, 14, 5, 10, 13, 4, 15, 3, 2];
+    let values: [i64; 14] = [24, 13, 23, 15, 16, 11, 28, 8, 19, 26, 7, 30, 5, 40];
+    let w = weights[item as usize];
+    let v = values[item as usize];
+    let mut next = row;
+    let mut c: usize = 50;
+    while c >= w {
+        let candidate = row[c - w] + v;
+        if candidate > next[c] {
+            next[c] = candidate;
+        }
+        if c == 0 {
+            break;
+        }
+        c -= 1;
+    }
+    next
+}
+
+fn best(row: [i64; 51]) -> i64 {
+    row[50]
+}
+
+range(0, 14).fold(start, step).map(best).return
