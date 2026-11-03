@@ -50,27 +50,39 @@ run_scenario() {
     -v "$REPO:/repo:ro" \
     -v "$MARIGOLD_LSP_BIN:/usr/local/bin/marigold-lsp:ro" \
     "${work[@]}" \
+    -e "OPENCODE_MARIGOLD_MCP=${OPENCODE_MARIGOLD_MCP:-0}" \
     "$IMAGE" bash /repo/integrations/ci/opencode/in-container.sh "$scenario"
   local rc=$?
   if [ "$rc" -eq 0 ]; then RESULT[$scenario]=PASS; else RESULT[$scenario]=FAIL; FAILED=1; fi
 }
 
-run_scenario error
-run_scenario info
-run_scenario warning
-run_scenario mixed
-run_scenario valid
-run_scenario edit-error
-run_scenario edit-info
+if [ "${OPENCODE_MARIGOLD_MCP:-0}" = 1 ]; then
+  run_scenario mcp-info
+  run_scenario mcp-warning
+  run_scenario mcp-valid
+  echo
+  echo "=== summary (opencode $VERSION, marigold MCP server registered) ==="
+  echo "${RESULT[mcp-info]}  information diagnostic reaches the model via the marigold_check MCP tool"
+  echo "${RESULT[mcp-warning]}  warning diagnostic reaches the model via the marigold_check MCP tool"
+  echo "${RESULT[mcp-valid]}  valid file (control): MCP result has no diagnostics"
+else
+  run_scenario error
+  run_scenario info
+  run_scenario warning
+  run_scenario mixed
+  run_scenario valid
+  run_scenario edit-error
+  run_scenario edit-info
 
-echo
-echo "=== summary (opencode $VERSION) ==="
-echo "${RESULT[error]}  error-severity file: tool result contains the undefined-enum diagnostic"
-echo "${RESULT[info]}  information-severity file: characterization (see README)"
-echo "${RESULT[warning]}  warning-severity file: characterization (see README)"
-echo "${RESULT[mixed]}  error plus information plus warning in one file: only the error is shown"
-echo "${RESULT[valid]}  valid file (control): no diagnostics"
-echo "${RESULT[edit-error]}  edit tool turns a valid file into an error-severity one: diagnostic shown"
-echo "${RESULT[edit-info]}  edit tool turns a valid file into an information-severity one: characterization (see README)"
+  echo
+  echo "=== summary (opencode $VERSION) ==="
+  echo "${RESULT[error]}  error-severity file: tool result contains the undefined-enum diagnostic"
+  echo "${RESULT[info]}  information-severity file: characterization (see README)"
+  echo "${RESULT[warning]}  warning-severity file: characterization (see README)"
+  echo "${RESULT[mixed]}  error plus information plus warning in one file: only the error is shown"
+  echo "${RESULT[valid]}  valid file (control): no diagnostics"
+  echo "${RESULT[edit-error]}  edit tool turns a valid file into an error-severity one: diagnostic shown"
+  echo "${RESULT[edit-info]}  edit tool turns a valid file into an information-severity one: characterization (see README)"
+fi
 if [ "$FAILED" -eq 0 ]; then echo "PASS"; else echo "FAIL"; fi
 exit "$FAILED"

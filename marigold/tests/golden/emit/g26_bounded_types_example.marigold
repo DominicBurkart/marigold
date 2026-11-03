@@ -1,0 +1,16 @@
+        struct Sensor {
+            reading: int[-40, 85]
+        }
+
+        fn to_sensor(i: i32) -> Sensor {
+            Sensor { reading: i as i8 }
+        }
+
+        fn get_reading(s: Sensor) -> i8 {
+            s.reading
+        }
+
+        range(0, 3)
+            .map(to_sensor)
+            .map(get_reading)
+            .return
