@@ -4,7 +4,15 @@ program!("tsp_lkh" => [i64; 11]);
 mod tests {
     use super::*;
     use crate::block_on;
-    use crate::tsp::{is_valid_tour, optimum, tour_length, N};
+    use crate::tsp::{self, N};
+
+    fn optimum() -> i64 {
+        i64::from(tsp::optimum())
+    }
+
+    fn tour_length(t: &[usize]) -> i64 {
+        i64::from(tsp::tour_length(t))
+    }
 
     fn seeded_start() -> Vec<usize> {
         let mut t: Vec<usize> = (0..N).collect();
@@ -72,7 +80,9 @@ mod tests {
     #[test]
     fn tour_is_valid_and_reported_length_is_correct() {
         let (tour, len) = result();
-        assert!(is_valid_tour(&tour));
+        let mut sorted = tour.clone();
+        sorted.sort();
+        assert_eq!(sorted, (0..N).collect::<Vec<_>>());
         assert_eq!(len, tour_length(&tour));
         assert!(len >= optimum());
     }

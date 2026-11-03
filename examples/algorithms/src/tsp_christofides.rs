@@ -4,7 +4,19 @@ program!("tsp_christofides" => [i64; 13]);
 mod tests {
     use super::*;
     use crate::block_on;
-    use crate::tsp::{dist, is_valid_tour, optimum, tour_length, N};
+    use crate::tsp::{self, N};
+
+    fn dist(a: usize, b: usize) -> i64 {
+        i64::from(tsp::dist(a, b))
+    }
+
+    fn optimum() -> i64 {
+        i64::from(tsp::optimum())
+    }
+
+    fn tour_length(t: &[usize]) -> i64 {
+        i64::from(tsp::tour_length(t))
+    }
 
     fn kruskal_weight() -> i64 {
         let mut edges: Vec<(i64, usize, usize)> = (0..N)
@@ -65,7 +77,9 @@ mod tests {
         let out = block_on(run());
         assert_eq!(out.len(), 1);
         let tour: Vec<usize> = out[0][..N].iter().map(|&c| c as usize).collect();
-        assert!(is_valid_tour(&tour));
+        let mut sorted = tour.clone();
+        sorted.sort();
+        assert_eq!(sorted, (0..N).collect::<Vec<_>>());
         assert!(tour_length(&tour) >= optimum());
         assert!(2 * tour_length(&tour) <= 3 * optimum());
     }
