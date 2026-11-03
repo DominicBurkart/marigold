@@ -58,7 +58,7 @@ Limits relative to issue #414, stated plainly:
 
 ### Correctness oracle
 
-Tests in `src/main.rs` check against plain-loop oracles on the same wheel:
+Tests in `src/main.rs` and `src/lib.rs` check against plain-loop oracles on the same wheel:
 
 - the five best geometric scores equal the five best scores of an exhaustive
   loop over all 1,296 polygons (exact equality), and the program enumerates
@@ -68,11 +68,13 @@ Tests in `src/main.rs` check against plain-loop oracles on the same wheel:
   all C(74,3) triples of the 74 distinct wheel colours. Both relations are
   measured on this wheel, not theorems: the wheel channel values are not the
   51-step grid, and no guarantee is claimed for other wheels or metrics;
-- the prisma (f64 CIECAM02) ordering agrees that the geometric winner does
-  not beat the unrestricted wheel optimum;
-- the program scores (0,0,0), (255,255,255), (153,204,0) as 499,574,432,835,
-  the value an independent script and the grid loop both give, so changing an
-  LMS or luminance weight that affects output fails a test.
+- the program scores three fixed palettes through its own functions:
+  (0,0,0), (255,255,255), (153,204,0) as 499,574,432,835; a deutan-bound
+  palette as 405,408,682,152 (427,676,629,344 if deutan were dropped); a
+  tritan-bound palette as 105,671,398,184 (116,983,101,218 if tritan were
+  dropped). The values were computed with an independent script and fail a
+  test if an LMS or luminance weight, or the deutan or tritan model, is
+  changed.
 
 ## Complexity estimation
 

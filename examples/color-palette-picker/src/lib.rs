@@ -309,15 +309,23 @@ macro_rules! geometric_program {
     };
 }
 
+macro_rules! geometric_search {
+    ($($tail:tt)*) => {
+        geometric_program!(
+            range(0, 6)
+                .permutations_with_replacement(4)
+                $($tail)*
+        )
+    };
+}
+
 pub async fn geometric_palettes() -> Vec<[[i32; 3]; 3]> {
     use marigold::marigold_impl::StreamExt;
 
-    geometric_program!(
-        range(0, 6)
-            .permutations_with_replacement(4)
-            .keep_first_n(5, compare_polygons)
-            .map(to_palette)
-            .return
+    geometric_search!(
+        .keep_first_n(5, compare_polygons)
+        .map(to_palette)
+        .return
     )
     .await
     .collect::<Vec<_>>()
@@ -365,11 +373,9 @@ mod geometric_program_tests {
     #[allow(dead_code)]
     #[tokio::test]
     async fn program_enumerates_exactly_the_oracle_polygons() {
-        let mut enumerated = geometric_program!(
-            range(0, 6)
-                .permutations_with_replacement(4)
-                .map(to_palette)
-                .return
+        let mut enumerated = geometric_search!(
+            .map(to_palette)
+            .return
         )
         .await
         .collect::<Vec<_>>()
@@ -396,17 +402,27 @@ mod geometric_program_tests {
 
     #[allow(dead_code)]
     #[tokio::test]
-    async fn program_scores_a_fixed_palette_with_the_reference_value() {
-        let scores = geometric_program!(
-            fn fixed_score(_i: i32) -> i64 {
-                min_palette_contrast(&[[0, 0, 0], [255, 255, 255], [153, 204, 0]])
+    async fn program_scores_reference_palettes_for_each_vision_model() {
+        let mut scores = geometric_program!(
+            fn fixed_score(i: i32) -> i64 {
+                if i == 0 {
+                    min_palette_contrast(&[[0, 0, 0], [255, 255, 255], [153, 204, 0]])
+                } else if i == 1 {
+                    min_palette_contrast(&[[255, 255, 255], [0, 85, 85], [255, 170, 255]])
+                } else {
+                    min_palette_contrast(&[[255, 255, 255], [0, 85, 255], [85, 0, 28]])
+                }
             }
 
-            range(0, 1).map(fixed_score).return
+            range(0, 3).map(fixed_score).return
         )
         .await
         .collect::<Vec<_>>()
         .await;
-        assert_eq!(scores, vec![499_574_432_835]);
+        scores.sort_unstable();
+        assert_eq!(
+            scores,
+            vec![105_671_398_184, 405_408_682_152, 499_574_432_835]
+        );
     }
 }
