@@ -367,28 +367,71 @@ Mutations run against the program (each changes the program file, then
 ### kruskal
 
 - Issue: [#408](https://github.com/DominicBurkart/marigold/issues/408)
-- Reference: [Kruskal 1956](https://en.wikipedia.org/wiki/Kruskal%27s_algorithm)
+- Reference: Kruskal 1956, "On the shortest spanning subtree of a graph and
+  the traveling salesman problem", Proceedings of the AMS 7(1):48-50
+  (doi 10.1090/S0002-9939-1956-0078686-7),
+  [Wikipedia](https://en.wikipedia.org/wiki/Kruskal%27s_algorithm)
 - Canonical complexity: O(E log E) for the sort, plus near-linear union-find
-- Analyzer estimate: O(C(n,2)), exact 2*O(C(n,2)) + 3, `collects_input`.
+- Analyzer estimate: O(C(n,2)), exact 3 + 2*C(n,2), space O(5),
+  `collects_input`, cardinality 1.
 
-The spine is `range(0, 8).combinations(2)` (all 28 vertex pairs),
-`map(weigh)` (attach a weight, 0 for the 15 non-edges), `filter(is_edge)`
-(keep the 13 edges), `keep_first_n(13, by_weight)` (sort ascending; the
-comparator reverses the order because `keep_first_n` returns the largest
-first) and `fold(start, unite)` (union-find, one fold step per edge).
+The stream carries the candidate set, the sort and the sweep:
+`range(0, 8).combinations(2)` (28 vertex pairs), `map(weigh)` (attach a
+weight, 0 for the 15 non-edges), `filter(is_edge)` (keep the 13 edges),
+`keep_first_n(13, by_weight)` (sort ascending; the comparator reverses the
+order because `keep_first_n` returns the largest first) and
+`fold(start, unite)` (one fold step per sorted edge). The sort is the
+runtime's `keep_first_n`, not a loop in the program. Hidden in function
+bodies: the edge lookup in `weigh` (a linear search of a 13-edge array), the
+union-find `root` loop, and the union itself. The fold carries the
+union-find parents, the total weight, the edge count and the chosen edges in
+a `[i64; 24]`. The union-find has no path compression and no union by rank.
 
-Divergence from the canonical class: the analyzer reports the quadratic pair
-enumeration, because the filter output size is unknown, and cannot see the
-sort cost or the union-find cost inside `unite`
-([#416](https://github.com/DominicBurkart/marigold/issues/416)). V = 8 is
+The analyzer reports O(C(n,2)) because it bounds the filtered stream by the
+28 pairs; it cannot see the sort cost or the union-find cost inside `unite`
+([#416](https://github.com/DominicBurkart/marigold/issues/416)), and V = 8 is
 constant, so the symbolic form is lost
-([#415](https://github.com/DominicBurkart/marigold/issues/415)).
+([#415](https://github.com/DominicBurkart/marigold/issues/415)). The canonical
+O(E log E) is therefore not reported (a test asserts the difference). The
+per-stage cardinalities are pinned from the program file: 28 pairs after
+`combinations(2)`, 28 after `map`, `<=C(8, 2)` after `filter`, and
+`min(<=C(8, 2), 13)` after `keep_first_n`.
 
-The candidate counts match the canonical values: C(8, 2) = 28 pairs after
-`combinations(2)` and `map`, and `min(<=C(8, 2), 13)` after the filter and
-`keep_first_n`. Edge weights are distinct, so the MST is unique; tests
-compare the edges and the total weight with Prim. Union-find omits path
-compression and union by rank (8 vertices).
+The graph has eight vertices and 13 edges and is connected, so the fold
+yields a spanning tree; a disconnected graph would give a forest but is not
+exercised. Weights 8 on edges 1-2 and 2-4 are equal and close a cycle with
+edge 1-4, so there are two minimum spanning trees of weight 53 (enumerated by
+script; the other uses 2-4 in place of 1-2). The comparator breaks equal weights
+by pair id, lower first, so the program picks 1-2. `keep_first_n` orders
+equal items differently by build (checked: without the pair-id tie-break the
+pinned set held in the default build and failed under `tokio` and
+`async-std`, where 2-4 came out first); this is tracked in
+[#452](https://github.com/DominicBurkart/marigold/issues/452). The Kruskal
+program works around it by breaking equal weights by pair id inside its
+comparator, so its result is identical on all four feature sets. The
+pinned set is `0-1 0-3 1-2 1-4 3-5 4-6 6-7`; the rejected cycle edges are
+`1-3 2-4 3-4 4-5 5-6 5-7`. The Rust test checks that the result is a spanning
+tree whose weight equals Prim's, and the edge list and the `keep_first_n`
+count in the program text are compared with the oracle's.
+
+Mutations run against the program:
+
+- Fail the run tests (default features): skipping the cycle check, a
+  descending sort, a `root` that never climbs, `>=` in `is_edge`, recording
+  the wrong endpoint, wrong initial parents, not accumulating the weight, not
+  counting edges, dropping the `filter` (this also fails the cardinality
+  pin), an edge written with `v < u`, changing the weight of edge 1-4, and
+  reversing the pair-id tie-break (the last fails exactly the cycle-edge, tie
+  and pinned-set tests).
+- Dropping the pair-id tie-break passes in the default build and fails the
+  same three tests under `--features tokio` and `--features async-std`.
+- Fail only a static test, because the run result is unchanged: changing the
+  weight of edge 2-4 to 9 (edge-list guard only), `range(0, 9)` (the extra
+  pairs have weight 0 and are filtered; the cardinality pin fails), and
+  `keep_first_n` of 12 or 14 (edge-list guard and cardinality pin).
+- Survive: swapping the union direction (only which vertex is the root
+  changes) and comparing equal sort keys as `Less` (equal keys are the same
+  edge, which is only compared with itself).
 
 [tsp-exact]: https://en.wikipedia.org/wiki/Travelling_salesman_problem#Exact_algorithms
 [held-karp]: https://en.wikipedia.org/wiki/Held%E2%80%93Karp_algorithm
