@@ -1,0 +1,3 @@
+fn imp(x: i32) -> i32 { let e = Entry::Vacant; x }
+fn imp2(x: i32) -> i32 { let e: Wrapping = 1; x }
+range(0, 3).return

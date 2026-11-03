@@ -1,0 +1,12 @@
+macro_rules! bad { () => { let _q: u32 = "s"; } }
+fn a() { let x: u32 = "hi"; }
+fn b() { let y = nope; }
+fn c() { let s = String::new(); let t = s; println!("{}", s); }
+fn d() { let unused = 1; }
+fn e() { bad!(); }
+fn f() { let s = "é→x"; let z: u32 = "k"; }
+fn g() {
+	let z: u32 = "tab";
+}
+fn main() {}
+mod crlf;

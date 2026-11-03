@@ -1,0 +1,4 @@
+xs = range(0, 3)
+ys = select_all(range(5, 8), range(1, 2)).map(nope)
+ys.write_file("o.csv", csv)
+xs.write_file("p.csv", csv)

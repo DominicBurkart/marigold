@@ -11,6 +11,7 @@ LOG=$WORK/requests-$SCENARIO.jsonl
 
 mkdir -p "$PROJECT" "$HOME"
 trap stop_mock EXIT
+MOCK_TURN_DELAY_MS=${MOCK_TURN_DELAY_MS:-3000}
 start_mock anthropic "$CI_DIR/scripts/$SCENARIO.json" "$LOG"
 
 cd "$PROJECT"

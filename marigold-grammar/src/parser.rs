@@ -77,15 +77,7 @@ impl PestParser {
     ) -> Result<Vec<crate::complexity::NodeComplexity>, MarigoldParseError> {
         let pairs = MarigoldPestParser::parse(Rule::program, input)
             .map_err(|e| MarigoldParseError(format!("Parse error: {}", e)))?;
-        let ranges: Vec<crate::diagnostics::ByteRange> = pairs
-            .clone()
-            .flatten()
-            .filter(|p| p.as_rule() == Rule::expr)
-            .map(|p| crate::diagnostics::ByteRange {
-                start: p.as_span().start(),
-                end: p.as_span().start() + p.as_str().trim_end().len(),
-            })
-            .collect();
+        let ranges = Self::expr_ranges(&pairs);
         let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)
             .map_err(MarigoldParseError)?;
         Self::resolve_enum_range_counts(&mut expressions).map_err(MarigoldParseError)?;
@@ -101,6 +93,26 @@ impl PestParser {
                 },
             )
             .collect())
+    }
+
+    /// Source range of every top-level expression, in source order.
+    ///
+    /// `Rule::expr` never nests and `PestAstBuilder::build_program` produces one
+    /// `TypedExpression` per `Rule::expr`, so this list is parallel to the builder's
+    /// output: the range of `expressions[i]` is `ranges[i]`. A stream variable's
+    /// `expr` pair includes its trailing whitespace, which is trimmed here.
+    fn expr_ranges(pairs: &pest::iterators::Pairs<'_, Rule>) -> Vec<crate::diagnostics::ByteRange> {
+        #[cfg(test)]
+        crate::source_map::count_ranges_computed();
+        pairs
+            .clone()
+            .flatten()
+            .filter(|p| p.as_rule() == Rule::expr)
+            .map(|p| crate::diagnostics::ByteRange {
+                start: p.as_span().start(),
+                end: p.as_span().start() + p.as_str().trim_end().len(),
+            })
+            .collect()
     }
 
     pub(crate) fn check(input: &str) -> Vec<crate::diagnostics::Diagnostic> {
@@ -147,6 +159,10 @@ impl PestParser {
         } else {
             None
         };
+
+        if Self::first_redeclared_stream_variable(&expressions).is_some() {
+            return Vec::new();
+        }
 
         match Self::generate_rust_code(expressions, resolved_bounds, None) {
             Ok(_) => Vec::new(),
@@ -220,7 +236,7 @@ impl PestParser {
 
     /// Internal function: parse input and build AST
     fn parse_input(input: &str) -> Result<String, String> {
-        Self::parse_input_with(input, None)
+        Self::generate_input_with(input, None, false).map(|generated| generated.rust)
     }
 
     #[cfg(feature = "otel")]
@@ -228,14 +244,56 @@ impl PestParser {
         input: &str,
         options: &crate::instrument::CodegenOptions,
     ) -> Result<String, String> {
-        let plan = Plan::new(input, options);
-        Self::parse_input_with(input, Some(&plan))
+        Self::generate_instrumented_with(input, options, false).map(|generated| generated.rust)
     }
 
-    fn parse_input_with(input: &str, plan: Option<&Plan>) -> Result<String, String> {
+    #[cfg(feature = "otel")]
+    pub(crate) fn generate_instrumented(
+        input: &str,
+        options: &crate::instrument::CodegenOptions,
+    ) -> Result<crate::source_map::GeneratedProgram, String> {
+        Self::generate_instrumented_with(input, options, true)
+    }
+
+    #[cfg(feature = "otel")]
+    fn generate_instrumented_with(
+        input: &str,
+        options: &crate::instrument::CodegenOptions,
+        layout: bool,
+    ) -> Result<crate::source_map::GeneratedProgram, String> {
+        let plan = Plan::new(input, options);
+        Self::generate_input_with(input, Some(&plan), layout)
+    }
+
+    /// Parse input, generate Rust code and map every generated item back to the
+    /// Marigold source expression it came from.
+    ///
+    /// This is the single code path behind both [`MarigoldParser::parse`] and
+    /// [`crate::marigold_generate`], so the generated code and the errors are
+    /// identical between them.
+    pub(crate) fn generate_input(
+        input: &str,
+    ) -> Result<crate::source_map::GeneratedProgram, String> {
+        Self::generate_input_with(input, None, true)
+    }
+
+    fn generate_input_with(
+        input: &str,
+        plan: Option<&Plan>,
+        layout: bool,
+    ) -> Result<crate::source_map::GeneratedProgram, String> {
+        let _skip = crate::source_map::SkipLayout::enter(!layout);
         // Stage 1: Parse with Pest grammar
         let pairs = MarigoldPestParser::parse(Rule::program, input)
             .map_err(|e| format!("Parse error: {}", e))?;
+        let (ranges, parts) = if layout {
+            (
+                Self::expr_ranges(&pairs),
+                crate::sub_spans::skeletons(&pairs),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
 
         // Stage 2: Build AST from parse tree
         let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)?;
@@ -247,7 +305,23 @@ impl PestParser {
         let resolved_bounds = Self::validate_bounded_types(&expressions)?;
 
         // Stage 4: Generate Rust code (replicating LALRPOP logic)
-        Self::generate_rust_code(expressions, resolved_bounds, plan)
+        let (rust, generated) =
+            Self::generate_rust_code_mapped(expressions, resolved_bounds, plan, layout)?;
+
+        if !layout {
+            return Ok(crate::source_map::GeneratedProgram {
+                rust,
+                map: crate::source_map::SourceMap::empty(),
+            });
+        }
+        let mut segments = Vec::new();
+        for g in generated {
+            g.attach_source(&ranges, &parts, &mut segments);
+        }
+        Ok(crate::source_map::GeneratedProgram {
+            rust,
+            map: crate::source_map::SourceMap::new(segments),
+        })
     }
 
     /// Resolve `InputCount::Enum(name)` placeholders produced by `range(EnumName)`.
@@ -319,141 +393,202 @@ impl PestParser {
         }
     }
 
+    fn first_redeclared_stream_variable(
+        expressions: &[crate::nodes::TypedExpression],
+    ) -> Option<&str> {
+        let mut seen = std::collections::HashSet::new();
+        expressions.iter().find_map(|expr| {
+            let name = match expr {
+                crate::nodes::TypedExpression::StreamVariable(v) => v.variable_name.as_str(),
+                crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
+                    v.variable_name.as_str()
+                }
+                _ => return None,
+            };
+            (!seen.insert(name)).then_some(name)
+        })
+    }
+
     /// Generate Rust code from AST expressions
     fn generate_rust_code(
         expressions: Vec<crate::nodes::TypedExpression>,
         resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
         plan: Option<&Plan>,
     ) -> Result<String, String> {
+        Self::generate_rust_code_mapped(expressions, resolved_bounds, plan, false)
+            .map(|(rust, _)| rust)
+    }
+
+    /// Generate Rust code from AST expressions and record, for every top-level
+    /// expression that produces a standalone item or statement, where in the
+    /// generated code it was written.
+    ///
+    /// The returned code is the same code [`Self::generate_rust_code`] returns; the
+    /// separators between items and statements are glue and belong to no segment.
+    /// `expr_index` is the position in `expressions`, which is not the position in
+    /// the filtered per-section lists that name the generated variables.
+    fn generate_rust_code_mapped(
+        expressions: Vec<crate::nodes::TypedExpression>,
+        resolved_bounds: Option<crate::bound_resolution::ResolvedBounds>,
+        plan: Option<&Plan>,
+        record: bool,
+    ) -> Result<(String, Vec<crate::source_map::GeneratedSegment>), String> {
+        use crate::nodes::TypedExpression;
+        use crate::source_map::{CodeBuilder, SegmentKind};
+
+        if let Some(name) = Self::first_redeclared_stream_variable(&expressions) {
+            return Err(format!(
+                "stream variable '{name}' is declared more than once in this program"
+            ));
+        }
         let struct_bounds = Self::build_struct_bounds_map(&resolved_bounds);
-        let mut output = "async {\n    use ::marigold::marigold_impl::*;\n    ".to_string();
+        let mut out = CodeBuilder::new(
+            "async {\n    use ::marigold::marigold_impl::*;\n    ",
+            record,
+        );
 
         // 1. Generate enums and structs
-        let enums_and_structs = expressions
-            .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::StructDeclaration(s) => {
+        for (i, expr) in out.pass(&expressions) {
+            match expr {
+                TypedExpression::StructDeclaration(s) => {
                     let field_bounds = struct_bounds.get(&s.name);
-                    Some(s.code_with_bounds(field_bounds))
+                    let code = s.emit_with_bounds(field_bounds);
+                    out.segment(
+                        SegmentKind::Struct,
+                        i,
+                        || (Some(s.name.clone()), Some(s.name.clone())),
+                        code,
+                    );
                 }
-                crate::nodes::TypedExpression::EnumDeclaration(e) => Some(e.code()),
-                _ => None,
-            })
-            .map(|s| format!("{s}\n\n"))
-            .collect::<Vec<_>>()
-            .join("");
-
-        output.push_str(&enums_and_structs);
+                TypedExpression::EnumDeclaration(e) => {
+                    out.segment(
+                        SegmentKind::Enum,
+                        i,
+                        || (Some(e.name.clone()), Some(e.name.clone())),
+                        e.emit(),
+                    );
+                }
+                _ => continue,
+            }
+            out.glue("\n\n");
+        }
 
         // 2. Generate functions
-        let functions = expressions
-            .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::FnDeclaration(f) => Some(f.code()),
-                _ => None,
-            })
-            .map(|s| format!("{s}\n\n"))
-            .collect::<Vec<_>>()
-            .join("");
-
-        output.push_str(&functions);
+        for (i, expr) in out.pass(&expressions) {
+            if let TypedExpression::FnDeclaration(f) = expr {
+                out.segment(
+                    SegmentKind::Function,
+                    i,
+                    || (Some(f.name.clone()), Some(f.name.clone())),
+                    f.emit(),
+                );
+                out.glue("\n\n");
+            }
+        }
 
         // 3. Generate stream variable declarations
-        let stream_variable_declarations = expressions
-            .iter()
-            .enumerate()
-            .filter_map(|(i, expr)| match expr {
-                crate::nodes::TypedExpression::StreamVariable(v) => {
-                    Some(Self::variable_declaration_code(plan, i, v))
+        for (i, expr) in out.pass(&expressions) {
+            let (name, code) = match expr {
+                TypedExpression::StreamVariable(v) => (
+                    &v.variable_name,
+                    Self::variable_declaration_code(plan, i, v)?,
+                ),
+                TypedExpression::StreamVariableFromPriorStreamVariable(v) => (
+                    &v.variable_name,
+                    Self::variable_from_prior_declaration_code(plan, i, v)?,
+                ),
+                _ => continue,
+            };
+            out.segment(
+                SegmentKind::StreamVariable,
+                i,
+                || (Some(name.clone()), Some(name.clone())),
+                code,
+            );
+            out.glue("\n\n");
+        }
+
+        let mut n_returning_streams = 0;
+        for (i, expr) in out.pass(&expressions) {
+            let code = match expr {
+                TypedExpression::UnnamedReturningStream(s) => {
+                    Self::unnamed_stream_code(plan, i, s)?
                 }
-                crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                    Some(Self::variable_from_prior_declaration_code(plan, i, v))
+                TypedExpression::NamedReturningStream(s) => Self::named_stream_code(plan, i, s)?,
+                _ => continue,
+            };
+            let stmt = Self::boxed_statement("returning_stream_", n_returning_streams, code);
+            out.segment(
+                SegmentKind::ReturningStream,
+                i,
+                || {
+                    (
+                        None,
+                        Some(format!("returning_stream_{n_returning_streams}")),
+                    )
+                },
+                stmt,
+            );
+            out.glue("\n");
+            n_returning_streams += 1;
+        }
+
+        let mut n_non_returning_streams = 0;
+        for (i, expr) in out.pass(&expressions) {
+            let code = match expr {
+                TypedExpression::UnnamedNonReturningStream(s) => {
+                    Self::unnamed_stream_code(plan, i, s)?
                 }
-                _ => None,
-            })
-            .map(|s| s.map(|s| format!("{s}\n\n")))
-            .collect::<Result<Vec<_>, String>>()?
-            .join("");
+                TypedExpression::NamedNonReturningStream(s) => Self::named_stream_code(plan, i, s)?,
+                _ => continue,
+            };
+            let stmt =
+                Self::boxed_statement("non_returning_stream_", n_non_returning_streams, code);
+            out.segment(
+                SegmentKind::NonReturningStream,
+                i,
+                || {
+                    (
+                        None,
+                        Some(format!("non_returning_stream_{n_non_returning_streams}")),
+                    )
+                },
+                stmt,
+            );
+            out.glue("\n");
+            n_non_returning_streams += 1;
+        }
 
-        output.push_str(&stream_variable_declarations);
-
-        // 4. Collect returning streams
-        let returning_stream_vec = expressions
-            .iter()
-            .enumerate()
-            .filter_map(|(i, expr)| match expr {
-                crate::nodes::TypedExpression::UnnamedReturningStream(s) => {
-                    Some(Self::unnamed_stream_code(plan, i, s))
+        let mut n_stream_variable_runners = 0;
+        for (i, expr) in out.pass(&expressions) {
+            let (name, code) = match expr {
+                TypedExpression::StreamVariable(v) => (&v.variable_name, v.runner_code()),
+                TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
+                    (&v.variable_name, v.runner_code())
                 }
-                crate::nodes::TypedExpression::NamedReturningStream(s) => {
-                    Some(Self::named_stream_code(plan, i, s))
-                }
-                _ => None,
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-
-        let n_returning_streams = returning_stream_vec.len();
-
-        // Generate returning stream variables
-        output.push_str(
-            &returning_stream_vec
-                .iter()
-                .zip(0..n_returning_streams)
-                .map(|(stream_def, i)| {
-                    format!("let returning_stream_{i} = Box::pin({stream_def});\n")
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        );
-
-        // 5. Collect non-returning streams
-        let non_returning_streams = expressions
-            .iter()
-            .enumerate()
-            .filter_map(|(i, expr)| match expr {
-                crate::nodes::TypedExpression::UnnamedNonReturningStream(s) => {
-                    Some(Self::unnamed_stream_code(plan, i, s))
-                }
-                crate::nodes::TypedExpression::NamedNonReturningStream(s) => {
-                    Some(Self::named_stream_code(plan, i, s))
-                }
-                _ => None,
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-
-        output.push_str(
-            &non_returning_streams
-                .iter()
-                .enumerate()
-                .map(|(i, stream_def)| {
-                    format!("let non_returning_stream_{i} = Box::pin({stream_def});\n")
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        );
-
-        // 6. Collect stream variable runners
-        let stream_variable_runners = expressions
-            .iter()
-            .filter_map(|expr| match expr {
-                crate::nodes::TypedExpression::StreamVariable(v) => Some(v.runner_code()),
-                crate::nodes::TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
-                    Some(v.runner_code())
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        output.push_str(
-            &stream_variable_runners
-                .iter()
-                .enumerate()
-                .map(|(i, stream_def)| {
-                    format!("let stream_variable_runners_{i} = Box::pin({stream_def});\n")
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        );
+                _ => continue,
+            };
+            let stmt = Self::boxed_statement(
+                "stream_variable_runners_",
+                n_stream_variable_runners,
+                crate::source_map::Emit::text(code),
+            );
+            out.segment(
+                SegmentKind::StreamVariableRunner,
+                i,
+                || {
+                    (
+                        Some(name.clone()),
+                        Some(format!(
+                            "stream_variable_runners_{n_stream_variable_runners}"
+                        )),
+                    )
+                },
+                stmt,
+            );
+            out.glue("\n");
+            n_stream_variable_runners += 1;
+        }
 
         // 7. Build streams array
         let mut streams_string = "vec![\n".to_string();
@@ -466,14 +601,14 @@ impl PestParser {
         );
 
         streams_string.push_str(
-            &(0..non_returning_streams.len())
+            &(0..n_non_returning_streams)
                 .map(|i| format!("non_returning_stream_{i},\n"))
                 .collect::<Vec<_>>()
                 .join(""),
         );
 
         streams_string.push_str(
-            &(0..stream_variable_runners.len())
+            &(0..n_stream_variable_runners)
                 .map(|i| format!("stream_variable_runners_{i},\n"))
                 .collect::<Vec<_>>()
                 .join(""),
@@ -483,7 +618,7 @@ impl PestParser {
 
         // 8. Generate stream array with type inference helper if needed
         if n_returning_streams > 0 {
-            output.push_str(
+            out.glue(
                 "
         /// silly function that uses generics to infer the output type (StreamItem) via generics, so that
         /// we can provide the streams as an array of Pin<Box<dyn Stream<Item=StreamItem>>>.
@@ -493,79 +628,102 @@ impl PestParser {
         }
         "
             );
-            output.push_str(&format!(
+            out.glue(&format!(
                 "let streams_array = typed_stream_vec({streams_string});"
             ));
         } else {
-            output.push_str(&format!(
+            out.glue(&format!(
                 "let streams_array:  Vec<core::pin::Pin<Box<dyn futures::Stream<Item=()>>>> = {streams_string};"
             ));
         }
 
         // 9. Generate select_all and collect/return
-        output.push_str("let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array);");
+        out.glue("let mut all_streams = ::marigold::marigold_impl::futures::stream::select_all(streams_array);");
 
         if n_returning_streams == 0 {
-            output.push_str("all_streams.collect::<Vec<()>>().await;\n");
+            out.glue("all_streams.collect::<Vec<()>>().await;\n");
         } else {
-            output.push_str("all_streams\n");
+            out.glue("all_streams\n");
         }
 
-        output.push_str("}\n");
+        out.glue("}\n");
 
-        Ok(output)
+        Ok(out.finish())
+    }
+
+    /// `let {prefix}{n} = Box::pin({code});`, keeping the layout of `code`.
+    fn boxed_statement(
+        prefix: &str,
+        n: usize,
+        code: crate::source_map::Emit,
+    ) -> crate::source_map::Emit {
+        use std::fmt::Write;
+        let mut text = String::with_capacity(prefix.len() + code.s.len() + 32);
+        let _ = write!(text, "let {prefix}{n} = Box::pin(");
+        let mut stmt = crate::source_map::Emit::text(text);
+        stmt.splice(code);
+        stmt.push(");");
+        stmt
     }
 
     fn unnamed_stream_code(
         plan: Option<&Plan>,
         expr_index: usize,
         node: &crate::nodes::UnnamedStreamNode,
-    ) -> Result<String, String> {
+    ) -> Result<crate::source_map::Emit, String> {
         #[cfg(feature = "otel")]
         if let Some(plan) = plan {
-            return plan.unnamed(expr_index, node);
+            return plan
+                .unnamed(expr_index, node)
+                .map(crate::source_map::Emit::text);
         }
         let _ = (plan, expr_index);
-        Ok(node.code())
+        Ok(node.emit())
     }
 
     fn named_stream_code(
         plan: Option<&Plan>,
         expr_index: usize,
         node: &crate::nodes::NamedStreamNode,
-    ) -> Result<String, String> {
+    ) -> Result<crate::source_map::Emit, String> {
         #[cfg(feature = "otel")]
         if let Some(plan) = plan {
-            return plan.named(expr_index, node);
+            return plan
+                .named(expr_index, node)
+                .map(crate::source_map::Emit::text);
         }
         let _ = (plan, expr_index);
-        Ok(node.code())
+        Ok(node.emit())
     }
 
     fn variable_declaration_code(
         plan: Option<&Plan>,
         expr_index: usize,
         node: &crate::nodes::StreamVariableNode,
-    ) -> Result<String, String> {
+    ) -> Result<crate::source_map::Emit, String> {
         #[cfg(feature = "otel")]
         if let Some(plan) = plan {
-            return plan.variable(expr_index, node);
+            return plan
+                .variable(expr_index, node)
+                .map(crate::source_map::Emit::text);
         }
         let _ = (plan, expr_index);
-        Ok(node.declaration_code())
+        Ok(node.declaration_emit())
     }
 
     fn variable_from_prior_declaration_code(
         plan: Option<&Plan>,
         expr_index: usize,
         node: &crate::nodes::StreamVariableFromPriorStreamVariableNode,
-    ) -> Result<String, String> {
+    ) -> Result<crate::source_map::Emit, String> {
         #[cfg(feature = "otel")]
         if let Some(plan) = plan {
-            return plan.variable_from_prior(expr_index, node);
+            return plan
+                .variable_from_prior(expr_index, node)
+                .map(crate::source_map::Emit::text);
         }
         let _ = (plan, expr_index);
-        Ok(node.declaration_code())
+        Ok(node.declaration_emit())
     }
 
     fn build_struct_bounds_map(
@@ -2204,5 +2362,204 @@ mod function_grammar_tests {
             .expect("Simple fn should still parse after grammar change");
         assert!(code.contains("x: i32"), "param type i32 should be present");
         assert!(code.contains("-> i32"), "return type i32 should be present");
+    }
+
+    fn independent_statements(n: usize) -> String {
+        (0..n)
+            .map(|i| format!("v{i} = range(0, 5).map(f)\nv{i}.return\nstruct S{i} {{ a: u8 }}\n"))
+            .collect()
+    }
+
+    fn chained_statements(n: usize) -> String {
+        let mut program = "x_0 = range(0, 5)\n".to_string();
+        for i in 1..n {
+            program.push_str(&format!("x_{i} = x_{}.map(f)\n", i - 1));
+        }
+        program.push_str(&format!("x_{}.return\n", n - 1));
+        program
+    }
+
+    fn codegen_steps_for(program: &str) -> (usize, usize, usize) {
+        let pairs = MarigoldPestParser::parse(Rule::program, program).unwrap();
+        let expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs).unwrap();
+        let statements = expressions.len();
+        crate::source_map::reset_codegen_steps();
+        let (rust, segments) =
+            PestParser::generate_rust_code_mapped(expressions, None, None, true).unwrap();
+        std::hint::black_box((&rust, &segments));
+        (statements, crate::source_map::codegen_steps(), rust.len())
+    }
+
+    const STEPS_PER_STATEMENT: usize = 40;
+    const BYTES_PER_STATEMENT: usize = 2_000;
+
+    fn assert_codegen_is_linear(build: fn(usize) -> String) {
+        for n in [1_000_usize, 4_000, 16_000] {
+            let (statements, steps, bytes) = codegen_steps_for(&build(n));
+            assert!(
+                statements >= n,
+                "n={n}: only {statements} statements parsed"
+            );
+            assert!(
+                steps <= STEPS_PER_STATEMENT * statements,
+                "n={n}: {steps} steps for {statements} statements"
+            );
+            assert!(
+                steps >= statements,
+                "n={n}: only {steps} steps counted for {statements} statements"
+            );
+            assert!(
+                bytes <= BYTES_PER_STATEMENT * statements,
+                "n={n}: {bytes} bytes for {statements} statements"
+            );
+        }
+    }
+
+    #[test]
+    fn mapped_code_generation_work_is_linear_for_independent_statements() {
+        assert_codegen_is_linear(independent_statements);
+    }
+
+    #[test]
+    fn mapped_code_generation_work_is_linear_for_chained_statements() {
+        assert_codegen_is_linear(chained_statements);
+    }
+
+    #[test]
+    fn mapped_code_generation_work_counter_is_wired_to_the_builder() {
+        let (statements, steps, _) = codegen_steps_for(&independent_statements(10));
+        assert!(
+            steps >= 3 * statements,
+            "{steps} steps for {statements} statements"
+        );
+    }
+
+    const SUBSPAN_PROGRAMS: &[&str] = &[
+        "range(0, 5).return",
+        "range(0, 5).map(f).filter(g).return",
+        "x = range(0, 3).map(f)\nx.return",
+        "struct S { a: u8, b: u8 }\nrange(0, 5).return",
+        "enum E { A, B }\nrange(0, 5).return",
+        "fn f(x: u32) -> u32 { x }\nrange(0, 5).map(f).return",
+        "select_all(range(0, 2), range(2, 4)).return",
+        "range(0, 5).write_file(\"o.csv\", csv)",
+    ];
+
+    #[test]
+    fn marigold_parse_does_no_sub_span_work() {
+        for program in SUBSPAN_PROGRAMS {
+            crate::source_map::reset_subspan_steps();
+            let rust = crate::marigold_parse(program).unwrap();
+            assert!(!rust.is_empty());
+            assert_eq!(
+                crate::source_map::subspan_steps(),
+                0,
+                "marigold_parse did sub-span work for {program:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn marigold_generate_does_sub_span_work() {
+        for program in SUBSPAN_PROGRAMS {
+            crate::source_map::reset_subspan_steps();
+            let generated = crate::marigold_generate(program).unwrap();
+            assert!(!generated.rust.is_empty());
+            assert!(
+                crate::source_map::subspan_steps() > 0,
+                "marigold_generate did no sub-span work for {program:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_and_generate_agree_byte_for_byte_with_and_without_layout() {
+        for program in SUBSPAN_PROGRAMS {
+            assert_eq!(
+                crate::marigold_parse(program).unwrap(),
+                crate::marigold_generate(program).unwrap().rust,
+                "{program:?}"
+            );
+        }
+    }
+
+    #[cfg(feature = "otel")]
+    #[test]
+    fn instrumented_parse_does_no_sub_span_work_and_generate_does() {
+        let options = crate::instrument::CodegenOptions::new("t");
+        for program in SUBSPAN_PROGRAMS {
+            crate::source_map::reset_subspan_steps();
+            let parsed = crate::marigold_parse_instrumented(program, &options).unwrap();
+            assert_eq!(
+                crate::source_map::subspan_steps(),
+                0,
+                "marigold_parse_instrumented did sub-span work for {program:?}"
+            );
+            crate::source_map::reset_subspan_steps();
+            let generated = crate::marigold_generate_instrumented(program, &options).unwrap();
+            assert!(
+                crate::source_map::subspan_steps() > 0,
+                "marigold_generate_instrumented did no sub-span work for {program:?}"
+            );
+            assert_eq!(parsed, generated.rust);
+        }
+    }
+
+    const MAP_PROGRAMS: &[&str] = &[
+        "range(0, 1).return",
+        "range(0, 5).map(f).filter(g).return",
+        "x = range(0, 3).map(f)\nx.return",
+        "x = range(0, 3)\ny = x.map(f)\ny.return\nx.return",
+        "struct S { a: u8, b: u8 }\nrange(0, 5).return",
+        "enum E { A, B }\nrange(E).return",
+        "fn f(x: u32) -> u32 { x }\nrange(0, 5).map(f).return",
+        "select_all(range(0, 2), range(2, 4)).return",
+        "range(0, 5).write_file(\"o.csv\", csv)",
+        "range(0, 3).return\nrange(0, 3).return",
+        "struct P { v: int[0, 9] }\nfn g(i: i32) -> P { P { v: 1 } }\nrange(0, 2).map(g).return",
+        "range(0, 9).fold(0, add).return",
+    ];
+
+    fn assert_no_map_work(what: &str, program: &str) {
+        for (name, n) in crate::source_map::map_work() {
+            assert_eq!(n, 0, "{what} did {name} for {program:?}");
+        }
+    }
+
+    #[test]
+    fn marigold_parse_builds_no_map_segment_range_or_layout() {
+        for program in MAP_PROGRAMS {
+            crate::source_map::reset_map_work();
+            let rust = crate::marigold_parse(program).unwrap();
+            assert!(!rust.is_empty());
+            assert_no_map_work("marigold_parse", program);
+        }
+    }
+
+    #[test]
+    fn marigold_generate_builds_the_map_segments_ranges_and_layout() {
+        for program in MAP_PROGRAMS {
+            crate::source_map::reset_map_work();
+            let generated = crate::marigold_generate(program).unwrap();
+            assert!(!generated.map.segments().is_empty());
+            for (name, n) in crate::source_map::map_work() {
+                assert!(n > 0, "marigold_generate did no {name} for {program:?}");
+            }
+        }
+    }
+
+    #[cfg(feature = "otel")]
+    #[test]
+    fn instrumented_parse_builds_no_map_segment_range_or_layout() {
+        let options = crate::instrument::CodegenOptions::new("t");
+        for program in MAP_PROGRAMS {
+            crate::source_map::reset_map_work();
+            let parsed = crate::marigold_parse_instrumented(program, &options).unwrap();
+            assert_no_map_work("marigold_parse_instrumented", program);
+            crate::source_map::reset_map_work();
+            let generated = crate::marigold_generate_instrumented(program, &options).unwrap();
+            assert!(crate::source_map::map_work()[1].1 > 0, "{program:?}");
+            assert_eq!(parsed, generated.rust);
+        }
     }
 }

@@ -32,15 +32,14 @@ mod tests {
     }
 
     #[test]
-    fn last_item_matters() {
-        let full = brute_force(&WEIGHTS, &VALUES, CAPACITY);
-        assert!(brute_force(&WEIGHTS[..13], &VALUES[..13], CAPACITY) < full);
+    fn pinned_optimum_binds_direction_item_count_capacity_and_take_branch() {
+        assert_eq!(brute_force(&WEIGHTS, &VALUES, CAPACITY), 136);
+        assert_eq!(block_on(run()), vec![136]);
     }
 
     #[test]
-    fn oracle_is_nontrivial() {
-        let best = brute_force(&WEIGHTS, &VALUES, CAPACITY);
-        assert!(best > 0);
-        assert!(best < VALUES.iter().sum::<i64>());
+    fn nearby_instances_have_other_optima() {
+        assert_eq!(brute_force(&WEIGHTS[..13], &VALUES[..13], CAPACITY), 101);
+        assert_eq!(brute_force(&WEIGHTS, &VALUES, CAPACITY - 1), 134);
     }
 }
