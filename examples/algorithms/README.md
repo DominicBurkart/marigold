@@ -306,23 +306,63 @@ DOI or URL for either):
 ### dijkstra
 
 - Issue: [#407](https://github.com/DominicBurkart/marigold/issues/407)
-- Reference: [Dijkstra 1959](https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm)
+- Reference: Dijkstra 1959, "A note on two problems in connexion with
+  graphs", Numerische Mathematik 1:269-271 (doi 10.1007/BF01386390),
+  [Wikipedia](https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm)
 - Canonical complexity: O(V^2) with an array scan (O(E log V) with a heap)
-- Analyzer estimate: O(1), exact O(2): `range(0, 9).fold(start, settle)`
-  followed by `map(distances)`.
+- Analyzer estimate: O(1), exact O(2), space O(2), cardinality 1:
+  `range(0, 9).fold(start, settle).map(distances)`.
 
-The 9 vertices are a constant, so the whole stream collapses to O(1) (symbolic
-input size is [#415](https://github.com/DominicBurkart/marigold/issues/415)).
-The O(V) scan and the O(E) relaxation inside `settle` are invisible to the
-analyzer (per-item fn cost is
-[#416](https://github.com/DominicBurkart/marigold/issues/416)).
+The stream carries the round structure: nine rounds, one fold step per round,
+and a map that extracts the distances. Each step settles one vertex. The
+selection of the closest unsettled vertex, the relaxation of its edges and
+the settled flags are `while` loops inside `settle`, over a `[i64; 18]` state
+(nine distances, nine flags) and a 13-edge array declared in the function.
+There is no heap and no sort; the scan is the O(V) part of O(V^2), invisible
+to the analyzer (per-item fn cost,
+[#416](https://github.com/DominicBurkart/marigold/issues/416)). The sizes are
+constants, so the stream collapses to O(1)
+([#415](https://github.com/DominicBurkart/marigold/issues/415)). A fold runs
+for the length of its source, so the nine rounds are a worst-case cap rather
+than a data-dependent stop
+([#429](https://github.com/DominicBurkart/marigold/issues/429)).
+The source is vertex 0; the program has no other source.
 
-One fold step settles exactly one vertex: select the closest unsettled vertex,
-then relax its edges. The relaxation loops live inside `settle`, so the stream
-shape is only the fold. Vertex 8 is isolated and stays at the 1000000000
-sentinel. Edges are undirected and one is listed in descending vertex order,
-so relaxation from both endpoints is exercised. Tests compare the result
-with Bellman-Ford.
+The graph has nine vertices and 13 undirected edges with nonnegative weights.
+The pinned distances from vertex 0 are `[0, 3, 1, 8, 11, 9, 8, 15, 1000000000]`,
+checked against an independent heap-based Dijkstra and a Floyd-Warshall
+script, and against Bellman-Ford in the Rust test. The instance binds each
+component:
+
+- Vertex 8 has no edges, so it keeps the `1000000000` sentinel.
+- Edges 0-1, 2-5, 4-6 and 3-7 are each longer than the distance gap they
+  span, so the direct edge loses to a cheaper detour.
+- Vertex 3 has two shortest paths (3+5 and 1+7), and vertices 3 and 6 are
+  tied at distance 8 when the next vertex is selected.
+- Edge 5-6 is listed as `[5, 6, 1]` and vertex 6 is settled before 5, so the
+  relaxation from the second endpoint is needed.
+
+The edge list in the program text is compared with the oracle's edge list.
+
+Nine rounds are not all needed: seven are the least that give the pinned
+answer (checked: six give `28` for vertex 7), because rounds eight and nine
+settle vertex 7, which has no unsettled neighbour, and the isolated vertex 8.
+
+Mutations run against the program (each changes the program file, then
+`cargo test -p algorithms`):
+
+- Fail the run tests: skipping the relaxation from either endpoint, selecting
+  without the settled flag, selecting the farthest vertex, ignoring the edge
+  weight in the relaxation, source distance 1, six rounds, and changing the
+  weight of edge 2-6 or 4-7 (the last two also fail the edge-list guard).
+- Fail only the complexity test, because the run result is unchanged: eight
+  or seven rounds (the pinned cardinality of the range is nine).
+- Survive: checking the settled flag in the relaxation (equivalent for
+  nonnegative weights; with edge 1-3 set to `-9` the original gives `3` for
+  vertex 1 and the mutant `-15`), selecting ties by the later index (the
+  settlement order changes from 3, 6 to 6, 3 but the distances do not), and
+  `>` for `>=` in the unreachable guard (it settles vertex 8, which has no
+  edges).
 
 ### kruskal
 
