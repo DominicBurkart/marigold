@@ -654,6 +654,253 @@ Mutation checks, run on the program files with `cargo test -p algorithms`
 - The complexity tests do not see mutations inside step functions, which the
   analyzer does not inspect. They do catch range edits, as listed above.
 
+### tsp_nearest_neighbour
+
+- Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
+- Reference: the Wikipedia article [Nearest neighbour algorithm][nn-wiki]. The
+  Wikipedia article [Travelling salesman problem][tsp-wiki] says that
+  Rosenkrantz et al. showed the factor is Theta(log |V|) for instances that
+  satisfy the triangle inequality, citing Rosenkrantz, Stearns and Lewis,
+  "Approximate algorithms for the traveling salesperson problem", 15th Annual
+  Symposium on Switching and Automata Theory, 1974, pp. 33-42
+  ([doi:10.1109/SWAT.1974.4][nn-swat]), and lists their "An Analysis of
+  Several Heuristics for the Traveling Salesman Problem", SIAM Journal on
+  Computing 6(3):563-581, 1977 ([doi:10.1137/0206041][nn-siam]). The
+  nearest-neighbour article itself does not mention that bound.
+- Canonical complexity: Theta(N^2) time (the Wikipedia infobox)
+- Analyzer estimate: O(1), exact O(2), exact space O(2), cardinality 1, does
+  not collect input
+
+The program is `range(0, 9).fold(start, extend_tour).map(close_tour)`. The
+state travels through the fold in one `[i64; 13]` array (current city,
+visited bitmask, length so far, tour). Each fold step appends exactly one
+city: the nearest unvisited one. The scan over the 10 cities is a `while` loop
+inside `extend_tour`, because generated functions are `const fn`. The nine
+steps are a constant, so the analyzer reports O(1) by construction, not the
+canonical N^2 ([#429](https://github.com/DominicBurkart/marigold/issues/429),
+[#416](https://github.com/DominicBurkart/marigold/issues/416),
+[#415](https://github.com/DominicBurkart/marigold/issues/415),
+[#435](https://github.com/DominicBurkart/marigold/issues/435)).
+
+Determinism. The start city is city 0, fixed by the initial state
+`[0, 1, 0, ...]` (current city 0, visited mask 1). Ties are broken by the
+lowest city index, because the scan runs in index order and replaces the best
+candidate only on a strictly smaller distance (`if d < best_d`). The pinned
+instance has exactly one tie, at the first step: cities 1 and 2 are both at
+distance 11 from city 0, and the program picks city 1
+(`the_first_step_is_a_tie_that_the_lowest_index_rule_resolves`,
+`matches_reference_nearest_neighbour_with_lowest_index_tie_break`).
+
+Result: tour `0 1 8 4 6 5 3 7 2 9`, length 90, against the optimum 84 (ratio
+1.071). Both values come from an independent Python re-implementation
+(`matches_independent_python_reference`), and the Rust test also compares the
+tour with a second Rust implementation. The output array holds the tour in
+elements 0..10 and the closed length in element 10. No test asserts the
+Theta(log |V|) factor; the instance is a metric (`distances_are_a_metric` in
+`src/tsp.rs`), and the length is only asserted to be at least the optimum.
+
+### tsp_christofides
+
+- Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
+- Reference: Nicos Christofides, "Worst-case analysis of a new heuristic for
+  the travelling salesman problem", Report 388, Graduate School of Industrial
+  Administration, CMU, 1976, as cited by the Wikipedia article
+  [Christofides algorithm][chr-wiki]
+  ([the report][chr-report], the link the article gives)
+- Canonical complexity: O(n^3) with a polynomial-time minimum-weight perfect
+  matching; the tour is within a factor of 3/2 of optimal on metric instances
+  (the Wikipedia article)
+- Analyzer estimate: O(1), exact O(5), exact space O(5), cardinality 1, does
+  not collect input
+
+What is canonical. The program does the steps the Wikipedia article lists, in
+order: a minimum spanning tree (Prim, one vertex per fold step), the set of
+odd-degree vertices, a minimum-weight perfect matching on those vertices,
+the union of tree and matching as an Eulerian multigraph, an Eulerian circuit
+(Hierholzer's algorithm, lowest-index neighbour first), and shortcutting the
+repeated vertices. The program is
+`range(0, 9).fold(mst_start, prim_step)` followed by
+`.map(add_matching).map(euler_circuit).map(shortcut).map(finish)`. The fold
+state is one `[i64; 146]` array (the 10 x 10 multigraph, the visited mask,
+weights and the circuit). The fold steps are algorithmic steps; each of the
+four maps is a whole phase of the algorithm, not a step.
+
+What is simplified. The matching is brute force: `match_cost` recurses over
+bitmasks of odd vertices, pairing the lowest vertex with every other one. It
+is exponential in the number of odd vertices. That is acceptable only at
+N = 10 (at most 945 matchings for 10 odd vertices, here 105 for 8), and a
+polynomial implementation would use Edmonds' blossom algorithm. Among
+equal-weight matchings it keeps the pair with the lowest partner index.
+
+Results on the pinned instance, from an independent Python re-implementation
+that follows the same tie-breaks (`matches_independent_python_reference`):
+
+- MST weight 61. Kruskal's algorithm gives 61 too
+  (`mst_weight_matches_kruskal`, a Rust Kruskal) and so does the Python Prim.
+- Odd-degree vertices `{0, 2, 3, 5, 6, 7, 8, 9}`, reported as the bitmask 1005
+  in output element 12.
+- Matching weight 39. The test enumerates all 105 perfect matchings of those
+  eight vertices and checks that 39 is their minimum and that some matching is
+  heavier (`matching_weight_is_the_minimum_over_every_perfect_matching_of_the_odd_vertices`);
+  the Python enumeration also gives 39.
+- Tour `0 2 7 9 3 5 8 6 4 1`, length 90. The 3/2 guarantee on this instance is
+  90 <= 126 = 1.5 * 84, with ratio 1.071
+  (`tour_is_within_three_halves_of_the_optimum_and_not_below_it`). The tour is
+  also no longer than MST + matching = 100.
+
+The output array holds the tour (elements 0..10), the MST weight, the
+matching weight and the odd mask.
+
+### tsp_lkh
+
+**This is not LKH-3.** It is a simplified Lin-Kernighan-style local search:
+the file name keeps the issue's label.
+
+- Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
+- Reference: Shen Lin and Brian W. Kernighan, "An Effective Heuristic
+  Algorithm for the Traveling-Salesman Problem", Operations Research
+  21(2):498-516, 1973 ([doi:10.1287/opre.21.2.498][lk-doi]), and the Wikipedia
+  article [Lin-Kernighan heuristic][lk-wiki]; Keld Helsgaun, "An effective
+  implementation of the Lin-Kernighan traveling salesman heuristic", European
+  Journal of Operational Research 126(1):106-130, 2000
+  ([doi:10.1016/S0377-2217(99)00284-2][lkh-doi]), as the Wikipedia article
+  cites it; and Keld Helsgaun, "An Extension of the Lin-Kernighan-Helsgaun TSP
+  Solver for Constrained Traveling Salesman and Vehicle Routing Problems",
+  Technical Report, Roskilde University, 2017, as named on the
+  [LKH-3 page][lkh3-page]
+- Canonical complexity: heuristic local search with no polynomial worst-case
+  bound; per pass, a 2-opt neighbourhood scan is O(n^2)
+- Analyzer estimate: O(1), exact O(2), exact space O(2), cardinality 1, does
+  not collect input
+
+What it implements: the program is
+`range(0, 30).fold(seeded_start, improve_once).map(with_length)`. The start
+tour is a Fisher-Yates shuffle of the cities 1..9 driven by an LCG with seed
+624 (city 0 stays in position 0). Each fold step is one best-improvement pass:
+it evaluates every 2-opt reversal of positions `i..=j` (`1 <= i < j <= 9`)
+and every Or-opt move (a segment of 1, 2 or 3 cities moved to any other gap,
+in either orientation), scans them in a fixed order, and applies the one with
+the strictly shortest resulting tour, or leaves the tour unchanged at a local
+optimum. Thirty rounds is a cap; the pinned run makes 5 improving steps and is
+at a fixed point afterwards.
+
+What it lacks, compared with the Lin-Kernighan heuristic and with LKH-3. There
+is no variable-depth alternating-trail search (the depth-limited step of
+Lin-Kernighan), so the moves are only the fixed 2-opt and Or-opt
+neighbourhoods. Compared with the LKH pages: no 5-opt sequential basic move
+(LKH-1) or k-opt sub-moves (LKH-2), no alpha-nearness candidate sets, no
+trials or restarts, and none of the constraint handling that LKH-3 adds for
+constrained TSP and vehicle routing problems. The quality shown here says
+nothing about LKH-3. The feature list comes from the LKH and LKH-3 pages as
+archived by the Internet Archive; the host itself did not answer from the
+machine used for this work.
+
+Result: start tour `0 3 4 1 7 6 8 2 9 5` (length 138) improves to
+`0 1 6 4 8 3 5 9 7 2`, length 84, which equals the optimum for this seed. Both
+tours and the five improving steps come from an independent Python
+re-implementation (`seeded_start_matches_independent_python_reference`,
+`matches_independent_python_reference`); the Rust tests also run a second
+Rust best-improvement search and compare the final tour and the number of
+improving steps
+(`matches_reference_best_improvement_search_and_converges_before_the_round_cap`)
+and check exhaustively that no 2-opt or Or-opt move improves the result
+(`result_is_a_two_opt_and_or_opt_local_optimum`).
+
+Seed choice, stated plainly. The seed was picked by a Python sweep over the
+seeds 1 to 1499, to make the mutation tests below sensitive. An earlier seed
+(12345) left two mutants alive (an Or-opt gap range one position short and
+Or-opt without the reversed orientation), because along its trajectory those
+moves are never the best improvement. Seed 624 is one of two seeds in the sweep
+(the other is 982) for which removing 2-opt, removing Or-opt, removing the
+reversed Or-opt orientation, shortening the Or-opt gap range or shortening the
+2-opt range `j` each changes the final tour. No seed in the sweep also makes the
+limit of 3 cities per Or-opt segment matter (see the survivors below). Among
+the seeds 1 to 399 the local search ends at length 84 for 373 seeds and at 90
+for 26, so reaching the optimum is typical here, not special to seed 624.
+
+### Constructive and local-search TSP programs: shared notes
+
+Spine. Each program is a fold over a constant `range` whose step is one
+algorithmic step (a city for nearest neighbour, a vertex for Prim, an
+improvement pass for the local search), followed by one or more maps. The
+state travels through the fold in one fixed array and the loops over cities
+are `while` loops inside the step functions. None of these programs uses
+`keep_first_n`. The stream therefore carries only the iteration structure.
+The step counts are constants, so the analyzer reports O(1) by construction
+and cannot see the loops in the step functions.
+
+Analyzer pins. `tests/complexity.rs` pins, for each program: time class O(1),
+the exact time (O(2), O(5), O(2)), the space class, the exact space (the same
+values), cardinality 1, and that the input is not collected. Each
+`<name>_canonical_class_is_not_representable` test reads the program file,
+pins the cardinality of the range (9, 9 and 30) with `analyze_prefix(name,
+None)` and of the fold (1) with `Some("fold")`, and asserts that the class
+differs from the canonical O(n^2), O(n^3) and O(n^2) polynomial classes (the
+final `assert_ne!` cannot fail while the sibling test pins O(1)).
+
+Seeds and constants. Only the local search uses a random number generator. The
+generator, seed and every constant are in the program text, and the results do
+not depend on the runtime feature (`tokio`, `async-std` or none).
+`program_embeds_*` in each module asserts the seed, the stage text and the
+tie-break lines that the Python references rely on. The coordinates are
+`[i32; 10]` arrays, and `programs_embed_the_shared_cities` in `src/tsp.rs`
+parses them from all three program files and compares them with
+`tsp::CITIES`.
+
+Mutation checks, run on the program files with `cargo test -p algorithms
+--no-fail-fast` (default features), one edit at a time. Killed means at least
+one test failed.
+
+- Nearest neighbour, all killed by the pinned tour test
+  (`matches_independent_python_reference`): tie-break `<` changed to `<=`,
+  farthest city instead of nearest, `range(0, 9)` changed to `range(0, 8)` and
+  to `range(0, 10)`, the initial visited mask 1 changed to 0, the closing edge
+  dropped from the reported length, and city 1's x changed from 4 to 5. The
+  tie-break and farthest-city mutants are also killed by the Rust reference and
+  by the tie test, the coordinate mutant by `programs_embed_the_shared_cities`,
+  and the range mutants by the complexity prefix test.
+- Christofides, all killed: greedy first-pair matching (by the pinned values
+  and the all-matchings test), maximum-weight matching, the odd test inverted,
+  the matching weight accumulation removed, the shortcut keeping repeats
+  (invalid tour), Prim picking the farthest edge, `range(0, 9)` changed to
+  `range(0, 8)`, the `add_matching`, `euler_circuit` or `shortcut` stage
+  removed, the reported MST weight forced to 0, and city 9's y changed. The
+  Prim tie-break `<` changed to `<=` is killed by the pinned values and the
+  parameter test. The Euler circuit taking the last neighbour instead of the
+  lowest is killed only by the pinned Python tour: the tour stays valid and
+  within 3/2, so the pin is what catches it.
+- Local search, killed by the pinned Python tour and by the Rust
+  best-improvement reference: Or-opt removed, 2-opt removed, Or-opt reversal
+  removed, Or-opt gap range one short, 2-opt `j` range one short, seed 624
+  changed to 625, `range(0, 30)` changed to `range(0, 4)`, the 2-opt
+  acceptance `<` changed to `<=`, the start shuffle with its swap removed, and
+  city 1's y changed from 7 to 6 (also by `programs_embed_the_shared_cities`).
+  The `<=` mutant works through a structural plateau: at a local optimum the
+  whole-tour reversal of positions 1 to 9 has exactly the same length, so with
+  `<=` it is accepted every round and the tour flips orientation each round. It
+  changes the output here because 25 rounds follow the fifth improving step (an
+  odd number); with the earlier seed 224, whose fixed point left an even number
+  of rounds, the same mutant survived. This is observed, not structural.
+- Local search, not killed behaviourally (only text and analyzer checks fail):
+  `range(0, 30)` changed to `range(0, 5)` produces the same tour, because five
+  rounds reach the fixed point (observed); it is caught by the complexity
+  prefix test (cardinality 30) and by the stage text in
+  `program_embeds_the_seed_round_cap_and_move_neighbourhood`. Limiting Or-opt
+  segments from 3 cities to 2 (`while len <= 3` changed to `<= 2`) also gives
+  the same tour for seed 624 (observed: along this trajectory no 3-city segment
+  move is the best improvement), and only the text guard fails. In the seed
+  sweep, of the two seeds that satisfy the other conditions, a Python
+  re-implementation shows that limiting segments to 1 city changes the final
+  tour for seed 624 and not for seed 982, while limiting them to 2 cities
+  changes it for seed 982 and not for seed 624, so neither seed catches both
+  (these two Python variants were not run on the program files). The segment
+  length mutant and the five-round mutant are survivors of the behavioural
+  tests.
+- Compile error, not a test kill: removing the `with_length` map leaves the
+  output type mismatched (`E0308`).
+- The complexity tests do not see mutations inside step functions, which the
+  analyzer does not inspect. They do catch range edits.
+
 [tsp-exact]: https://en.wikipedia.org/wiki/Travelling_salesman_problem#Exact_algorithms
 [held-karp]: https://en.wikipedia.org/wiki/Held%E2%80%93Karp_algorithm
 [binary-search]: https://en.wikipedia.org/wiki/Binary_search_algorithm
@@ -665,81 +912,13 @@ Mutation checks, run on the program files with `cargo test -p algorithms`
 [ox-wiki]: https://en.wikipedia.org/wiki/Crossover_(evolutionary_algorithm)
 [aco-doi]: https://doi.org/10.1109/3477.484436
 [aco-wiki]: https://en.wikipedia.org/wiki/Ant_colony_optimization_algorithms
-
-### tsp_nearest_neighbour
-
-- Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
-- Reference: Rosenkrantz, Stearns, Lewis 1977,
-  [Nearest neighbour algorithm](https://en.wikipedia.org/wiki/Nearest_neighbour_algorithm)
-- Canonical complexity: O(n^2) time, tour within (ceil(log2 n)+1)/2 of optimal
-- Analyzer estimate: O(1), exact O(2), cardinality 1.
-
-`range(0, 9).fold(extend_tour).map(close_tour)`. Each fold step appends the
-nearest unvisited city, ties broken by lowest index. The O(n) scan lives in
-the fn body
-([#416](https://github.com/DominicBurkart/marigold/issues/416)) and the city
-count is a literal, so the n^2 collapses to a constant
-([#415](https://github.com/DominicBurkart/marigold/issues/415)). The test
-compares against an independent Rust nearest neighbour and checks the
-Rosenkrantz et al. bound against the optimum.
-
-### tsp_christofides
-
-- Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
-- Reference: Christofides 1976,
-  [Christofides algorithm](https://en.wikipedia.org/wiki/Christofides_algorithm)
-- Canonical complexity: O(n^3) time with a polynomial matching, tour within
-  1.5 of optimal
-- Analyzer estimate: O(1), exact O(5), cardinality 1.
-
-`range(0, 9).fold(prim_step)` then
-`.map(add_matching).map(euler_circuit).map(shortcut).map(finish)`. Prim is the
-fold (one vertex per step); each later stage is one map and is a whole phase
-of the algorithm. The same collapse and hidden per-item cost apply
-([#415](https://github.com/DominicBurkart/marigold/issues/415),
-[#416](https://github.com/DominicBurkart/marigold/issues/416)).
-
-Simplification: the minimum-weight perfect matching of the odd-degree
-vertices is found by brute-force recursion over bitmasks. That is exponential
-in the number of odd vertices and is acceptable only because N=10 leaves at
-most 945 matchings; a real implementation would use Edmonds' blossom
-algorithm. The Eulerian circuit is Hierholzer's algorithm on the multigraph
-and the shortcut keeps first visits. The output carries the tour, the MST
-weight, the matching weight and the odd-vertex mask. Tests assert a valid
-tour of length at most 1.5 times optimal, the MST weight equals Kruskal's,
-the matching weight equals an independent brute-force minimum over the odd
-set, and the tour is no longer than MST plus matching.
-
-### tsp_lkh
-
-- Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)
-- Reference: Helsgaun 2017, LKH-3 paper "An Extension of the
-  Lin-Kernighan-Helsgaun TSP Solver for Constrained Traveling Salesman and
-  Vehicle Routing Problems",
-  [LKH-3 page](http://webhotel4.ruc.dk/~keld/research/LKH-3/)
-- Canonical complexity: heuristic local search, no polynomial worst case
-- Analyzer estimate: O(1), exact O(2), cardinality 1.
-
-**This is NOT LKH-3.** It is a simplified local search standing in for the
-Lin-Kernighan family: `range(0, 30).fold(improve_once).map(with_length)`.
-From a tour made by a seeded LCG shuffle, each fold step evaluates every
-2-opt reversal and every Or-opt move (segments of 1 to 3 cities, either
-orientation) and applies the best improving one, for at most 30 steps.
-LKH-3's alpha-nearness candidate sets, 5-opt sequential moves, constraint
-handling and variable-depth Lin-Kernighan search are not implemented. Tests
-assert a valid tour, equality with an independent Rust best-improvement
-search, and an independent 2-opt and Or-opt local-optimum check. Optimality
-is not claimed.
-
-### Analyzer divergence for the constructive TSP programs
-
-The analyzer sees only the stream shape. Every pipeline starts from a
-constant `range`, so the estimate is O(1) with exact O(k), where k is the
-number of stream stages, and the cardinality is exactly one. The canonical
-polynomial costs live in `while` loops inside the fold and map bodies, which
-the analyzer cannot see
-([#416](https://github.com/DominicBurkart/marigold/issues/416)), and in the
-city count, which is a literal rather than a symbolic input size
-([#415](https://github.com/DominicBurkart/marigold/issues/415)). The analyzer
-does not expose intermediate cardinalities (9 fold steps for the first two
-programs, 30 for `tsp_lkh`), so only the final cardinality is pinned.
+[nn-wiki]: https://en.wikipedia.org/wiki/Nearest_neighbour_algorithm
+[tsp-wiki]: https://en.wikipedia.org/wiki/Travelling_salesman_problem
+[nn-swat]: https://doi.org/10.1109/SWAT.1974.4
+[nn-siam]: https://doi.org/10.1137/0206041
+[chr-wiki]: https://en.wikipedia.org/wiki/Christofides_algorithm
+[chr-report]: https://apps.dtic.mil/dtic/tr/fulltext/u2/a025602.pdf
+[lk-wiki]: https://en.wikipedia.org/wiki/Lin%E2%80%93Kernighan_heuristic
+[lk-doi]: https://doi.org/10.1287/opre.21.2.498
+[lkh-doi]: https://doi.org/10.1016/S0377-2217(99)00284-2
+[lkh3-page]: http://webhotel4.ruc.dk/~keld/research/LKH-3/
