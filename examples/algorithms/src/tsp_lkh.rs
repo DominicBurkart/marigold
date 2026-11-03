@@ -7,17 +7,17 @@ mod tests {
     use crate::tsp::{optimum, tour_length, N};
 
     const PROGRAM: &str = include_str!("../programs/tsp_lkh.marigold");
-    const SEED_LINE: &str = "let mut seed = 624u64;";
+    const SEED_LINE: &str = "let mut seed = 982u64;";
     const ROUNDS_STAGE: &str = "range(0, 30).fold(seeded_start, improve_once)";
-    const PINNED_START: [usize; N] = [0, 3, 4, 1, 7, 6, 8, 2, 9, 5];
-    const PINNED_START_LENGTH: i32 = 138;
-    const PINNED_TOUR: [i64; N] = [0, 1, 6, 4, 8, 3, 5, 9, 7, 2];
+    const PINNED_START: [usize; N] = [0, 7, 5, 6, 8, 2, 3, 9, 1, 4];
+    const PINNED_START_LENGTH: i32 = 124;
+    const PINNED_TOUR: [i64; N] = [0, 2, 7, 9, 5, 3, 8, 4, 6, 1];
     const PINNED_LENGTH: i32 = 84;
     const PINNED_IMPROVING_STEPS: usize = 5;
 
     fn seeded_start() -> Vec<usize> {
         let mut t: Vec<usize> = (0..N).collect();
-        let mut seed = 624u64;
+        let mut seed = 982u64;
         for i in (1..N).rev() {
             seed = (seed * 1103515245 + 12345) % 2147483648;
             let j = 1 + ((seed >> 16) as usize) % i;
