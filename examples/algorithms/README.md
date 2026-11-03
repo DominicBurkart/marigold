@@ -517,7 +517,9 @@ bounds above are the textbook statements, not measurements of these programs.
 Each `<name>_canonical_class_is_not_representable` test in
 `tests/complexity.rs` pins the prefix cardinality read from the program file
 (`analyze_prefix(name, None)` for the range, `Some("fold")` for the fold)
-and asserts that the estimate differs from the canonical class.
+and asserts that the estimate differs from the canonical class. The final
+`assert_ne!` in each of these tests documents the divergence; it cannot fail
+while the sibling test pins the O(1) class.
 
 Parameters, all fixed in the program file and asserted by
 `program_embeds_the_seed_and_parameters_the_reference_uses` in each module:
@@ -525,16 +527,25 @@ Parameters, all fixed in the program file and asserted by
 - Every program uses the LCG `(r * 1103515245 + 12345) % 2147483648` and reads
   the high bits (`r >> 16`, or `r >> 8` for the ant colony roulette).
 - Annealing: seed 12345, 2000 iterations, 2-opt reversal of positions in
-  1..=9 (position 0 holds city 0 for the whole run), temperature
-  `30 * (2000 - round) / 2000`, and a worse move is accepted when
-  `delta * 100 < u * temp` with `u` in 0..100.
+  1..=9 (position 0 holds city 0 for the whole run), and the Metropolis rule:
+  a worse move (`delta > 0`) is accepted with probability `exp(-delta / T)`.
+  The temperature is stored in sixteenths, `temp = 16 T = 480 * (2000 - round)
+  / 2000` (so T falls linearly from 30 towards 0), with a floor of 1 so the
+  division below is defined. The program does no floating point. It reads
+  `exp` from a table of 97 integers, `table[k] = round(32768 * exp(-k / 16))`,
+  indexed by `k = (delta * 256 + temp / 2) / temp`, which is `delta / T` in
+  sixteenths rounded to nearest. A worse move is accepted when `k <= 96` and
+  the draw `u = r >> 16` (uniform on 0..32767) is below `table[k]`. Beyond
+  `k = 96`, that is `delta / T` above 6.03, the probability is treated as 0;
+  the true value there is at most 0.25 percent.
 - Genetic: seed 987654321, 150 generations, population 16, binary tournament,
   OX1 with two random cuts, a swap mutation with probability 20 percent, and
   the best tour carried over unchanged.
 - Ant colony: seed 24680, 200 iterations, 8 ants, initial pheromone 1000,
-  weight `tau * (10000 / d^2)`, roulette selection, evaporation to 90 percent
-  with a floor of 10, and a deposit of `100000 / length` on each edge of each
-  ant's tour.
+  weight `tau * (10000 / d^2)` (Ant System with alpha = 1 and beta = 2, the
+  heuristic term being the integer `10000 / d^2`), roulette selection,
+  evaporation to 90 percent with a floor of 10, and a deposit of
+  `100000 / length` on each edge of each ant's tour.
 
 The programs embed the 10 city coordinates as `[i32; 10]` arrays, and
 `programs_embed_the_shared_cities` in `src/tsp.rs` parses them from the
@@ -549,9 +560,16 @@ re-implementation of the same LCG and algorithm
 (`matches_independent_python_reference_for_the_fixed_seed`). The pinned values
 are:
 
-- Annealing: tour `0 2 7 9 3 5 6 4 8 1` (starts at city 0), length 84.
+- Annealing: tour `0 1 8 4 6 5 3 7 9 2` (starts at city 0), length 84.
 - Genetic: tour `1 8 4 6 5 3 7 9 2 0`, length 84.
 - Ant colony: tour `3 8 4 6 1 0 2 7 9 5`, length 84.
+
+The annealing table is checked by
+`exp_table_in_the_program_matches_f64_exp_within_half_a_unit`: it parses the 97
+entries out of the program text with `include_str!` and asserts each is within
+0.5 of `32768 * exp(-k / 16)` computed with f64 `exp`, which is the bound for
+round-to-nearest. Changing any single entry by one fails it (checked for
+entries 0, 1 and 5).
 
 Tours are cyclic, so the genetic and ant colony tours start at an arbitrary
 city. All three lengths equal the optimum for the pinned seeds. That is the
@@ -561,24 +579,45 @@ Seeds tried. The Python reference was run with 20 seeds per program (1, 2, 3,
 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 777, 4242, 11111, 13579, 31337, 54321
 and 99991). The program files were also run with 8 edited seeds (1, 777, 4242,
 31337, 99991, 54321, 11111, 13579), and every tour equalled the Python tour for
-the same seed. Annealing and ant colony reached length 84 for all 20 seeds. The
-genetic algorithm reached 84 for 18 of 20; seed 99991 gave 90 and seed 11111
-gave 86. These sweeps are manual and are not part of the test suite: seeds are
-compile-time constants of the generated `const fn`s, so the tests cannot vary
-them at run time.
+the same seed. Ant colony reached length 84 for all 20 seeds. The genetic
+algorithm reached 84 for 18 of 20; seed 99991 gave 90 and seed 11111 gave 86.
+Annealing, with the Metropolis rule and this schedule, reached 84 for 14 of the
+20 seeds; the other six gave 86 (seeds 5 and 21), 88 (seeds 13579, 34 and 144)
+and 90 (seed 89). The annealing program was additionally run with 13 edited
+seeds (the 8 above plus 5, 21, 34, 89 and 144), and every tour equalled the
+Python tour. These sweeps are manual and are not part of the test suite: seeds
+are compile-time constants of the generated `const fn`s, so the tests cannot
+vary them at run time. Only the pinned seed is guaranteed to give the optimum.
 
 Mutation checks, run on the program files with `cargo test -p algorithms`
 (default features), one edit at a time. Killed means at least one test failed.
 
-- Annealing, killed by the pinned tour test: iterations 2000 to 5, accepting
-  `delta <= 0` changed to `delta < 0`, the reversal loop `lo < hi` changed to
-  `lo + 1 < hi`, acceptance `<` changed to `<=`, the acceptance draw shift 16
-  changed to 15, the best-tour update `<` changed to `<=`, the temperature
-  factor 30 changed to 0, and the LCG multiplier incremented.
-- Annealing, killed by the parameter test: seed 12345 to 54321, iterations 2000
-  to 1999, temperature 30 to 0, LCG multiplier. Iterations 2000 to 1999 is not
-  caught by the pinned tour (the last iteration does not change the best
-  tour); the parameter test and the complexity prefix test catch it.
+- Annealing (Metropolis rule), killed by the pinned tour test: index scaling
+  256 to 128 and to 512, index rounding changed to a floor (dropping
+  `temp / 2`), comparison direction reversed, draw shift 16 to 15, temperature
+  start 480 to 240, seed 12345 to 54321, iterations 2000 to 5, the reversal
+  loop `lo < hi` changed to `lo + 1 < hi`, and the LCG multiplier incremented.
+  The seed mutant 54321 also changes the pinned tour in the current rule (the
+  tour changes to `0 2 9 7 3 5 6 4 8 1`, length 84); the parameter test fails
+  too.
+- Annealing, killed by the table test: changing table entry 0, 1 or 5 by one.
+  These do not change the pinned tour.
+- Annealing, caught only by the parameter test (the tour is unchanged, so the
+  pinned tour test passes): cutoff `k <= 96` changed to `95` or `94`,
+  comparison `<` changed to `<=`, temperature start 480 to 960, schedule
+  `2000 - round` changed to `1999 - round`, and iterations 2000 to 1999. The
+  complexity prefix test also catches the iteration edit. The Python
+  reference gives the same tour for each of these (the pinned run evaluates
+  1034 worse candidates, 86 of them with `k > 94`). This is
+  observed, not structural.
+- Annealing, survivors (no test fails): accepting `delta < 0` instead of
+  `delta <= 0` is structurally equivalent, because `delta = 0` gives `k = 0`,
+  `table[0] = 32768` and every draw is below it. Raising the temperature floor
+  from 1 to 2 is equivalent: the floor only applies in the last four rounds, and
+  there every worse move has `delta >= 2` (tour lengths are even), so
+  `k >= 256 > 96` and the move is rejected either way. Changing the best-tour
+  update from `<` to `<=` leaves the tour unchanged in the Python reference for
+  this seed (observed, not structural).
 - Genetic, killed by the pinned tour test: generations 150 to 1, mutation rate
   20 to 0 and to 21, elitism copying individual 0, tournament `<=` changed to
   `<`, the OX fill start position, the OX donor index, seed 987654321 to
@@ -591,14 +630,21 @@ Mutation checks, run on the program files with `cargo test -p algorithms`
   test.
 - Every city coordinate edit (the second x of each program from 4 to 5) is
   killed by `programs_embed_the_shared_cities` and by the pinned tour test.
-- Inserting a second `fold` stage after the `map` stops the build, because the
-  generated code no longer type checks.
+- Inserting a second `fold` stage after the `map` stops the build in the
+  genetic program (error E0308: the generated step call no longer type
+  checks). A type-correct extra stage, such as an identity `map` appended to the
+  annealing program, builds and is killed by the `tsp_simulated_annealing`
+  complexity test (exact time changes from O(2) to O(3)).
 - Equivalent survivors, for the ant colony: the pheromone floor. Removing it,
-  or raising it from 10 to 11, changes no test result. The floor binds
-  (1600 of the 20000 evaporation updates in the Python reference are below 10
-  before clamping), but the Python reference produces identical tours for all
-  1600 ants across 200 iterations with the floor at 10, at 11 and removed, so
-  the mutant cannot be observed for this seed.
+  or raising it from 10 to 11, changes no test result. For the pinned seed
+  this is structural: all 1600 clamps are on the diagonal cells `s[u * 10 + u]`,
+  which `next_city` never reads (the current city is always visited), and the
+  smallest off-diagonal pheromone read at the start of any iteration is 16,
+  above both floors. For other seeds the floor does bind off-diagonal (13 of
+  the 21 seeds tried, with a smallest read value of 10), yet the Python
+  reference produced identical tours with the floor at 10, at 11 and removed
+  for all 21 seeds (the 20 sweep seeds and 24680); that is observed, not
+  structural.
 - The complexity tests do not see mutations inside step functions, which the
   analyzer does not inspect. They do catch range edits, as listed above.
 
