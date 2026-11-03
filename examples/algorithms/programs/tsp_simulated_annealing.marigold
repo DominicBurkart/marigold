@@ -1,7 +1,7 @@
 fn dist(a: i64, b: i64) -> i64 {
-    let xs: [i64; 10] = [0, 4, 9, 13, 6, 15, 2, 11, 8, 17];
-    let ys: [i64; 10] = [0, 7, 2, 8, 12, 15, 14, 5, 9, 3];
-    (xs[a as usize] - xs[b as usize]).abs() + (ys[a as usize] - ys[b as usize]).abs()
+    let xs: [i32; 10] = [0, 4, 9, 13, 6, 15, 2, 11, 8, 17];
+    let ys: [i32; 10] = [0, 7, 2, 8, 12, 15, 14, 5, 9, 3];
+    ((xs[a as usize] - xs[b as usize]).abs() + (ys[a as usize] - ys[b as usize]).abs()) as i64
 }
 
 fn tour_len(t: [i64; 10]) -> i64 {
