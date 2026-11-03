@@ -7,6 +7,20 @@ fn bench_gcd(c: &mut Criterion) {
     });
 }
 
+fn bench_knapsack(c: &mut Criterion) {
+    let rt = algorithms::runtime();
+    c.bench_function("knapsack", |b| {
+        b.to_async(&rt).iter(algorithms::knapsack::run);
+    });
+}
+
+fn bench_floyd_warshall(c: &mut Criterion) {
+    let rt = algorithms::runtime();
+    c.bench_function("floyd_warshall", |b| {
+        b.to_async(&rt).iter(algorithms::floyd_warshall::run);
+    });
+}
+
 fn bench_tsp_exact(c: &mut Criterion) {
     let rt = algorithms::runtime();
     let mut group = c.benchmark_group("tsp_exact");
@@ -20,5 +34,11 @@ fn bench_tsp_exact(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_gcd, bench_tsp_exact);
+criterion_group!(
+    benches,
+    bench_gcd,
+    bench_knapsack,
+    bench_floyd_warshall,
+    bench_tsp_exact
+);
 criterion_main!(benches);

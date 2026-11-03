@@ -59,6 +59,60 @@ the bound and the arithmetic are exercised together. Tests compare every pair
 with a reference Euclid and assert that the worst case needs fewer rounds than
 the cap.
 
+### knapsack
+
+- Issue: [#409](https://github.com/DominicBurkart/marigold/issues/409)
+- Reference: [Knapsack problem](https://en.wikipedia.org/wiki/Knapsack_problem)
+- Canonical complexity: O(n * W) time, O(W) space
+- Analyzer estimate: O(1), exact O(2), cardinality 1: a fold over the
+  constant `range(0, 14)` and a map.
+
+The spine is a fold with one item per step. Each step is one DP row update
+(`c` from `W` down to the item weight) on a `[i64; 51]` row, so the 14 items
+and capacity 50 are constants. The step reads the previous row and writes a
+new one, so the direction of the capacity loop does not change the result.
+The `n * W` product lives in the step function's loop and the fixed row, which the
+analyzer cannot see (per-item function cost:
+[#416](https://github.com/DominicBurkart/marigold/issues/416); symbolic input
+size: [#415](https://github.com/DominicBurkart/marigold/issues/415)). The
+analyzer therefore cannot express O(n * W): the tests pin the 14-item range
+and the single folded state, derived from the program file, and assert that
+the reported classes differ from the canonical ones. Those tests use
+`assert_ne!`, so they show a difference, not the exact class.
+
+The run test compares the program with an enumeration of all 2^14 subsets and
+with the pinned optimum 136. The optimum is not unique (three subsets reach
+it), so some single-item edits leave the result unchanged. Nearby instances
+have other optima: 101 without the last item, 134 at capacity 49, 1000 if the
+step reads the in-place row with an ascending capacity loop (the unbounded
+variant), 127 if every candidate is taken, 0 if none is. Reading the in-place
+row with the descending loop is the textbook 0/1 update and gives 136, as
+does reading the previous row with either loop direction. A test compares the
+item arrays in the program text with the oracle's constants.
+
+### floyd_warshall
+
+- Issue: [#411](https://github.com/DominicBurkart/marigold/issues/411)
+- Reference: Floyd 1962 (doi 10.1145/367766.368168), Warshall 1962
+  (doi 10.1145/321105.321107),
+  [Wikipedia](https://en.wikipedia.org/wiki/Floyd%E2%80%93Warshall_algorithm)
+- Canonical complexity: O(V^3) time, O(V^2) space
+- Analyzer estimate: O(1), exact O(1), cardinality 1: a single fold over the
+  constant `range(0, 8)`.
+
+The spine is a fold with one step per intermediate vertex `k`, each step
+relaxing all `V^2` pairs of the flat `[i64; 64]` distance matrix. The `V^3`
+lives in the step function's two nested loops and the fixed array, invisible
+to the analyzer (#415, #416). The tests pin the 8-vertex range from the
+program file and assert divergence from the canonical classes.
+
+The graph is two directed rings of four vertices joined by one edge (nine
+edges), so every vertex is a needed intermediate and 16 pairs are
+unreachable. The run test compares the program with Bellman-Ford from every
+source, and with a pinned 64-entry matrix that includes the `1000000`
+unreachable sentinel. A test compares the edge list in the program text with
+the oracle's. Weights are nonnegative; there is no negative-cycle case.
+
 ### tsp_brute_force
 
 - Issue: [#406](https://github.com/DominicBurkart/marigold/issues/406)

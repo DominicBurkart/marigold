@@ -118,3 +118,79 @@ fn held_karp_canonical_class_is_not_representable() {
     let result = analyze_example("tsp_held_karp");
     assert_eq!(result.streams[0].time_class, ComplexityClass::O1);
 }
+
+#[test]
+fn knapsack() {
+    let result = analyze_example("knapsack");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_space,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn knapsack_canonical_class_is_not_representable() {
+    let items = analyze_prefix("knapsack", None);
+    assert_eq!(
+        items.streams[0].cardinality,
+        Cardinality::Exact(14u32.into())
+    );
+    let folded = analyze_prefix("knapsack", Some("fold"));
+    assert_eq!(
+        folded.streams[0].cardinality,
+        Cardinality::Exact(1u32.into())
+    );
+    let result = analyze_example("knapsack");
+    assert_ne!(
+        result.streams[0].time_class,
+        ComplexityClass::OPolynomial(2)
+    );
+    assert_ne!(result.streams[0].space_class, ComplexityClass::ON);
+}
+
+#[test]
+fn floyd_warshall() {
+    let result = analyze_example("floyd_warshall");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(1)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_space,
+        ExactComplexity::from_str("O(1)").unwrap()
+    );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn floyd_warshall_canonical_class_is_not_representable() {
+    let vertices = analyze_prefix("floyd_warshall", None);
+    assert_eq!(
+        vertices.streams[0].cardinality,
+        Cardinality::Exact(8u32.into())
+    );
+    let result = analyze_example("floyd_warshall");
+    assert_ne!(
+        result.streams[0].time_class,
+        ComplexityClass::OPolynomial(3)
+    );
+    assert_ne!(
+        result.streams[0].space_class,
+        ComplexityClass::OPolynomial(2)
+    );
+}
