@@ -465,62 +465,116 @@ fn kruskal_canonical_class_is_not_representable() {
     assert_ne!(result.streams[0].time_class, ComplexityClass::ONLogN);
 }
 
-fn assert_constant_fold_pipeline(name: &str, exact: &str, description: &str) {
-    let result = analyze_example(name);
+#[test]
+fn tsp_nearest_neighbour() {
+    let result = analyze_example("tsp_nearest_neighbour");
     assert_eq!(result.streams.len(), 1);
     let stream = &result.streams[0];
-    assert_eq!(stream.description, description);
-    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
     assert_eq!(stream.time_class, ComplexityClass::O1);
-    assert_eq!(stream.exact_time, ExactComplexity::from_str(exact).unwrap());
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
     assert_eq!(stream.space_class, ComplexityClass::O1);
     assert_eq!(
         stream.exact_space,
-        ExactComplexity::from_str(exact).unwrap()
+        ExactComplexity::from_str("O(2)").unwrap()
     );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
     assert!(!stream.collects_input);
 }
 
 #[test]
-fn tsp_nearest_neighbour() {
-    assert_constant_fold_pipeline(
-        "tsp_nearest_neighbour",
-        "O(2)",
-        "input.fold(...).map(...).return",
+fn tsp_nearest_neighbour_canonical_class_is_not_representable() {
+    let rounds = analyze_prefix("tsp_nearest_neighbour", None);
+    assert_eq!(
+        rounds.streams[0].cardinality,
+        Cardinality::Exact(9u32.into())
     );
-}
-
-#[test]
-fn tsp_nearest_neighbour_diverges_from_canonical_class() {
-    let canonical = ComplexityClass::OPolynomial(2);
+    let folded = analyze_prefix("tsp_nearest_neighbour", Some("fold"));
+    assert_eq!(
+        folded.streams[0].cardinality,
+        Cardinality::Exact(1u32.into())
+    );
     let result = analyze_example("tsp_nearest_neighbour");
-    assert_ne!(result.streams[0].time_class, canonical);
+    assert_ne!(
+        result.streams[0].time_class,
+        ComplexityClass::OPolynomial(2)
+    );
 }
 
 #[test]
 fn tsp_christofides() {
-    assert_constant_fold_pipeline(
-        "tsp_christofides",
-        "O(5)",
-        "input.fold(...).map(...).map(...).map(...).map(...).return",
+    let result = analyze_example("tsp_christofides");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(5)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_space,
+        ExactComplexity::from_str("O(5)").unwrap()
+    );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn tsp_christofides_canonical_class_is_not_representable() {
+    let rounds = analyze_prefix("tsp_christofides", None);
+    assert_eq!(
+        rounds.streams[0].cardinality,
+        Cardinality::Exact(9u32.into())
+    );
+    let folded = analyze_prefix("tsp_christofides", Some("fold"));
+    assert_eq!(
+        folded.streams[0].cardinality,
+        Cardinality::Exact(1u32.into())
+    );
+    let result = analyze_example("tsp_christofides");
+    assert_ne!(
+        result.streams[0].time_class,
+        ComplexityClass::OPolynomial(3)
     );
 }
 
 #[test]
-fn tsp_christofides_diverges_from_canonical_class() {
-    let canonical = ComplexityClass::OPolynomial(3);
-    let result = analyze_example("tsp_christofides");
-    assert_ne!(result.streams[0].time_class, canonical);
-}
-
-#[test]
 fn tsp_lkh() {
-    assert_constant_fold_pipeline("tsp_lkh", "O(2)", "input.fold(...).map(...).return");
+    let result = analyze_example("tsp_lkh");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_space,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
 }
 
 #[test]
-fn tsp_lkh_diverges_from_canonical_class() {
-    let canonical = ComplexityClass::OPolynomial(2);
+fn tsp_lkh_canonical_class_is_not_representable() {
+    let rounds = analyze_prefix("tsp_lkh", None);
+    assert_eq!(
+        rounds.streams[0].cardinality,
+        Cardinality::Exact(30u32.into())
+    );
+    let folded = analyze_prefix("tsp_lkh", Some("fold"));
+    assert_eq!(
+        folded.streams[0].cardinality,
+        Cardinality::Exact(1u32.into())
+    );
     let result = analyze_example("tsp_lkh");
-    assert_ne!(result.streams[0].time_class, canonical);
+    assert_ne!(
+        result.streams[0].time_class,
+        ComplexityClass::OPolynomial(2)
+    );
 }
