@@ -1,0 +1,2 @@
+struct R { a: i32 }
+read_file("data.csv", csv, struct=R).ok().return

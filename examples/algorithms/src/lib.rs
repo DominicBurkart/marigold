@@ -36,5 +36,11 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
 }
 
 pub mod binary_search;
+pub mod floyd_warshall;
 pub mod gcd;
+pub mod knapsack;
 pub mod quicksort;
+#[cfg(test)]
+mod tsp;
+pub mod tsp_brute_force;
+pub mod tsp_held_karp;

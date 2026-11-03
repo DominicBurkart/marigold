@@ -1,0 +1,18 @@
+[
+  {
+    "tool_call": {
+      "name": "write",
+      "arguments": {
+        "filePath": "{file}",
+        "content": "b = a.map(f)\na = range(0, 3)\nb.return\n"
+      }
+    }
+  },
+  {
+    "tool_call": {
+      "name": "marigold_marigold_check",
+      "arguments": { "path": "{file}" }
+    }
+  },
+  { "text": "Wrote hello_world.marigold and checked it." }
+]

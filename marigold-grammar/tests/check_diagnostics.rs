@@ -790,7 +790,9 @@ fn timed<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
     (out, start.elapsed())
 }
 
-const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(60);
+/// A backstop against a hang, not a performance claim: the 60_000-function programs take a few
+/// seconds in a debug build, and over a minute when the machine is saturated by other processes.
+const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(600);
 
 fn assert_output_is_capped_at_every_size(build: impl Fn(usize) -> String) {
     for n in [5_000, 10_000] {
@@ -826,7 +828,12 @@ fn many_fns(n: usize) -> String {
 fn chained_variables(n: usize) -> String {
     let mut src = String::new();
     for i in 0..n {
-        src.push_str(&format!("v{i} = range(0,3)\nv{} = v{i}.map(f{i})\n", i + 1));
+        src.push_str(&format!(
+            "v{} = range(0,3)\nv{} = v{}.map(f{i})\n",
+            2 * i,
+            2 * i + 1,
+            2 * i
+        ));
     }
     src
 }
@@ -930,4 +937,71 @@ fn did_you_mean_is_omitted_when_declared_fns_exceed_the_candidate_cap() {
     let help = d.help.unwrap();
     assert!(!help.contains("did you mean"), "{help}");
     assert!(help.contains("and 181 more"), "{help}");
+}
+
+#[test]
+fn redeclaring_a_stream_variable_is_an_error_at_the_later_declaration() {
+    let src = "x = range(0, 5)\nx.return\nx = range(0, 7)\nx.return\n";
+    let d = only(marigold_check(src));
+    assert_eq!(d.code, "redeclared-stream-variable");
+    assert_eq!(d.severity, Severity::Error);
+    let second = src.rfind("x = range(0, 7)").unwrap();
+    assert!(d.range.start >= second, "{d:?}");
+    assert!(d.range.end <= src.len(), "{d:?}");
+    assert!(d.message.contains("'x'"), "{}", d.message);
+    assert!(d.help.unwrap().contains("rename"));
+}
+
+#[test]
+fn redeclaring_through_a_self_read_is_an_error() {
+    let src = "x = range(0, 5)\nx = x.permutations(2)\nx.return\n";
+    let d = only(marigold_check(src));
+    assert_eq!(d.code, "redeclared-stream-variable");
+}
+
+#[test]
+fn each_extra_declaration_gets_its_own_error() {
+    let src = "x = range(0, 5)\nx = range(0, 6)\nx = range(0, 7)\nx.return\n";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    assert!(diags.iter().all(|d| d.code == "redeclared-stream-variable"));
+    assert!(diags[0].range.end <= diags[1].range.start, "{diags:?}");
+}
+
+#[test]
+fn distinct_stream_variable_names_are_not_flagged() {
+    let src = "x = range(0, 5)\ny = x.permutations(2)\nz = y\nz.return\n";
+    assert!(marigold_check(src).is_empty());
+}
+
+#[test]
+fn redeclaration_is_reported_once_and_the_program_does_not_parse() {
+    let src = "x = range(0, 5)\nx = range(0, 6)\nx.return\n";
+    let diags = marigold_check(src);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    let err = marigold_parse(src).unwrap_err().to_string();
+    assert!(err.contains("declared more than once"), "{err}");
+}
+
+#[test]
+fn redeclaration_errors_are_capped_with_one_summary() {
+    let mut src = String::new();
+    for i in 0..80 {
+        src.push_str(&format!("x = range(0, {})\n", i + 1));
+    }
+    src.push_str("x.return\n");
+    let diags = marigold_check(&src);
+    let redeclared = diags
+        .iter()
+        .filter(|d| d.code == "redeclared-stream-variable")
+        .count();
+    assert_eq!(redeclared, 50);
+    assert_eq!(
+        diags
+            .iter()
+            .filter(|d| d.code == "resolver-diagnostics-truncated")
+            .count(),
+        1
+    );
+    assert_eq!(diags.len(), 51);
 }

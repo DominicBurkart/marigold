@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 395a10ff6e9347bdf0b82dc790a4b92d585df5c0d5e3d28b46404fde4c5cc933 # shrinks to body = "x = range(0, 5).map(f)\nx.return"

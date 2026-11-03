@@ -12,7 +12,7 @@ const PROGRAMS: &[&str] = &[
     "digits = range(0, 10)\n\ndigits\n    .filter(is_odd)\n    .return\ndigits.return",
     "read_file(\"in dir/a  b.csv\", csv, struct=Data)\n\t.ok_or_panic()\n\t.write_file(\"out  dir/o.csv.gz\", csv)",
     "range(0, 3).return\nrange(0, 3).return\nrange(0, 3).return",
-    "x = range(0, 3)\nx = x.map(f)\nx.return",
+    "x = range(0, 3)\ny = x.map(f)\ny.return",
     "select_all(\n    range(0, 10).map(double),\n    range(0, 20)\n).filter(is_odd).return",
     "fn double(i: i32) -> i32 {\n    i * 2\n}\n\nrange(0, 3).map(double).return",
     "range(0, 3)\r\n.map(f)\r\n.return",
