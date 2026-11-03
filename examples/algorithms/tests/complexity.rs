@@ -264,3 +264,95 @@ fn quicksort_canonical_class_is_not_representable() {
     let result = analyze_example("quicksort");
     assert_ne!(result.streams[0].time_class, ComplexityClass::ONLogN);
 }
+
+#[test]
+fn dijkstra() {
+    let result = analyze_example("dijkstra");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_time,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_space,
+        ExactComplexity::from_str("O(2)").unwrap()
+    );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(!stream.collects_input);
+}
+
+#[test]
+fn dijkstra_canonical_class_is_not_representable() {
+    let rounds = analyze_prefix("dijkstra", None);
+    assert_eq!(
+        rounds.streams[0].cardinality,
+        Cardinality::Exact(9u32.into())
+    );
+    let folded = analyze_prefix("dijkstra", Some("fold"));
+    assert_eq!(
+        folded.streams[0].cardinality,
+        Cardinality::Exact(1u32.into())
+    );
+    let result = analyze_example("dijkstra");
+    assert_ne!(
+        result.streams[0].time_class,
+        ComplexityClass::OPolynomial(2)
+    );
+}
+
+#[test]
+fn kruskal() {
+    let result = analyze_example("kruskal");
+    assert_eq!(result.streams.len(), 1);
+    let stream = &result.streams[0];
+    assert_eq!(stream.time_class, ComplexityClass::OCombinatorial(2));
+    let mut expected_time = ExactComplexity::new();
+    expected_time.add_work(ComplexityClass::O1, 3);
+    expected_time.add_work(ComplexityClass::OCombinatorial(2), 2);
+    assert_eq!(stream.exact_time, expected_time);
+    assert_eq!(stream.space_class, ComplexityClass::O1);
+    assert_eq!(
+        stream.exact_space,
+        ExactComplexity::from_str("O(5)").unwrap()
+    );
+    assert_eq!(stream.cardinality, Cardinality::Exact(1u32.into()));
+    assert!(stream.collects_input);
+}
+
+#[test]
+fn kruskal_candidate_counts_are_pinned_per_stage() {
+    let pairs = analyze_prefix("kruskal", Some("combinations"));
+    assert_eq!(
+        pairs.streams[0].cardinality,
+        Cardinality::Exact(28u32.into())
+    );
+    let weighed = analyze_prefix("kruskal", Some("map"));
+    assert_eq!(
+        weighed.streams[0].cardinality,
+        Cardinality::Exact(28u32.into())
+    );
+    let filtered = analyze_prefix("kruskal", Some("filter"));
+    assert_eq!(
+        filtered.streams[0].cardinality.to_string(),
+        "\u{2264}C(8, 2)"
+    );
+    let sorted = analyze_prefix("kruskal", Some("keep_first_n"));
+    assert_eq!(
+        sorted.streams[0].cardinality.to_string(),
+        "min(\u{2264}C(8, 2), 13)"
+    );
+    let folded = analyze_prefix("kruskal", Some("fold"));
+    assert_eq!(
+        folded.streams[0].cardinality,
+        Cardinality::Exact(1u32.into())
+    );
+}
+
+#[test]
+fn kruskal_canonical_class_is_not_representable() {
+    let result = analyze_example("kruskal");
+    assert_ne!(result.streams[0].time_class, ComplexityClass::ONLogN);
+}

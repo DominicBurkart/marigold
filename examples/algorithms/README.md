@@ -34,6 +34,9 @@ Every example has three checks:
   stream shape, so loops that live inside a function body are invisible to it.
 - Keep this file within 80 columns (markdownlint enforces it, tables
   included): one `###` section per program, as below.
+- The `program!` macro allows `clippy::clone_on_copy` because the default
+  `filter` codegen calls `.clone()` on the item, which is a `Copy` array for
+  programs such as `kruskal`.
 
 ## Programs
 
@@ -302,6 +305,158 @@ DOI or URL for either):
 - Michael Held and Richard M. Karp, "A dynamic programming approach to
   sequencing problems", Journal for the Society for Industrial and Applied
   Mathematics 1:10, 1962.
+
+### dijkstra
+
+- Issue: [#407](https://github.com/DominicBurkart/marigold/issues/407)
+- Reference: Dijkstra 1959, "A note on two problems in connexion with
+  graphs", Numerische Mathematik 1:269-271 (doi 10.1007/BF01386390),
+  [Wikipedia](https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm)
+- Canonical complexity: O(V^2) with an array scan (O((V+E) log V) with a heap)
+- Analyzer estimate: O(1), exact O(2), space O(2), cardinality 1:
+  `range(0, 9).fold(start, settle).map(distances)`.
+
+The stream carries the round structure: nine rounds, one fold step per round,
+and a map that extracts the distances. Each step settles one vertex. The
+selection of the closest unsettled vertex, the relaxation of its edges and
+the settled flags are `while` loops inside `settle`, over a `[i64; 18]` state
+(nine distances, nine flags) and a 13-edge array declared in the function.
+There is no heap and no sort. Each round scans the nine vertices and loops
+over all 13 edges, so the program does `O(V^2 + V x E)` work, more than the
+canonical O(V^2) of an array scan over an adjacency matrix. The analyzer sees
+none of it (per-item fn cost,
+[#416](https://github.com/DominicBurkart/marigold/issues/416)). The sizes are
+constants, so the stream collapses to O(1)
+([#415](https://github.com/DominicBurkart/marigold/issues/415)). A fold runs
+for the length of its source, so the nine rounds are a worst-case cap rather
+than a data-dependent stop
+([#429](https://github.com/DominicBurkart/marigold/issues/429)).
+The source is vertex 0; the program has no other source.
+
+The graph has nine vertices and 13 undirected edges with nonnegative weights.
+The pinned distances from vertex 0 are `[0, 3, 1, 8, 11, 9, 8, 15, 1000000000]`,
+checked against an independent heap-based Dijkstra and a Floyd-Warshall
+script, and against Bellman-Ford in the Rust test. The instance binds each
+component:
+
+- Vertex 8 has no edges, so it keeps the `1000000000` sentinel.
+- Edges 0-1, 2-5, 4-6 and 3-7 are each longer than the distance gap they
+  span, so the direct edge loses to a cheaper detour.
+- Vertex 3 has two shortest paths (3+5 and 1+7), and vertices 3 and 6 are
+  tied at distance 8 when the next vertex is selected.
+- Edge 5-6 is listed as `[5, 6, 1]` and vertex 6 is settled before 5, so the
+  relaxation from the second endpoint is needed.
+
+The edge list in the program text is compared with the oracle's edge list.
+The guard reads digits only, so it cannot see a sign flip (weights are
+nonnegative by contract).
+
+Nine rounds are not all needed: seven are the least that give the pinned
+answer (checked: six give `28` for vertex 7). Round eight settles vertex 7,
+which has no unsettled neighbour, and round nine selects the isolated vertex 8
+and returns at the unreachable guard without settling it.
+
+Mutations run against the program (each changes the program file, then
+`cargo test -p algorithms`):
+
+- Fail the run tests: skipping the relaxation from either endpoint, selecting
+  without the settled flag, selecting the farthest vertex, ignoring the edge
+  weight in the relaxation, source distance 1, six rounds, and changing the
+  weight of edge 2-6 or 4-7 (the last two also fail the edge-list guard).
+- Fail only the complexity test, because the run result is unchanged: eight
+  or seven rounds (the pinned cardinality of the range is nine).
+- Survive: dropping the settled-flag check in the relaxation (equivalent for
+  nonnegative weights). Setting the edge `[5, 4, 2]` to `[5, 4, -12]`
+  separates every variant: vertex 6 is `8` in the original and `4` with the
+  check dropped in the first-endpoint relaxation, and vertex 5 is `9` in the
+  original and `-15` with it dropped in the second-endpoint relaxation (or in
+  both). Setting edge 1-3 to `-9` separates only the second-endpoint
+  variant: vertex 1 is `3` in the original and `-15` in the mutant, while the
+  first-endpoint variant matches the original.
+- Also survive: selecting ties by the later index (the settlement order
+  changes from 3, 6 to 6, 3 but the distances do not), and `>` for `>=` in
+  the unreachable guard (the mutant settles vertex 8 in round nine; it has no
+  edges, so nothing else changes).
+
+### kruskal
+
+- Issue: [#408](https://github.com/DominicBurkart/marigold/issues/408)
+- Reference: Kruskal 1956, "On the shortest spanning subtree of a graph and
+  the traveling salesman problem", Proceedings of the AMS 7(1):48-50
+  (doi 10.1090/S0002-9939-1956-0078686-7),
+  [Wikipedia](https://en.wikipedia.org/wiki/Kruskal%27s_algorithm)
+- Canonical complexity: O(E log E) for the sort, plus near-linear union-find
+- Analyzer estimate: O(C(n,2)), exact 3 + 2*C(n,2), space O(5),
+  `collects_input`, cardinality 1.
+
+The stream carries the candidate set, the sort and the sweep:
+`range(0, 8).combinations(2)` (28 vertex pairs), `map(weigh)` (attach a
+weight, 0 for the 15 non-edges), `filter(is_edge)` (keep the 13 edges),
+`keep_first_n(13, by_weight)` (sort ascending; the comparator reverses the
+order because `keep_first_n` returns the largest first) and
+`fold(start, unite)` (one fold step per sorted edge). The sort is the
+runtime's `keep_first_n`, not a loop in the program. Hidden in function
+bodies: the edge lookup in `weigh` (a linear search of a 13-edge array), the
+union-find `root` loop, and the union itself. The fold carries the
+union-find parents, the total weight, the edge count and the chosen edges in
+a `[i64; 24]`. The union-find has no path compression and no union by rank.
+
+The work the analyzer does not see adds up as follows. `weigh` searches the
+edge array once per pair, `O(V^2 x E)` over the 28 pairs. The runtime sort is
+`O(E log E)`. Each of the E fold steps runs two `root` loops that cost O(V),
+because there is no compression or rank, so `O(E x V)` in total, against the
+canonical near-linear union-find. The program is therefore
+`O(V^2 x E + E log E + E x V)`, dominated by `weigh`, not the canonical
+O(E log E).
+
+The analyzer reports O(C(n,2)) because it bounds the filtered stream by the
+28 pairs; it cannot see the sort cost or the union-find cost inside `unite`
+([#416](https://github.com/DominicBurkart/marigold/issues/416)), and V = 8 is
+constant, so the symbolic form is lost
+([#415](https://github.com/DominicBurkart/marigold/issues/415)). The canonical
+O(E log E) is therefore not reported (a test asserts the difference). The
+per-stage cardinalities are pinned from the program file: 28 pairs after
+`combinations(2)`, 28 after `map`, `<=C(8, 2)` after `filter`, and
+`min(<=C(8, 2), 13)` after `keep_first_n`.
+
+The graph has eight vertices and 13 edges and is connected, so the fold
+yields a spanning tree; a disconnected graph would give a forest but is not
+exercised. Weights 8 on edges 1-2 and 2-4 are equal and close a cycle with
+edge 1-4, so there are two minimum spanning trees of weight 53 (enumerated by
+script; the other uses 2-4 in place of 1-2). The comparator breaks equal weights
+by pair id, lower first, so the program picks 1-2. `keep_first_n` orders
+equal items differently by build (checked: without the pair-id tie-break the
+pinned set held in the default build and failed under `tokio` and
+`async-std`, where 2-4 came out first); this is tracked in
+[#452](https://github.com/DominicBurkart/marigold/issues/452). The Kruskal
+program works around it by breaking equal weights by pair id inside its
+comparator, so its result is identical on all four feature sets. The
+pinned set is `0-1 0-3 1-2 1-4 3-5 4-6 6-7`; the rejected cycle edges are
+`1-3 2-4 3-4 4-5 5-6 5-7`. The Rust test checks that the result is a spanning
+tree whose weight equals Prim's, and the edge list and the `keep_first_n`
+count in the program text are compared with the oracle's. As for Dijkstra,
+the edge-list guard reads digits only and cannot see a sign flip.
+
+Mutations run against the program:
+
+- Fail the run tests (default features): skipping the cycle check, a
+  descending sort, a `root` that never climbs, `>=` in `is_edge`, recording
+  the wrong endpoint, wrong initial parents, not accumulating the weight, not
+  counting edges, dropping the `filter` (this also fails the `kruskal`
+  analyzer pin and the cardinality pin), an edge written with `v < u`,
+  changing the weight of edge 1-4, and reversing the pair-id tie-break (the
+  last fails exactly the cycle-edge, tie and pinned-set tests).
+- Dropping the pair-id tie-break passes in the default build and fails the
+  same three tests under `--features tokio` and `--features async-std`.
+- Fail only a static test, because the run result is unchanged: changing the
+  weight of edge 2-4 to 9 (edge-list guard only), `range(0, 9)` (the extra
+  pairs have weight 0 and are filtered; the cardinality pin fails), and
+  `keep_first_n` of 12 or 14 (edge-list guard and cardinality pin).
+- Survive: swapping the union direction (only which vertex is the root
+  changes) and replacing the `Equal` arm of `by_weight` with a `panic!`
+  (default, `tokio` and `async-std`). The 13 sort keys, `weight * 64 + pair
+  id`, are distinct, so the comparator is never called with equal keys and
+  the arm is unreachable.
 
 [tsp-exact]: https://en.wikipedia.org/wiki/Travelling_salesman_problem#Exact_algorithms
 [held-karp]: https://en.wikipedia.org/wiki/Held%E2%80%93Karp_algorithm

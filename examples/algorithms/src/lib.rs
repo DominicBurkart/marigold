@@ -2,7 +2,7 @@ use std::future::Future;
 
 macro_rules! program {
     ($name:literal => $item:ty) => {
-        #[allow(unused_mut, clippy::let_and_return)]
+        #[allow(unused_mut, clippy::let_and_return, clippy::clone_on_copy)]
         pub async fn run() -> Vec<$item> {
             use marigold::marigold_impl::StreamExt;
             include!(concat!(env!("OUT_DIR"), "/", $name, ".rs"))
@@ -36,9 +36,11 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
 }
 
 pub mod binary_search;
+pub mod dijkstra;
 pub mod floyd_warshall;
 pub mod gcd;
 pub mod knapsack;
+pub mod kruskal;
 pub mod quicksort;
 #[cfg(test)]
 mod tsp;

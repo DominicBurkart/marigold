@@ -7,6 +7,20 @@ fn bench_gcd(c: &mut Criterion) {
     });
 }
 
+fn bench_dijkstra(c: &mut Criterion) {
+    let rt = algorithms::runtime();
+    c.bench_function("dijkstra", |b| {
+        b.to_async(&rt).iter(algorithms::dijkstra::run);
+    });
+}
+
+fn bench_kruskal(c: &mut Criterion) {
+    let rt = algorithms::runtime();
+    c.bench_function("kruskal", |b| {
+        b.to_async(&rt).iter(algorithms::kruskal::run);
+    });
+}
+
 fn bench_knapsack(c: &mut Criterion) {
     let rt = algorithms::runtime();
     c.bench_function("knapsack", |b| {
@@ -55,6 +69,8 @@ criterion_group!(
     bench_quicksort,
     bench_knapsack,
     bench_floyd_warshall,
-    bench_tsp_exact
+    bench_tsp_exact,
+    bench_dijkstra,
+    bench_kruskal
 );
 criterion_main!(benches);
