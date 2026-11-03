@@ -814,26 +814,44 @@ and check exhaustively that no 2-opt or Or-opt move improves the result
 Seed choice, stated plainly. The seed was chosen by a Python sweep over the
 seeds 1 to 1499, to make the mutation tests below sensitive. The history:
 
-- Seed 12345 (first version). Left two mutants alive: an Or-opt gap range one
-  position short, and Or-opt without the reversed orientation.
-- Seed 224 (commit 4461ed8). Killed those two but left alive the 2-opt `<=`
-  mutant and the 2-opt range `j` one short.
+- Seed 12345 (first version). Of the five move-class mutants named below it
+  left two alive: an Or-opt gap range one position short, and Or-opt without
+  the reversed orientation. It also left alive the Or-opt segment limit of 2
+  cities and `range(0, 5)`.
+- Seed 224 (commit 4461ed8). Killed those two but left alive the 2-opt range
+  `j` one short (a move-class mutant) and the 2-opt `<=` plateau mutant.
 - Seed 624 (commit 76d0b06). Killed all five move-class mutants named below, but
-  it also left alive removing the start shuffle's swap (the identity tour
-  reaches the same final tour in 4 steps) and the 2-opt segment limit of 2
-  cities. An earlier version of this README listed the swap removal as killed;
-  that was true at seed 224 and false at seed 624.
+  it also left alive removing the start shuffle's swap (all three lines; the
+  identity tour reaches the same final tour in 4 steps) and the Or-opt segment
+  limit of 2 cities (`while len <= 3` changed to `<= 2`). An earlier version
+  of this README listed the swap removal as killed; that was true at seed 224
+  and false at seed 624.
 - Seed 982 (this version). Pinned.
 
 The five move-class mutants are: removing 2-opt, removing Or-opt, removing the
 reversed Or-opt orientation, shortening the Or-opt gap range by one, and
-shortening the 2-opt range `j` by one. Seeds 624 and 982 are the only two of
-the 1499 swept seeds for which all five change the final tour. Seed 982 was
-preferred over 624 because, on the program file, it also kills the swap-line
-removal mutants and the segment limit of 2 cities, which seed 624 leaves alive.
-With seed 982 two
+shortening the 2-opt range `j` by one. The comparisons in this section are of
+the ordered city sequence, which is what the tests compare. Seeds 624 and 982
+are the only two of the 1499 swept seeds for which all five change the final
+sequence. Seed 982 was preferred over 624 because, on the program file, it
+also kills removing the swap (all three lines) and the Or-opt segment limit of
+2 cities, which seed 624 leaves alive. The single swap-line edits give a
+non-permutation start at any seed and are always caught. With seed 982 two
 mutants still survive behaviourally (see the mutation list): limiting Or-opt
 segments to 1 city, and `range(0, 5)`.
+
+Orientation caveat. A tour is a cycle, and at seed 982 three of the killed
+mutants end at the mirror image of the pinned tour (positions 1 to 9
+reversed): `0 1 6 4 8 3 5 9 7 2`, the same cycle traversed backwards, length
+84. They are the swap removal (the identity start), the 2-opt range `j` one
+short, and the 2-opt `<=` mutant. Their kills depend on the tests comparing
+the ordered sequence. Compared as cycles (the canonical form is the smaller of
+the tour and its reverse after city 0), only seed 624 of the 1499 changes the
+cycle for all five move-class mutants (at 982 the 2-opt `j` mutant ends in the
+same cycle), and at 624 the swap removal ends in the same cycle. So no swept
+seed makes all five move-class mutants and the swap removal change the cycle,
+and a test comparing cycles would let the swap removal survive at the pinned
+seed.
 
 The sweep was re-run to check the figures. Over the seeds 1 to 1499 the local
 search ends at length 84 for 1383 seeds and at 90 for 116; over the seeds 1 to
@@ -908,7 +926,9 @@ one test failed.
   acceptance `<` changed to `<=`, city 1's y changed from 7 to 6 (also by
   `programs_embed_the_shared_cities`), and four edits to the start shuffle:
   the whole swap (three lines) removed, so the search starts from the identity
-  tour and ends at `0 1 6 4 8 3 5 9 7 2` instead of the pinned tour; the line
+  tour and ends at `0 1 6 4 8 3 5 9 7 2`, which is the pinned tour in the
+  opposite orientation, so this kill depends on the tests comparing the ordered
+  sequence, not the cycle (see the orientation caveat above); the line
   `t[j] = tmp;` replaced by `t[j] = t[j];`; the line `let tmp = t[i];`
   replaced by `let tmp = t[j];`; and the line `t[i] = t[j];` replaced by
   `t[i] = t[i];`. The last three produce a non-permutation start, so they are
@@ -928,8 +948,10 @@ one test failed.
   Or-opt segments to 1 city (`while len <= 3` changed to `<= 1`) also gives the
   same tour at seed 982, and only the text guard fails. A Python
   re-implementation agrees on both. The swap lines also have a text guard in
-  `program_embeds_the_seed_round_cap_and_move_neighbourhood`, which is a
-  second line of defence, not the one that kills the swap mutants.
+  `program_embeds_the_seed_round_cap_and_move_neighbourhood`; it compares the
+  program text with a literal in the test, not with the Rust copy of the
+  shuffle. It fails on all four swap mutants too, so it is one of the killers;
+  the behavioural tests kill them independently.
 - Compile error, not a test kill: removing the `with_length` map leaves the
   output type mismatched (`E0308`).
 - The complexity tests do not see mutations inside step functions, which the
