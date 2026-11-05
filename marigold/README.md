@@ -78,6 +78,40 @@ Output:
 4
 ```
 
+### Returning results
+
+A program that ends in `.return` hands its items to the command line:
+`marigold run` prints each one on its own line using Rust's `{:?}` (Debug)
+formatting, then exits.
+
+```marigold
+fn double(x: i32) -> i32 { x * 2 }
+
+range(0, 4).map(double).return
+```
+
+```sh
+marigold run double.marigold
+```
+
+Output:
+
+```text
+0
+2
+4
+6
+```
+
+Numbers print as plain numbers. Strings print quoted, and arrays, structs and
+enums print in their Debug form (`[1, 2]`), so use `write_file` with `csv`
+when a program should produce CSV rows. A program may mix `.return` and `write_file`
+streams: the returned items are printed and the files are written.
+
+`marigold run` builds the program against the published `marigold` crate that
+matches the installed CLI version. To build against a local checkout instead,
+set `MARIGOLD_WORKSPACE_PATH` to the checkout's `marigold` crate directory.
+
 ### Static Analysis
 
 Marigold can statically analyze your program's complexity:
