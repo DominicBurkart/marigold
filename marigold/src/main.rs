@@ -357,6 +357,40 @@ fn run_emit(format: EmitFormat, file: Option<&str>) -> i32 {
 }
 
 #[cfg(feature = "cli")]
+const MAIN_PRELUDE: &str = r#"trait MarigoldFinish {
+    fn finish(self) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ()>>>;
+}
+
+impl MarigoldFinish for () {
+    fn finish(self) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ()>>> {
+        Box::pin(async {})
+    }
+}
+
+impl<T: ::std::fmt::Debug + 'static> MarigoldFinish
+    for ::marigold::marigold_impl::futures::stream::SelectAll<
+        ::std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item = T>>>,
+    >
+{
+    fn finish(mut self) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ()>>> {
+        Box::pin(async move {
+            use ::marigold::marigold_impl::futures::StreamExt;
+            while let Some(item) = self.next().await {
+                println!("{:?}", item);
+            }
+        })
+    }
+}
+"#;
+
+#[cfg(feature = "cli")]
+fn program_main_source(program_contents: &str) -> String {
+    format!(
+        "{MAIN_PRELUDE}\n#[tokio::main] async fn main() {{ MarigoldFinish::finish(marigold::m!({program_contents}).await).await }}"
+    )
+}
+
+#[cfg(feature = "cli")]
 fn main() -> Result<()> {
     use MarigoldCommand::*;
 
@@ -473,8 +507,7 @@ fn main() -> Result<()> {
 
     std::fs::write(
         program_src_dir.join("main.rs"),
-        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}")
-            .as_str(),
+        program_main_source(&program_contents),
     )?;
 
     const MARIGOLD_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -555,6 +588,35 @@ tokio = {{ version = "1", features = ["full"]}}
     };
 
     std::process::exit(exit_status.code().unwrap_or(0));
+}
+
+#[cfg(all(test, feature = "cli"))]
+mod wrapper_tests {
+    use super::{program_main_source, MAIN_PRELUDE};
+
+    #[test]
+    fn wraps_the_program_verbatim_and_finishes_what_it_yields() {
+        assert_eq!(
+            program_main_source("range(0, 3).return"),
+            format!(
+                "{MAIN_PRELUDE}\n#[tokio::main] async fn main() {{ MarigoldFinish::finish(marigold::m!(range(0, 3).return).await).await }}"
+            )
+        );
+    }
+
+    #[test]
+    fn braces_in_the_program_are_not_interpreted() {
+        let program = "fn id(x: i32) -> i32 { let y = {x}; y }\nrange(0, 2).map(id).return";
+        let source = program_main_source(program);
+        assert!(source.contains(&format!("marigold::m!({program}).await")));
+    }
+
+    #[test]
+    fn the_prelude_finishes_both_shapes_of_program_value() {
+        assert!(MAIN_PRELUDE.contains("impl MarigoldFinish for () {"));
+        assert!(MAIN_PRELUDE.contains("stream::SelectAll<"));
+        assert!(MAIN_PRELUDE.contains("println!(\"{:?}\", item)"));
+    }
 }
 
 #[cfg(all(test, feature = "cli"))]
