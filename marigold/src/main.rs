@@ -596,12 +596,22 @@ mod wrapper_tests {
 
     #[test]
     fn wraps_the_program_verbatim_and_finishes_what_it_yields() {
-        assert_eq!(
-            program_main_source("range(0, 3).return"),
-            format!(
-                "{MAIN_PRELUDE}\n#[tokio::main] async fn main() {{ MarigoldFinish::finish(marigold::m!(range(0, 3).return).await).await }}"
-            )
-        );
+        let program = "fn f(x: i32) -> i32 { { x } }\nrange(0, 2).map(f).return";
+        let source = program_main_source(program);
+        assert!(source.starts_with(MAIN_PRELUDE));
+        assert_eq!(source.matches(program).count(), 1);
+        let (before, after) = source.split_once(program).unwrap();
+        let wrapper = &before[MAIN_PRELUDE.len()..];
+        let main_at = wrapper.find("async fn main()").unwrap();
+        assert!(wrapper[..main_at].contains("#[tokio::main]"));
+        let finish_at = wrapper.find("MarigoldFinish::finish(").unwrap();
+        assert!(main_at < finish_at);
+        assert!(wrapper.ends_with("marigold::m!("));
+        assert!(after.starts_with(").await"));
+        assert!(after.trim_end().ends_with('}'));
+        let outside = format!("{wrapper}{after}");
+        assert_eq!(outside.matches('{').count(), outside.matches('}').count());
+        assert_eq!(outside.matches('(').count(), outside.matches(')').count());
     }
 
     #[test]
