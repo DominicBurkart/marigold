@@ -105,8 +105,10 @@ Output:
 
 Numbers print as plain numbers. Strings print quoted, and arrays, structs and
 enums print in their Debug form (`[1, 2]`), so use `write_file` with `csv`
-when a program should produce CSV rows. A program may mix `.return` and `write_file`
-streams: the returned items are printed and the files are written.
+when a program should produce CSV rows. A program may mix `.return` and
+`write_file` streams: the returned items are printed and the files are written.
+When a program has several `.return` streams, their items are interleaved as
+they arrive, so the order across streams is unspecified.
 
 `marigold run` builds the program against the published `marigold` crate that
 matches the installed CLI version. To build against a local checkout instead,
