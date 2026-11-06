@@ -6,6 +6,7 @@ ignore = [
     "RUSTSEC-2026-0097",
     # async-std discontinued - marigold's own optional async-std runtime feature; no maintained drop-in, tracked separately
     "RUSTSEC-2025-0052",
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils is unmaintained with no safe upgrade; it is a dependency of marigold-impl and async-std" },
 ]
 
 [licenses]
