@@ -1,0 +1,18 @@
+[identity]
+name = "auditor"
+description = "Adversarially reviews every proposed agent spawn; blocks misaligned spawns and escalates when no card in the catalog fits."
+loop = "inner"
+model = "gemma4:e4b"
+system_prompt = "prompts/auditor.md"
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = []
+read_paths = []
+max_effect = "none"
+tools = []
+
+[limits]
+max_iterations = 1
+max_wall_clock_secs = 120
+max_concurrent = 4
