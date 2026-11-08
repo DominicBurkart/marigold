@@ -1,0 +1,18 @@
+[identity]
+name = "pr-shepherd"
+description = "Commits finished work, pushes the branch and opens a draft pull request."
+loop = "middle"
+model = "gemma4:e4b"
+system_prompt = "prompts/pr-shepherd.md"
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = []
+read_paths = ["marigold/**", "marigold-macros/**", "marigold-grammar/**", "marigold-lsp/**", "marigold-impl/**", "tests/**", "examples/**", "integrations/**", "docs/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "deny.toml", "codecov.yml", "README.md", "install.sh", "publish.sh"]
+max_effect = "repository"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "git_commit", "git_push_branch", "github_pr_open", "github_pr_comments"]
+
+[limits]
+max_iterations = 100
+max_wall_clock_secs = 1800
+max_concurrent = 2
