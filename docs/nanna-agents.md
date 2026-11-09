@@ -86,8 +86,32 @@ fails to parse. It is not wired into CI.
   and `delegate` load the global catalog alone, so a running task gets the base
   card, not the narrowed one (DominicBurkart/nanna-coder#931).
 - There is no per-card container field (DominicBurkart/nanna-coder#1012). The
-  per-repo image comes from the flake `devContainerImage`. nanna runs a task in
-  a dev container only when the repository has both `flake.nix` and
-  `.devcontainer/`. This repository has neither, so adding them is a
-  prerequisite for running these cards in a container, and for the `cargo_*`
-  tools, which exist only in the container registry.
+  per-repo image comes from the flake `devContainerImage`.
+
+## Container
+
+nanna runs a task in a dev container only when the repository has both
+`flake.nix` and `.devcontainer/`. This repository now has both:
+
+| Path | Role |
+| --- | --- |
+| `flake.nix` | Exposes `packages.<system>.devContainerImage` (nix2container, x86_64 and aarch64 linux) and a `devShells.default`. |
+| `flake.lock` | Pins nixpkgs, rust-overlay and nix2container. |
+| `.devcontainer/devcontainer.json` | Opt-in marker; nanna only checks that the directory exists. |
+| `.nanna/protected.toml` | Declares `.inchworm/**` as an extra protected glob. |
+| `.nanna/prompt.md` | Per-project prompt: workspace layout and the checks CI and the pre-commit hook run. |
+
+The image carries the toolchain read from `rust-toolchain.toml` through
+`rust-bin.fromRustupToolchainFile` (stable, with rustfmt and clippy), a C
+toolchain, `pkg-config`, OpenSSL, zlib, git and coreutils. It sets
+`CARGO_HOME=/tmp/cargo` and `MARIGOLD_WORKSPACE_PATH=/workspace/marigold`, which
+`cargo_check`, `cargo_test` and `cargo_build` need to compile the workspace.
+Build it with `nix build .#devContainerImage`.
+
+`flake.nix`, `flake.lock` and `.devcontainer/**` are in nanna's fixed protected
+set, so an agent cannot edit them.
+
+CI does not use the flake: no workflow under `.github/workflows` invokes `nix`
+or references `flake.nix`, so the required checks are unaffected. The Rust
+toolchain used by CI still comes from `rust-toolchain.toml`; the flake only
+reads that file.
