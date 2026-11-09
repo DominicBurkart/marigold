@@ -27,7 +27,7 @@ or below the base; `scope.repos`, `scope.paths`, `scope.tools` and
 is rejected, and `auditor` cannot be overridden. Installing the base is a human
 step on the host that runs nanna:
 
-```
+```sh
 mkdir -p ~/.config/nanna/agents
 cp -r .nanna/catalog/. ~/.config/nanna/agents/
 ```
@@ -46,7 +46,8 @@ Write scopes (`paths`) use the workspace crates: `marigold`, `marigold-macros`,
 | `docs-writer` | inner | `docs/**`, `README.md` | workspace | `read_file`, `write_file`, `list_directory`, `search`, `git_status`, `git_diff` |
 | `auditor` | inner | none | none | none (base only, cannot be overridden) |
 
-All cards use model `gemma4:e4b` and repository `github.com/DominicBurkart/marigold`.
+All cards use model `gemma4:e4b` and repository
+`github.com/DominicBurkart/marigold`.
 `rust-implementer` has no network: its ceiling is workspace and it is given no
 `github_*` tool. `pr-shepherd` is the only card with the repository ceiling.
 Its four tools (`git_commit`, `git_push_branch`, `github_pr_open`,
@@ -71,7 +72,7 @@ credentials, not something an agent should hold a card for.
 
 ## Listing and verifying
 
-```
+```sh
 scripts/check_nanna_agents.sh
 ```
 
