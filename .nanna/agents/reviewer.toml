@@ -1,0 +1,18 @@
+[identity]
+name = "reviewer"
+description = "Reads a marigold change and reports findings; writes nothing."
+loop = "middle"
+model = "gemma4:e4b"
+system_prompt = { inline = "You review only. You cannot write files or run commands. Report correctness, public-API compatibility and test-coverage findings with file and line references." }
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = []
+read_paths = ["marigold/**", "marigold-macros/**", "marigold-grammar/**", "marigold-lsp/**", "marigold-impl/**", "tests/**", "examples/**", "integrations/**", "docs/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "deny.toml", "README.md"]
+max_effect = "none"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff"]
+
+[limits]
+max_iterations = 60
+max_wall_clock_secs = 900
+max_concurrent = 1
