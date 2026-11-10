@@ -1,1 +1,1 @@
-extra = [".inchworm/**"]
+extra = [".inchworm/**", "publish.sh", ".github/**"]
