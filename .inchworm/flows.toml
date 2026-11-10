@@ -1,0 +1,41 @@
+[[flow]]
+name = "issue"
+trigger = { kind = "label", label = "inchworm" }
+base = "main"
+max_attempts = 3
+
+[[flow.step]]
+name = "implement"
+identity = "rust-implementer"
+
+[[flow.step]]
+name = "publish"
+identity = "pr-shepherd"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 400
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[[flow.judge]]
+kind = "llm"
+rubric = ".inchworm/rubric.md"
+model = "gemma4:e4b"
+min_score = 7
+
+[flow.outcome]
+mode = "draft_pr"
+required_checks = [
+  "Aarch64 Build",
+  "Linux ARMv7 Build",
+  "Linux x86 Build",
+  "Mac x86_64 Build",
+  "Windows x86_64 Build",
+  "WASM Build",
+  "Tests",
+  "Benches",
+  "style hooks",
+]
