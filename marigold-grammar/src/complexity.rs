@@ -379,9 +379,12 @@ fn parse_base_complexity(s: &str) -> Result<ComplexityClass, String> {
     }
 }
 
+pub type SizeBindings = BTreeMap<String, BigUint>;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Symbolic {
     Constant(BigUint),
+    Param(String),
     Unknown,
     Filtered(Box<Symbolic>),
     Permutations { n: Box<Symbolic>, k: u64 },
@@ -393,34 +396,39 @@ pub enum Symbolic {
 
 impl Symbolic {
     pub fn try_evaluate(&self) -> Option<BigUint> {
+        self.evaluate(&SizeBindings::new())
+    }
+
+    pub fn evaluate(&self, bindings: &SizeBindings) -> Option<BigUint> {
         match self {
             Symbolic::Constant(v) => Some(v.clone()),
+            Symbolic::Param(name) => bindings.get(name).cloned(),
             Symbolic::Unknown => None,
             Symbolic::Filtered(_) => None,
             Symbolic::Permutations { n, k } => {
-                let n_val = n.try_evaluate()?;
+                let n_val = n.evaluate(bindings)?;
                 let k_val = *k;
                 Some(falling_factorial(&n_val, k_val))
             }
             Symbolic::PermutationsWithReplacement { n, k } => {
-                let n_val = n.try_evaluate()?;
+                let n_val = n.evaluate(bindings)?;
                 let k_val = *k;
                 Some(n_val.pow(k_val as u32))
             }
             Symbolic::Combinations { n, k } => {
-                let n_val = n.try_evaluate()?;
+                let n_val = n.evaluate(bindings)?;
                 let k_val = *k;
                 Some(binomial(&n_val, k_val))
             }
             Symbolic::Min(a, b) => {
-                let a_val = a.try_evaluate()?;
-                let b_val = b.try_evaluate()?;
+                let a_val = a.evaluate(bindings)?;
+                let b_val = b.evaluate(bindings)?;
                 Some(a_val.min(b_val))
             }
             Symbolic::Sum(parts) => {
                 let mut total = BigUint::zero();
                 for part in parts {
-                    total += part.try_evaluate()?;
+                    total += part.evaluate(bindings)?;
                 }
                 Some(total)
             }
@@ -429,7 +437,7 @@ impl Symbolic {
 
     pub fn classify_as_time(&self) -> ComplexityClass {
         match self {
-            Symbolic::Constant(_) => ComplexityClass::O1,
+            Symbolic::Constant(_) | Symbolic::Param(_) => ComplexityClass::O1,
             Symbolic::Unknown => ComplexityClass::Unknown,
             Symbolic::Filtered(inner) => inner.classify_as_time(),
             Symbolic::Permutations { k, .. } => ComplexityClass::OPermutational(*k),
@@ -452,7 +460,7 @@ impl Symbolic {
     pub fn contains_unknown(&self) -> bool {
         match self {
             Symbolic::Unknown => true,
-            Symbolic::Constant(_) => false,
+            Symbolic::Constant(_) | Symbolic::Param(_) => false,
             Symbolic::Filtered(inner) => inner.contains_unknown(),
             Symbolic::Permutations { n, .. }
             | Symbolic::PermutationsWithReplacement { n, .. }
@@ -463,31 +471,38 @@ impl Symbolic {
     }
 
     pub fn upper_bound(&self) -> Option<BigUint> {
+        self.upper_bound_with(&SizeBindings::new())
+    }
+
+    pub fn upper_bound_with(&self, bindings: &SizeBindings) -> Option<BigUint> {
         match self {
             Symbolic::Constant(v) => Some(v.clone()),
+            Symbolic::Param(name) => bindings.get(name).cloned(),
             Symbolic::Unknown => None,
-            Symbolic::Filtered(inner) => inner.upper_bound(),
+            Symbolic::Filtered(inner) => inner.upper_bound_with(bindings),
             Symbolic::Permutations { n, k } => {
-                let n_val = n.upper_bound()?;
+                let n_val = n.upper_bound_with(bindings)?;
                 Some(falling_factorial(&n_val, *k))
             }
             Symbolic::PermutationsWithReplacement { n, k } => {
-                let n_val = n.upper_bound()?;
+                let n_val = n.upper_bound_with(bindings)?;
                 Some(n_val.pow(*k as u32))
             }
             Symbolic::Combinations { n, k } => {
-                let n_val = n.upper_bound()?;
+                let n_val = n.upper_bound_with(bindings)?;
                 Some(binomial(&n_val, *k))
             }
-            Symbolic::Min(a, b) => match (a.upper_bound(), b.upper_bound()) {
-                (Some(av), Some(bv)) => Some(av.min(bv)),
-                (Some(v), None) | (None, Some(v)) => Some(v),
-                (None, None) => None,
-            },
+            Symbolic::Min(a, b) => {
+                match (a.upper_bound_with(bindings), b.upper_bound_with(bindings)) {
+                    (Some(av), Some(bv)) => Some(av.min(bv)),
+                    (Some(v), None) | (None, Some(v)) => Some(v),
+                    (None, None) => None,
+                }
+            }
             Symbolic::Sum(parts) => {
                 let mut total = BigUint::zero();
                 for part in parts {
-                    total += part.upper_bound()?;
+                    total += part.upper_bound_with(bindings)?;
                 }
                 Some(total)
             }
@@ -509,6 +524,7 @@ impl fmt::Display for Symbolic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Symbolic::Constant(v) => write!(f, "{v}"),
+            Symbolic::Param(name) => write!(f, "${name}"),
             Symbolic::Unknown => write!(f, "?"),
             Symbolic::Filtered(inner) => write!(f, "\u{2264}{inner}"),
             Symbolic::Permutations { n, k } => write!(f, "P({n}, {k})"),
@@ -602,22 +618,18 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
         }
         Rule::symbolic_perm_rep => {
             let mut inner = pair.into_inner();
-            let n_str = inner
+            let n_pair = inner
                 .next()
-                .ok_or_else(|| "Missing perm_rep n".to_string())?
-                .as_str();
+                .ok_or_else(|| "Missing perm_rep n".to_string())?;
             let k_str = inner
                 .next()
                 .ok_or_else(|| "Missing perm_rep k".to_string())?
                 .as_str();
-            let n: BigUint = n_str
-                .parse()
-                .map_err(|_| "Invalid perm_rep n value".to_string())?;
             let k: u64 = k_str
                 .parse()
                 .map_err(|_| "Invalid perm_rep k value".to_string())?;
             Ok(Symbolic::PermutationsWithReplacement {
-                n: Box::new(Symbolic::Constant(n)),
+                n: Box::new(parse_symbolic_pair(n_pair)?),
                 k,
             })
         }
@@ -641,6 +653,7 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
                 .map_err(|_| "Invalid constant".to_string())?;
             Ok(Symbolic::Constant(v))
         }
+        Rule::symbolic_param => Ok(Symbolic::Param(pair.as_str()[1..].to_string())),
         Rule::symbolic_unknown => Ok(Symbolic::Unknown),
         _ => Err(format!("Unexpected rule: {:?}", pair.as_rule())),
     }
