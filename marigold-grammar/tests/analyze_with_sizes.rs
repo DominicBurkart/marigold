@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use marigold_grammar::complexity::{ComplexityClass, SizeBindings};
+use marigold_grammar::complexity::{ComplexityClass, SizeBindings, SizeName};
 use marigold_grammar::sizes::{
     InputSizes, ReasonCode, Resolution, ResolutionKind, SizeAnalysisError, StreamResolution,
     SymbolicAnalysis,
@@ -47,7 +47,7 @@ fn last(stream: &StreamResolution) -> &Resolution {
 }
 
 fn at(n: u64) -> SizeBindings {
-    SizeBindings::from([("n".to_string(), BigUint::from(n))])
+    SizeBindings::from([(SizeName::new("n").unwrap(), BigUint::from(n))])
 }
 
 fn big(value: u64) -> Option<BigUint> {

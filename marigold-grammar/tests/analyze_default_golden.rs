@@ -149,7 +149,7 @@ fn default_analyze_output_matches_the_committed_goldens() {
 
     assert!(
         mismatches.is_empty() && stale.is_empty(),
-        "default analyze output changed (re-run with {BLESS_VARIABLE}=1 only for a deliberate change):\n{}\nstale goldens: {stale:?}",
+        "default analyze output changed.\n{}\nstale goldens: {stale:?}\nThese goldens pin the output that marigold-lsp, the MCP adapter, the CLI and the README consume. If the change is deliberate, re-bless with `{BLESS_VARIABLE}=1 cargo test -p marigold-grammar --test analyze_default_golden`, then review the diff of every changed file under tests/golden_analyze/ and explain each one in the pull request. Do not bless to make this test pass.",
         mismatches.join("\n")
     );
 }

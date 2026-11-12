@@ -7,7 +7,8 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
 use crate::complexity::{
-    analyze_nodes_with, input_cardinality, input_nodes, ProgramComplexity, SizeBindings, Symbolic,
+    analyze_nodes_with, input_cardinality, input_nodes, ProgramComplexity, SizeBindings, SizeName,
+    Symbolic,
 };
 use crate::nodes::{StreamFunctionKind, TypedExpression};
 use crate::parser::MarigoldParseError;
@@ -52,14 +53,51 @@ fn one() -> Symbolic {
 }
 
 fn cap(expression: Symbolic, limit: u64) -> Symbolic {
-    match expression {
-        Symbolic::Constant(value) => Symbolic::Constant(value.min(BigUint::from(limit))),
-        other => Symbolic::Min(
-            Box::new(other),
-            Box::new(Symbolic::Constant(BigUint::from(limit))),
-        ),
+    Symbolic::Min(
+        Box::new(expression),
+        Box::new(Symbolic::Constant(BigUint::from(limit))),
+    )
+}
+
+fn simplify(expression: Symbolic) -> Symbolic {
+    match expression.try_evaluate() {
+        Some(value) => Symbolic::Constant(value),
+        None => expression,
     }
 }
+
+fn monotone_only(expression: &Symbolic) -> bool {
+    match expression {
+        Symbolic::Constant(_) | Symbolic::Param(_) => true,
+        Symbolic::Permutations { n, .. }
+        | Symbolic::PermutationsWithReplacement { n, .. }
+        | Symbolic::Combinations { n, .. } => monotone_only(n),
+        Symbolic::Min(a, b) => monotone_only(a) && monotone_only(b),
+        Symbolic::Filtered(_) | Symbolic::Unknown | Symbolic::Sum(_) => false,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InvalidResolution {
+    NonMonotoneBound,
+    LowerAboveUpper,
+}
+
+impl fmt::Display for InvalidResolution {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InvalidResolution::NonMonotoneBound => write!(
+                f,
+                "a resolution bound may contain only constants, sizes, min and the combinatorial constructors"
+            ),
+            InvalidResolution::LowerAboveUpper => {
+                write!(f, "the lower bound of a resolution exceeds its upper bound")
+            }
+        }
+    }
+}
+
+impl std::error::Error for InvalidResolution {}
 
 fn map_size(expression: Symbolic, kind: &StreamFunctionKind) -> Symbolic {
     match kind {
@@ -82,10 +120,36 @@ fn map_size(expression: Symbolic, kind: &StreamFunctionKind) -> Symbolic {
 }
 
 impl Resolution {
-    pub fn new(lo: Symbolic, hi: Option<Symbolic>, mut reasons: Vec<ReasonCode>) -> Resolution {
+    pub(crate) fn new(
+        lo: Symbolic,
+        hi: Option<Symbolic>,
+        mut reasons: Vec<ReasonCode>,
+    ) -> Resolution {
         reasons.sort();
         reasons.dedup();
-        Resolution { lo, hi, reasons }
+        Resolution {
+            lo: simplify(lo),
+            hi: hi.map(simplify),
+            reasons,
+        }
+    }
+
+    pub fn checked(
+        lo: Symbolic,
+        hi: Option<Symbolic>,
+        reasons: Vec<ReasonCode>,
+    ) -> Result<Resolution, InvalidResolution> {
+        if !monotone_only(&lo) || hi.as_ref().is_some_and(|hi| !monotone_only(hi)) {
+            return Err(InvalidResolution::NonMonotoneBound);
+        }
+        if let (Some(low), Some(Some(high))) =
+            (lo.try_evaluate(), hi.as_ref().map(|h| h.try_evaluate()))
+        {
+            if low > high {
+                return Err(InvalidResolution::LowerAboveUpper);
+            }
+        }
+        Ok(Resolution::new(lo, hi, reasons))
     }
 
     pub fn of_source(source: &Symbolic) -> Resolution {
@@ -239,17 +303,7 @@ impl From<MarigoldParseError> for SizeAnalysisError {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct InputSizes {
-    by_ordinal: BTreeMap<usize, String>,
-}
-
-fn is_valid_param_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(first) if first.is_ascii_alphabetic() || first == '_' => {
-            chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-        }
-        _ => false,
-    }
+    by_ordinal: BTreeMap<usize, SizeName>,
 }
 
 impl InputSizes {
@@ -258,10 +312,8 @@ impl InputSizes {
     }
 
     pub fn bind(mut self, ordinal: usize, name: &str) -> Result<InputSizes, SizeAnalysisError> {
-        if !is_valid_param_name(name) {
-            return Err(SizeAnalysisError::InvalidParamName(name.to_string()));
-        }
-        self.by_ordinal.insert(ordinal, name.to_string());
+        let name = SizeName::new(name).map_err(|e| SizeAnalysisError::InvalidParamName(e.0))?;
+        self.by_ordinal.insert(ordinal, name);
         Ok(self)
     }
 }

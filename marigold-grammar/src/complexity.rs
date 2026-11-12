@@ -380,12 +380,65 @@ fn parse_base_complexity(s: &str) -> Result<ComplexityClass, String> {
     }
 }
 
-pub type SizeBindings = BTreeMap<String, BigUint>;
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SizeName(String);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidSizeName(pub String);
+
+impl fmt::Display for InvalidSizeName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:?} is not a valid size name: use an ASCII letter or underscore followed by letters, digits or underscores",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for InvalidSizeName {}
+
+impl SizeName {
+    pub fn new(name: &str) -> Result<SizeName, InvalidSizeName> {
+        let mut chars = name.chars();
+        let valid = match chars.next() {
+            Some(first) if first.is_ascii_alphabetic() || first == '_' => {
+                chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+            }
+            _ => false,
+        };
+        if valid {
+            Ok(SizeName(name.to_string()))
+        } else {
+            Err(InvalidSizeName(name.to_string()))
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SizeName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl FromStr for SizeName {
+    type Err = InvalidSizeName;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        SizeName::new(s)
+    }
+}
+
+pub type SizeBindings = BTreeMap<SizeName, BigUint>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Symbolic {
     Constant(BigUint),
-    Param(String),
+    Param(SizeName),
     Unknown,
     Filtered(Box<Symbolic>),
     Permutations { n: Box<Symbolic>, k: u64 },
@@ -654,7 +707,9 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
                 .map_err(|_| "Invalid constant".to_string())?;
             Ok(Symbolic::Constant(v))
         }
-        Rule::symbolic_param => Ok(Symbolic::Param(pair.as_str()[1..].to_string())),
+        Rule::symbolic_param => SizeName::new(&pair.as_str()[1..])
+            .map(Symbolic::Param)
+            .map_err(|e| e.to_string()),
         Rule::symbolic_unknown => Ok(Symbolic::Unknown),
         _ => Err(format!("Unexpected rule: {:?}", pair.as_rule())),
     }

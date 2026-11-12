@@ -1,6 +1,6 @@
-use marigold_grammar::complexity::{SizeBindings, Symbolic};
+use marigold_grammar::complexity::{SizeBindings, SizeName, Symbolic};
 use marigold_grammar::nodes::StreamFunctionKind;
-use marigold_grammar::sizes::{ReasonCode, Resolution, ResolutionKind};
+use marigold_grammar::sizes::{InvalidResolution, ReasonCode, Resolution, ResolutionKind};
 use num_bigint::BigUint;
 use num_traits::{One, ToPrimitive, Zero};
 use proptest::prelude::*;
@@ -11,11 +11,11 @@ fn constant(value: u64) -> Symbolic {
 }
 
 fn param(name: &str) -> Symbolic {
-    Symbolic::Param(name.to_string())
+    Symbolic::Param(SizeName::new(name).unwrap())
 }
 
 fn bind(n: u64) -> SizeBindings {
-    SizeBindings::from([("n".to_string(), BigUint::from(n))])
+    SizeBindings::from([(SizeName::new("n").unwrap(), BigUint::from(n))])
 }
 
 fn exact(value: u64) -> Resolution {
@@ -155,7 +155,7 @@ fn reasons_are_ordered_by_code_not_by_arrival() {
         fallible_first.reasons(),
         &[ReasonCode::OpaquePredicate, ReasonCode::FallibleItems]
     );
-    let built = Resolution::new(
+    let built = Resolution::checked(
         constant(0),
         None,
         vec![
@@ -164,7 +164,8 @@ fn reasons_are_ordered_by_code_not_by_arrival() {
             ReasonCode::OpaquePredicate,
             ReasonCode::UndeclaredStreamVariable,
         ],
-    );
+    )
+    .unwrap();
     assert_eq!(
         built.reasons(),
         &[
@@ -202,13 +203,7 @@ fn combinatorial_stages_apply_to_both_bounds() {
         .after(&StreamFunctionKind::Filter)
         .after(&StreamFunctionKind::Combinations(2));
     assert_eq!(filtered.kind(), ResolutionKind::Bounded);
-    assert_eq!(
-        filtered.lo(),
-        &Symbolic::Combinations {
-            n: Box::new(constant(0)),
-            k: 2
-        }
-    );
+    assert_eq!(filtered.lo(), &constant(0));
     assert_eq!(
         filtered.hi(),
         Some(&Symbolic::Combinations {
@@ -527,8 +522,8 @@ proptest! {
         let tight_hi = low + 3;
         let wide_lo = tight_lo.saturating_sub(grow_down);
         let wide_hi = tight_hi + grow_up;
-        let mut tight = Resolution::new(constant(tight_lo), Some(constant(tight_hi)), vec![]);
-        let mut wide = Resolution::new(constant(wide_lo), Some(constant(wide_hi)), vec![]);
+        let mut tight = Resolution::checked(constant(tight_lo), Some(constant(tight_hi)), vec![]).unwrap();
+        let mut wide = Resolution::checked(constant(wide_lo), Some(constant(wide_hi)), vec![]).unwrap();
         for kind in &stages {
             tight = tight.after(kind);
             wide = wide.after(kind);
@@ -566,4 +561,144 @@ fn the_reference_counters_agree_with_known_values() {
     assert_eq!(reference_binomial(&n(1), 2).to_u64(), Some(0));
     assert_eq!(reference_binomial(&n(7), 0).to_u64(), Some(1));
     assert_eq!(reference_power(&n(3), 4).to_u64(), Some(81));
+}
+
+#[test]
+fn a_constant_bound_prints_and_compares_as_the_constant() {
+    let filtered_then_permuted = symbolic_n()
+        .after(&StreamFunctionKind::Filter)
+        .after(&StreamFunctionKind::Permutations(3));
+    assert_eq!(filtered_then_permuted.lo(), &constant(0));
+    assert_eq!(filtered_then_permuted.lo().to_string(), "0");
+    assert_eq!(filtered_then_permuted.hi().unwrap().to_string(), "P($n, 3)");
+    assert_eq!(
+        serde_json::to_value(&filtered_then_permuted).unwrap()["lo"],
+        json!("0")
+    );
+
+    let concrete = exact(5).after(&StreamFunctionKind::Permutations(3));
+    assert_eq!(concrete.lo(), &constant(60));
+    assert_eq!(concrete.hi(), Some(&constant(60)));
+    assert_eq!(concrete.kind(), ResolutionKind::Exact);
+
+    let capped = exact(30).after(&StreamFunctionKind::KeepFirstN(5));
+    assert_eq!(capped.lo(), &constant(5));
+
+    let chained = exact(4)
+        .after(&StreamFunctionKind::Combinations(2))
+        .after(&StreamFunctionKind::PermutationsWithReplacement(2));
+    assert_eq!(chained.lo(), &constant(36));
+}
+
+#[test]
+fn a_symbolic_bound_is_not_simplified() {
+    let permuted = symbolic_n().after(&StreamFunctionKind::Permutations(3));
+    assert_eq!(permuted.lo().to_string(), "P($n, 3)");
+    let capped = symbolic_n().after(&StreamFunctionKind::KeepFirstN(5));
+    assert_eq!(capped.lo().to_string(), "min($n, 5)");
+}
+
+#[test]
+fn the_checked_constructor_accepts_valid_intervals_and_normalizes_them() {
+    let valid = Resolution::checked(
+        Symbolic::Permutations {
+            n: Box::new(constant(0)),
+            k: 3,
+        },
+        Some(param("n")),
+        vec![ReasonCode::OpaquePredicate, ReasonCode::OpaquePredicate],
+    )
+    .unwrap();
+    assert_eq!(valid.lo(), &constant(0));
+    assert_eq!(valid.reasons(), &[ReasonCode::OpaquePredicate]);
+    assert_eq!(valid.kind(), ResolutionKind::Bounded);
+
+    let open = Resolution::checked(constant(0), None, vec![ReasonCode::UnboundInput]).unwrap();
+    assert_eq!(open.kind(), ResolutionKind::Unresolvable);
+
+    let point = Resolution::checked(param("n"), Some(param("n")), vec![]).unwrap();
+    assert_eq!(point.kind(), ResolutionKind::Symbolic);
+}
+
+#[test]
+fn the_checked_constructor_rejects_bounds_that_break_the_lattice() {
+    let filtered = Symbolic::Filtered(Box::new(param("n")));
+    let sum = Symbolic::Sum(vec![param("n"), constant(1)]);
+    for bad in [filtered.clone(), Symbolic::Unknown, sum.clone()] {
+        assert_eq!(
+            Resolution::checked(bad.clone(), Some(param("n")), vec![]),
+            Err(InvalidResolution::NonMonotoneBound),
+            "lower bound {bad}"
+        );
+        assert_eq!(
+            Resolution::checked(constant(0), Some(bad.clone()), vec![]),
+            Err(InvalidResolution::NonMonotoneBound),
+            "upper bound {bad}"
+        );
+        for nested in [
+            Symbolic::Permutations {
+                n: Box::new(bad.clone()),
+                k: 2,
+            },
+            Symbolic::PermutationsWithReplacement {
+                n: Box::new(bad.clone()),
+                k: 2,
+            },
+            Symbolic::Combinations {
+                n: Box::new(bad.clone()),
+                k: 2,
+            },
+        ] {
+            assert_eq!(
+                Resolution::checked(nested.clone(), Some(param("n")), vec![]),
+                Err(InvalidResolution::NonMonotoneBound),
+                "nested {nested}"
+            );
+        }
+        let capped = Symbolic::Min(Box::new(bad.clone()), Box::new(constant(3)));
+        assert_eq!(
+            Resolution::checked(constant(0), Some(capped), vec![]),
+            Err(InvalidResolution::NonMonotoneBound)
+        );
+    }
+    assert_eq!(
+        Resolution::checked(constant(5), Some(constant(4)), vec![]),
+        Err(InvalidResolution::LowerAboveUpper)
+    );
+    assert!(Resolution::checked(constant(4), Some(constant(4)), vec![]).is_ok());
+    assert!(Resolution::checked(constant(4), Some(constant(5)), vec![]).is_ok());
+    assert_eq!(
+        Resolution::checked(
+            Symbolic::Combinations {
+                n: Box::new(constant(10)),
+                k: 2
+            },
+            Some(constant(44)),
+            vec![]
+        ),
+        Err(InvalidResolution::LowerAboveUpper)
+    );
+    assert!(InvalidResolution::NonMonotoneBound.to_string().len() > 10);
+    assert!(InvalidResolution::LowerAboveUpper.to_string().len() > 10);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(512))]
+
+    #[test]
+    fn every_resolution_the_api_can_produce_passes_its_own_checked_constructor(
+        source in source_strategy(),
+        stages in prop::collection::vec(kind_strategy(), 0..5),
+    ) {
+        let mut resolution = source;
+        for kind in &stages {
+            resolution = resolution.after(kind);
+            let rebuilt = Resolution::checked(
+                resolution.lo().clone(),
+                resolution.hi().cloned(),
+                resolution.reasons().to_vec(),
+            );
+            prop_assert_eq!(rebuilt, Ok(resolution.clone()));
+        }
+    }
 }

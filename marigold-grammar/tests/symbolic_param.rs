@@ -1,12 +1,18 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use marigold_grammar::complexity::{Cardinality, ComplexityClass, SizeBindings, Symbolic};
+use marigold_grammar::complexity::{
+    Cardinality, ComplexityClass, SizeBindings, SizeName, Symbolic,
+};
 use num_bigint::BigUint;
 use proptest::prelude::*;
 
+fn size_name(name: &str) -> SizeName {
+    SizeName::new(name).unwrap_or_else(|e| panic!("{e}"))
+}
+
 fn param(name: &str) -> Symbolic {
-    Symbolic::Param(name.to_string())
+    Symbolic::Param(size_name(name))
 }
 
 fn constant(value: u64) -> Symbolic {
@@ -16,7 +22,7 @@ fn constant(value: u64) -> Symbolic {
 fn bind(pairs: &[(&str, u64)]) -> SizeBindings {
     pairs
         .iter()
-        .map(|(name, value)| ((*name).to_string(), BigUint::from(*value)))
+        .map(|(name, value)| (size_name(name), BigUint::from(*value)))
         .collect()
 }
 
@@ -236,12 +242,15 @@ fn the_existing_entry_points_agree_with_evaluation_under_empty_bindings() {
     }
 }
 
-fn param_names() -> impl Strategy<Value = String> {
+fn param_names() -> impl Strategy<Value = SizeName> {
     prop_oneof![
-        Just("n".to_string()),
-        Just("m".to_string()),
-        Just("rows".to_string()),
-        Just("x_1".to_string()),
+        4 => prop_oneof![
+            Just("n"),
+            Just("m"),
+            Just("rows"),
+            Just("x_1"),
+        ].prop_map(size_name),
+        1 => "[A-Za-z_][A-Za-z0-9_]{0,6}".prop_map(|name| size_name(&name)),
     ]
 }
 
@@ -361,11 +370,11 @@ proptest! {
     ) {
         let smaller: SizeBindings = ["n", "m", "rows", "x_1"]
             .iter()
-            .map(|name| ((*name).to_string(), BigUint::from(low)))
+            .map(|name| (size_name(name), BigUint::from(low)))
             .collect();
         let larger: SizeBindings = ["n", "m", "rows", "x_1"]
             .iter()
-            .map(|name| ((*name).to_string(), BigUint::from(low + step)))
+            .map(|name| (size_name(name), BigUint::from(low + step)))
             .collect();
         if let (Some(a), Some(b)) = (expression.evaluate(&smaller), expression.evaluate(&larger)) {
             prop_assert!(a <= b);
@@ -378,6 +387,70 @@ proptest! {
         }
         if expression.upper_bound_with(&smaller).is_none() {
             prop_assert!(expression.upper_bound_with(&larger).is_none());
+        }
+    }
+}
+
+#[test]
+fn a_size_name_is_an_identifier() {
+    for name in ["n", "_", "rows_2", "N", "x1", "_9", "abc_DEF_123"] {
+        let parsed = SizeName::new(name).unwrap_or_else(|e| panic!("{name:?}: {e}"));
+        assert_eq!(parsed.as_str(), name);
+        assert_eq!(parsed.to_string(), name);
+        assert_eq!(SizeName::from_str(name).unwrap(), parsed);
+    }
+    for name in [
+        "",
+        "1n",
+        "a-b",
+        "a b",
+        "$n",
+        "n!",
+        "\u{00e9}",
+        "a\u{00e9}",
+        "n\u{0663}",
+        " n",
+        "n ",
+        "a.b",
+    ] {
+        assert!(SizeName::new(name).is_err(), "{name:?} should be rejected");
+        assert!(
+            SizeName::from_str(name).is_err(),
+            "{name:?} should be rejected"
+        );
+        assert_eq!(
+            SizeName::new(name).unwrap_err().to_string().contains(name),
+            true
+        );
+    }
+}
+
+#[test]
+fn size_names_order_and_compare_by_text() {
+    assert!(size_name("a") < size_name("b"));
+    assert_eq!(size_name("n"), size_name("n"));
+    assert_ne!(size_name("n"), size_name("N"));
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(512))]
+
+    #[test]
+    fn every_valid_name_round_trips_as_a_param(name in "[A-Za-z_][A-Za-z0-9_]{0,12}") {
+        let expression = permutations(with_replacement(param(&name), 2), 2);
+        let text = expression.to_string();
+        prop_assert_eq!(Symbolic::from_str(&text).unwrap(), expression);
+        prop_assert_eq!(
+            Symbolic::from_str(&format!("${name}")).unwrap(),
+            param(&name)
+        );
+    }
+
+    #[test]
+    fn names_the_type_rejects_never_parse_as_params(name in "[^A-Za-z_][ -~]{0,6}|[A-Za-z_][A-Za-z0-9_]{0,3}[^A-Za-z0-9_][ -~]{0,3}") {
+        prop_assert!(SizeName::new(&name).is_err());
+        if let Ok(parsed) = Symbolic::from_str(&format!("${name}")) {
+            prop_assert!(!matches!(parsed, Symbolic::Param(ref p) if p.as_str() == name));
         }
     }
 }
