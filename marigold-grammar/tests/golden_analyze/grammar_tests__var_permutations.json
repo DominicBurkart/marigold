@@ -1,38 +1,38 @@
 {
   "analyze": {
-    "program_cardinality": "?",
-    "program_exact_space": "O(?)",
-    "program_exact_time": "O(n!/(n-2)!)",
-    "program_space": "O(?)",
-    "program_time": "O(n!/(n-2)!)",
     "streams": [
       {
-        "cardinality": "?",
-        "collects_input": true,
         "description": "input.permutations(2).return",
-        "exact_space": "O(?)",
+        "cardinality": "?",
+        "time_class": "O(n!/(n-2)!)",
         "exact_time": "O(n!/(n-2)!)",
         "space_class": "O(?)",
-        "time_class": "O(n!/(n-2)!)"
+        "exact_space": "O(?)",
+        "collects_input": true
       }
-    ]
+    ],
+    "program_time": "O(n!/(n-2)!)",
+    "program_exact_time": "O(n!/(n-2)!)",
+    "program_space": "O(?)",
+    "program_exact_space": "O(?)",
+    "program_cardinality": "?"
   },
   "nodes": [
     {
+      "name": null,
+      "expr_index": 0,
+      "range": {
+        "start": 0,
+        "end": 62
+      },
       "complexity": {
-        "cardinality": "?",
-        "collects_input": true,
         "description": "input.permutations(2).return",
-        "exact_space": "O(?)",
+        "cardinality": "?",
+        "time_class": "O(n!/(n-2)!)",
         "exact_time": "O(n!/(n-2)!)",
         "space_class": "O(?)",
-        "time_class": "O(n!/(n-2)!)"
-      },
-      "expr_index": 0,
-      "name": null,
-      "range": {
-        "end": 62,
-        "start": 0
+        "exact_space": "O(?)",
+        "collects_input": true
       }
     }
   ]

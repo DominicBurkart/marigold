@@ -1,38 +1,38 @@
 {
   "analyze": {
-    "program_cardinality": "20",
-    "program_exact_space": "O(3)",
-    "program_exact_time": "O(3)",
-    "program_space": "O(1)",
-    "program_time": "O(1)",
     "streams": [
       {
-        "cardinality": "20",
-        "collects_input": true,
         "description": "input.permutations_with_replacement(3).combinations(5).keep_first_n(20, ...).return",
-        "exact_space": "O(3)",
+        "cardinality": "20",
+        "time_class": "O(1)",
         "exact_time": "O(3)",
         "space_class": "O(1)",
-        "time_class": "O(1)"
+        "exact_space": "O(3)",
+        "collects_input": true
       }
-    ]
+    ],
+    "program_time": "O(1)",
+    "program_exact_time": "O(3)",
+    "program_space": "O(1)",
+    "program_exact_space": "O(3)",
+    "program_cardinality": "20"
   },
   "nodes": [
     {
+      "name": null,
+      "expr_index": 0,
+      "range": {
+        "start": 0,
+        "end": 104
+      },
       "complexity": {
-        "cardinality": "20",
-        "collects_input": true,
         "description": "input.permutations_with_replacement(3).combinations(5).keep_first_n(20, ...).return",
-        "exact_space": "O(3)",
+        "cardinality": "20",
+        "time_class": "O(1)",
         "exact_time": "O(3)",
         "space_class": "O(1)",
-        "time_class": "O(1)"
-      },
-      "expr_index": 0,
-      "name": null,
-      "range": {
-        "end": 104,
-        "start": 0
+        "exact_space": "O(3)",
+        "collects_input": true
       }
     }
   ]

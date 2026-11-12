@@ -1,38 +1,38 @@
 {
   "analyze": {
-    "program_cardinality": "min(≤100, 5)",
-    "program_exact_space": "O(2)",
-    "program_exact_time": "O(n)",
-    "program_space": "O(1)",
-    "program_time": "O(n)",
     "streams": [
       {
-        "cardinality": "min(≤100, 5)",
-        "collects_input": false,
         "description": "input.filter(...).keep_first_n(5, ...).return",
-        "exact_space": "O(2)",
+        "cardinality": "min(≤100, 5)",
+        "time_class": "O(n)",
         "exact_time": "O(n)",
         "space_class": "O(1)",
-        "time_class": "O(n)"
+        "exact_space": "O(2)",
+        "collects_input": false
       }
-    ]
+    ],
+    "program_time": "O(n)",
+    "program_exact_time": "O(n)",
+    "program_space": "O(1)",
+    "program_exact_space": "O(2)",
+    "program_cardinality": "min(≤100, 5)"
   },
   "nodes": [
     {
+      "name": null,
+      "expr_index": 0,
+      "range": {
+        "start": 0,
+        "end": 61
+      },
       "complexity": {
-        "cardinality": "min(≤100, 5)",
-        "collects_input": false,
         "description": "input.filter(...).keep_first_n(5, ...).return",
-        "exact_space": "O(2)",
+        "cardinality": "min(≤100, 5)",
+        "time_class": "O(n)",
         "exact_time": "O(n)",
         "space_class": "O(1)",
-        "time_class": "O(n)"
-      },
-      "expr_index": 0,
-      "name": null,
-      "range": {
-        "end": 61,
-        "start": 0
+        "exact_space": "O(2)",
+        "collects_input": false
       }
     }
   ]

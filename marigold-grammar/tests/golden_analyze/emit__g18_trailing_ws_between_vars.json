@@ -1,0 +1,73 @@
+{
+  "analyze": {
+    "streams": [
+      {
+        "description": "y.return",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    ],
+    "program_time": "O(1)",
+    "program_exact_time": "O(1)",
+    "program_space": "O(1)",
+    "program_exact_space": "O(1)",
+    "program_cardinality": "5"
+  },
+  "nodes": [
+    {
+      "name": "x",
+      "expr_index": 0,
+      "range": {
+        "start": 2,
+        "end": 17
+      },
+      "complexity": {
+        "description": "x = input",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    },
+    {
+      "name": "y",
+      "expr_index": 1,
+      "range": {
+        "start": 28,
+        "end": 40
+      },
+      "complexity": {
+        "description": "y = x.map(...)",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    },
+    {
+      "name": null,
+      "expr_index": 2,
+      "range": {
+        "start": 45,
+        "end": 53
+      },
+      "complexity": {
+        "description": "y.return",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    }
+  ]
+}

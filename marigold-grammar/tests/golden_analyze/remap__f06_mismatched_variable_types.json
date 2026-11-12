@@ -1,0 +1,99 @@
+{
+  "analyze": {
+    "streams": [
+      {
+        "description": "xs.write_file(...)",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      },
+      {
+        "description": "ys.write_file(...)",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(2)",
+        "space_class": "O(1)",
+        "exact_space": "O(2)",
+        "collects_input": false
+      }
+    ],
+    "program_time": "O(1)",
+    "program_exact_time": "O(3)",
+    "program_space": "O(1)",
+    "program_exact_space": "O(3)",
+    "program_cardinality": "5"
+  },
+  "nodes": [
+    {
+      "name": "xs",
+      "expr_index": 2,
+      "range": {
+        "start": 78,
+        "end": 103
+      },
+      "complexity": {
+        "description": "xs = input.map(...)",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    },
+    {
+      "name": "ys",
+      "expr_index": 3,
+      "range": {
+        "start": 104,
+        "end": 121
+      },
+      "complexity": {
+        "description": "ys = xs.map(...)",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(2)",
+        "space_class": "O(1)",
+        "exact_space": "O(2)",
+        "collects_input": false
+      }
+    },
+    {
+      "name": null,
+      "expr_index": 4,
+      "range": {
+        "start": 122,
+        "end": 149
+      },
+      "complexity": {
+        "description": "xs.write_file(...)",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    },
+    {
+      "name": null,
+      "expr_index": 5,
+      "range": {
+        "start": 150,
+        "end": 177
+      },
+      "complexity": {
+        "description": "ys.write_file(...)",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(2)",
+        "space_class": "O(1)",
+        "exact_space": "O(2)",
+        "collects_input": false
+      }
+    }
+  ]
+}

@@ -1,81 +1,81 @@
 {
   "analyze": {
-    "program_cardinality": "≤10",
-    "program_exact_space": "O(2)",
-    "program_exact_time": "O(n)",
-    "program_space": "O(1)",
-    "program_time": "O(n)",
     "streams": [
       {
-        "cardinality": "10",
-        "collects_input": false,
         "description": "digits.return",
-        "exact_space": "O(1)",
+        "cardinality": "10",
+        "time_class": "O(1)",
         "exact_time": "O(1)",
         "space_class": "O(1)",
-        "time_class": "O(1)"
+        "exact_space": "O(1)",
+        "collects_input": false
       },
       {
-        "cardinality": "≤10",
-        "collects_input": false,
         "description": "digits.filter(...).map(...).return",
-        "exact_space": "O(2)",
+        "cardinality": "≤10",
+        "time_class": "O(n)",
         "exact_time": "O(n)",
         "space_class": "O(1)",
-        "time_class": "O(n)"
+        "exact_space": "O(2)",
+        "collects_input": false
       }
-    ]
+    ],
+    "program_time": "O(n)",
+    "program_exact_time": "O(n)",
+    "program_space": "O(1)",
+    "program_exact_space": "O(2)",
+    "program_cardinality": "≤10"
   },
   "nodes": [
     {
-      "complexity": {
-        "cardinality": "10",
-        "collects_input": false,
-        "description": "digits = input",
-        "exact_space": "O(1)",
-        "exact_time": "O(1)",
-        "space_class": "O(1)",
-        "time_class": "O(1)"
-      },
-      "expr_index": 1,
       "name": "digits",
+      "expr_index": 1,
       "range": {
-        "end": 78,
-        "start": 57
-      }
-    },
-    {
+        "start": 57,
+        "end": 78
+      },
       "complexity": {
+        "description": "digits = input",
         "cardinality": "10",
-        "collects_input": false,
-        "description": "digits.return",
-        "exact_space": "O(1)",
+        "time_class": "O(1)",
         "exact_time": "O(1)",
         "space_class": "O(1)",
-        "time_class": "O(1)"
-      },
-      "expr_index": 2,
-      "name": null,
-      "range": {
-        "end": 98,
-        "start": 80
+        "exact_space": "O(1)",
+        "collects_input": false
       }
     },
     {
+      "name": null,
+      "expr_index": 2,
+      "range": {
+        "start": 80,
+        "end": 98
+      },
       "complexity": {
-        "cardinality": "≤10",
-        "collects_input": false,
+        "description": "digits.return",
+        "cardinality": "10",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    },
+    {
+      "name": null,
+      "expr_index": 3,
+      "range": {
+        "start": 100,
+        "end": 166
+      },
+      "complexity": {
         "description": "digits.filter(...).map(...).return",
-        "exact_space": "O(2)",
+        "cardinality": "≤10",
+        "time_class": "O(n)",
         "exact_time": "O(n)",
         "space_class": "O(1)",
-        "time_class": "O(n)"
-      },
-      "expr_index": 3,
-      "name": null,
-      "range": {
-        "end": 166,
-        "start": 100
+        "exact_space": "O(2)",
+        "collects_input": false
       }
     }
   ]
