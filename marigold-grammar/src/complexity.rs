@@ -1034,6 +1034,33 @@ pub(crate) fn analyze_nodes(
     ProgramComplexity,
     Vec<(usize, Option<String>, StreamComplexity)>,
 ) {
+    analyze_nodes_with(expressions, &|_, inp| input_cardinality(inp))
+}
+
+pub(crate) fn input_ordinals(expressions: &[TypedExpression]) -> Vec<Option<usize>> {
+    let mut next = 0;
+    expressions
+        .iter()
+        .map(|expr| match expr {
+            TypedExpression::StreamVariable(_)
+            | TypedExpression::UnnamedReturningStream(_)
+            | TypedExpression::UnnamedNonReturningStream(_) => {
+                next += 1;
+                Some(next - 1)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+pub(crate) fn analyze_nodes_with(
+    expressions: &[TypedExpression],
+    source_cardinality: &dyn Fn(usize, &crate::nodes::InputFunctionNode) -> Symbolic,
+) -> (
+    ProgramComplexity,
+    Vec<(usize, Option<String>, StreamComplexity)>,
+) {
+    let ordinals = input_ordinals(expressions);
     let mut nodes: Vec<(usize, Option<String>, StreamComplexity)> = Vec::new();
     let mut declared: std::collections::HashMap<String, PipelineState> =
         std::collections::HashMap::new();
@@ -1041,7 +1068,9 @@ pub(crate) fn analyze_nodes(
     for (expr_index, expr) in expressions.iter().enumerate() {
         match expr {
             TypedExpression::StreamVariable(v) => {
-                let state = PipelineState::from_source(input_cardinality(&v.inp)).extended(&v.funs);
+                let ordinal = ordinals[expr_index].expect("stream variable has an input");
+                let state = PipelineState::from_source(source_cardinality(ordinal, &v.inp))
+                    .extended(&v.funs);
                 let desc = if v.funs.is_empty() {
                     format!("{} = input", v.variable_name)
                 } else {
@@ -1107,7 +1136,8 @@ pub(crate) fn analyze_nodes(
                 } else {
                     format!("input.{funs_desc}.{out_desc}")
                 };
-                PipelineState::from_source(input_cardinality(&s.inp_and_funs.inp))
+                let ordinal = ordinals[expr_index].expect("unnamed stream has an input");
+                PipelineState::from_source(source_cardinality(ordinal, &s.inp_and_funs.inp))
                     .extended(&s.inp_and_funs.funs)
                     .finish(&desc)
             }
