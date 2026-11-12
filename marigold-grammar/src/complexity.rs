@@ -380,6 +380,16 @@ fn parse_base_complexity(s: &str) -> Result<ComplexityClass, String> {
     }
 }
 
+/// The name of an input size: an ASCII letter or underscore followed by ASCII letters, digits or
+/// underscores. It prints as `$name` inside a [`Symbolic`].
+///
+/// ```
+/// use marigold_grammar::complexity::SizeName;
+///
+/// assert_eq!(SizeName::new("rows_2").unwrap().as_str(), "rows_2");
+/// assert!(SizeName::new("2rows").is_err());
+/// assert!("a-b".parse::<SizeName>().is_err());
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SizeName(String);
 
@@ -433,6 +443,17 @@ impl FromStr for SizeName {
     }
 }
 
+/// Item counts for named sizes, used to evaluate a [`Symbolic`].
+///
+/// ```
+/// use marigold_grammar::complexity::{SizeBindings, SizeName, Symbolic};
+/// use num_bigint::BigUint;
+///
+/// let mut bindings = SizeBindings::new();
+/// bindings.insert(SizeName::new("n").unwrap(), BigUint::from(5u32));
+/// let permutations: Symbolic = "P($n, 2)".parse().unwrap();
+/// assert_eq!(permutations.evaluate(&bindings), Some(BigUint::from(20u32)));
+/// ```
 pub type SizeBindings = BTreeMap<SizeName, BigUint>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -454,6 +475,8 @@ impl Symbolic {
         self.evaluate(&SizeBindings::new())
     }
 
+    /// The exact item count under `bindings`, or `None` when an unbound size or an unknown or
+    /// filtered part makes it unknowable.
     pub fn evaluate(&self, bindings: &SizeBindings) -> Option<BigUint> {
         match self {
             Symbolic::Constant(v) => Some(v.clone()),
@@ -529,6 +552,19 @@ impl Symbolic {
         self.upper_bound_with(&SizeBindings::new())
     }
 
+    /// An upper bound on the item count under `bindings`: like [`Symbolic::evaluate`], except a
+    /// filtered part contributes the bound of what it filters.
+    ///
+    /// ```
+    /// use marigold_grammar::complexity::{SizeBindings, SizeName, Symbolic};
+    /// use num_bigint::BigUint;
+    ///
+    /// let filtered: Symbolic = "\u{2264}$n".parse().unwrap();
+    /// let bindings = SizeBindings::from([(SizeName::new("n").unwrap(), BigUint::from(5u32))]);
+    /// assert_eq!(filtered.evaluate(&bindings), None);
+    /// assert_eq!(filtered.upper_bound_with(&bindings), Some(BigUint::from(5u32)));
+    /// assert_eq!(filtered.upper_bound_with(&SizeBindings::new()), None);
+    /// ```
     pub fn upper_bound_with(&self, bindings: &SizeBindings) -> Option<BigUint> {
         match self {
             Symbolic::Constant(v) => Some(v.clone()),

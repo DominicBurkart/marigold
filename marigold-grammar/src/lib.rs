@@ -344,6 +344,24 @@ pub fn marigold_analyze(
     parser::PestParser::analyze(s)
 }
 
+/// Analyzes a program with the sizes of some inputs named, without executing it. Inputs are
+/// numbered from 0 in source order; see [`sizes`] for what the result says and assumes.
+///
+/// ```
+/// use marigold_grammar::marigold_analyze_with_sizes;
+/// use marigold_grammar::sizes::{InputSizes, ResolutionKind};
+///
+/// let src = "struct D { x: i32 }\nread_file(\"d.csv\", csv, struct=D).ok_or_panic().permutations(3).return";
+///
+/// let bound = marigold_analyze_with_sizes(src, &InputSizes::new().bind(0, "n").unwrap()).unwrap();
+/// let last = bound.streams[0].stages.last().unwrap();
+/// assert_eq!(last.resolution.kind(), ResolutionKind::Symbolic);
+/// assert_eq!(last.resolution.lo().to_string(), "P($n, 3)");
+///
+/// let unbound = marigold_analyze_with_sizes(src, &InputSizes::new()).unwrap();
+/// let last = unbound.streams[0].stages.last().unwrap();
+/// assert_eq!(last.resolution.kind(), ResolutionKind::Unbound);
+/// ```
 pub fn marigold_analyze_with_sizes(
     s: &str,
     sizes: &sizes::InputSizes,
