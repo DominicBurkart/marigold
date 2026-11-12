@@ -92,6 +92,7 @@ mod recovery;
 pub mod remap;
 mod resolver;
 pub mod rustc_json;
+pub mod sizes;
 mod span_index;
 mod sub_spans;
 pub mod symbol_table;
