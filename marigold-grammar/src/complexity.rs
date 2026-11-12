@@ -27,6 +27,7 @@ use pest::Parser;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::nodes::{InputCount, InputVariability, StreamFunctionKind, TypedExpression};
+use crate::sizes::{Resolution, StageResolution};
 
 #[derive(pest_derive::Parser)]
 #[grammar = "complexity_notation.pest"]
@@ -827,7 +828,7 @@ pub struct ProgramComplexity {
     pub program_cardinality: Cardinality,
 }
 
-fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
+pub(crate) fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
     match (&inp.variability, &inp.input_count) {
         (InputVariability::Constant, InputCount::Known(n)) => Symbolic::Constant(n.clone()),
         _ => Symbolic::Unknown,
@@ -926,23 +927,35 @@ struct PipelineState {
     exact_time: ExactComplexity,
     exact_space: ExactComplexity,
     collects: bool,
+    resolution: Resolution,
+    stages: Vec<StageResolution>,
 }
 
 impl PipelineState {
     fn from_source(cardinality: Symbolic) -> Self {
+        let resolution = Resolution::of_source(&cardinality);
+        PipelineState::with_resolution(cardinality, resolution)
+    }
+
+    fn with_resolution(cardinality: Symbolic, resolution: Resolution) -> Self {
         PipelineState {
             cardinality,
             unknown_source: false,
             exact_time: ExactComplexity::new(),
             exact_space: ExactComplexity::new(),
             collects: false,
+            stages: vec![StageResolution {
+                stage: "input".to_string(),
+                resolution: resolution.clone(),
+            }],
+            resolution,
         }
     }
 
     fn undeclared() -> Self {
         PipelineState {
             unknown_source: true,
-            ..PipelineState::from_source(Symbolic::Unknown)
+            ..PipelineState::with_resolution(Symbolic::Unknown, Resolution::undeclared())
         }
     }
 
@@ -972,6 +985,11 @@ impl PipelineState {
             std::mem::replace(&mut self.cardinality, Symbolic::Unknown),
             &f.kind,
         );
+        self.resolution = self.resolution.after(&f.kind);
+        self.stages.push(StageResolution {
+            stage: describe_stream_fn(&f.kind),
+            resolution: self.resolution.clone(),
+        });
     }
 
     fn extended(&self, funs: &[crate::nodes::StreamFunctionNode]) -> Self {
@@ -1006,22 +1024,26 @@ impl PipelineState {
     }
 }
 
+fn describe_stream_fn(kind: &StreamFunctionKind) -> String {
+    match kind {
+        StreamFunctionKind::Map => "map(...)".to_string(),
+        StreamFunctionKind::Filter => "filter(...)".to_string(),
+        StreamFunctionKind::FilterMap => "filter_map(...)".to_string(),
+        StreamFunctionKind::Permutations(k) => format!("permutations({k})"),
+        StreamFunctionKind::PermutationsWithReplacement(k) => {
+            format!("permutations_with_replacement({k})")
+        }
+        StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
+        StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
+        StreamFunctionKind::Fold => "fold(...)".to_string(),
+        StreamFunctionKind::Ok => "ok()".to_string(),
+        StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
+    }
+}
+
 fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
     funs.iter()
-        .map(|f| match &f.kind {
-            StreamFunctionKind::Map => "map(...)".to_string(),
-            StreamFunctionKind::Filter => "filter(...)".to_string(),
-            StreamFunctionKind::FilterMap => "filter_map(...)".to_string(),
-            StreamFunctionKind::Permutations(k) => format!("permutations({k})"),
-            StreamFunctionKind::PermutationsWithReplacement(k) => {
-                format!("permutations_with_replacement({k})")
-            }
-            StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
-            StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
-            StreamFunctionKind::Fold => "fold(...)".to_string(),
-            StreamFunctionKind::Ok => "ok()".to_string(),
-            StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
-        })
+        .map(|f| describe_stream_fn(&f.kind))
         .collect::<Vec<_>>()
         .join(".")
 }
@@ -1047,7 +1069,28 @@ pub(crate) fn analyze_nodes(
     ProgramComplexity,
     Vec<(usize, Option<String>, StreamComplexity)>,
 ) {
-    analyze_nodes_with(expressions, &|_, inp| input_cardinality(inp))
+    let analysis = analyze_nodes_with(expressions, &|_, inp| input_cardinality(inp));
+    (analysis.program, analysis.nodes)
+}
+
+pub(crate) struct TracedAnalysis {
+    pub(crate) program: ProgramComplexity,
+    pub(crate) nodes: Vec<(usize, Option<String>, StreamComplexity)>,
+    pub(crate) traces: Vec<Vec<StageResolution>>,
+}
+
+pub(crate) fn input_nodes(
+    expressions: &[TypedExpression],
+) -> Vec<&crate::nodes::InputFunctionNode> {
+    expressions
+        .iter()
+        .filter_map(|expr| match expr {
+            TypedExpression::StreamVariable(v) => Some(&v.inp),
+            TypedExpression::UnnamedReturningStream(s)
+            | TypedExpression::UnnamedNonReturningStream(s) => Some(&s.inp_and_funs.inp),
+            _ => None,
+        })
+        .collect()
 }
 
 pub(crate) fn input_ordinals(expressions: &[TypedExpression]) -> Vec<Option<usize>> {
@@ -1069,12 +1112,10 @@ pub(crate) fn input_ordinals(expressions: &[TypedExpression]) -> Vec<Option<usiz
 pub(crate) fn analyze_nodes_with(
     expressions: &[TypedExpression],
     source_cardinality: &dyn Fn(usize, &crate::nodes::InputFunctionNode) -> Symbolic,
-) -> (
-    ProgramComplexity,
-    Vec<(usize, Option<String>, StreamComplexity)>,
-) {
+) -> TracedAnalysis {
     let ordinals = input_ordinals(expressions);
     let mut nodes: Vec<(usize, Option<String>, StreamComplexity)> = Vec::new();
+    let mut traces: Vec<(usize, Vec<StageResolution>)> = Vec::new();
     let mut declared: std::collections::HashMap<String, PipelineState> =
         std::collections::HashMap::new();
 
@@ -1098,6 +1139,7 @@ pub(crate) fn analyze_nodes_with(
                     Some(v.variable_name.clone()),
                     state.finish(&desc),
                 ));
+                traces.push((expr_index, state.stages.clone()));
                 declared.insert(v.variable_name.clone(), state);
             }
             TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
@@ -1121,6 +1163,7 @@ pub(crate) fn analyze_nodes_with(
                     Some(v.variable_name.clone()),
                     state.finish(&desc),
                 ));
+                traces.push((expr_index, state.stages.clone()));
                 declared.insert(v.variable_name.clone(), state);
             }
             _ => {}
@@ -1135,7 +1178,7 @@ pub(crate) fn analyze_nodes_with(
     let mut program_cardinality = Cardinality::Exact(BigUint::zero());
 
     for (expr_index, expr) in expressions.iter().enumerate() {
-        let sc = match expr {
+        let (sc, trace) = match expr {
             TypedExpression::UnnamedReturningStream(s)
             | TypedExpression::UnnamedNonReturningStream(s) => {
                 let funs_desc = describe_stream_fns(&s.inp_and_funs.funs);
@@ -1150,9 +1193,10 @@ pub(crate) fn analyze_nodes_with(
                     format!("input.{funs_desc}.{out_desc}")
                 };
                 let ordinal = ordinals[expr_index].expect("unnamed stream has an input");
-                PipelineState::from_source(source_cardinality(ordinal, &s.inp_and_funs.inp))
-                    .extended(&s.inp_and_funs.funs)
-                    .finish(&desc)
+                let state =
+                    PipelineState::from_source(source_cardinality(ordinal, &s.inp_and_funs.inp))
+                        .extended(&s.inp_and_funs.funs);
+                (state.finish(&desc), state.stages)
             }
             TypedExpression::NamedReturningStream(s)
             | TypedExpression::NamedNonReturningStream(s) => {
@@ -1167,12 +1211,12 @@ pub(crate) fn analyze_nodes_with(
                 } else {
                     format!("{}.{funs_desc}.{out_desc}", s.stream_variable)
                 };
-                declared
+                let state = declared
                     .get(&s.stream_variable)
                     .cloned()
                     .unwrap_or_else(PipelineState::undeclared)
-                    .extended(&s.funs)
-                    .finish(&desc)
+                    .extended(&s.funs);
+                (state.finish(&desc), state.stages)
             }
             _ => continue,
         };
@@ -1183,9 +1227,11 @@ pub(crate) fn analyze_nodes_with(
         program_exact_space.merge(&sc.exact_space);
         program_cardinality = program_cardinality.max(sc.cardinality.clone());
         nodes.push((expr_index, None, sc.clone()));
+        traces.push((expr_index, trace));
         streams.push(sc);
     }
     nodes.sort_by_key(|n| n.0);
+    traces.sort_by_key(|t| t.0);
 
     let program = ProgramComplexity {
         streams,
@@ -1195,7 +1241,11 @@ pub(crate) fn analyze_nodes_with(
         program_exact_space,
         program_cardinality,
     };
-    (program, nodes)
+    TracedAnalysis {
+        program,
+        nodes,
+        traces: traces.into_iter().map(|(_, trace)| trace).collect(),
+    }
 }
 
 #[cfg(test)]

@@ -1,10 +1,16 @@
+use std::collections::BTreeMap;
+use std::fmt;
+
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
-use crate::complexity::{SizeBindings, Symbolic};
-use crate::nodes::StreamFunctionKind;
+use crate::complexity::{
+    analyze_nodes_with, input_cardinality, input_nodes, ProgramComplexity, SizeBindings, Symbolic,
+};
+use crate::nodes::{StreamFunctionKind, TypedExpression};
+use crate::parser::MarigoldParseError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -173,4 +179,135 @@ impl Serialize for Resolution {
         state.serialize_field("reasons", &self.reasons)?;
         state.end()
     }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct StageResolution {
+    pub stage: String,
+    pub resolution: Resolution,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct StreamResolution {
+    pub expr_index: usize,
+    pub name: Option<String>,
+    pub description: String,
+    pub stages: Vec<StageResolution>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SymbolicAnalysis {
+    pub program: ProgramComplexity,
+    pub streams: Vec<StreamResolution>,
+}
+
+#[derive(Clone, Debug)]
+pub enum SizeAnalysisError {
+    Parse(MarigoldParseError),
+    UnknownInput { ordinal: usize, inputs: usize },
+    InputSizeKnown { ordinal: usize },
+    InvalidParamName(String),
+}
+
+impl fmt::Display for SizeAnalysisError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SizeAnalysisError::Parse(error) => write!(f, "{error}"),
+            SizeAnalysisError::UnknownInput { ordinal, inputs } => write!(
+                f,
+                "input {ordinal} does not exist: the program has {inputs} input(s), numbered from 0 in source order"
+            ),
+            SizeAnalysisError::InputSizeKnown { ordinal } => write!(
+                f,
+                "input {ordinal} has a size known at analysis time, so it cannot be bound to a named size"
+            ),
+            SizeAnalysisError::InvalidParamName(name) => write!(
+                f,
+                "{name:?} is not a valid size name: use an ASCII letter or underscore followed by letters, digits or underscores"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SizeAnalysisError {}
+
+impl From<MarigoldParseError> for SizeAnalysisError {
+    fn from(error: MarigoldParseError) -> Self {
+        SizeAnalysisError::Parse(error)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct InputSizes {
+    by_ordinal: BTreeMap<usize, String>,
+}
+
+fn is_valid_param_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() || first == '_' => {
+            chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        _ => false,
+    }
+}
+
+impl InputSizes {
+    pub fn new() -> InputSizes {
+        InputSizes::default()
+    }
+
+    pub fn bind(mut self, ordinal: usize, name: &str) -> Result<InputSizes, SizeAnalysisError> {
+        if !is_valid_param_name(name) {
+            return Err(SizeAnalysisError::InvalidParamName(name.to_string()));
+        }
+        self.by_ordinal.insert(ordinal, name.to_string());
+        Ok(self)
+    }
+}
+
+pub(crate) fn analyze_with_sizes(
+    expressions: &[TypedExpression],
+    sizes: &InputSizes,
+) -> Result<SymbolicAnalysis, SizeAnalysisError> {
+    let inputs = input_nodes(expressions);
+    for ordinal in sizes.by_ordinal.keys() {
+        match inputs.get(*ordinal) {
+            None => {
+                return Err(SizeAnalysisError::UnknownInput {
+                    ordinal: *ordinal,
+                    inputs: inputs.len(),
+                })
+            }
+            Some(input) if !matches!(input_cardinality(input), Symbolic::Unknown) => {
+                return Err(SizeAnalysisError::InputSizeKnown { ordinal: *ordinal })
+            }
+            Some(_) => {}
+        }
+    }
+
+    let analysis = analyze_nodes_with(expressions, &|ordinal, input| match sizes
+        .by_ordinal
+        .get(&ordinal)
+    {
+        Some(name) => Symbolic::Param(name.clone()),
+        None => input_cardinality(input),
+    });
+    let streams = analysis
+        .nodes
+        .into_iter()
+        .zip(analysis.traces)
+        .map(
+            |((expr_index, name, complexity), stages)| StreamResolution {
+                expr_index,
+                name,
+                description: complexity.description,
+                stages,
+            },
+        )
+        .collect();
+    Ok(SymbolicAnalysis {
+        program: analysis.program,
+        streams,
+    })
 }

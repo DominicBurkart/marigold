@@ -344,6 +344,13 @@ pub fn marigold_analyze(
     parser::PestParser::analyze(s)
 }
 
+pub fn marigold_analyze_with_sizes(
+    s: &str,
+    sizes: &sizes::InputSizes,
+) -> Result<sizes::SymbolicAnalysis, sizes::SizeAnalysisError> {
+    parser::PestParser::analyze_with_sizes(s, sizes)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
