@@ -1,0 +1,39 @@
+{
+  "analyze": {
+    "program_cardinality": "≤P(100, 2)",
+    "program_exact_space": "O(4)",
+    "program_exact_time": "O(4)",
+    "program_space": "O(1)",
+    "program_time": "O(1)",
+    "streams": [
+      {
+        "cardinality": "≤P(100, 2)",
+        "collects_input": true,
+        "description": "input.permutations(2).map(...).map(...).filter(...).return",
+        "exact_space": "O(4)",
+        "exact_time": "O(4)",
+        "space_class": "O(1)",
+        "time_class": "O(1)"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "complexity": {
+        "cardinality": "≤P(100, 2)",
+        "collects_input": true,
+        "description": "input.permutations(2).map(...).map(...).filter(...).return",
+        "exact_space": "O(4)",
+        "exact_time": "O(4)",
+        "space_class": "O(1)",
+        "time_class": "O(1)"
+      },
+      "expr_index": 0,
+      "name": null,
+      "range": {
+        "end": 60,
+        "start": 0
+      }
+    }
+  ]
+}

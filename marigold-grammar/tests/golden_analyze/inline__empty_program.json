@@ -1,0 +1,11 @@
+{
+  "analyze": {
+    "program_cardinality": "0",
+    "program_exact_space": "O(1)",
+    "program_exact_time": "O(1)",
+    "program_space": "O(1)",
+    "program_time": "O(1)",
+    "streams": []
+  },
+  "nodes": []
+}
