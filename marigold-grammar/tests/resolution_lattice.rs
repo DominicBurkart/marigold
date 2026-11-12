@@ -89,7 +89,7 @@ fn sources_resolve_as_documented() {
     assert!(sized.reasons().is_empty());
 
     let missing = unbound();
-    assert_eq!(missing.kind(), ResolutionKind::Unresolvable);
+    assert_eq!(missing.kind(), ResolutionKind::Unbound);
     assert_eq!(missing.lo(), &constant(0));
     assert_eq!(missing.hi(), None);
     assert_eq!(missing.reasons(), &[ReasonCode::UnboundInput]);
@@ -128,7 +128,7 @@ fn filtering_stages_keep_the_upper_bound_and_lose_the_lower_bound() {
         assert_eq!(from_symbolic.reasons(), &[reason]);
 
         let from_unbound = unbound().after(&kind);
-        assert_eq!(from_unbound.kind(), ResolutionKind::Unresolvable);
+        assert_eq!(from_unbound.kind(), ResolutionKind::Unbound);
         assert_eq!(from_unbound.hi(), None);
         assert_eq!(from_unbound.reasons(), &[ReasonCode::UnboundInput, reason]);
     }
@@ -223,7 +223,7 @@ fn combinatorial_stages_apply_to_both_bounds() {
         StreamFunctionKind::Combinations(2),
     ] {
         let unresolved = unbound().after(&kind);
-        assert_eq!(unresolved.kind(), ResolutionKind::Unresolvable);
+        assert_eq!(unresolved.kind(), ResolutionKind::Unbound);
         assert_eq!(unresolved.hi(), None);
         assert_eq!(unresolved.reasons(), &[ReasonCode::UnboundInput]);
     }
@@ -327,8 +327,49 @@ fn the_machine_readable_codes_are_stable_strings() {
         json!("bounded")
     );
     assert_eq!(
+        serde_json::to_value(ResolutionKind::Unbound).unwrap(),
+        json!("unbound")
+    );
+    assert_eq!(
         serde_json::to_value(ResolutionKind::Unresolvable).unwrap(),
         json!("unresolvable")
+    );
+}
+
+#[test]
+fn only_a_missing_binding_is_unbound_and_everything_else_open_ended_is_unresolvable() {
+    assert_eq!(unbound().kind(), ResolutionKind::Unbound);
+    assert_eq!(undeclared().kind(), ResolutionKind::Unresolvable);
+    assert_eq!(
+        undeclared().after(&StreamFunctionKind::Filter).kind(),
+        ResolutionKind::Unresolvable
+    );
+    assert_eq!(
+        Resolution::checked(constant(0), None, vec![])
+            .unwrap()
+            .kind(),
+        ResolutionKind::Unresolvable
+    );
+    assert_eq!(
+        Resolution::checked(
+            constant(0),
+            None,
+            vec![
+                ReasonCode::UnboundInput,
+                ReasonCode::UndeclaredStreamVariable
+            ]
+        )
+        .unwrap()
+        .kind(),
+        ResolutionKind::Unresolvable
+    );
+    assert_eq!(
+        unbound().after(&StreamFunctionKind::KeepFirstN(3)).kind(),
+        ResolutionKind::Bounded
+    );
+    assert_eq!(
+        unbound().after(&StreamFunctionKind::Fold).kind(),
+        ResolutionKind::Exact
     );
 }
 
@@ -347,7 +388,7 @@ fn a_resolution_serializes_with_its_kind_bounds_and_reasons() {
     assert_eq!(
         serde_json::to_value(unbound()).unwrap(),
         json!({
-            "kind": "unresolvable",
+            "kind": "unbound",
             "lo": "0",
             "hi": null,
             "reasons": ["unbound_input"],
@@ -372,6 +413,7 @@ fn contains_forbidden(expression: &Symbolic) -> bool {
         | Symbolic::PermutationsWithReplacement { n, .. }
         | Symbolic::Combinations { n, .. } => contains_forbidden(n),
         Symbolic::Min(a, b) => contains_forbidden(a) || contains_forbidden(b),
+        _ => panic!("a new Symbolic variant needs a rule in contains_forbidden"),
     }
 }
 
@@ -382,9 +424,9 @@ fn kind_strategy() -> impl Strategy<Value = StreamFunctionKind> {
         Just(StreamFunctionKind::Filter),
         Just(StreamFunctionKind::FilterMap),
         Just(StreamFunctionKind::Ok),
-        (1u64..4).prop_map(StreamFunctionKind::Permutations),
+        (0u64..4).prop_map(StreamFunctionKind::Permutations),
         (1u64..4).prop_map(StreamFunctionKind::PermutationsWithReplacement),
-        (1u64..4).prop_map(StreamFunctionKind::Combinations),
+        (0u64..4).prop_map(StreamFunctionKind::Combinations),
         (1u64..7).prop_map(StreamFunctionKind::KeepFirstN),
         Just(StreamFunctionKind::Fold),
     ]
@@ -614,7 +656,7 @@ fn the_checked_constructor_accepts_valid_intervals_and_normalizes_them() {
     assert_eq!(valid.kind(), ResolutionKind::Bounded);
 
     let open = Resolution::checked(constant(0), None, vec![ReasonCode::UnboundInput]).unwrap();
-    assert_eq!(open.kind(), ResolutionKind::Unresolvable);
+    assert_eq!(open.kind(), ResolutionKind::Unbound);
 
     let point = Resolution::checked(param("n"), Some(param("n")), vec![]).unwrap();
     assert_eq!(point.kind(), ResolutionKind::Symbolic);

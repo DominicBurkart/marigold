@@ -72,7 +72,7 @@ impl PestParser {
         Ok(crate::complexity::analyze_program(&expressions))
     }
 
-    pub fn analyze_with_sizes(
+    pub(crate) fn analyze_with_sizes(
         input: &str,
         sizes: &crate::sizes::InputSizes,
     ) -> Result<crate::sizes::SymbolicAnalysis, crate::sizes::SizeAnalysisError> {

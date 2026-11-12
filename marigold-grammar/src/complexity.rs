@@ -436,6 +436,7 @@ impl FromStr for SizeName {
 pub type SizeBindings = BTreeMap<SizeName, BigUint>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Symbolic {
     Constant(BigUint),
     Param(SizeName),
@@ -672,20 +673,28 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
         }
         Rule::symbolic_perm_rep => {
             let mut inner = pair.into_inner();
-            let n_pair = inner
+            let base = inner
                 .next()
                 .ok_or_else(|| "Missing perm_rep n".to_string())?;
-            let k_str = inner
+            let mut result = parse_symbolic_pair(base)?;
+            for k_pair in inner {
+                let k: u64 = k_pair
+                    .as_str()
+                    .parse()
+                    .map_err(|_| "Invalid perm_rep k value".to_string())?;
+                result = Symbolic::PermutationsWithReplacement {
+                    n: Box::new(result),
+                    k,
+                };
+            }
+            Ok(result)
+        }
+        Rule::symbolic_rep_base => {
+            let inner = pair
+                .into_inner()
                 .next()
-                .ok_or_else(|| "Missing perm_rep k".to_string())?
-                .as_str();
-            let k: u64 = k_str
-                .parse()
-                .map_err(|_| "Invalid perm_rep k value".to_string())?;
-            Ok(Symbolic::PermutationsWithReplacement {
-                n: Box::new(parse_symbolic_pair(n_pair)?),
-                k,
-            })
+                .ok_or_else(|| "Empty perm_rep base".to_string())?;
+            parse_symbolic_pair(inner)
         }
         Rule::symbolic_comb => {
             let mut inner = pair.into_inner();
@@ -1134,41 +1143,38 @@ pub(crate) struct TracedAnalysis {
     pub(crate) traces: Vec<Vec<StageResolution>>,
 }
 
+fn expression_input(expr: &TypedExpression) -> Option<&crate::nodes::InputFunctionNode> {
+    match expr {
+        TypedExpression::StreamVariable(v) => Some(&v.inp),
+        TypedExpression::UnnamedReturningStream(s)
+        | TypedExpression::UnnamedNonReturningStream(s) => Some(&s.inp_and_funs.inp),
+        TypedExpression::StreamVariableFromPriorStreamVariable(_)
+        | TypedExpression::NamedReturningStream(_)
+        | TypedExpression::NamedNonReturningStream(_)
+        | TypedExpression::StructDeclaration(_)
+        | TypedExpression::EnumDeclaration(_)
+        | TypedExpression::FnDeclaration(_) => None,
+    }
+}
+
 pub(crate) fn input_nodes(
     expressions: &[TypedExpression],
 ) -> Vec<&crate::nodes::InputFunctionNode> {
-    expressions
-        .iter()
-        .filter_map(|expr| match expr {
-            TypedExpression::StreamVariable(v) => Some(&v.inp),
-            TypedExpression::UnnamedReturningStream(s)
-            | TypedExpression::UnnamedNonReturningStream(s) => Some(&s.inp_and_funs.inp),
-            _ => None,
-        })
-        .collect()
-}
-
-pub(crate) fn input_ordinals(expressions: &[TypedExpression]) -> Vec<Option<usize>> {
-    let mut next = 0;
-    expressions
-        .iter()
-        .map(|expr| match expr {
-            TypedExpression::StreamVariable(_)
-            | TypedExpression::UnnamedReturningStream(_)
-            | TypedExpression::UnnamedNonReturningStream(_) => {
-                next += 1;
-                Some(next - 1)
-            }
-            _ => None,
-        })
-        .collect()
+    expressions.iter().filter_map(expression_input).collect()
 }
 
 pub(crate) fn analyze_nodes_with(
     expressions: &[TypedExpression],
     source_cardinality: &dyn Fn(usize, &crate::nodes::InputFunctionNode) -> Symbolic,
 ) -> TracedAnalysis {
-    let ordinals = input_ordinals(expressions);
+    let ordinals: Vec<usize> = expressions
+        .iter()
+        .scan(0, |seen, expr| {
+            let ordinal = *seen;
+            *seen += usize::from(expression_input(expr).is_some());
+            Some(ordinal)
+        })
+        .collect();
     let mut nodes: Vec<(usize, Option<String>, StreamComplexity)> = Vec::new();
     let mut traces: Vec<(usize, Vec<StageResolution>)> = Vec::new();
     let mut declared: std::collections::HashMap<String, PipelineState> =
@@ -1177,7 +1183,7 @@ pub(crate) fn analyze_nodes_with(
     for (expr_index, expr) in expressions.iter().enumerate() {
         match expr {
             TypedExpression::StreamVariable(v) => {
-                let ordinal = ordinals[expr_index].expect("stream variable has an input");
+                let ordinal = ordinals[expr_index];
                 let state = PipelineState::from_source(source_cardinality(ordinal, &v.inp))
                     .extended(&v.funs);
                 let desc = if v.funs.is_empty() {
@@ -1247,7 +1253,7 @@ pub(crate) fn analyze_nodes_with(
                 } else {
                     format!("input.{funs_desc}.{out_desc}")
                 };
-                let ordinal = ordinals[expr_index].expect("unnamed stream has an input");
+                let ordinal = ordinals[expr_index];
                 let state =
                     PipelineState::from_source(source_cardinality(ordinal, &s.inp_and_funs.inp))
                         .extended(&s.inp_and_funs.funs);

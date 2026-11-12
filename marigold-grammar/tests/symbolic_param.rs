@@ -262,17 +262,22 @@ fn leaf() -> impl Strategy<Value = Symbolic> {
     ]
 }
 
-fn replacement_base() -> impl Strategy<Value = Symbolic> {
+fn replacement_base(inner: BoxedStrategy<Symbolic>) -> BoxedStrategy<Symbolic> {
     prop_oneof![
         (0u64..30).prop_map(constant),
         param_names().prop_map(Symbolic::Param),
+        inner.prop_map(|base| match base {
+            Symbolic::Filtered(_) | Symbolic::Sum(_) => min(base, constant(7)),
+            other => other,
+        }),
     ]
+    .boxed()
 }
 
 fn atom(inner: BoxedStrategy<Symbolic>) -> BoxedStrategy<Symbolic> {
     prop_oneof![
         leaf(),
-        (replacement_base(), 0u64..5).prop_map(|(n, k)| with_replacement(n, k)),
+        (replacement_base(inner.clone()), 0u64..5).prop_map(|(n, k)| with_replacement(n, k)),
         (inner.clone(), 0u64..5).prop_map(|(n, k)| permutations(n, k)),
         (inner.clone(), 0u64..5).prop_map(|(n, k)| combinations(n, k)),
         (inner.clone(), inner).prop_map(|(a, b)| min(a, b)),
@@ -311,6 +316,7 @@ fn substitute(expression: &Symbolic, bindings: &SizeBindings) -> Symbolic {
         Symbolic::Sum(parts) => {
             Symbolic::Sum(parts.iter().map(|p| substitute(p, bindings)).collect())
         }
+        _ => panic!("a new Symbolic variant needs a rule in substitute"),
     }
 }
 
@@ -453,4 +459,42 @@ proptest! {
             prop_assert!(!matches!(parsed, Symbolic::Param(ref p) if p.as_str() == name));
         }
     }
+}
+
+#[test]
+fn compound_replacement_bases_round_trip() {
+    for text in [
+        "min($n, 5)^2",
+        "P($n, 2)^2",
+        "C($n, 2)^3",
+        "min(\u{2264}5, 3)^2",
+        "?^2",
+        "$n^2^3",
+        "P($n, 2)^2^2",
+        "\u{2264}min($n, 5)^2",
+    ] {
+        let parsed = Symbolic::from_str(text).unwrap_or_else(|e| panic!("{text}: {e}"));
+        assert_eq!(parsed.to_string(), text);
+    }
+    assert_eq!(
+        Symbolic::from_str("$n^2^3").unwrap(),
+        with_replacement(with_replacement(param("n"), 2), 3)
+    );
+}
+
+#[test]
+fn replacement_powers_over_filtered_or_summed_bases_do_not_round_trip() {
+    let over_filtered = with_replacement(filtered(param("n")), 2);
+    assert_eq!(over_filtered.to_string(), "\u{2264}$n^2");
+    assert_eq!(
+        Symbolic::from_str("\u{2264}$n^2").unwrap(),
+        filtered(with_replacement(param("n"), 2))
+    );
+
+    let over_sum = with_replacement(Symbolic::Sum(vec![param("n"), constant(1)]), 2);
+    assert_eq!(over_sum.to_string(), "$n + 1^2");
+    assert_eq!(
+        Symbolic::from_str("$n + 1^2").unwrap(),
+        Symbolic::Sum(vec![param("n"), with_replacement(constant(1), 2)])
+    );
 }

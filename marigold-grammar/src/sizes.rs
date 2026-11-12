@@ -15,6 +15,7 @@ use crate::parser::MarigoldParseError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ReasonCode {
     UnboundInput,
     UndeclaredStreamVariable,
@@ -24,14 +25,17 @@ pub enum ReasonCode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ResolutionKind {
     Exact,
     Symbolic,
     Bounded,
+    Unbound,
     Unresolvable,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct EvaluatedRange {
     pub lo: Option<BigUint>,
     pub hi: Option<BigUint>,
@@ -179,6 +183,11 @@ impl Resolution {
 
     pub fn kind(&self) -> ResolutionKind {
         match &self.hi {
+            None if self.reasons.contains(&ReasonCode::UnboundInput)
+                && !self.reasons.contains(&ReasonCode::UndeclaredStreamVariable) =>
+            {
+                ResolutionKind::Unbound
+            }
             None => ResolutionKind::Unresolvable,
             Some(hi) if *hi == self.lo => {
                 if hi.try_evaluate().is_some() {
@@ -246,12 +255,14 @@ impl Serialize for Resolution {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct StageResolution {
     pub stage: String,
     pub resolution: Resolution,
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct StreamResolution {
     pub expr_index: usize,
     pub name: Option<String>,
@@ -260,12 +271,14 @@ pub struct StreamResolution {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct SymbolicAnalysis {
     pub program: ProgramComplexity,
     pub streams: Vec<StreamResolution>,
 }
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum SizeAnalysisError {
     Parse(MarigoldParseError),
     UnknownInput { ordinal: usize, inputs: usize },

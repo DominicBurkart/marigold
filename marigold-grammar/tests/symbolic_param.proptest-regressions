@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 9f925b7b5158d87132b6ea15b2396a98b12897b03baaf93eaf875f7c9cd76be5 # shrinks to name = "A^0"
+cc b59fe89502acc1bdfe5fb1f2834b7a932ec23b3fc4725b5bca59d5ce871773ef # shrinks to expression = Filtered(Combinations { n: Sum([Min(Filtered(PermutationsWithReplacement { n: Unknown, k: 0 }), Constant(0)), Constant(0)]), k: 0 })

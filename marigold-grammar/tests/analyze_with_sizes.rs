@@ -77,7 +77,7 @@ fn a_bound_input_is_analyzed_with_symbolic_classes_and_stage_resolutions() {
 }
 
 #[test]
-fn an_unbound_program_reports_exactly_the_default_analysis_and_names_why_it_is_unresolvable() {
+fn an_unbound_program_reports_exactly_the_default_analysis_and_names_why_it_is_unbound() {
     let analysis = analyze(PERMUTATIONS, &[]);
     let default = marigold_analyze(PERMUTATIONS).unwrap();
     assert_eq!(
@@ -85,7 +85,7 @@ fn an_unbound_program_reports_exactly_the_default_analysis_and_names_why_it_is_u
         serde_json::to_string(&default).unwrap()
     );
     let stream = &analysis.streams[0];
-    assert_eq!(kinds(stream), vec![ResolutionKind::Unresolvable; 3]);
+    assert_eq!(kinds(stream), vec![ResolutionKind::Unbound; 3]);
     for stage in &stream.stages {
         assert_eq!(stage.resolution.reasons(), &[ReasonCode::UnboundInput]);
     }
@@ -126,9 +126,9 @@ fn keep_first_n_bounds_an_unbound_input_and_ok_names_fallible_items() {
     assert_eq!(
         kinds(stream),
         vec![
-            ResolutionKind::Unresolvable,
-            ResolutionKind::Unresolvable,
-            ResolutionKind::Unresolvable,
+            ResolutionKind::Unbound,
+            ResolutionKind::Unbound,
+            ResolutionKind::Unbound,
             ResolutionKind::Bounded
         ]
     );
@@ -192,10 +192,7 @@ fn a_declared_variable_consumed_twice_shares_one_size() {
 fn inputs_are_numbered_in_source_order_and_each_binding_applies_to_one() {
     let source = "struct D { x: i32 }\nread_file(\"a.csv\", csv, struct=D).ok_or_panic().map(f).return\nread_file(\"b.csv\", csv, struct=D).ok_or_panic().map(f).return";
     let analysis = analyze(source, &[(1, "m")]);
-    assert_eq!(
-        last(&analysis.streams[0]).kind(),
-        ResolutionKind::Unresolvable
-    );
+    assert_eq!(last(&analysis.streams[0]).kind(), ResolutionKind::Unbound);
     assert_eq!(last(&analysis.streams[1]).kind(), ResolutionKind::Symbolic);
     assert_eq!(last(&analysis.streams[1]).lo().to_string(), "$m");
 
@@ -214,7 +211,7 @@ fn named_consumers_and_derived_variables_do_not_take_an_input_number() {
     let second = analyze(source, &[(1, "m")]);
     assert_eq!(second.streams.len(), 5);
     for stream in &second.streams[..4] {
-        assert_eq!(last(stream).kind(), ResolutionKind::Unresolvable);
+        assert_eq!(last(stream).kind(), ResolutionKind::Unbound);
     }
     assert_eq!(last(&second.streams[4]).lo().to_string(), "P($m, 2)");
 
@@ -222,7 +219,7 @@ fn named_consumers_and_derived_variables_do_not_take_an_input_number() {
     for stream in &first.streams[..4] {
         assert_eq!(stream.stages[0].resolution.lo().to_string(), "$n");
     }
-    assert_eq!(last(&first.streams[4]).kind(), ResolutionKind::Unresolvable);
+    assert_eq!(last(&first.streams[4]).kind(), ResolutionKind::Unbound);
     assert!(matches!(
         marigold_analyze_with_sizes(source, &sizes(&[(2, "x")])),
         Err(SizeAnalysisError::UnknownInput {
@@ -295,6 +292,17 @@ fn binding_a_missing_or_known_size_input_is_an_error() {
     assert!(matches!(
         marigold_analyze_with_sizes("enum C { A, B }\nrange(C).return", &sizes(&[(0, "n")])),
         Err(SizeAnalysisError::InputSizeKnown { ordinal: 0 })
+    ));
+    let known_then_unknown = "struct D { x: i32 }\nrange(0, 4).return\nread_file(\"d.csv\", csv, struct=D).ok_or_panic().return";
+    assert!(matches!(
+        marigold_analyze_with_sizes(known_then_unknown, &sizes(&[(0, "n")])),
+        Err(SizeAnalysisError::InputSizeKnown { ordinal: 0 })
+    ));
+    assert!(marigold_analyze_with_sizes(known_then_unknown, &sizes(&[(1, "n")])).is_ok());
+    let unknown_then_known = "struct D { x: i32 }\nread_file(\"d.csv\", csv, struct=D).ok_or_panic().return\nrange(0, 4).return";
+    assert!(matches!(
+        marigold_analyze_with_sizes(unknown_then_known, &sizes(&[(1, "n")])),
+        Err(SizeAnalysisError::InputSizeKnown { ordinal: 1 })
     ));
 }
 
@@ -415,4 +423,23 @@ fn analysis_without_bindings_equals_the_default_analysis_on_every_pinned_program
         }
     }
     assert!(checked >= 48, "only {checked} programs were compared");
+}
+
+#[test]
+fn program_complexity_with_a_bound_input_survives_a_json_round_trip() {
+    let prelude = "struct D { x: i32 }\nfn cmp(a: &D, b: &D) -> Ordering { Ordering::Equal }\n";
+    let bodies = [
+        "read_file(\"d.csv\", csv, struct=D).ok_or_panic().keep_first_n(5, cmp).permutations_with_replacement(2).return",
+        "read_file(\"d.csv\", csv, struct=D).ok_or_panic().permutations(2).permutations_with_replacement(2).return",
+        "read_file(\"d.csv\", csv, struct=D).ok_or_panic().combinations(2).permutations_with_replacement(2).return",
+        "read_file(\"d.csv\", csv, struct=D).ok().permutations_with_replacement(2).permutations_with_replacement(2).return",
+    ];
+    for body in bodies {
+        let source = format!("{prelude}{body}");
+        let analysis = analyze(&source, &[(0, "n")]);
+        let text = serde_json::to_string(&analysis.program).unwrap();
+        let parsed: marigold_grammar::complexity::ProgramComplexity =
+            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{body}: {e}"));
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), text, "{body}");
+    }
 }
