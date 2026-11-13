@@ -1,0 +1,38 @@
+[repo]
+name = "marigold"
+remote = "github.com/DominicBurkart/marigold"
+
+[[process]]
+name = "design-tests"
+agents = ["marigold-invariant-scout", "marigold-test-designer"]
+sequence = "scout-then-design-until-no-untested-interface"
+gate = "python3 .nanna/inchworm/gate.py ledger"
+after_run = "cargo test --workspace"
+max_failures_before_pause = 3
+
+[[process]]
+name = "close-coverage"
+agents = ["marigold-coverage-closer"]
+requires = ["design-tests"]
+gate = "python3 .nanna/inchworm/gate.py coverage"
+after_run = "cargo test --workspace"
+until = "patch-coverage-100"
+max_failures_before_pause = 3
+
+[[process]]
+name = "prove-invariants"
+agents = ["marigold-kani-prover"]
+requires = ["design-tests"]
+gate = "python3 .nanna/inchworm/gate.py ledger"
+schedule = "0 3 * * 0"
+max_failures_before_pause = 2
+
+[[process]]
+name = "identify-provable-invariants"
+agents = ["marigold-invariant-scout"]
+schedule = "0 3 * * 6"
+gate = "python3 .nanna/inchworm/gate.py ledger"
+
+[output]
+open_draft_pr = true
+branch_prefix = "inchworm/"

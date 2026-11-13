@@ -1,0 +1,47 @@
+[[invariant]]
+id = "grammar-parse-total"
+surface = "interface"
+statement = "marigold_parse never panics on any input string; it returns Ok(code) or Err."
+status = "candidate"
+provable = "none"
+covered_by = []
+
+[[invariant]]
+id = "grammar-check-agrees-with-parse"
+surface = "interface"
+statement = "marigold_check returns no error diagnostics exactly when marigold_parse returns Ok."
+status = "candidate"
+provable = "none"
+covered_by = []
+
+[[invariant]]
+id = "keep-first-n-bounded-descending"
+surface = "interface"
+statement = "KeepFirstN returns at most N items in descending order, and exactly the N largest by the comparator, with ties broken by earlier stream position."
+status = "candidate"
+provable = "kani"
+covered_by = []
+
+[[invariant]]
+id = "permutations-count"
+surface = "interface"
+statement = "Permutable over n items with length k yields n!/(n-k)! items, each a distinct ordering."
+status = "candidate"
+provable = "lean"
+covered_by = []
+
+[[invariant]]
+id = "combinations-count"
+surface = "interface"
+statement = "Combinable over n items with length k yields C(n,k) items, no two equal as sets."
+status = "candidate"
+provable = "lean"
+covered_by = []
+
+[[invariant]]
+id = "multi-consumer-fanout"
+surface = "interface"
+statement = "Every receiver from MultiConsumerStream::get observes every item of the source exactly once, in source order."
+status = "candidate"
+provable = "none"
+covered_by = []

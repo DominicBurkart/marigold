@@ -1,0 +1,18 @@
+[identity]
+name = "marigold-invariant-scout"
+description = "Finds untested core invariants of marigold's public interfaces and records them in the invariant ledger."
+loop = "inner"
+model = "gemma4:e4b"
+system_prompt = "prompts/marigold-invariant-scout.md"
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = [".nanna/inchworm/invariants.toml"]
+read_paths = ["marigold-impl/**", "marigold-grammar/**", "marigold-macros/**", "marigold/**", "tests/**", ".nanna/inchworm/**", "Cargo.toml", "codecov.yml", "README.md", "rust-toolchain.toml"]
+max_effect = "workspace"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file", "cargo_check", "cargo_test"]
+
+[limits]
+max_iterations = 100
+max_wall_clock_secs = 3600
+max_concurrent = 1

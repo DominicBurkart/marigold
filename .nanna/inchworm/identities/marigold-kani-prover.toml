@@ -1,0 +1,18 @@
+[identity]
+name = "marigold-kani-prover"
+description = "Proves ledger invariants: Kani harnesses for bounded properties, Lean 4 via Aeneas for the rest."
+loop = "inner"
+model = "leanstral-1-5"
+system_prompt = "prompts/marigold-kani-prover.md"
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = ["marigold-impl/**", "marigold-grammar/**", "tests/**", ".nanna/inchworm/proofs/**", ".nanna/inchworm/invariants.toml"]
+read_paths = ["marigold-impl/**", "marigold-grammar/**", "marigold-macros/**", "marigold/**", "tests/**", ".nanna/inchworm/**", "Cargo.toml", "codecov.yml", "README.md", "rust-toolchain.toml"]
+max_effect = "workspace"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file", "cargo_check", "cargo_test"]
+
+[limits]
+max_iterations = 150
+max_wall_clock_secs = 3600
+max_concurrent = 1
