@@ -1,0 +1,39 @@
+{
+  "analyze": {
+    "streams": [
+      {
+        "description": "input.ok_or_panic().permutations(3).return",
+        "cardinality": "?",
+        "time_class": "O(?)",
+        "exact_time": "O(? + n!/(n-3)!)",
+        "space_class": "O(?)",
+        "exact_space": "O(?)",
+        "collects_input": true
+      }
+    ],
+    "program_time": "O(?)",
+    "program_exact_time": "O(? + n!/(n-3)!)",
+    "program_space": "O(?)",
+    "program_exact_space": "O(?)",
+    "program_cardinality": "?"
+  },
+  "nodes": [
+    {
+      "name": null,
+      "expr_index": 1,
+      "range": {
+        "start": 20,
+        "end": 93
+      },
+      "complexity": {
+        "description": "input.ok_or_panic().permutations(3).return",
+        "cardinality": "?",
+        "time_class": "O(?)",
+        "exact_time": "O(? + n!/(n-3)!)",
+        "space_class": "O(?)",
+        "exact_space": "O(?)",
+        "collects_input": true
+      }
+    }
+  ]
+}

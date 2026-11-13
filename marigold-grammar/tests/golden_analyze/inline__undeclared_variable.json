@@ -1,0 +1,39 @@
+{
+  "analyze": {
+    "streams": [
+      {
+        "description": "ghost.map(...).return",
+        "cardinality": "?",
+        "time_class": "O(?)",
+        "exact_time": "O(?)",
+        "space_class": "O(?)",
+        "exact_space": "O(?)",
+        "collects_input": false
+      }
+    ],
+    "program_time": "O(?)",
+    "program_exact_time": "O(?)",
+    "program_space": "O(?)",
+    "program_exact_space": "O(?)",
+    "program_cardinality": "?"
+  },
+  "nodes": [
+    {
+      "name": null,
+      "expr_index": 0,
+      "range": {
+        "start": 0,
+        "end": 19
+      },
+      "complexity": {
+        "description": "ghost.map(...).return",
+        "cardinality": "?",
+        "time_class": "O(?)",
+        "exact_time": "O(?)",
+        "space_class": "O(?)",
+        "exact_space": "O(?)",
+        "collects_input": false
+      }
+    }
+  ]
+}

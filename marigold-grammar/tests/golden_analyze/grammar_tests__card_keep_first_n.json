@@ -1,0 +1,39 @@
+{
+  "analyze": {
+    "streams": [
+      {
+        "description": "input.keep_first_n(5, ...).return",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    ],
+    "program_time": "O(1)",
+    "program_exact_time": "O(1)",
+    "program_space": "O(1)",
+    "program_exact_space": "O(1)",
+    "program_cardinality": "5"
+  },
+  "nodes": [
+    {
+      "name": null,
+      "expr_index": 0,
+      "range": {
+        "start": 0,
+        "end": 45
+      },
+      "complexity": {
+        "description": "input.keep_first_n(5, ...).return",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    }
+  ]
+}

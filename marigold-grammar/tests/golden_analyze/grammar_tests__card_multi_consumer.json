@@ -1,0 +1,82 @@
+{
+  "analyze": {
+    "streams": [
+      {
+        "description": "digits.return",
+        "cardinality": "10",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      },
+      {
+        "description": "digits.filter(...).map(...).return",
+        "cardinality": "≤10",
+        "time_class": "O(n)",
+        "exact_time": "O(n)",
+        "space_class": "O(1)",
+        "exact_space": "O(2)",
+        "collects_input": false
+      }
+    ],
+    "program_time": "O(n)",
+    "program_exact_time": "O(n)",
+    "program_space": "O(1)",
+    "program_exact_space": "O(2)",
+    "program_cardinality": "≤10"
+  },
+  "nodes": [
+    {
+      "name": "digits",
+      "expr_index": 1,
+      "range": {
+        "start": 57,
+        "end": 78
+      },
+      "complexity": {
+        "description": "digits = input",
+        "cardinality": "10",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    },
+    {
+      "name": null,
+      "expr_index": 2,
+      "range": {
+        "start": 80,
+        "end": 98
+      },
+      "complexity": {
+        "description": "digits.return",
+        "cardinality": "10",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    },
+    {
+      "name": null,
+      "expr_index": 3,
+      "range": {
+        "start": 100,
+        "end": 166
+      },
+      "complexity": {
+        "description": "digits.filter(...).map(...).return",
+        "cardinality": "≤10",
+        "time_class": "O(n)",
+        "exact_time": "O(n)",
+        "space_class": "O(1)",
+        "exact_space": "O(2)",
+        "collects_input": false
+      }
+    }
+  ]
+}
