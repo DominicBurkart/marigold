@@ -368,8 +368,12 @@ impl Resolution {
         hi: Option<Symbolic>,
         mut reasons: Vec<ReasonCode>,
     ) -> Resolution {
-        let lo = simplify(lo);
-        let hi = hi.map(simplify);
+        let (lo, hi) = if hi.as_ref() == Some(&lo) {
+            let point = simplify(lo);
+            (point.clone(), Some(point))
+        } else {
+            (simplify(lo), hi.map(simplify))
+        };
         if hi.as_ref() == Some(&lo) {
             reasons.clear();
         }
@@ -846,13 +850,14 @@ pub(crate) fn analyze_with_sizes(
         }
     }
 
-    let analysis = analyze_nodes_with(expressions, &|ordinal, input| match sizes
-        .by_ordinal
-        .get(&ordinal)
-    {
-        Some(name) => Symbolic::Param(name.clone()),
-        None => input_cardinality(input),
-    });
+    let analysis = analyze_nodes_with(
+        expressions,
+        &|ordinal, input| match sizes.by_ordinal.get(&ordinal) {
+            Some(name) => Symbolic::Param(name.clone()),
+            None => input_cardinality(input),
+        },
+        true,
+    );
     let streams = analysis
         .nodes
         .into_iter()

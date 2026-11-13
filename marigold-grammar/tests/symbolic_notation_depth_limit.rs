@@ -503,3 +503,107 @@ fn a_combination_is_computed_from_the_smaller_side() {
         );
     });
 }
+
+fn classes(source: &str) -> Vec<String> {
+    let program = marigold_grammar::marigold_analyze(source).unwrap();
+    let mut out = vec![
+        serde_json::to_string(&program.program_time).unwrap(),
+        serde_json::to_string(&program.program_exact_time).unwrap(),
+        serde_json::to_string(&program.program_space).unwrap(),
+        serde_json::to_string(&program.program_exact_space).unwrap(),
+    ];
+    for stream in &program.streams {
+        out.push(serde_json::to_string(&stream.time_class).unwrap());
+        out.push(serde_json::to_string(&stream.exact_time).unwrap());
+        out.push(serde_json::to_string(&stream.space_class).unwrap());
+        out.push(serde_json::to_string(&stream.exact_space).unwrap());
+        out.push(stream.collects_input.to_string());
+    }
+    out
+}
+
+#[test]
+fn capped_constant_programs_keep_the_default_cost_classes() {
+    on_small_stack(|| {
+        for (source, exact) in [
+            ("range(0, 1000000).permutations(52429).map(f).return", "\"O(2)\""),
+            (
+                "range(0, 1000000).permutations_with_replacement(300).permutations_with_replacement(300).map(f).return",
+                "\"O(3)\"",
+            ),
+            (
+                "range(0, 1000000).permutations(52429).permutations(2).map(f).return",
+                "\"O(3)\"",
+            ),
+        ] {
+            let found = classes(source);
+            assert_eq!(
+                found[..4],
+                ["\"O(1)\"", exact, "\"O(1)\"", exact],
+                "{source}"
+            );
+            assert_eq!(found[4..8], ["\"O(1)\"", exact, "\"O(1)\"", exact], "{source}");
+            let program = marigold_grammar::marigold_analyze(source).unwrap();
+            assert!(
+                matches!(program.program_cardinality, Cardinality::Bounded(_)),
+                "{source}"
+            );
+        }
+    });
+}
+
+#[test]
+fn a_capped_constant_program_has_the_classes_of_the_same_program_with_small_constants() {
+    on_small_stack(|| {
+        for (capped, small) in [
+            (
+                "range(0, 1000000).permutations(52429).map(f).return",
+                "range(0, 10).permutations(3).map(f).return",
+            ),
+            (
+                "range(0, 1000000).permutations_with_replacement(300).permutations_with_replacement(300).map(f).return",
+                "range(0, 10).permutations_with_replacement(3).permutations_with_replacement(3).map(f).return",
+            ),
+            (
+                "range(0, 1000000).combinations(300).combinations(300).map(f).return",
+                "range(0, 10).combinations(3).combinations(3).map(f).return",
+            ),
+            (
+                "range(0, 10).permutations_with_replacement(1000).permutations(1000).map(f).return",
+                "range(0, 10).permutations_with_replacement(2).permutations(2).map(f).return",
+            ),
+            (
+                "range(0, 1000000).permutations(52429).permutations(2).map(f).return",
+                "range(0, 10).permutations(3).permutations(2).map(f).return",
+            ),
+            (
+                "range(0, 1000000).permutations(52429).combinations(2).return",
+                "range(0, 10).permutations(3).combinations(2).return",
+            ),
+            (
+                "range(0, 1000000).permutations(52429).permutations_with_replacement(2).map(f).return",
+                "range(0, 10).permutations(3).permutations_with_replacement(2).map(f).return",
+            ),
+        ] {
+            assert_eq!(classes(capped), classes(small), "{capped}");
+        }
+    });
+}
+
+#[test]
+fn filtered_or_unknown_counts_are_not_constant() {
+    on_small_stack(|| {
+        let o1 = "\"O(1)\"".to_string();
+        for source in [
+            "range(0, 10).filter(f).permutations(2).map(f).return",
+            "range(0, 1000000).filter(f).permutations(52429).map(f).return",
+            "struct D { x: i32 }\nread_file(\"d.csv\", csv, struct=D).ok_or_panic().permutations(2).map(f).return",
+        ] {
+            assert_ne!(classes(source)[0], o1, "{source}");
+        }
+        assert_eq!(
+            classes("range(0, 1000000).filter(f).permutations(52429).map(f).return")[4..],
+            classes("range(0, 10).filter(f).permutations(52429).map(f).return")[4..]
+        );
+    });
+}

@@ -571,6 +571,16 @@ impl Symbolic {
     /// multiplications, about `k` per term, so a string of many large terms can take seconds.
     /// `k` above `u32::MAX` never reaches the arithmetic, so it is never truncated.
     ///
+    /// In the default analysis a single stage reaches the cap only near its edge (for example
+    /// `range(0, 1000000).permutations(52429)` or
+    /// `range(0, 3).permutations_with_replacement(524289)`), but two chained combinatorial stages with `k` of a few hundred commonly do:
+    /// `range(0, 1000000).combinations(300).combinations(300)`,
+    /// `range(0, 10).permutations_with_replacement(1000).permutations(1000)` (`P(10^1000, 1000)`)
+    /// or `range(0, 1000).permutations(500).permutations(500)`. Such a count prints as its
+    /// expression instead of a number and its stage resolutions evaluate to `None`; the cost
+    /// classes do not change, because whether a count is constant is decided from its structure,
+    /// not by evaluating it.
+    ///
     /// ```
     /// use marigold_grammar::complexity::{SizeBindings, SizeName, Symbolic};
     /// use num_bigint::BigUint;
@@ -1118,8 +1128,12 @@ impl Cardinality {
     ///
     /// The result is in canonical form: sums are flattened and their terms sorted by their
     /// notation, so a non-canonical input such as `C(0, 0) + $n` comes back as `$n + C(0, 0)`,
-    /// equal in value but not in structure. Two values without any size keep the default
-    /// analysis's rule, which is neither commutative on ties nor always sound (`100` against
+    /// equal in value but not in structure. In the default analysis a count too large to compute
+    /// is such an open term as well, so `range(0, 5)` beside
+    /// `range(0, 1000000).permutations(52429)` gives `5 + P(1000000, 52429)`: a sound upper
+    /// bound, where the exact count would be the larger stream's alone. Two values without any
+    /// size keep the default analysis's rule, which is neither commutative on ties nor always
+    /// sound (`100` against
     /// `≤3` gives `≤3`); for `program_cardinality` of a program with a bound input, every stream
     /// is joined with the size rule above instead.
     ///
@@ -1369,8 +1383,20 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
     }
 }
 
+fn is_constant_count(expression: &Symbolic) -> bool {
+    match expression {
+        Symbolic::Constant(_) => true,
+        Symbolic::Param(_) | Symbolic::Unknown | Symbolic::Filtered(_) => false,
+        Symbolic::Permutations { n, .. }
+        | Symbolic::PermutationsWithReplacement { n, .. }
+        | Symbolic::Combinations { n, .. } => is_constant_count(n),
+        Symbolic::Min(a, b) => is_constant_count(a) && is_constant_count(b),
+        Symbolic::Sum(parts) => parts.iter().all(is_constant_count),
+    }
+}
+
 fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
-    if cardinality.try_evaluate().is_some() {
+    if is_constant_count(cardinality) {
         return ComplexityClass::O1;
     }
     let base = cardinality.classify_as_time();
@@ -1382,7 +1408,7 @@ fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
 }
 
 fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
-    if cardinality.try_evaluate().is_some() {
+    if is_constant_count(cardinality) {
         return ComplexityClass::O1;
     }
     match kind {
@@ -1394,7 +1420,7 @@ fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> Complex
 }
 
 fn step_space_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
-    if cardinality.try_evaluate().is_some() {
+    if is_constant_count(cardinality) {
         return ComplexityClass::O1;
     }
     match kind {
@@ -1419,16 +1445,18 @@ struct PipelineState {
     collects: bool,
     resolution: Resolution,
     stages: Vec<StageResolution>,
+    traced: bool,
 }
 
 impl PipelineState {
-    fn from_source(cardinality: Symbolic) -> Self {
+    fn from_source(cardinality: Symbolic, traced: bool) -> Self {
         let resolution = Resolution::of_source(&cardinality);
-        PipelineState::with_resolution(cardinality, resolution)
+        PipelineState::with_resolution(cardinality, resolution, traced)
     }
 
-    fn with_resolution(cardinality: Symbolic, resolution: Resolution) -> Self {
+    fn with_resolution(cardinality: Symbolic, resolution: Resolution, traced: bool) -> Self {
         PipelineState {
+            traced,
             cardinality,
             unknown_source: false,
             exact_time: ExactComplexity::new(),
@@ -1442,10 +1470,10 @@ impl PipelineState {
         }
     }
 
-    fn undeclared() -> Self {
+    fn undeclared(traced: bool) -> Self {
         PipelineState {
             unknown_source: true,
-            ..PipelineState::with_resolution(Symbolic::Unknown, Resolution::undeclared())
+            ..PipelineState::with_resolution(Symbolic::Unknown, Resolution::undeclared(), traced)
         }
     }
 
@@ -1475,11 +1503,13 @@ impl PipelineState {
             std::mem::replace(&mut self.cardinality, Symbolic::Unknown),
             &f.kind,
         );
-        self.resolution = self.resolution.after(&f.kind);
-        self.stages.push(StageResolution {
-            stage: describe_stream_fn(&f.kind),
-            resolution: self.resolution.clone(),
-        });
+        if self.traced {
+            self.resolution = self.resolution.after(&f.kind);
+            self.stages.push(StageResolution {
+                stage: describe_stream_fn(&f.kind),
+                resolution: self.resolution.clone(),
+            });
+        }
     }
 
     fn extended(&self, funs: &[crate::nodes::StreamFunctionNode]) -> Self {
@@ -1559,7 +1589,7 @@ pub(crate) fn analyze_nodes(
     ProgramComplexity,
     Vec<(usize, Option<String>, StreamComplexity)>,
 ) {
-    let analysis = analyze_nodes_with(expressions, &|_, inp| input_cardinality(inp));
+    let analysis = analyze_nodes_with(expressions, &|_, inp| input_cardinality(inp), false);
     (analysis.program, analysis.nodes)
 }
 
@@ -1592,6 +1622,7 @@ pub(crate) fn input_nodes(
 pub(crate) fn analyze_nodes_with(
     expressions: &[TypedExpression],
     source_cardinality: &dyn Fn(usize, &crate::nodes::InputFunctionNode) -> Symbolic,
+    traced: bool,
 ) -> TracedAnalysis {
     let ordinals: Vec<usize> = expressions
         .iter()
@@ -1610,7 +1641,7 @@ pub(crate) fn analyze_nodes_with(
         match expr {
             TypedExpression::StreamVariable(v) => {
                 let ordinal = ordinals[expr_index];
-                let state = PipelineState::from_source(source_cardinality(ordinal, &v.inp))
+                let state = PipelineState::from_source(source_cardinality(ordinal, &v.inp), traced)
                     .extended(&v.funs);
                 let desc = if v.funs.is_empty() {
                     format!("{} = input", v.variable_name)
@@ -1633,7 +1664,7 @@ pub(crate) fn analyze_nodes_with(
                 let state = declared
                     .get(&v.prior_stream_variable)
                     .cloned()
-                    .unwrap_or_else(PipelineState::undeclared)
+                    .unwrap_or_else(|| PipelineState::undeclared(traced))
                     .extended(&v.funs);
                 let desc = if v.funs.is_empty() {
                     format!("{} = {}", v.variable_name, v.prior_stream_variable)
@@ -1680,9 +1711,11 @@ pub(crate) fn analyze_nodes_with(
                     format!("input.{funs_desc}.{out_desc}")
                 };
                 let ordinal = ordinals[expr_index];
-                let state =
-                    PipelineState::from_source(source_cardinality(ordinal, &s.inp_and_funs.inp))
-                        .extended(&s.inp_and_funs.funs);
+                let state = PipelineState::from_source(
+                    source_cardinality(ordinal, &s.inp_and_funs.inp),
+                    traced,
+                )
+                .extended(&s.inp_and_funs.funs);
                 (state.finish(&desc), state.stages)
             }
             TypedExpression::NamedReturningStream(s)
@@ -1701,7 +1734,7 @@ pub(crate) fn analyze_nodes_with(
                 let state = declared
                     .get(&s.stream_variable)
                     .cloned()
-                    .unwrap_or_else(PipelineState::undeclared)
+                    .unwrap_or_else(|| PipelineState::undeclared(traced))
                     .extended(&s.funs);
                 (state.finish(&desc), state.stages)
             }
@@ -1781,7 +1814,7 @@ mod tests {
                 kind: kind.clone(),
                 code: String::new(),
             };
-            let analyzed = PipelineState::from_source(Symbolic::Unknown)
+            let analyzed = PipelineState::from_source(Symbolic::Unknown, true)
                 .extended(&[node])
                 .finish("t");
             if analyzed.collects_input {
