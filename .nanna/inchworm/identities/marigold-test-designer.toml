@@ -1,0 +1,18 @@
+[identity]
+name = "marigold-test-designer"
+description = "Writes tests, doctests and property tests that pin one ledger invariant at a time."
+loop = "inner"
+model = "gemma4:e4b"
+system_prompt = "prompts/marigold-test-designer.md"
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = ["marigold-impl/**", "marigold-grammar/**", "marigold/**", "tests/**", ".nanna/inchworm/invariants.toml"]
+read_paths = ["marigold-impl/**", "marigold-grammar/**", "marigold-macros/**", "marigold/**", "tests/**", ".nanna/inchworm/**", "Cargo.toml", "codecov.yml", "README.md", "rust-toolchain.toml"]
+max_effect = "workspace"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file", "cargo_check", "cargo_test"]
+
+[limits]
+max_iterations = 200
+max_wall_clock_secs = 3600
+max_concurrent = 1
