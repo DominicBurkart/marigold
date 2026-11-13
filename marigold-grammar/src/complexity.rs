@@ -663,9 +663,15 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
             parse_symbolic_pair(inner)
         }
         Rule::symbolic_sum => {
-            let parts: Result<Vec<Symbolic>, String> =
-                pair.into_inner().map(parse_symbolic_pair).collect();
-            Ok(Symbolic::Sum(parts?))
+            let mut parts = pair
+                .into_inner()
+                .map(parse_symbolic_pair)
+                .collect::<Result<Vec<Symbolic>, String>>()?;
+            if parts.len() == 1 {
+                Ok(parts.remove(0))
+            } else {
+                Ok(Symbolic::Sum(parts))
+            }
         }
         Rule::symbolic_atom => {
             let inner = pair
