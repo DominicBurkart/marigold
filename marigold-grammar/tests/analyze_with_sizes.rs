@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use marigold_grammar::complexity::{ComplexityClass, SizeBindings, SizeName};
+use marigold_grammar::complexity::{Cardinality, ComplexityClass, SizeBindings, SizeName};
 use marigold_grammar::sizes::{
     InputSizes, ReasonCode, Resolution, ResolutionKind, SizeAnalysisError, StreamResolution,
     SymbolicAnalysis,
@@ -186,6 +186,118 @@ fn a_declared_variable_consumed_twice_shares_one_size() {
     assert_eq!((range.lo, range.hi), (big(20), big(20)));
     assert_eq!(analysis.streams[1].expr_index, 2);
     assert_eq!(analysis.streams[2].expr_index, 3);
+}
+
+#[test]
+fn streams_pair_with_program_streams_through_program_stream_not_by_position() {
+    let source = "struct D { x: i32 }\nrows = read_file(\"d.csv\", csv, struct=D).ok_or_panic()\nrows.map(f).return\nrows.permutations(2).return";
+    let analysis = analyze(source, &[(0, "n")]);
+    assert_eq!(analysis.streams.len(), 3);
+    assert_eq!(analysis.program.streams.len(), 2);
+    let keys: Vec<Option<usize>> = analysis.streams.iter().map(|s| s.program_stream).collect();
+    assert_eq!(keys, vec![None, Some(0), Some(1)]);
+    for stream in &analysis.streams {
+        if let Some(index) = stream.program_stream {
+            assert_eq!(
+                analysis.program.streams[index].description,
+                stream.description
+            );
+        }
+    }
+
+    let unnamed_first = "struct D { x: i32 }\nrange(0, 3).map(f).return\nrows = read_file(\"a.csv\", csv, struct=D).ok_or_panic()\nmore = rows.map(f)\nrows.map(f).return\nmore.return";
+    let analysis = analyze(unnamed_first, &[(1, "n")]);
+    let paired: Vec<(Option<&str>, Option<usize>)> = analysis
+        .streams
+        .iter()
+        .map(|s| (s.name.as_deref(), s.program_stream))
+        .collect();
+    assert_eq!(
+        paired,
+        vec![
+            (None, Some(0)),
+            (Some("rows"), None),
+            (Some("more"), None),
+            (None, Some(1)),
+            (None, Some(2)),
+        ]
+    );
+    assert_eq!(analysis.program.streams.len(), 3);
+    assert_eq!(
+        analysis.program.streams[2].description,
+        analysis.streams[4].description
+    );
+}
+
+fn ceiling(cardinality: &Cardinality, n: u64) -> BigUint {
+    match cardinality {
+        Cardinality::Exact(v) => v.clone(),
+        Cardinality::Bounded(sym) => sym.upper_bound_with(&at(n)).expect("n is bound"),
+        Cardinality::Unknown => panic!("an unknown cardinality has no ceiling"),
+    }
+}
+
+#[test]
+fn program_cardinality_with_a_bound_input_does_not_depend_on_stream_order() {
+    let declaration = "struct D { x: i32 }\nfn keep(d: &D) -> bool { true }\nrows = read_file(\"d.csv\", csv, struct=D).ok_or_panic()\n";
+    let consumers = [
+        "rows.map(f).return",
+        "rows.permutations(2).return",
+        "range(0, 7).return",
+        "rows.filter(keep).combinations(2).return",
+    ];
+    let program = |order: &[usize]| {
+        let body: Vec<&str> = order.iter().map(|i| consumers[*i]).collect();
+        format!("{declaration}{}", body.join("\n"))
+    };
+
+    let forward = analyze(&program(&[0, 1]), &[(0, "n")]).program;
+    let backward = analyze(&program(&[1, 0]), &[(0, "n")]).program;
+    assert_eq!(forward.program_cardinality, backward.program_cardinality);
+    assert_eq!(forward.program_cardinality.to_string(), "$n + P($n, 2)");
+
+    let orders: [&[usize]; 4] = [&[0, 1, 2, 3], &[3, 2, 1, 0], &[2, 0, 3, 1], &[1, 3, 0, 2]];
+    let results: Vec<Cardinality> = orders
+        .iter()
+        .map(|order| {
+            analyze(&program(order), &[(0, "n")])
+                .program
+                .program_cardinality
+        })
+        .collect();
+    for result in &results {
+        assert_eq!(result, &results[0]);
+    }
+    let joined = &results[0];
+    for n in 0..10 {
+        let ceiling_of_joined = ceiling(joined, n);
+        for stream in analyze(&program(&[0, 1, 2, 3]), &[(0, "n")])
+            .program
+            .streams
+        {
+            assert!(
+                ceiling_of_joined >= ceiling(&stream.cardinality, n),
+                "{joined} is below {} at n={n}",
+                stream.cardinality
+            );
+        }
+    }
+}
+
+#[test]
+fn a_stage_that_ignores_its_unbound_input_reports_no_reasons() {
+    let source = "struct D { x: i32 }\nfn cmp(a: &D, b: &D) -> Ordering { Ordering::Equal }\nread_file(\"d.csv\", csv, struct=D).ok_or_panic().keep_first_n(0, cmp).combinations(0).return";
+    let analysis = analyze(source, &[]);
+    let stages = &analysis.streams[0].stages;
+    let emptied = &stages[2].resolution;
+    assert_eq!(emptied.kind(), ResolutionKind::Exact);
+    assert_eq!(emptied.lo().to_string(), "0");
+    assert!(emptied.reasons().is_empty());
+    let chosen = &stages[3].resolution;
+    assert_eq!(chosen.kind(), ResolutionKind::Exact);
+    assert_eq!(chosen.lo().to_string(), "1");
+    assert!(chosen.reasons().is_empty());
+    assert_eq!(stages[1].resolution.reasons(), &[ReasonCode::UnboundInput]);
 }
 
 #[test]
@@ -376,6 +488,7 @@ fn the_analysis_serializes_with_a_stable_shape() {
         value["streams"],
         json!([{
             "expr_index": 0,
+            "program_stream": 0,
             "name": null,
             "description": "input.map(...).return",
             "stages": [

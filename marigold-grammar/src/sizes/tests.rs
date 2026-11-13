@@ -1,6 +1,6 @@
-use marigold_grammar::complexity::{SizeBindings, SizeName, Symbolic};
-use marigold_grammar::nodes::StreamFunctionKind;
-use marigold_grammar::sizes::{InvalidResolution, ReasonCode, Resolution, ResolutionKind};
+use crate::complexity::{SizeBindings, SizeName, Symbolic};
+use crate::nodes::StreamFunctionKind;
+use crate::sizes::{InvalidResolution, ReasonCode, Resolution, ResolutionKind};
 use num_bigint::BigUint;
 use num_traits::{One, ToPrimitive, Zero};
 use proptest::prelude::*;
@@ -345,10 +345,8 @@ fn only_a_missing_binding_is_unbound_and_everything_else_open_ended_is_unresolva
         ResolutionKind::Unresolvable
     );
     assert_eq!(
-        Resolution::checked(constant(0), None, vec![])
-            .unwrap()
-            .kind(),
-        ResolutionKind::Unresolvable
+        Resolution::checked(constant(0), None, vec![]),
+        Err(InvalidResolution::OpenBoundWithoutCause)
     );
     assert_eq!(
         Resolution::checked(
@@ -413,7 +411,6 @@ fn contains_forbidden(expression: &Symbolic) -> bool {
         | Symbolic::PermutationsWithReplacement { n, .. }
         | Symbolic::Combinations { n, .. } => contains_forbidden(n),
         Symbolic::Min(a, b) => contains_forbidden(a) || contains_forbidden(b),
-        _ => panic!("a new Symbolic variant needs a rule in contains_forbidden"),
     }
 }
 
@@ -564,8 +561,9 @@ proptest! {
         let tight_hi = low + 3;
         let wide_lo = tight_lo.saturating_sub(grow_down);
         let wide_hi = tight_hi + grow_up;
-        let mut tight = Resolution::checked(constant(tight_lo), Some(constant(tight_hi)), vec![]).unwrap();
-        let mut wide = Resolution::checked(constant(wide_lo), Some(constant(wide_hi)), vec![]).unwrap();
+        let reason = || vec![ReasonCode::OpaquePredicate];
+        let mut tight = Resolution::checked(constant(tight_lo), Some(constant(tight_hi)), reason()).unwrap();
+        let mut wide = Resolution::checked(constant(wide_lo), Some(constant(wide_hi)), reason()).unwrap();
         for kind in &stages {
             tight = tight.after(kind);
             wide = wide.after(kind);
@@ -708,7 +706,12 @@ fn the_checked_constructor_rejects_bounds_that_break_the_lattice() {
         Err(InvalidResolution::LowerAboveUpper)
     );
     assert!(Resolution::checked(constant(4), Some(constant(4)), vec![]).is_ok());
-    assert!(Resolution::checked(constant(4), Some(constant(5)), vec![]).is_ok());
+    assert!(Resolution::checked(
+        constant(4),
+        Some(constant(5)),
+        vec![ReasonCode::OpaquePredicate]
+    )
+    .is_ok());
     assert_eq!(
         Resolution::checked(
             Symbolic::Combinations {
@@ -741,6 +744,198 @@ proptest! {
                 resolution.reasons().to_vec(),
             );
             prop_assert_eq!(rebuilt, Ok(resolution.clone()));
+            let open_cause = resolution.reasons().iter().any(|r| {
+                matches!(r, ReasonCode::UnboundInput | ReasonCode::UndeclaredStreamVariable)
+            });
+            match resolution.kind() {
+                ResolutionKind::Exact | ResolutionKind::Symbolic => {
+                    prop_assert!(resolution.reasons().is_empty(), "{:?}", resolution)
+                }
+                ResolutionKind::Bounded => {
+                    prop_assert!(!resolution.reasons().is_empty(), "{:?}", resolution)
+                }
+                ResolutionKind::Unbound | ResolutionKind::Unresolvable => {
+                    prop_assert!(open_cause, "{:?}", resolution)
+                }
+            }
         }
     }
+
+    #[test]
+    fn an_accepted_interval_is_ordered_under_every_binding(
+        lo in monotone_bound(),
+        hi in monotone_bound(),
+    ) {
+        if let Ok(resolution) = Resolution::checked(lo, Some(hi), vec![ReasonCode::OpaquePredicate]) {
+            for n in 0..10u64 {
+                for m in 0..4u64 {
+                    let bindings = SizeBindings::from([
+                        (SizeName::new("n").unwrap(), BigUint::from(n)),
+                        (SizeName::new("m").unwrap(), BigUint::from(m)),
+                    ]);
+                    let range = resolution.evaluate(&bindings);
+                    prop_assert!(range.lo <= range.hi, "{:?} at n={} m={}", resolution, n, m);
+                }
+            }
+        }
+    }
+}
+
+fn monotone_bound() -> impl Strategy<Value = Symbolic> {
+    let leaf = prop_oneof![
+        (0u64..6).prop_map(constant),
+        Just(param("n")),
+        Just(param("m")),
+    ];
+    leaf.prop_recursive(3, 12, 2, |inner| {
+        prop_oneof![
+            (inner.clone(), inner.clone())
+                .prop_map(|(a, b)| Symbolic::Min(Box::new(a), Box::new(b))),
+            (inner.clone(), 0u64..3)
+                .prop_map(|(n, k)| Symbolic::Permutations { n: Box::new(n), k }),
+            (inner.clone(), 0u64..3)
+                .prop_map(|(n, k)| Symbolic::PermutationsWithReplacement { n: Box::new(n), k }),
+            (inner, 0u64..3).prop_map(|(n, k)| Symbolic::Combinations { n: Box::new(n), k }),
+        ]
+    })
+}
+
+#[test]
+fn the_checked_constructor_rejects_order_it_cannot_prove() {
+    let n = param("n");
+    let m = param("m");
+    let reason = || vec![ReasonCode::OpaquePredicate];
+    let squared = Symbolic::PermutationsWithReplacement {
+        n: Box::new(n.clone()),
+        k: 2,
+    };
+    let n_capped = Symbolic::Min(Box::new(n.clone()), Box::new(constant(3)));
+    for (lo, hi) in [
+        (m.clone(), n.clone()),
+        (squared.clone(), n.clone()),
+        (n.clone(), n_capped.clone()),
+        (constant(4), n_capped.clone()),
+        (constant(1), n.clone()),
+        (
+            Symbolic::Permutations {
+                n: Box::new(n.clone()),
+                k: 2,
+            },
+            Symbolic::Permutations {
+                n: Box::new(n.clone()),
+                k: 3,
+            },
+        ),
+    ] {
+        assert_eq!(
+            Resolution::checked(lo.clone(), Some(hi.clone()), reason()),
+            Err(InvalidResolution::LowerAboveUpper),
+            "[{lo}, {hi}]"
+        );
+    }
+    let choose_none = Symbolic::Combinations {
+        n: Box::new(n.clone()),
+        k: 0,
+    };
+    for (lo, hi) in [
+        (n_capped.clone(), n.clone()),
+        (constant(0), n_capped.clone()),
+        (
+            constant(3),
+            Symbolic::Min(Box::new(constant(5)), Box::new(constant(4))),
+        ),
+        (constant(1), choose_none),
+        (
+            Symbolic::Permutations {
+                n: Box::new(n_capped.clone()),
+                k: 2,
+            },
+            Symbolic::Permutations {
+                n: Box::new(n.clone()),
+                k: 2,
+            },
+        ),
+        (
+            Symbolic::Min(Box::new(m.clone()), Box::new(constant(2))),
+            Symbolic::Min(Box::new(constant(4)), Box::new(constant(9))),
+        ),
+    ] {
+        assert!(
+            Resolution::checked(lo.clone(), Some(hi.clone()), reason()).is_ok(),
+            "[{lo}, {hi}]"
+        );
+    }
+}
+
+#[test]
+fn the_checked_constructor_ties_reasons_to_the_shape_of_the_interval() {
+    let n = param("n");
+    assert_eq!(
+        Resolution::checked(constant(0), None, vec![]),
+        Err(InvalidResolution::OpenBoundWithoutCause)
+    );
+    assert_eq!(
+        Resolution::checked(constant(0), None, vec![ReasonCode::OpaquePredicate]),
+        Err(InvalidResolution::OpenBoundWithoutCause)
+    );
+    assert!(Resolution::checked(constant(0), None, vec![ReasonCode::UnboundInput]).is_ok());
+    assert!(Resolution::checked(
+        constant(0),
+        None,
+        vec![ReasonCode::UndeclaredStreamVariable]
+    )
+    .is_ok());
+    assert_eq!(
+        Resolution::checked(
+            constant(3),
+            Some(constant(3)),
+            vec![ReasonCode::OpaquePredicate]
+        ),
+        Err(InvalidResolution::ReasonOnDeterminedCount)
+    );
+    assert_eq!(
+        Resolution::checked(
+            n.clone(),
+            Some(n.clone()),
+            vec![ReasonCode::OpaquePredicate]
+        ),
+        Err(InvalidResolution::ReasonOnDeterminedCount)
+    );
+    assert_eq!(
+        Resolution::checked(constant(0), Some(n.clone()), vec![]),
+        Err(InvalidResolution::RangeWithoutReason)
+    );
+    assert_eq!(
+        Resolution::checked(constant(2), Some(constant(3)), vec![]),
+        Err(InvalidResolution::RangeWithoutReason)
+    );
+    for error in [
+        InvalidResolution::OpenBoundWithoutCause,
+        InvalidResolution::ReasonOnDeterminedCount,
+        InvalidResolution::RangeWithoutReason,
+    ] {
+        assert!(error.to_string().len() > 10);
+    }
+}
+
+#[test]
+fn a_stage_that_no_longer_depends_on_the_input_drops_its_stale_reasons() {
+    let emptied = unbound().after(&StreamFunctionKind::KeepFirstN(0));
+    assert_eq!(emptied.kind(), ResolutionKind::Exact);
+    assert_eq!(emptied.lo(), &constant(0));
+    assert!(emptied.reasons().is_empty());
+
+    let one_choice = emptied.after(&StreamFunctionKind::Combinations(0));
+    assert_eq!(one_choice.kind(), ResolutionKind::Exact);
+    assert_eq!(one_choice.lo(), &constant(1));
+    assert!(one_choice.reasons().is_empty());
+
+    let filtered_then_emptied = symbolic_n()
+        .after(&StreamFunctionKind::Filter)
+        .after(&StreamFunctionKind::KeepFirstN(0));
+    assert_eq!(filtered_then_emptied.kind(), ResolutionKind::Bounded);
+    assert_eq!(
+        filtered_then_emptied.reasons(),
+        &[ReasonCode::OpaquePredicate]
+    );
 }

@@ -8,9 +8,36 @@
 //! - `exact`: `lo == hi` and both are numbers.
 //! - `symbolic`: `lo == hi` and both mention a named size, so the count is exact once the size is
 //!   bound.
-//! - `bounded`: `lo < hi` is possible, typically after a `filter` or a `keep_first_n`.
-//! - `unbound`: the length of an input is free; binding it with [`InputSizes`] resolves the stage.
-//! - `unresolvable`: no binding can resolve the stage, as for an undeclared stream variable.
+//! - `bounded`: `lo` and `hi` differ, typically after a `filter` or a `keep_first_n`.
+//! - `unbound`: the length of an input is free. Binding it with [`InputSizes`] narrows the stage
+//!   to `symbolic` or `bounded` (or `exact`). An unbound resolution has no upper bound (`hi` is
+//!   `None`) and carries [`ReasonCode::UnboundInput`] but not
+//!   [`ReasonCode::UndeclaredStreamVariable`].
+//! - `unresolvable`: no binding can resolve the stage, as for an undeclared stream variable: `hi`
+//!   is `None` and the reasons do not make it `unbound`.
+//!
+//! ```
+//! use marigold_grammar::marigold_analyze_with_sizes;
+//! use marigold_grammar::sizes::{InputSizes, ReasonCode, ResolutionKind};
+//!
+//! let src = "struct D { x: i32 }\nfn keep(d: &D) -> bool { true }\nread_file(\"d.csv\", csv, struct=D).ok_or_panic().filter(keep).return";
+//! let kinds = |sizes: &InputSizes| -> Vec<ResolutionKind> {
+//!     marigold_analyze_with_sizes(src, sizes).unwrap().streams[0]
+//!         .stages
+//!         .iter()
+//!         .map(|stage| stage.resolution.kind())
+//!         .collect()
+//! };
+//!
+//! use ResolutionKind::{Bounded, Symbolic, Unbound};
+//! assert_eq!(kinds(&InputSizes::new()), [Unbound, Unbound, Unbound]);
+//! assert_eq!(kinds(&InputSizes::new().bind(0, "n").unwrap()), [Symbolic, Symbolic, Bounded]);
+//!
+//! let bound = marigold_analyze_with_sizes(src, &InputSizes::new().bind(0, "n").unwrap()).unwrap();
+//! let filtered = &bound.streams[0].stages[2].resolution;
+//! assert_eq!(filtered.hi().unwrap().to_string(), "$n");
+//! assert_eq!(filtered.reasons(), [ReasonCode::OpaquePredicate]);
+//! ```
 //!
 //! `Cardinality::Bounded` in the default [`ProgramComplexity`] is the same stream seen as one
 //! scalar for the cost model (an upper bound), and its `Exact` and `Unknown` are not this
@@ -21,6 +48,12 @@
 //! panic; `fold` emits exactly one item and is assumed to terminate. A resolution is correct for
 //! a program whose only unknown is the bound input's length. Known exception: the analyzer
 //! reports one item for `permutations_with_replacement(0)` while the runtime yields none (#457).
+//!
+//! Precision: every resolution is sound, but some are wider than the true count. A
+//! `keep_first_n(0)` over a bound input reports `min($n, 0)` rather than the number 0;
+//! `filter(..).combinations(0)` reports `[1, C($n, 0)]` although the count is always 1; and
+//! `permutations(0)` or `combinations(0)` over an unbound input stays `unbound` with `lo` 1,
+//! although the count is exactly 1.
 //!
 //! Inputs are numbered from 0 in source order, each stream-variable declaration and each unnamed
 //! stream counting once and a `select_all` counting as a single input. This numbering is
@@ -56,9 +89,13 @@ use crate::parser::MarigoldParseError;
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ReasonCode {
+    /// The stream reads an input whose length is unknown and not bound to a size.
     UnboundInput,
+    /// The stream consumes a variable that the program never declares.
     UndeclaredStreamVariable,
+    /// A `filter` or `filter_map` keeps an unknown share of its items.
     OpaquePredicate,
+    /// An `ok()` drops the items that fail to parse, an unknown share.
     FallibleItems,
 }
 
@@ -73,30 +110,42 @@ pub enum ReasonCode {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ResolutionKind {
+    /// `lo == hi` and both are numbers.
     Exact,
+    /// `lo == hi` and both mention a named size.
     Symbolic,
+    /// `lo` and `hi` differ.
     Bounded,
+    /// `hi` is `None` because an input is unbound; binding it narrows the stage.
     Unbound,
+    /// `hi` is `None` and no binding can narrow it, as for an undeclared stream variable.
     Unresolvable,
 }
 
-/// A resolution evaluated under bindings. `lo` is `None` when it mentions an unbound size and
-/// `hi` is `None` when it is open-ended or mentions an unbound size, even if a `min` would cap it.
+/// A resolution evaluated under bindings, as returned by [`Resolution::evaluate`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct EvaluatedRange {
+    /// The fewest items the stage can produce, or `None` when `lo` mentions an unbound size.
     pub lo: Option<BigUint>,
+    /// The most items the stage can produce, or `None` when `hi` is open-ended or mentions an
+    /// unbound size, even if a `min` would cap it.
     pub hi: Option<BigUint>,
 }
 
 /// The interval `[lo, hi]` of item counts a stage can produce, with the reasons it is not exact.
 ///
-/// Invariants: `lo` and `hi` contain only constants, named sizes, `min` and the combinatorial
-/// constructors, all non-decreasing in every size, so widening an input never narrows a stage;
-/// when both are numbers `lo <= hi`; `hi` is `None` only while a size is unbound or undeclared.
-/// Resolutions produced by the analysis report `exact` and `symbolic` stages with no reasons and
-/// every other stage with at least one. Constant bounds are folded to a number; symbolic bounds
-/// are left as written. Use [`Resolution::checked`] to build one directly.
+/// Every resolution, whether produced by the analysis or by [`Resolution::checked`], satisfies:
+///
+/// - `lo` and `hi` contain only constants, named sizes, `min` and the combinatorial
+///   constructors, all non-decreasing in every size, so widening an input never narrows a stage.
+/// - `lo <= hi` under every binding, as shown by the rules listed on [`Resolution::checked`].
+/// - `hi` is `None` only with [`ReasonCode::UnboundInput`] or
+///   [`ReasonCode::UndeclaredStreamVariable`] among the reasons.
+/// - `exact` and `symbolic` stages (`lo == hi`, compared as written) have no reasons and every
+///   other stage has at least one.
+///
+/// Constant bounds are folded to a number; symbolic bounds are left as written.
 ///
 /// ```
 /// use marigold_grammar::complexity::{SizeBindings, SizeName, Symbolic};
@@ -119,7 +168,7 @@ pub struct EvaluatedRange {
 /// assert_eq!(resolution.evaluate(&bound).hi, Some(BigUint::from(3u32)));
 ///
 /// assert_eq!(
-///     Resolution::checked(number(5), Some(number(4)), vec![]),
+///     Resolution::checked(number(5), Some(number(4)), vec![ReasonCode::OpaquePredicate]),
 ///     Err(InvalidResolution::LowerAboveUpper)
 /// );
 /// ```
@@ -163,10 +212,74 @@ fn monotone_only(expression: &Symbolic) -> bool {
     }
 }
 
+fn floor(expression: &Symbolic) -> Option<BigUint> {
+    fn sizes(expression: &Symbolic, bindings: &mut SizeBindings) {
+        match expression {
+            Symbolic::Param(name) => {
+                bindings.insert(name.clone(), BigUint::zero());
+            }
+            Symbolic::Permutations { n, .. }
+            | Symbolic::PermutationsWithReplacement { n, .. }
+            | Symbolic::Combinations { n, .. }
+            | Symbolic::Filtered(n) => sizes(n, bindings),
+            Symbolic::Min(a, b) => {
+                sizes(a, bindings);
+                sizes(b, bindings);
+            }
+            Symbolic::Sum(parts) => parts.iter().for_each(|part| sizes(part, bindings)),
+            Symbolic::Constant(_) | Symbolic::Unknown => {}
+        }
+    }
+    let mut bindings = SizeBindings::new();
+    sizes(expression, &mut bindings);
+    expression.evaluate(&bindings)
+}
+
+fn provably_at_most(lo: &Symbolic, hi: &Symbolic) -> bool {
+    if lo == hi {
+        return true;
+    }
+    if let Some(low) = lo.try_evaluate() {
+        return floor(hi).is_some_and(|least| low <= least);
+    }
+    match (lo, hi) {
+        (_, Symbolic::Min(a, b)) => provably_at_most(lo, a) && provably_at_most(lo, b),
+        (Symbolic::Min(a, b), _) => provably_at_most(a, hi) || provably_at_most(b, hi),
+        (Symbolic::Permutations { n: a, k: j }, Symbolic::Permutations { n: b, k })
+        | (
+            Symbolic::PermutationsWithReplacement { n: a, k: j },
+            Symbolic::PermutationsWithReplacement { n: b, k },
+        )
+        | (Symbolic::Combinations { n: a, k: j }, Symbolic::Combinations { n: b, k }) => {
+            j == k && provably_at_most(a, b)
+        }
+        _ => false,
+    }
+}
+
+/// Why [`Resolution::checked`] rejected a pair of bounds.
+///
+/// ```
+/// use marigold_grammar::complexity::Symbolic;
+/// use marigold_grammar::sizes::{InvalidResolution, Resolution};
+///
+/// let rejected = Resolution::checked(Symbolic::Unknown, None, vec![]).unwrap_err();
+/// assert_eq!(rejected, InvalidResolution::NonMonotoneBound);
+/// assert!(rejected.to_string().contains("min"));
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum InvalidResolution {
+    /// A bound contains `?`, a filtered term or a sum.
     NonMonotoneBound,
+    /// `lo <= hi` could not be shown under every binding.
     LowerAboveUpper,
+    /// `hi` is `None` but no reason names an unbound input or an undeclared stream variable.
+    OpenBoundWithoutCause,
+    /// `lo == hi`, so the count is determined, yet reasons were given.
+    ReasonOnDeterminedCount,
+    /// `lo` and `hi` differ but no reason says why.
+    RangeWithoutReason,
 }
 
 impl fmt::Display for InvalidResolution {
@@ -176,9 +289,22 @@ impl fmt::Display for InvalidResolution {
                 f,
                 "a resolution bound may contain only constants, sizes, min and the combinatorial constructors"
             ),
-            InvalidResolution::LowerAboveUpper => {
-                write!(f, "the lower bound of a resolution exceeds its upper bound")
-            }
+            InvalidResolution::LowerAboveUpper => write!(
+                f,
+                "the lower bound of a resolution is not provably at most its upper bound"
+            ),
+            InvalidResolution::OpenBoundWithoutCause => write!(
+                f,
+                "a resolution without an upper bound needs an unbound-input or undeclared-variable reason"
+            ),
+            InvalidResolution::ReasonOnDeterminedCount => write!(
+                f,
+                "a resolution whose bounds are equal cannot carry reasons"
+            ),
+            InvalidResolution::RangeWithoutReason => write!(
+                f,
+                "a resolution whose bounds differ needs at least one reason"
+            ),
         }
     }
 }
@@ -211,36 +337,97 @@ impl Resolution {
         hi: Option<Symbolic>,
         mut reasons: Vec<ReasonCode>,
     ) -> Resolution {
+        let lo = simplify(lo);
+        let hi = hi.map(simplify);
+        if hi.as_ref() == Some(&lo) {
+            reasons.clear();
+        }
         reasons.sort();
         reasons.dedup();
-        Resolution {
-            lo: simplify(lo),
-            hi: hi.map(simplify),
-            reasons,
-        }
+        Resolution { lo, hi, reasons }
     }
 
-    /// Builds a resolution, rejecting bounds that are not monotone in the sizes or whose lower
-    /// bound exceeds the upper bound. Reasons are sorted and deduplicated.
+    /// Builds a resolution from its bounds and reasons, sorting and deduplicating the reasons
+    /// and folding constant bounds to numbers. It is rejected unless:
+    ///
+    /// - neither bound contains `?`, a filtered term or a sum
+    ///   ([`InvalidResolution::NonMonotoneBound`]);
+    /// - `lo <= hi` is shown under every binding by one of these rules, applied recursively
+    ///   ([`InvalidResolution::LowerAboveUpper`]): the bounds are equal as written; `lo` is a
+    ///   number no greater than `hi` with every size at 0; `hi` is `min(a, b)` with `lo <= a` and
+    ///   `lo <= b`; `lo` is `min(a, b)` with `a <= hi` or `b <= hi`; or both are the same
+    ///   combinatorial constructor with the same `k` and the inner `lo` is at most the inner
+    ///   `hi`. Other pairs, such as `$m` and `$n`, are rejected even when they happen to be
+    ///   ordered;
+    /// - a missing `hi` comes with [`ReasonCode::UnboundInput`] or
+    ///   [`ReasonCode::UndeclaredStreamVariable`] ([`InvalidResolution::OpenBoundWithoutCause`]);
+    /// - equal bounds come with no reasons ([`InvalidResolution::ReasonOnDeterminedCount`]) and
+    ///   different bounds with at least one ([`InvalidResolution::RangeWithoutReason`]).
+    ///
+    /// ```
+    /// use marigold_grammar::complexity::{SizeName, Symbolic};
+    /// use marigold_grammar::sizes::{InvalidResolution, ReasonCode, Resolution};
+    ///
+    /// let n = Symbolic::Param(SizeName::new("n").unwrap());
+    /// let m = Symbolic::Param(SizeName::new("m").unwrap());
+    /// let squared = Symbolic::PermutationsWithReplacement { n: Box::new(n.clone()), k: 2 };
+    /// let reason = || vec![ReasonCode::OpaquePredicate];
+    ///
+    /// let capped = Symbolic::Min(Box::new(n.clone()), Box::new(Symbolic::Constant(3u32.into())));
+    /// assert!(Resolution::checked(capped, Some(n.clone()), reason()).is_ok());
+    /// assert_eq!(
+    ///     Resolution::checked(squared, Some(n.clone()), reason()),
+    ///     Err(InvalidResolution::LowerAboveUpper)
+    /// );
+    /// assert_eq!(
+    ///     Resolution::checked(m, Some(n.clone()), reason()),
+    ///     Err(InvalidResolution::LowerAboveUpper)
+    /// );
+    /// assert_eq!(
+    ///     Resolution::checked(n.clone(), Some(n.clone()), reason()),
+    ///     Err(InvalidResolution::ReasonOnDeterminedCount)
+    /// );
+    /// assert!(Resolution::checked(n.clone(), Some(n), vec![]).is_ok());
+    /// ```
     pub fn checked(
         lo: Symbolic,
         hi: Option<Symbolic>,
-        reasons: Vec<ReasonCode>,
+        mut reasons: Vec<ReasonCode>,
     ) -> Result<Resolution, InvalidResolution> {
         if !monotone_only(&lo) || hi.as_ref().is_some_and(|hi| !monotone_only(hi)) {
             return Err(InvalidResolution::NonMonotoneBound);
         }
-        if let (Some(low), Some(Some(high))) =
-            (lo.try_evaluate(), hi.as_ref().map(|h| h.try_evaluate()))
-        {
-            if low > high {
-                return Err(InvalidResolution::LowerAboveUpper);
+        let lo = simplify(lo);
+        let hi = hi.map(simplify);
+        match &hi {
+            None => {
+                if !reasons.iter().any(|reason| {
+                    matches!(
+                        reason,
+                        ReasonCode::UnboundInput | ReasonCode::UndeclaredStreamVariable
+                    )
+                }) {
+                    return Err(InvalidResolution::OpenBoundWithoutCause);
+                }
+            }
+            Some(hi) => {
+                if !provably_at_most(&lo, hi) {
+                    return Err(InvalidResolution::LowerAboveUpper);
+                }
+                if *hi == lo && !reasons.is_empty() {
+                    return Err(InvalidResolution::ReasonOnDeterminedCount);
+                }
+                if *hi != lo && reasons.is_empty() {
+                    return Err(InvalidResolution::RangeWithoutReason);
+                }
             }
         }
-        Ok(Resolution::new(lo, hi, reasons))
+        reasons.sort();
+        reasons.dedup();
+        Ok(Resolution { lo, hi, reasons })
     }
 
-    pub fn of_source(source: &Symbolic) -> Resolution {
+    pub(crate) fn of_source(source: &Symbolic) -> Resolution {
         match source {
             Symbolic::Constant(_) | Symbolic::Param(_) => {
                 Resolution::new(source.clone(), Some(source.clone()), Vec::new())
@@ -249,22 +436,73 @@ impl Resolution {
         }
     }
 
-    pub fn undeclared() -> Resolution {
+    pub(crate) fn undeclared() -> Resolution {
         Resolution::new(zero(), None, vec![ReasonCode::UndeclaredStreamVariable])
     }
 
+    /// The fewest items the stage can produce.
+    ///
+    /// ```
+    /// use marigold_grammar::marigold_analyze_with_sizes;
+    /// use marigold_grammar::sizes::InputSizes;
+    ///
+    /// let src = "struct D { x: i32 }\nread_file(\"d.csv\", csv, struct=D).ok_or_panic().combinations(2).return";
+    /// let analysis = marigold_analyze_with_sizes(src, &InputSizes::new().bind(0, "n").unwrap()).unwrap();
+    /// let last = &analysis.streams[0].stages.last().unwrap().resolution;
+    /// assert_eq!(last.lo().to_string(), "C($n, 2)");
+    /// ```
     pub fn lo(&self) -> &Symbolic {
         &self.lo
     }
 
+    /// The most items the stage can produce, or `None` when no upper bound is known.
+    ///
+    /// ```
+    /// use marigold_grammar::marigold_analyze_with_sizes;
+    /// use marigold_grammar::sizes::InputSizes;
+    ///
+    /// let src = "struct D { x: i32 }\nread_file(\"d.csv\", csv, struct=D).ok_or_panic().return";
+    /// let unbound = marigold_analyze_with_sizes(src, &InputSizes::new()).unwrap();
+    /// assert_eq!(unbound.streams[0].stages[1].resolution.hi(), None);
+    /// let bound = marigold_analyze_with_sizes(src, &InputSizes::new().bind(0, "rows").unwrap()).unwrap();
+    /// assert_eq!(bound.streams[0].stages[1].resolution.hi().unwrap().to_string(), "$rows");
+    /// ```
     pub fn hi(&self) -> Option<&Symbolic> {
         self.hi.as_ref()
     }
 
+    /// Why the stage is not exact, sorted by code and without duplicates; empty for `exact` and
+    /// `symbolic` stages.
+    ///
+    /// ```
+    /// use marigold_grammar::marigold_analyze_with_sizes;
+    /// use marigold_grammar::sizes::{InputSizes, ReasonCode};
+    ///
+    /// let src = "struct D { x: i32 }\nread_file(\"d.csv\", csv, struct=D).ok().return";
+    /// let analysis = marigold_analyze_with_sizes(src, &InputSizes::new()).unwrap();
+    /// let last = &analysis.streams[0].stages[1].resolution;
+    /// assert_eq!(last.reasons(), [ReasonCode::UnboundInput, ReasonCode::FallibleItems]);
+    /// ```
     pub fn reasons(&self) -> &[ReasonCode] {
         &self.reasons
     }
 
+    /// How much is known about the count; see [`ResolutionKind`] and the module documentation.
+    ///
+    /// ```
+    /// use marigold_grammar::complexity::Symbolic;
+    /// use marigold_grammar::sizes::{ReasonCode, Resolution, ResolutionKind};
+    ///
+    /// let open = Resolution::checked(Symbolic::Constant(0u32.into()), None, vec![ReasonCode::UnboundInput]).unwrap();
+    /// assert_eq!(open.kind(), ResolutionKind::Unbound);
+    /// let ghost = Resolution::checked(
+    ///     Symbolic::Constant(0u32.into()),
+    ///     None,
+    ///     vec![ReasonCode::UnboundInput, ReasonCode::UndeclaredStreamVariable],
+    /// )
+    /// .unwrap();
+    /// assert_eq!(ghost.kind(), ResolutionKind::Unresolvable);
+    /// ```
     pub fn kind(&self) -> ResolutionKind {
         match &self.hi {
             None if self.reasons.contains(&ReasonCode::UnboundInput)
@@ -284,7 +522,7 @@ impl Resolution {
         }
     }
 
-    pub fn after(&self, kind: &StreamFunctionKind) -> Resolution {
+    pub(crate) fn after(&self, kind: &StreamFunctionKind) -> Resolution {
         match kind {
             StreamFunctionKind::Map | StreamFunctionKind::OkOrPanic => self.clone(),
             StreamFunctionKind::Filter | StreamFunctionKind::FilterMap => {
@@ -317,6 +555,22 @@ impl Resolution {
     }
 
     /// Evaluates both bounds under `bindings`. A bound that mentions an unbound size is `None`.
+    ///
+    /// ```
+    /// use marigold_grammar::complexity::{SizeBindings, SizeName};
+    /// use marigold_grammar::marigold_analyze_with_sizes;
+    /// use marigold_grammar::sizes::InputSizes;
+    /// use num_bigint::BigUint;
+    ///
+    /// let src = "struct D { x: i32 }\nfn keep(d: &D) -> bool { true }\nread_file(\"d.csv\", csv, struct=D).ok_or_panic().filter(keep).permutations(2).return";
+    /// let analysis = marigold_analyze_with_sizes(src, &InputSizes::new().bind(0, "n").unwrap()).unwrap();
+    /// let last = &analysis.streams[0].stages.last().unwrap().resolution;
+    /// let bindings = SizeBindings::from([(SizeName::new("n").unwrap(), BigUint::from(4u32))]);
+    /// let range = last.evaluate(&bindings);
+    /// assert_eq!(range.lo, Some(BigUint::from(0u32)));
+    /// assert_eq!(range.hi, Some(BigUint::from(12u32)));
+    /// assert_eq!(last.evaluate(&SizeBindings::new()).hi, None);
+    /// ```
     pub fn evaluate(&self, bindings: &SizeBindings) -> EvaluatedRange {
         EvaluatedRange {
             lo: self.lo.evaluate(bindings),
@@ -339,36 +593,126 @@ impl Serialize for Resolution {
     }
 }
 
+/// The resolution after one stage of a stream: its input, then each stream function in order.
+///
+/// ```
+/// use marigold_grammar::marigold_analyze_with_sizes;
+/// use marigold_grammar::sizes::InputSizes;
+///
+/// let analysis = marigold_analyze_with_sizes("range(0, 4).permutations(2).return", &InputSizes::new()).unwrap();
+/// let stages: Vec<(&str, String)> = analysis.streams[0]
+///     .stages
+///     .iter()
+///     .map(|s| (s.stage.as_str(), s.resolution.lo().to_string()))
+///     .collect();
+/// assert_eq!(stages, [("input", "4".to_string()), ("permutations(2)", "12".to_string())]);
+/// ```
 #[derive(Clone, Debug, Serialize)]
 #[non_exhaustive]
 pub struct StageResolution {
+    /// `input` for the source, otherwise the stream function as the default description prints
+    /// it, such as `filter(...)` or `permutations(2)`.
     pub stage: String,
+    /// The item count after this stage.
     pub resolution: Resolution,
 }
 
+/// The stage resolutions of one stream.
+///
+/// [`SymbolicAnalysis::streams`] has one entry per stream-variable declaration and per output
+/// stream, while `program.streams` has only the output streams, so the two lists differ in length
+/// whenever a program declares a variable. Pair them with `program_stream`, never by position.
+///
+/// ```
+/// use marigold_grammar::marigold_analyze_with_sizes;
+/// use marigold_grammar::sizes::InputSizes;
+///
+/// let src = "xs = range(0, 3)\nxs.map(f).return\nrange(0, 5).return";
+/// let analysis = marigold_analyze_with_sizes(src, &InputSizes::new()).unwrap();
+/// assert_eq!(analysis.streams.len(), 3);
+/// assert_eq!(analysis.program.streams.len(), 2);
+/// let paired: Vec<(Option<&str>, usize, Option<usize>)> = analysis
+///     .streams
+///     .iter()
+///     .map(|s| (s.name.as_deref(), s.expr_index, s.program_stream))
+///     .collect();
+/// assert_eq!(paired, [(Some("xs"), 0, None), (None, 1, Some(0)), (None, 2, Some(1))]);
+/// assert_eq!(analysis.program.streams[1].description, analysis.streams[2].description);
+/// ```
 #[derive(Clone, Debug, Serialize)]
 #[non_exhaustive]
 pub struct StreamResolution {
+    /// The position of the stream's expression among the program's top-level expressions,
+    /// counting declarations of structs, enums and functions; the same index as
+    /// [`NodeComplexity::expr_index`](crate::complexity::NodeComplexity::expr_index).
     pub expr_index: usize,
+    /// The index of this stream in `program.streams`, or `None` for a stream-variable
+    /// declaration, which `program.streams` does not list.
+    pub program_stream: Option<usize>,
+    /// The declared variable for `x = ...`, `None` for an output stream.
     pub name: Option<String>,
+    /// The same description as the default analysis gives the stream.
     pub description: String,
+    /// The input and then one entry per stream function, in order.
     pub stages: Vec<StageResolution>,
 }
 
 /// The default analysis of a program plus the resolution of every stage of every stream.
+///
+/// ```
+/// use marigold_grammar::{marigold_analyze, marigold_analyze_with_sizes};
+/// use marigold_grammar::sizes::InputSizes;
+///
+/// let src = "range(0, 3).map(f).return";
+/// let analysis = marigold_analyze_with_sizes(src, &InputSizes::new()).unwrap();
+/// assert_eq!(
+///     serde_json::to_string(&analysis.program).unwrap(),
+///     serde_json::to_string(&marigold_analyze(src).unwrap()).unwrap()
+/// );
+/// assert_eq!(analysis.streams[0].stages.len(), 2);
+/// ```
 #[derive(Clone, Debug, Serialize)]
 #[non_exhaustive]
 pub struct SymbolicAnalysis {
+    /// The default analysis, with each bound input contributing its named size.
     pub program: ProgramComplexity,
+    /// One entry per stream-variable declaration and per output stream, by `expr_index`.
     pub streams: Vec<StreamResolution>,
 }
 
+/// Why [`marigold_analyze_with_sizes`](crate::marigold_analyze_with_sizes) or
+/// [`InputSizes::bind`] failed.
+///
+/// ```
+/// use marigold_grammar::marigold_analyze_with_sizes;
+/// use marigold_grammar::sizes::{InputSizes, SizeAnalysisError};
+///
+/// let known = marigold_analyze_with_sizes("range(0, 3).return", &InputSizes::new().bind(0, "n").unwrap());
+/// assert!(matches!(known, Err(SizeAnalysisError::InputSizeKnown { ordinal: 0 })));
+/// assert!(matches!(
+///     marigold_analyze_with_sizes("range(0, ", &InputSizes::new()),
+///     Err(SizeAnalysisError::Parse(_))
+/// ));
+/// ```
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum SizeAnalysisError {
+    /// The program does not parse; the error is the one the default analysis reports.
     Parse(MarigoldParseError),
-    UnknownInput { ordinal: usize, inputs: usize },
-    InputSizeKnown { ordinal: usize },
+    /// A binding names an input the program does not have.
+    UnknownInput {
+        /// The ordinal that was bound.
+        ordinal: usize,
+        /// How many inputs the program has.
+        inputs: usize,
+    },
+    /// A binding names an input whose size is already known, such as a constant `range`.
+    InputSizeKnown {
+        /// The ordinal that was bound.
+        ordinal: usize,
+    },
+    /// The size name is not an ASCII letter or underscore followed by letters, digits or
+    /// underscores; the field is the rejected name.
     InvalidParamName(String),
 }
 
@@ -423,12 +767,33 @@ pub struct InputSizes {
 }
 
 impl InputSizes {
+    /// No bindings: every input of unknown size stays unbound.
+    ///
+    /// ```
+    /// use marigold_grammar::sizes::InputSizes;
+    ///
+    /// assert_eq!(InputSizes::new(), InputSizes::default());
+    /// ```
     pub fn new() -> InputSizes {
         InputSizes::default()
     }
 
+    /// Names the size of input `ordinal`, replacing an earlier name for the same ordinal. The
+    /// ordinal is checked against the program only when it is analyzed.
+    ///
+    /// ```
+    /// use marigold_grammar::sizes::{InputSizes, SizeAnalysisError};
+    ///
+    /// let renamed = InputSizes::new().bind(0, "a").unwrap().bind(0, "b").unwrap();
+    /// assert_eq!(renamed, InputSizes::new().bind(0, "b").unwrap());
+    /// assert!(matches!(
+    ///     InputSizes::new().bind(0, "$n"),
+    ///     Err(SizeAnalysisError::InvalidParamName(name)) if name == "$n"
+    /// ));
+    /// ```
     pub fn bind(mut self, ordinal: usize, name: &str) -> Result<InputSizes, SizeAnalysisError> {
-        let name = SizeName::new(name).map_err(|e| SizeAnalysisError::InvalidParamName(e.0))?;
+        let name = SizeName::new(name)
+            .map_err(|e| SizeAnalysisError::InvalidParamName(e.name().to_string()))?;
         self.by_ordinal.insert(ordinal, name);
         Ok(self)
     }
@@ -466,8 +831,9 @@ pub(crate) fn analyze_with_sizes(
         .into_iter()
         .zip(analysis.traces)
         .map(
-            |((expr_index, name, complexity), stages)| StreamResolution {
+            |((expr_index, name, complexity), (program_stream, stages))| StreamResolution {
                 expr_index,
+                program_stream,
                 name,
                 description: complexity.description,
                 stages,
@@ -479,3 +845,6 @@ pub(crate) fn analyze_with_sizes(
         streams,
     })
 }
+
+#[cfg(test)]
+mod tests;
