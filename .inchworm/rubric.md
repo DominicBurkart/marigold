@@ -16,4 +16,4 @@ Start at 10 and subtract:
   reason, or any dependency added to a default language crate build.
 
 Scores of 7 or more are acceptable. Score 0 for a change that edits CI
-workflows, `publish.sh`, or `.inchworm/`.
+workflows, `publish.sh`, `inchworm.toml`, or `.inchworm/`.

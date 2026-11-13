@@ -13,4 +13,4 @@ Checks the project enforces:
 
 `README.md` and `marigold/README.md` must stay byte-identical.
 
-Do not edit `.inchworm/**`, `.github/**`, `.cargo-husky/**`, `deny.toml`, `codecov.yml`, `flake.nix` or `.devcontainer/**`. Prefer the container tools `cargo_check` and `cargo_test` while iterating, and keep changes small and covered by tests.
+Do not edit `inchworm.toml`, `.inchworm/**`, `.github/**`, `.cargo-husky/**`, `deny.toml`, `codecov.yml`, `flake.nix` or `.devcontainer/**`. Prefer the container tools `cargo_check` and `cargo_test` while iterating, and keep changes small and covered by tests.

@@ -1,3 +1,13 @@
+[offramp]
+default = "noop"
+
+[auditor]
+runs_in = { kind = "nanna", identity = "auditor" }
+on_failure = "block"
+
+[merge]
+allow = false
+
 [[flow]]
 name = "issue"
 trigger = { kind = "label", label = "inchworm" }
@@ -15,7 +25,7 @@ identity = "pr-shepherd"
 [[flow.judge]]
 kind = "diff"
 max_lines = 400
-forbid_paths = ["publish.sh", ".github/**", ".inchworm/**"]
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml"]
 
 [[flow.judge]]
 kind = "nanna_clean"

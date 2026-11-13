@@ -99,7 +99,7 @@ nanna runs a task in a dev container only when the repository has both
 | `flake.nix` | Exposes `packages.<system>.devContainerImage` (nix2container, x86_64 and aarch64 linux) and a `devShells.default`. |
 | `flake.lock` | Pins nixpkgs, rust-overlay and nix2container. |
 | `.devcontainer/devcontainer.json` | Opt-in marker; nanna only checks that the directory exists. |
-| `.nanna/protected.toml` | Declares `.inchworm/**` as an extra protected glob. |
+| `.nanna/protected.toml` | Declares `inchworm.toml`, `.inchworm/**` and other CI and release files as extra protected globs. |
 | `.nanna/prompt.md` | Per-project prompt: workspace layout and the checks CI and the pre-commit hook run. |
 
 The image carries the toolchain read from `rust-toolchain.toml` through
