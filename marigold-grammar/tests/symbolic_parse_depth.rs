@@ -39,7 +39,7 @@ fn deeply_nested_powers_sums_and_filters_parse_in_linear_time() {
     for text in [
         nested("min(", "$n", ", 1)^2", DEPTH),
         nested("P(", "$n", " + 1, 2)", DEPTH),
-        nested("C(\u{2264}", "$n", ", 2)^2", DEPTH),
+        nested("C(\u{2264}", "$n", ", 2)^2", DEPTH / 2),
         nested("min(1 + ", "$n", ", 3 + 4)", DEPTH),
     ] {
         let parsed = parse_within_budget(&text);

@@ -517,6 +517,28 @@ pub enum Symbolic {
 }
 
 impl Symbolic {
+    /// The deepest nesting that [`Symbolic::from_str`](FromStr::from_str) accepts. Each `(`
+    /// that is still open and each `≤` that prefixes a term opens one level; a `,` or `+` ends
+    /// the `≤` prefixes of the term before it and a `)` closes its level. Powers (`^k`) and sums
+    /// do not nest.
+    ///
+    /// The parser descends once per level, so the limit keeps a hostile string from exhausting
+    /// the stack: in a 2 MiB thread of a debug build, the shallowest overflow measured was at
+    /// 40 levels (nested `min(1 + ..` sums), and nested `≤` chains overflowed at 126. The
+    /// analyzer prints at most 3 levels for every program in the repository's corpus.
+    ///
+    /// ```
+    /// use marigold_grammar::complexity::Symbolic;
+    ///
+    /// let depth = Symbolic::MAX_NOTATION_DEPTH;
+    /// let nested = |d: usize| format!("{}$n{}", "P(".repeat(d), ", 2)".repeat(d));
+    /// assert!(nested(depth).parse::<Symbolic>().is_ok());
+    /// let error = nested(depth + 1).parse::<Symbolic>().unwrap_err();
+    /// assert!(error.contains("nested more than"));
+    /// assert!(format!("{}1", "\u{2264}".repeat(depth + 1)).parse::<Symbolic>().is_err());
+    /// ```
+    pub const MAX_NOTATION_DEPTH: usize = 20;
+
     pub fn try_evaluate(&self) -> Option<BigUint> {
         self.evaluate(&SizeBindings::new())
     }
@@ -690,10 +712,47 @@ impl fmt::Display for Symbolic {
     }
 }
 
+fn notation_depth_exceeds(s: &str, limit: usize) -> bool {
+    let mut open: Vec<(usize, usize)> = Vec::new();
+    let mut level = 0usize;
+    let mut term_start = 0usize;
+    for ch in s.chars() {
+        match ch {
+            '(' => {
+                open.push((level, term_start));
+                level += 1;
+                term_start = level;
+            }
+            ')' => {
+                if let Some((outer_level, outer_start)) = open.pop() {
+                    level = outer_level;
+                    term_start = outer_start;
+                }
+            }
+            ',' | '+' => level = term_start,
+            '\u{2264}' => level += 1,
+            _ => {}
+        }
+        if level > limit {
+            return true;
+        }
+    }
+    false
+}
+
 impl FromStr for Symbolic {
     type Err = String;
 
+    /// Parses the notation that `Display` prints. A string nested more than
+    /// [`Symbolic::MAX_NOTATION_DEPTH`] levels is rejected by a linear scan before parsing,
+    /// so untrusted input cannot overflow the stack.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if notation_depth_exceeds(s, Symbolic::MAX_NOTATION_DEPTH) {
+            return Err(format!(
+                "Invalid symbolic notation: notation nested more than {} levels",
+                Symbolic::MAX_NOTATION_DEPTH
+            ));
+        }
         let pairs = ComplexityNotationParser::parse(Rule::symbolic, s)
             .map_err(|e| format!("Invalid symbolic notation: {e}"))?;
 
