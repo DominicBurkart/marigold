@@ -517,34 +517,53 @@ pub enum Symbolic {
 }
 
 impl Symbolic {
-    /// The deepest nesting that [`Symbolic::from_str`](FromStr::from_str) accepts. Each `(`
-    /// that is still open and each `≤` that prefixes a term opens one level; a `,` or `+` ends
-    /// the `≤` prefixes of the term before it and a `)` closes its level. Powers (`^k`) and sums
-    /// do not nest.
+    /// The deepest tree that [`Symbolic::from_str`](FromStr::from_str) builds, counted in
+    /// edges from the root to the farthest leaf: a number, `$n` or `?` is 0 deep, and each
+    /// `min`, `P`, `C`, `≤`, `^k` and sum adds one level above what it contains. A `^k` after a
+    /// closing parenthesis sits on top of everything inside it, so `P(P(1, 2)^2, 2)^2` is 4
+    /// deep. A linear scan of the string computes this depth before anything is parsed, and a
+    /// deeper string is an error, so every recursive operation on a parsed value (`Display`,
+    /// evaluation, `Clone`, `Drop`) stays shallow.
     ///
-    /// The parser descends once per level, so the limit keeps a hostile string from exhausting
-    /// the stack: in a 2 MiB thread of a debug build, the shallowest overflow measured was at
-    /// 40 levels (nested `min(1 + ..` sums), and nested `≤` chains overflowed at 126. The
-    /// analyzer prints at most 3 levels for every program in the repository's corpus.
+    /// The parser itself recurses once per parenthesis and once per `≤` prefix, and a
+    /// parenthesis costs about three times the stack of a `≤`. The scan also rejects a string
+    /// whose open parentheses, counted as 3 each, plus the `≤` prefixes on the current path
+    /// exceed this limit, so parentheses nest at most 20 levels and `≤` prefixes at most 60. In
+    /// a 2 MiB thread of a debug build, before this limit, the parser overflowed at 40 nested
+    /// parentheses, 126 nested `≤` and 32 nested `C(≤ .. )^2` pairs, and `Display` of a power
+    /// chain overflowed at about 2,000 carets, so every shape keeps at least half of the stack.
+    ///
+    /// The analyzer prints at most 3 levels for every program in the repository's corpus. Its
+    /// default output can exceed the limit only for a stream with more than 60 stacked filters
+    /// or more than 20 nested combinatorial stages; that output does not parse back.
     ///
     /// ```
     /// use marigold_grammar::complexity::Symbolic;
     ///
-    /// let depth = Symbolic::MAX_NOTATION_DEPTH;
+    /// assert_eq!(Symbolic::MAX_NOTATION_DEPTH, 60);
+    /// let powers = |d: usize| format!("1{}", "^2".repeat(d));
+    /// assert!(powers(60).parse::<Symbolic>().is_ok());
+    /// assert!(powers(61).parse::<Symbolic>().unwrap_err().contains("nested more than 60"));
+    ///
+    /// let carried = |d: usize| format!("P(P(1, 2)^2, 2)^2{}", "^2".repeat(d));
+    /// assert!(carried(56).parse::<Symbolic>().is_ok());
+    /// assert!(carried(57).parse::<Symbolic>().is_err());
+    ///
     /// let nested = |d: usize| format!("{}$n{}", "P(".repeat(d), ", 2)".repeat(d));
-    /// assert!(nested(depth).parse::<Symbolic>().is_ok());
-    /// let error = nested(depth + 1).parse::<Symbolic>().unwrap_err();
-    /// assert!(error.contains("nested more than"));
-    /// assert!(format!("{}1", "\u{2264}".repeat(depth + 1)).parse::<Symbolic>().is_err());
+    /// assert!(nested(20).parse::<Symbolic>().is_ok());
+    /// assert!(nested(21).parse::<Symbolic>().is_err());
     /// ```
-    pub const MAX_NOTATION_DEPTH: usize = 20;
+    pub const MAX_NOTATION_DEPTH: usize = 60;
 
     pub fn try_evaluate(&self) -> Option<BigUint> {
         self.evaluate(&SizeBindings::new())
     }
 
     /// The exact item count under `bindings`, or `None` when an unbound size or an unknown or
-    /// filtered part makes it unknowable.
+    /// filtered part makes it unknowable. A power, permutation or combination count that could
+    /// exceed 2^20 bits (about 315,000 decimal digits) is not computed and is also `None`, so a
+    /// hostile string such as `9^9^9^9` cannot exhaust time or memory; `k` is a `u64`, and a
+    /// replacement power with `k` above `u32::MAX` is `None` rather than truncated.
     ///
     /// ```
     /// use marigold_grammar::complexity::{SizeBindings, SizeName, Symbolic};
@@ -567,18 +586,15 @@ impl Symbolic {
             Symbolic::Filtered(_) => None,
             Symbolic::Permutations { n, k } => {
                 let n_val = n.evaluate(bindings)?;
-                let k_val = *k;
-                Some(falling_factorial(&n_val, k_val))
+                falling_factorial(&n_val, *k)
             }
             Symbolic::PermutationsWithReplacement { n, k } => {
                 let n_val = n.evaluate(bindings)?;
-                let k_val = *k;
-                Some(n_val.pow(k_val as u32))
+                power(&n_val, *k)
             }
             Symbolic::Combinations { n, k } => {
                 let n_val = n.evaluate(bindings)?;
-                let k_val = *k;
-                Some(binomial(&n_val, k_val))
+                binomial(&n_val, *k)
             }
             Symbolic::Min(a, b) => {
                 let a_val = a.evaluate(bindings)?;
@@ -655,15 +671,15 @@ impl Symbolic {
             Symbolic::Filtered(inner) => inner.upper_bound_with(bindings),
             Symbolic::Permutations { n, k } => {
                 let n_val = n.upper_bound_with(bindings)?;
-                Some(falling_factorial(&n_val, *k))
+                falling_factorial(&n_val, *k)
             }
             Symbolic::PermutationsWithReplacement { n, k } => {
                 let n_val = n.upper_bound_with(bindings)?;
-                Some(n_val.pow(*k as u32))
+                power(&n_val, *k)
             }
             Symbolic::Combinations { n, k } => {
                 let n_val = n.upper_bound_with(bindings)?;
-                Some(binomial(&n_val, *k))
+                binomial(&n_val, *k)
             }
             Symbolic::Min(a, b) => {
                 match (a.upper_bound_with(bindings), b.upper_bound_with(bindings)) {
@@ -712,46 +728,125 @@ impl fmt::Display for Symbolic {
     }
 }
 
-fn notation_depth_exceeds(s: &str, limit: usize) -> bool {
-    let mut open: Vec<(usize, usize)> = Vec::new();
-    let mut level = 0usize;
-    let mut term_start = 0usize;
+const PARENTHESIS_STACK_COST: usize = 3;
+
+#[derive(Default)]
+struct NotationFrame {
+    deepest_part: usize,
+    parts: usize,
+    deepest_argument: usize,
+    filters: usize,
+    base: usize,
+    powers: usize,
+}
+
+impl NotationFrame {
+    fn term(&self) -> usize {
+        self.filters + self.base + self.powers
+    }
+
+    fn end_term(&mut self) {
+        self.deepest_part = self.deepest_part.max(self.term());
+        self.parts += 1;
+        self.filters = 0;
+        self.base = 0;
+        self.powers = 0;
+    }
+
+    fn end_expression(&mut self) -> usize {
+        self.end_term();
+        let depth = self.deepest_part + usize::from(self.parts > 1);
+        self.deepest_part = 0;
+        self.parts = 0;
+        depth
+    }
+}
+
+fn notation_depth_error(s: &str) -> Option<String> {
+    let limit = Symbolic::MAX_NOTATION_DEPTH;
+    let too_deep = || {
+        Some(format!(
+            "Invalid symbolic notation: notation nested more than {limit} levels"
+        ))
+    };
+    let mut frames = vec![NotationFrame::default()];
+    let mut costs: Vec<(usize, usize)> = Vec::new();
+    let mut cost = 0usize;
+    let mut cost_at_term_start = 0usize;
     for ch in s.chars() {
         match ch {
             '(' => {
-                open.push((level, term_start));
-                level += 1;
-                term_start = level;
+                frames.push(NotationFrame::default());
+                costs.push((cost, cost_at_term_start));
+                cost += PARENTHESIS_STACK_COST;
+                cost_at_term_start = cost;
             }
             ')' => {
-                if let Some((outer_level, outer_start)) = open.pop() {
-                    level = outer_level;
-                    term_start = outer_start;
+                if frames.len() > 1 {
+                    if let Some(mut inner) = frames.pop() {
+                        let argument = inner.end_expression();
+                        let depth = 1 + inner.deepest_argument.max(argument);
+                        if let Some(outer) = frames.last_mut() {
+                            outer.base = depth;
+                        }
+                    }
+                }
+                if let Some((outer_cost, outer_start)) = costs.pop() {
+                    cost = outer_cost;
+                    cost_at_term_start = outer_start;
                 }
             }
-            ',' | '+' => level = term_start,
-            '\u{2264}' => level += 1,
+            ',' => {
+                if let Some(frame) = frames.last_mut() {
+                    let argument = frame.end_expression();
+                    frame.deepest_argument = frame.deepest_argument.max(argument);
+                }
+                cost = cost_at_term_start;
+            }
+            '+' => {
+                if let Some(frame) = frames.last_mut() {
+                    frame.end_term();
+                }
+                cost = cost_at_term_start;
+            }
+            '^' => {
+                if let Some(frame) = frames.last_mut() {
+                    frame.powers += 1;
+                }
+            }
+            '\u{2264}' => {
+                if let Some(frame) = frames.last_mut() {
+                    frame.filters += 1;
+                }
+                cost += 1;
+            }
             _ => {}
         }
-        if level > limit {
-            return true;
+        let enclosing = frames.len() - 1;
+        let current = frames.last().map_or(0, NotationFrame::term);
+        if cost > limit || enclosing + current > limit {
+            return too_deep();
         }
     }
-    false
+    let depth = frames.first_mut().map_or(0, NotationFrame::end_expression);
+    if depth > limit {
+        return too_deep();
+    }
+    None
 }
 
 impl FromStr for Symbolic {
     type Err = String;
 
-    /// Parses the notation that `Display` prints. A string nested more than
-    /// [`Symbolic::MAX_NOTATION_DEPTH`] levels is rejected by a linear scan before parsing,
-    /// so untrusted input cannot overflow the stack.
+    /// Parses the notation that `Display` prints. A linear scan runs first and rejects a string
+    /// whose tree would be more than [`Symbolic::MAX_NOTATION_DEPTH`] levels deep or whose
+    /// nesting would exhaust the parser's stack, so untrusted input cannot overflow the stack
+    /// while parsing or while using the parsed value. `Display` output deeper than the limit
+    /// does not round-trip; the analyzer prints such output only for more than 60 stacked
+    /// filters or more than 20 nested combinatorial stages.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if notation_depth_exceeds(s, Symbolic::MAX_NOTATION_DEPTH) {
-            return Err(format!(
-                "Invalid symbolic notation: notation nested more than {} levels",
-                Symbolic::MAX_NOTATION_DEPTH
-            ));
+        if let Some(error) = notation_depth_error(s) {
+            return Err(error);
         }
         let pairs = ComplexityNotationParser::parse(Rule::symbolic, s)
             .map_err(|e| format!("Invalid symbolic notation: {e}"))?;
@@ -1103,29 +1198,53 @@ impl<'de> Deserialize<'de> for Cardinality {
     }
 }
 
-fn falling_factorial(n: &BigUint, k: u64) -> BigUint {
+const EVALUATION_BIT_LIMIT: u64 = 1 << 20;
+
+fn within_bit_limit(n: &BigUint, k: u64) -> bool {
+    n.bits()
+        .checked_mul(k)
+        .is_some_and(|bits| bits <= EVALUATION_BIT_LIMIT)
+}
+
+fn power(n: &BigUint, k: u64) -> Option<BigUint> {
+    if k == 0 || *n <= BigUint::one() {
+        return Some(if k == 0 { BigUint::one() } else { n.clone() });
+    }
+    if !within_bit_limit(n, k) {
+        return None;
+    }
+    Some(n.pow(u32::try_from(k).ok()?))
+}
+
+fn falling_factorial(n: &BigUint, k: u64) -> Option<BigUint> {
+    if BigUint::from(k) > *n {
+        return Some(BigUint::zero());
+    }
+    if !within_bit_limit(n, k) {
+        return None;
+    }
     let mut result = BigUint::one();
     let mut current = n.clone();
     for _ in 0..k {
-        if current.is_zero() {
-            return BigUint::zero();
-        }
         result *= &current;
         current -= BigUint::one();
     }
-    result
+    Some(result)
 }
 
-fn binomial(n: &BigUint, k: u64) -> BigUint {
+fn binomial(n: &BigUint, k: u64) -> Option<BigUint> {
     if k == 0 {
-        return BigUint::one();
+        return Some(BigUint::one());
     }
-    let numerator = falling_factorial(n, k);
+    let numerator = falling_factorial(n, k)?;
+    if numerator.is_zero() {
+        return Some(numerator);
+    }
     let mut denominator = BigUint::one();
     for i in 1..=k {
         denominator *= BigUint::from(i);
     }
-    numerator / denominator
+    Some(numerator / denominator)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
