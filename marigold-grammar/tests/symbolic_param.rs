@@ -424,10 +424,9 @@ fn a_size_name_is_an_identifier() {
             SizeName::from_str(name).is_err(),
             "{name:?} should be rejected"
         );
-        assert_eq!(
-            SizeName::new(name).unwrap_err().to_string().contains(name),
-            true
-        );
+        let error = SizeName::new(name).unwrap_err();
+        assert!(error.to_string().contains(name));
+        assert_eq!(error.name(), name);
     }
 }
 
@@ -483,12 +482,29 @@ fn compound_replacement_bases_round_trip() {
 }
 
 #[test]
-fn replacement_powers_over_filtered_or_summed_bases_do_not_round_trip() {
+fn pinned_shapes_whose_text_reads_back_as_a_different_tree() {
     let over_filtered = with_replacement(filtered(param("n")), 2);
     assert_eq!(over_filtered.to_string(), "\u{2264}$n^2");
     assert_eq!(
         Symbolic::from_str("\u{2264}$n^2").unwrap(),
         filtered(with_replacement(param("n"), 2))
+    );
+
+    let filtered_sum = filtered(Symbolic::Sum(vec![Symbolic::Unknown, constant(4)]));
+    assert_eq!(filtered_sum.to_string(), "\u{2264}? + 4");
+    assert_eq!(
+        Symbolic::from_str("\u{2264}? + 4").unwrap(),
+        Symbolic::Sum(vec![filtered(Symbolic::Unknown), constant(4)])
+    );
+
+    let nested_sum = Symbolic::Sum(vec![
+        Symbolic::Sum(vec![param("n"), constant(1)]),
+        constant(2),
+    ]);
+    assert_eq!(nested_sum.to_string(), "$n + 1 + 2");
+    assert_eq!(
+        Symbolic::from_str("$n + 1 + 2").unwrap(),
+        Symbolic::Sum(vec![param("n"), constant(1), constant(2)])
     );
 
     let over_sum = with_replacement(Symbolic::Sum(vec![param("n"), constant(1)]), 2);

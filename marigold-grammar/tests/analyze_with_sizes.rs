@@ -1,6 +1,6 @@
-use std::fs;
-use std::path::PathBuf;
+mod analyze_corpus;
 
+use marigold_grammar::complexity::ProgramComplexity;
 use marigold_grammar::complexity::{Cardinality, ComplexityClass, SizeBindings, SizeName};
 use marigold_grammar::sizes::{
     InputSizes, ReasonCode, Resolution, ResolutionKind, SizeAnalysisError, StreamResolution,
@@ -503,56 +503,64 @@ fn the_analysis_serializes_with_a_stable_shape() {
     );
 }
 
-fn marigold_files(relative: &str) -> Vec<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative);
-    let mut files: Vec<PathBuf> = fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("could not read {}: {e}", dir.display()))
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("marigold"))
-        .collect();
-    files.sort();
-    files
-}
-
 #[test]
 fn analysis_without_bindings_equals_the_default_analysis_on_every_pinned_program() {
-    let mut checked = 0;
-    for relative in [
-        "tests/programs",
-        "../examples/algorithms/programs",
-        "../examples",
-    ] {
-        for path in marigold_files(relative) {
-            let source = fs::read_to_string(&path).unwrap();
-            let default = marigold_analyze(&source).map(|p| serde_json::to_string(&p).unwrap());
-            let sized = marigold_analyze_with_sizes(&source, &InputSizes::new())
-                .map(|a| serde_json::to_string(&a.program).unwrap());
-            match (default, sized) {
-                (Ok(a), Ok(b)) => assert_eq!(a, b, "{}", path.display()),
-                (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string()),
-                (a, b) => panic!("{}: {:?} vs {:?}", path.display(), a.is_ok(), b.is_ok()),
-            }
-            checked += 1;
+    let corpus = analyze_corpus::corpus();
+    for (name, source) in &corpus {
+        let default = marigold_analyze(source).map(|p| serde_json::to_string(&p).unwrap());
+        let sized = marigold_analyze_with_sizes(source, &InputSizes::new())
+            .map(|a| serde_json::to_string(&a.program).unwrap());
+        match (default, sized) {
+            (Ok(a), Ok(b)) => assert_eq!(a, b, "{name}"),
+            (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string(), "{name}"),
+            (a, b) => panic!("{name}: {:?} vs {:?}", a.is_ok(), b.is_ok()),
         }
     }
-    assert!(checked >= 48, "only {checked} programs were compared");
+    assert!(
+        corpus.len() >= 107,
+        "only {} programs were compared",
+        corpus.len()
+    );
+}
+
+const PRELUDE: &str = "struct D { x: i32 }\nfn cmp(a: &D, b: &D) -> Ordering { Ordering::Equal }\n";
+
+fn program_round_trip(body: &str) -> (ProgramComplexity, ProgramComplexity, String) {
+    let source = format!("{PRELUDE}{body}");
+    let analysis = analyze(&source, &[(0, "n")]);
+    let text = serde_json::to_string(&analysis.program).unwrap();
+    let parsed: ProgramComplexity =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{body}: {e}"));
+    assert_eq!(serde_json::to_string(&parsed).unwrap(), text, "{body}");
+    (analysis.program, parsed, text)
 }
 
 #[test]
-fn program_complexity_with_a_bound_input_survives_a_json_round_trip() {
-    let prelude = "struct D { x: i32 }\nfn cmp(a: &D, b: &D) -> Ordering { Ordering::Equal }\n";
-    let bodies = [
+fn program_complexity_with_compound_replacement_bases_round_trips_to_the_same_cardinalities() {
+    for body in [
         "read_file(\"d.csv\", csv, struct=D).ok_or_panic().keep_first_n(5, cmp).permutations_with_replacement(2).return",
         "read_file(\"d.csv\", csv, struct=D).ok_or_panic().permutations(2).permutations_with_replacement(2).return",
         "read_file(\"d.csv\", csv, struct=D).ok_or_panic().combinations(2).permutations_with_replacement(2).return",
-        "read_file(\"d.csv\", csv, struct=D).ok().permutations_with_replacement(2).permutations_with_replacement(2).return",
-    ];
-    for body in bodies {
-        let source = format!("{prelude}{body}");
-        let analysis = analyze(&source, &[(0, "n")]);
-        let text = serde_json::to_string(&analysis.program).unwrap();
-        let parsed: marigold_grammar::complexity::ProgramComplexity =
-            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{body}: {e}"));
-        assert_eq!(serde_json::to_string(&parsed).unwrap(), text, "{body}");
+    ] {
+        let (original, parsed, _) = program_round_trip(body);
+        assert_eq!(
+            parsed.program_cardinality, original.program_cardinality,
+            "{body}"
+        );
+        assert_eq!(
+            parsed.streams[0].cardinality, original.streams[0].cardinality,
+            "{body}"
+        );
     }
+}
+
+#[test]
+fn program_complexity_over_a_filtered_replacement_base_round_trips_as_text_only() {
+    let body = "read_file(\"d.csv\", csv, struct=D).ok().permutations_with_replacement(2).permutations_with_replacement(2).return";
+    let (original, parsed, text) = program_round_trip(body);
+    assert!(text.contains("\u{2264}$n^2^2"), "{text}");
+    assert_ne!(
+        parsed.program_cardinality, original.program_cardinality,
+        "\u{2264}$n^2^2 is a pinned ambiguous shape: it reads back as a filtered power"
+    );
 }

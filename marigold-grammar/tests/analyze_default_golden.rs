@@ -5,42 +5,11 @@ use std::path::{Path, PathBuf};
 use marigold_grammar::complexity::{NodeComplexity, ProgramComplexity};
 use serde::Serialize;
 
+mod analyze_corpus;
+
+use analyze_corpus::{corpus, crate_root};
+
 const BLESS_VARIABLE: &str = "MARIGOLD_BLESS_ANALYZE_GOLDENS";
-
-const INLINE_PROGRAMS: &[(&str, &str)] = &[
-    ("readme_hello_world", "range(0, 5).write_file(\"/dev/stdout\", csv)"),
-    ("range_identifier_bound", "range(0, N).return"),
-    (
-        "read_file_unbound",
-        "struct D { x: i32 }\nfn id(d: D) -> D { d }\nread_file(\"data.csv\", csv, struct=D).ok().map(id).return",
-    ),
-    (
-        "read_file_permutations",
-        "struct D { x: i32 }\nread_file(\"data.csv\", csv, struct=D).ok_or_panic().permutations(3).return",
-    ),
-    (
-        "read_file_combinations_then_keep_first_n",
-        "struct D { x: i32 }\nfn cmp(a: &[D; 2], b: &[D; 2]) -> Ordering { Ordering::Equal }\nread_file(\"data.csv\", csv, struct=D).ok_or_panic().combinations(2).keep_first_n(5, cmp).return",
-    ),
-    ("undeclared_variable", "ghost.map(f).return"),
-    (
-        "variable_from_read_file_two_consumers",
-        "struct D { x: i32 }\nrows = read_file(\"data.csv\", csv, struct=D).ok_or_panic()\nrows.map(f).return\nrows.permutations(2).return",
-    ),
-    (
-        "select_all_with_read_file",
-        "struct D { x: i32 }\nselect_all(range(0, 5), read_file(\"d.csv\", csv, struct=D).ok_or_panic()).return",
-    ),
-    (
-        "enum_range",
-        "enum Color { Red, Green, Blue }\nrange(Color).return",
-    ),
-    ("empty_program", ""),
-];
-
-fn crate_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
 
 fn golden_dir() -> PathBuf {
     crate_root().join("tests/golden_analyze")
@@ -56,76 +25,6 @@ struct Analyzed<'a> {
 struct Rejected {
     analyze_error: String,
     nodes_error: String,
-}
-
-fn marigold_files_in(dir: &Path) -> Vec<PathBuf> {
-    let mut files: Vec<PathBuf> = fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("could not read {}: {e}", dir.display()))
-        .map(|entry| entry.expect("directory entry").path())
-        .filter(|path| {
-            matches!(
-                path.extension().and_then(|e| e.to_str()),
-                Some("marigold") | Some("mg")
-            )
-        })
-        .collect();
-    files.sort();
-    files
-}
-
-fn corpus() -> Vec<(String, String)> {
-    let mut programs = Vec::new();
-    let sources = [
-        ("grammar_tests", crate_root().join("tests/programs")),
-        (
-            "algorithms",
-            crate_root().join("../examples/algorithms/programs"),
-        ),
-        ("examples", crate_root().join("../examples")),
-        ("repository_root", crate_root().join("..")),
-        ("emit", crate_root().join("../marigold/tests/golden/emit")),
-    ];
-    for (group, dir) in sources {
-        for path in marigold_files_in(&dir) {
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .expect("utf-8 file stem");
-            let source = fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("could not read {}: {e}", path.display()));
-            let suffix = if path.extension().and_then(|e| e.to_str()) == Some("mg") {
-                "_mg"
-            } else {
-                ""
-            };
-            programs.push((format!("{group}__{stem}{suffix}"), source));
-        }
-    }
-    let mut remap: Vec<PathBuf> = fs::read_dir(crate_root().join("tests/fixtures/remap"))
-        .expect("read remap fixtures")
-        .map(|entry| {
-            entry
-                .expect("directory entry")
-                .path()
-                .join("program.marigold")
-        })
-        .filter(|path| path.is_file())
-        .collect();
-    remap.sort();
-    for path in remap {
-        let stem = path
-            .parent()
-            .and_then(|dir| dir.file_name())
-            .and_then(|s| s.to_str())
-            .expect("utf-8 fixture name");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("could not read {}: {e}", path.display()));
-        programs.push((format!("remap__{stem}"), source));
-    }
-    for (name, source) in INLINE_PROGRAMS {
-        programs.push((format!("inline__{name}"), (*source).to_string()));
-    }
-    programs
 }
 
 fn record(source: &str) -> String {
@@ -151,18 +50,19 @@ fn record(source: &str) -> String {
     text
 }
 
-#[test]
-fn default_analyze_output_matches_the_committed_goldens() {
-    let corpus = corpus();
-    let dir = golden_dir();
-    let bless = std::env::var_os(BLESS_VARIABLE).is_some();
+struct GoldenCheck {
+    mismatches: Vec<String>,
+    stale: Vec<String>,
+}
+
+fn check_goldens(corpus: &[(String, String)], dir: &Path, bless: bool) -> GoldenCheck {
     if bless {
-        fs::create_dir_all(&dir).expect("create golden directory");
+        fs::create_dir_all(dir).expect("create golden directory");
     }
 
     let mut expected_files = BTreeSet::new();
     let mut mismatches = Vec::new();
-    for (name, source) in &corpus {
+    for (name, source) in corpus {
         let file_name = format!("{name}.json");
         let rendered = record(source);
         let path = dir.join(&file_name);
@@ -178,7 +78,7 @@ fn default_analyze_output_matches_the_committed_goldens() {
         expected_files.insert(file_name);
     }
 
-    let present: BTreeSet<String> = fs::read_dir(&dir)
+    let present: BTreeSet<String> = fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("could not read {}: {e}", dir.display()))
         .map(|entry| {
             entry
@@ -188,12 +88,21 @@ fn default_analyze_output_matches_the_committed_goldens() {
                 .into_owned()
         })
         .collect();
-    let stale: Vec<&String> = present.difference(&expected_files).collect();
+    let stale: Vec<String> = present.difference(&expected_files).cloned().collect();
 
     if bless {
         for name in &stale {
             fs::remove_file(dir.join(name)).expect("remove stale golden");
         }
+    }
+    GoldenCheck { mismatches, stale }
+}
+
+#[test]
+fn default_analyze_output_matches_the_committed_goldens() {
+    let bless = std::env::var_os(BLESS_VARIABLE).is_some();
+    let GoldenCheck { mismatches, stale } = check_goldens(&corpus(), &golden_dir(), bless);
+    if bless {
         return;
     }
 
@@ -202,6 +111,54 @@ fn default_analyze_output_matches_the_committed_goldens() {
         "default analyze output changed.\n{}\nstale goldens: {stale:?}\nThese goldens pin the exact JSON that marigold-lsp, the MCP adapter, the CLI and the README consume, field order included. First review `git diff marigold-grammar/tests/golden_analyze` and the code change that caused it; only if the change is deliberate, re-bless with `{BLESS_VARIABLE}=1 cargo test -p marigold-grammar --test analyze_default_golden` (this also deletes stale goldens), review the diff of every changed file and explain each one in the pull request. Do not bless to make this test pass.",
         mismatches.join("\n")
     );
+}
+
+#[test]
+fn bless_mode_rewrites_goldens_and_deletes_stale_ones_while_check_mode_only_reports() {
+    let dir = std::env::temp_dir().join(format!(
+        "marigold-analyze-golden-bless-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let corpus = vec![("small".to_string(), "range(0, 3).return".to_string())];
+
+    let missing = check_goldens(&corpus, &dir, false);
+    assert_eq!(missing.mismatches.len(), 1);
+    assert!(missing.mismatches[0].starts_with("small.json: missing golden"));
+
+    fs::write(dir.join("small.json"), "outdated\n").unwrap();
+    fs::write(dir.join("planted.json"), "{}\n").unwrap();
+    let reported = check_goldens(&corpus, &dir, false);
+    assert_eq!(
+        reported.mismatches,
+        vec!["small.json: output differs from the golden".to_string()]
+    );
+    assert_eq!(reported.stale, vec!["planted.json".to_string()]);
+    assert!(
+        dir.join("planted.json").exists(),
+        "check mode deletes nothing"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("small.json")).unwrap(),
+        "outdated\n",
+        "check mode writes nothing"
+    );
+
+    let blessed = check_goldens(&corpus, &dir, true);
+    assert_eq!(blessed.stale, vec!["planted.json".to_string()]);
+    assert!(
+        !dir.join("planted.json").exists(),
+        "bless deletes stale goldens"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("small.json")).unwrap(),
+        record("range(0, 3).return")
+    );
+
+    let clean = check_goldens(&corpus, &dir, false);
+    assert!(clean.mismatches.is_empty() && clean.stale.is_empty());
+    fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
