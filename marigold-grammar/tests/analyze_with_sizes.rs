@@ -434,7 +434,7 @@ fn param_names_must_be_identifiers() {
         assert!(
             matches!(
                 InputSizes::new().bind(0, name),
-                Err(SizeAnalysisError::InvalidParamName(ref bad)) if bad == name
+                Err(SizeAnalysisError::InvalidParamName(ref bad)) if bad.name() == name
             ),
             "{name:?} should be rejected"
         );
@@ -563,4 +563,24 @@ fn program_complexity_over_a_filtered_replacement_base_round_trips_as_text_only(
         parsed.program_cardinality, original.program_cardinality,
         "\u{2264}$n^2^2 is a pinned ambiguous shape: it reads back as a filtered power"
     );
+}
+
+#[test]
+fn a_sized_program_cardinality_bounds_every_stream_even_beside_a_filtered_one() {
+    let source = "struct D { x: i32 }\nfn keep(i: &i32) -> bool { true }\nrange(0, 100).return\nrange(0, 7).filter(keep).return\nread_file(\"d.csv\", csv, struct=D).ok_or_panic().combinations(2).return";
+    let analysis = analyze(source, &[(2, "n")]);
+    let joined = &analysis.program.program_cardinality;
+    assert_eq!(joined.to_string(), "100 + C($n, 2)");
+    for n in 0..15 {
+        for stream in &analysis.program.streams {
+            assert!(
+                ceiling(joined, n) >= ceiling(&stream.cardinality, n),
+                "{joined} is below {} at n={n}",
+                stream.cardinality
+            );
+        }
+        assert!(ceiling(joined, n) >= BigUint::from(100u32));
+    }
+    let default = marigold_analyze(source).unwrap();
+    assert_eq!(default.program_cardinality, Cardinality::Unknown);
 }

@@ -983,22 +983,22 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
 pub(crate) fn fold_program_cardinality(
     cardinalities: impl IntoIterator<Item = Cardinality>,
 ) -> Cardinality {
-    let mut closed = Cardinality::Exact(BigUint::zero());
-    let mut open: Option<Cardinality> = None;
-    for cardinality in cardinalities {
-        if cardinality.mentions_size() {
-            open = Some(match open {
-                Some(sizes) => sizes.max(cardinality),
-                None => cardinality,
-            });
-        } else {
-            closed = closed.max(cardinality);
-        }
+    let cardinalities: Vec<Cardinality> = cardinalities.into_iter().collect();
+    if !cardinalities.iter().any(Cardinality::mentions_size) {
+        return cardinalities
+            .into_iter()
+            .fold(Cardinality::Exact(BigUint::zero()), Cardinality::max);
     }
-    match open {
-        Some(sizes) => closed.max(sizes),
-        None => closed,
+    if cardinalities
+        .iter()
+        .any(|cardinality| matches!(cardinality, Cardinality::Unknown))
+    {
+        return Cardinality::Unknown;
     }
+    cardinalities
+        .into_iter()
+        .reduce(Cardinality::join_open)
+        .unwrap_or(Cardinality::Exact(BigUint::zero()))
 }
 
 fn depends_on_bindings(expression: &Symbolic) -> bool {
@@ -1097,11 +1097,20 @@ impl Cardinality {
         }
     }
 
-    /// The larger of two stream lengths, used for `program_cardinality`. When either side mentions
-    /// a named size or `?`, the result is the sum of both sides' size-dependent terms, counted
-    /// once when both sides share them, plus the larger of their remaining number-valued terms:
-    /// it does not depend on the order of the arguments and is at least each side under every
-    /// binding.
+    /// The larger of two stream lengths. When either side mentions a named size or `?`, the
+    /// result is the sum of both sides' size-dependent terms, counted once when both sides share
+    /// them, plus whichever remaining number-valued term has the larger upper bound: it does not
+    /// depend on the order of the arguments and is at least each side under every binding. A `?`
+    /// inside a bounded value counts as a size-dependent term and is kept, so the result has no
+    /// upper bound whenever either side has none; the analyzer never builds such a value (it
+    /// reports `Unknown` instead), so this only concerns parsed or hand-built values.
+    ///
+    /// The result is in canonical form: sums are flattened and their terms sorted by their
+    /// notation, so a non-canonical input such as `C(0, 0) + $n` comes back as `$n + C(0, 0)`,
+    /// equal in value but not in structure. Two values without any size keep the default
+    /// analysis's rule, which is neither commutative on ties nor always sound (`100` against
+    /// `≤3` gives `≤3`); for `program_cardinality` of a program with a bound input, every stream
+    /// is joined with the size rule above instead.
     ///
     /// ```
     /// use marigold_grammar::complexity::Cardinality;
@@ -3105,25 +3114,126 @@ mod cardinality_join {
         }
 
         #[test]
-        fn the_program_fold_depends_only_on_the_order_of_closed_streams(
-            sized in prop::collection::vec(open(), 0..4),
-            fixed in prop::collection::vec(closed(), 0..4),
-            mask in prop::collection::vec(any::<bool>(), 8),
+        fn with_a_sized_stream_the_program_fold_ignores_order_and_bounds_every_stream(
+            sized in open(),
+            others in prop::collection::vec(any_cardinality(), 0..5),
+            rotation in any::<usize>(),
         ) {
-            let mut interleaved = Vec::new();
-            let (mut s, mut f) = (sized.iter(), fixed.iter());
-            for take_sized in &mask {
-                let next = if *take_sized { s.next().or_else(|| f.next()) } else { f.next().or_else(|| s.next()) };
-                if let Some(item) = next {
-                    interleaved.push(item.clone());
+            let mut streams = others.clone();
+            streams.push(sized);
+            let forward = fold_program_cardinality(streams.clone());
+            let mut reversed = streams.clone();
+            reversed.reverse();
+            let mut rotated = streams.clone();
+            let len = rotated.len();
+            rotated.rotate_left(rotation % len);
+            prop_assert_eq!(&forward, &fold_program_cardinality(reversed));
+            prop_assert_eq!(&forward, &fold_program_cardinality(rotated));
+            for n in 0..10 {
+                for bindings in [at(n, n), at(n, 9 - n)] {
+                    let joined = ceiling(&forward, &bindings).expect("every size is bound");
+                    for stream in &streams {
+                        let one = ceiling(stream, &bindings).expect("every size is bound");
+                        prop_assert!(joined >= one, "{} < {} at n={}", forward, stream, n);
+                    }
                 }
             }
-            let mut grouped: Vec<Cardinality> = sized.iter().rev().cloned().collect();
-            grouped.extend(fixed.iter().cloned());
-            prop_assert_eq!(
-                fold_program_cardinality(interleaved),
-                fold_program_cardinality(grouped)
-            );
         }
+
+        #[test]
+        fn a_question_mark_in_a_bounded_value_is_kept_as_an_unbounded_term(
+            a in unknown_bearing(),
+            b in prop_oneof![unknown_bearing(), closed()],
+        ) {
+            let ab = a.clone().max(b.clone());
+            prop_assert_eq!(&ab, &b.clone().max(a.clone()));
+            let Cardinality::Bounded(joined) = &ab else {
+                return Err(TestCaseError::fail(format!("{ab:?} is not bounded")));
+            };
+            prop_assert!(depends_on_bindings(joined), "{}", ab);
+            prop_assert_eq!(ceiling(&ab, &at(3, 3)), None);
+        }
+    }
+
+    fn unknown_bearing() -> BoxedStrategy<Cardinality> {
+        let leaf = prop_oneof![
+            (0u64..20).prop_map(|v| Symbolic::Constant(BigUint::from(v))),
+            Just(Symbolic::Unknown),
+        ];
+        leaf.prop_recursive(3, 12, 3, |inner| {
+            prop_oneof![
+                inner.clone().prop_map(|n| Symbolic::Filtered(Box::new(n))),
+                (inner.clone(), 0u64..3)
+                    .prop_map(|(n, k)| Symbolic::Permutations { n: Box::new(n), k }),
+                (inner.clone(), inner.clone())
+                    .prop_map(|(a, b)| Symbolic::Min(Box::new(a), Box::new(b))),
+                prop::collection::vec(inner, 2..4).prop_map(Symbolic::Sum),
+            ]
+        })
+        .prop_filter("contains ?", |s| {
+            s.contains_unknown() && s.upper_bound().is_none()
+        })
+        .prop_map(Cardinality::Bounded)
+        .boxed()
+    }
+
+    #[test]
+    fn a_question_mark_beside_a_number_keeps_both() {
+        let unknown_pair = Symbolic::Min(Box::new(Symbolic::Unknown), Box::new(Symbolic::Unknown));
+        assert_eq!(
+            Cardinality::Bounded(Symbolic::Constant(BigUint::zero()))
+                .max(Cardinality::Bounded(unknown_pair.clone())),
+            Cardinality::Bounded(unknown_pair.clone())
+        );
+        assert_eq!(
+            Cardinality::Exact(BigUint::from(4u32))
+                .max(Cardinality::Bounded(unknown_pair))
+                .to_string(),
+            "4 + min(?, ?)"
+        );
+    }
+
+    #[test]
+    fn a_sized_program_bounds_a_large_exact_stream_beside_a_filtered_one() {
+        let filtered_seven = Cardinality::Bounded(Symbolic::Filtered(Box::new(
+            Symbolic::Constant(BigUint::from(7u32)),
+        )));
+        let sized = Cardinality::Bounded(Symbolic::Combinations {
+            n: Box::new(size("n")),
+            k: 2,
+        });
+        let joined = fold_program_cardinality([
+            Cardinality::Exact(BigUint::from(100u32)),
+            filtered_seven,
+            sized,
+        ]);
+        assert_eq!(joined.to_string(), "100 + C($n, 2)");
+        for n in 0..15 {
+            assert!(ceiling(&joined, &at(n, n)).unwrap() >= BigUint::from(100u32));
+        }
+        assert_eq!(
+            fold_program_cardinality([Cardinality::Bounded(size("n")), Cardinality::Unknown]),
+            Cardinality::Unknown
+        );
+    }
+
+    #[test]
+    fn the_verifiers_mixed_triple_folds_the_same_in_every_order() {
+        let a: Cardinality = "\u{2264}$n".parse().unwrap();
+        let b: Cardinality = "\u{2264}\u{2264}0".parse().unwrap();
+        let c = Cardinality::Exact(BigUint::one());
+        let orders = [
+            [a.clone(), b.clone(), c.clone()],
+            [a.clone(), c.clone(), b.clone()],
+            [b.clone(), a.clone(), c.clone()],
+            [b.clone(), c.clone(), a.clone()],
+            [c.clone(), a.clone(), b.clone()],
+            [c, b, a],
+        ];
+        let first = fold_program_cardinality(orders[0].clone());
+        for order in orders {
+            assert_eq!(fold_program_cardinality(order), first);
+        }
+        assert_eq!(first.to_string(), "1 + \u{2264}$n");
     }
 }

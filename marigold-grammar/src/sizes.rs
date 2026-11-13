@@ -53,7 +53,15 @@
 //! `keep_first_n(0)` over a bound input reports `min($n, 0)` rather than the number 0;
 //! `filter(..).combinations(0)` reports `[1, C($n, 0)]` although the count is always 1; and
 //! `permutations(0)` or `combinations(0)` over an unbound input stays `unbound` with `lo` 1,
-//! although the count is exactly 1.
+//! although the count is exactly 1; and `ok().keep_first_n(0)` over a bound input reports
+//! `bounded` `[0, min($n, 0)]` with `fallible_items`, although the count is always 0. Separately,
+//! `permutations_with_replacement(0)` is reported as one item where the runtime yields none
+//! (#457).
+//!
+//! With a bound input, `program_cardinality` joins every stream with the rule on
+//! [`Cardinality::max`](crate::complexity::Cardinality::max) for values that mention a size: the
+//! sum of the size-dependent terms plus the largest number-valued term, for example
+//! `$n + P($n, 2)` for a variable consumed by a `map` and a `permutations(2)`.
 //!
 //! Inputs are numbered from 0 in source order, each stream-variable declaration and each unnamed
 //! stream counting once and a `select_all` counting as a single input. This numbering is
@@ -72,8 +80,8 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
 use crate::complexity::{
-    analyze_nodes_with, input_cardinality, input_nodes, ProgramComplexity, SizeBindings, SizeName,
-    Symbolic,
+    analyze_nodes_with, input_cardinality, input_nodes, InvalidSizeName, ProgramComplexity,
+    SizeBindings, SizeName, Symbolic,
 };
 use crate::nodes::{StreamFunctionKind, TypedExpression};
 use crate::parser::MarigoldParseError;
@@ -712,8 +720,8 @@ pub enum SizeAnalysisError {
         ordinal: usize,
     },
     /// The size name is not an ASCII letter or underscore followed by letters, digits or
-    /// underscores; the field is the rejected name.
-    InvalidParamName(String),
+    /// underscores; [`InvalidSizeName::name`] gives the rejected name.
+    InvalidParamName(InvalidSizeName),
 }
 
 impl fmt::Display for SizeAnalysisError {
@@ -728,10 +736,7 @@ impl fmt::Display for SizeAnalysisError {
                 f,
                 "input {ordinal} has a size known at analysis time, so it cannot be bound to a named size"
             ),
-            SizeAnalysisError::InvalidParamName(name) => write!(
-                f,
-                "{name:?} is not a valid size name: use an ASCII letter or underscore followed by letters, digits or underscores"
-            ),
+            SizeAnalysisError::InvalidParamName(error) => write!(f, "{error}"),
         }
     }
 }
@@ -788,12 +793,11 @@ impl InputSizes {
     /// assert_eq!(renamed, InputSizes::new().bind(0, "b").unwrap());
     /// assert!(matches!(
     ///     InputSizes::new().bind(0, "$n"),
-    ///     Err(SizeAnalysisError::InvalidParamName(name)) if name == "$n"
+    ///     Err(SizeAnalysisError::InvalidParamName(error)) if error.name() == "$n"
     /// ));
     /// ```
     pub fn bind(mut self, ordinal: usize, name: &str) -> Result<InputSizes, SizeAnalysisError> {
-        let name = SizeName::new(name)
-            .map_err(|e| SizeAnalysisError::InvalidParamName(e.name().to_string()))?;
+        let name = SizeName::new(name).map_err(SizeAnalysisError::InvalidParamName)?;
         self.by_ordinal.insert(ordinal, name);
         Ok(self)
     }
