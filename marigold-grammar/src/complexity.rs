@@ -531,11 +531,14 @@ impl Symbolic {
     /// exceed this limit, so parentheses nest at most 20 levels and `≤` prefixes at most 60. In
     /// a 2 MiB thread of a debug build, before this limit, the parser overflowed at 40 nested
     /// parentheses, 126 nested `≤` and 32 nested `C(≤ .. )^2` pairs, and `Display` of a power
-    /// chain overflowed at about 2,000 carets, so every shape keeps at least half of the stack.
+    /// chain overflowed at about 2,000 carets, so every shape keeps about half of the stack: 20
+    /// nested `P(` were measured to need about 1.07 MiB (a 1,060 KiB thread aborts, 1,088 KiB
+    /// passes), 52% of a 2 MiB debug thread, and far less in a release build.
     ///
     /// The analyzer prints at most 3 levels for every program in the repository's corpus. Its
-    /// default output can exceed the limit only for a stream with more than 60 stacked filters
-    /// or more than 20 nested combinatorial stages; that output does not parse back.
+    /// output does not parse back exactly when the printed tree is more than 60 levels deep or
+    /// a path costs more than 60 (3 per `min`, `P` or `C`, 1 per `≤`): for example 61 stacked
+    /// filters, `5` followed by 61 `^2`, or 15 nested `P(` around 16 `≤`.
     ///
     /// ```
     /// use marigold_grammar::complexity::Symbolic;
@@ -560,10 +563,13 @@ impl Symbolic {
     }
 
     /// The exact item count under `bindings`, or `None` when an unbound size or an unknown or
-    /// filtered part makes it unknowable. A power, permutation or combination count that could
-    /// exceed 2^20 bits (about 315,000 decimal digits) is not computed and is also `None`, so a
-    /// hostile string such as `9^9^9^9` cannot exhaust time or memory; `k` is a `u64`, and a
-    /// replacement power with `k` above `u32::MAX` is `None` rather than truncated.
+    /// filtered part makes it unknowable. A count is also `None` when its size estimate exceeds
+    /// 2^20 bits: `bits(n) × k` for `n^k` and `P(n, k)`, and `bits(n) × min(k, n - k)` for
+    /// `C(n, k)`. The estimate bounds every intermediate value, so memory stays bounded for any
+    /// input, but it can exceed the true size by up to a factor of two (`3^524289` is about
+    /// 831,000 bits and is not computed). Time is not bounded: it grows with the number of
+    /// multiplications, about `k` per term, so a string of many large terms can take seconds.
+    /// `k` above `u32::MAX` never reaches the arithmetic, so it is never truncated.
     ///
     /// ```
     /// use marigold_grammar::complexity::{SizeBindings, SizeName, Symbolic};
@@ -842,8 +848,8 @@ impl FromStr for Symbolic {
     /// whose tree would be more than [`Symbolic::MAX_NOTATION_DEPTH`] levels deep or whose
     /// nesting would exhaust the parser's stack, so untrusted input cannot overflow the stack
     /// while parsing or while using the parsed value. `Display` output deeper than the limit
-    /// does not round-trip; the analyzer prints such output only for more than 60 stacked
-    /// filters or more than 20 nested combinatorial stages.
+    /// does not round-trip: a printed tree more than 60 levels deep or with a path costing more
+    /// than 60 (3 per `min`, `P` or `C`, 1 per `≤`) is rejected.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(error) = notation_depth_error(s) {
             return Err(error);
@@ -1014,6 +1020,10 @@ fn depends_on_bindings(expression: &Symbolic) -> bool {
     }
 }
 
+fn open_term(expression: &Symbolic) -> bool {
+    depends_on_bindings(expression) || expression.upper_bound().is_none()
+}
+
 fn canonical_key(expression: &Symbolic) -> (String, String) {
     (expression.to_string(), format!("{expression:?}"))
 }
@@ -1035,7 +1045,7 @@ impl Cardinality {
     }
 
     fn mentions_size(&self) -> bool {
-        matches!(self, Cardinality::Bounded(sym) if depends_on_bindings(sym))
+        matches!(self, Cardinality::Bounded(sym) if open_term(sym))
     }
 
     fn summands(self) -> (Vec<Symbolic>, Option<Symbolic>) {
@@ -1046,7 +1056,7 @@ impl Cardinality {
                         flatten(part, open, closed);
                     }
                 }
-                part if depends_on_bindings(&part) => open.push(part),
+                part if open_term(&part) => open.push(part),
                 Symbolic::Constant(v) if v.is_zero() => {}
                 part => closed.push(part),
             }
@@ -1097,10 +1107,11 @@ impl Cardinality {
         }
     }
 
-    /// The larger of two stream lengths. When either side mentions a named size or `?`, the
-    /// result is the sum of both sides' size-dependent terms, counted once when both sides share
-    /// them, plus whichever remaining number-valued term has the larger upper bound: it does not
-    /// depend on the order of the arguments and is at least each side under every binding. A `?`
+    /// The larger of two stream lengths. When either side mentions a named size or `?`, or holds
+    /// a count too large to compute (see [`Symbolic::evaluate`]), the result is the sum of both
+    /// sides' open terms (those three kinds), counted once when both sides share them, plus
+    /// whichever remaining number-valued term has the larger upper bound: it does not depend on
+    /// the order of the arguments and is at least each side under every binding. A `?`
     /// inside a bounded value counts as a size-dependent term and is kept, so the result has no
     /// upper bound whenever either side has none; the analyzer never builds such a value (it
     /// reports `Unknown` instead), so this only concerns parsed or hand-built values.
@@ -1215,6 +1226,8 @@ fn within_bit_limit(n: &BigUint, k: u64) -> bool {
         .is_some_and(|bits| bits <= EVALUATION_BIT_LIMIT)
 }
 
+/// `n^k`, or `None` past the bit limit. Past the shortcut for `n <= 1`, `bits(n) >= 2`, so the
+/// limit leaves `k <= 2^19` and the conversion to `u32` is exact.
 fn power(n: &BigUint, k: u64) -> Option<BigUint> {
     if k == 0 || *n <= BigUint::one() {
         return Some(if k == 0 { BigUint::one() } else { n.clone() });
@@ -1222,7 +1235,7 @@ fn power(n: &BigUint, k: u64) -> Option<BigUint> {
     if !within_bit_limit(n, k) {
         return None;
     }
-    Some(n.pow(u32::try_from(k).ok()?))
+    Some(n.pow(k as u32))
 }
 
 fn falling_factorial(n: &BigUint, k: u64) -> Option<BigUint> {
@@ -1242,13 +1255,17 @@ fn falling_factorial(n: &BigUint, k: u64) -> Option<BigUint> {
 }
 
 fn binomial(n: &BigUint, k: u64) -> Option<BigUint> {
+    if BigUint::from(k) > *n {
+        return Some(BigUint::zero());
+    }
+    let k = match u64::try_from(n - BigUint::from(k)) {
+        Ok(rest) if rest < k => rest,
+        _ => k,
+    };
     if k == 0 {
         return Some(BigUint::one());
     }
     let numerator = falling_factorial(n, k)?;
-    if numerator.is_zero() {
-        return Some(numerator);
-    }
     let mut denominator = BigUint::one();
     for i in 1..=k {
         denominator *= BigUint::from(i);
@@ -2939,7 +2956,7 @@ mod proptests {
 }
 
 #[cfg(test)]
-mod cardinality_join {
+pub(crate) mod cardinality_join {
     use super::*;
     use proptest::prelude::*;
 
@@ -3153,6 +3170,91 @@ mod cardinality_join {
             prop_assert!(depends_on_bindings(joined), "{}", ab);
             prop_assert_eq!(ceiling(&ab, &at(3, 3)), None);
         }
+    }
+
+    fn too_large_to_compute() -> BoxedStrategy<Cardinality> {
+        prop_oneof![
+            (3u64..10, 524_289u64..530_000).prop_map(|(n, k)| {
+                Symbolic::PermutationsWithReplacement {
+                    n: Box::new(Symbolic::Constant(BigUint::from(n))),
+                    k,
+                }
+            }),
+            (52_429u64..60_000).prop_map(|k| Symbolic::Permutations {
+                n: Box::new(Symbolic::Constant(BigUint::from(1_000_000u32))),
+                k,
+            }),
+        ]
+        .prop_map(Cardinality::Bounded)
+        .boxed()
+    }
+
+    fn flattened(cardinality: &Cardinality) -> Vec<Symbolic> {
+        match cardinality {
+            Cardinality::Bounded(Symbolic::Sum(parts)) => parts.clone(),
+            Cardinality::Bounded(part) => vec![part.clone()],
+            Cardinality::Exact(v) => vec![Symbolic::Constant(v.clone())],
+            Cardinality::Unknown => vec![Symbolic::Unknown],
+        }
+    }
+
+    pub(crate) fn within_deadline(body: fn()) {
+        let deadline = std::time::Duration::from_secs(60);
+        let (done, finished) = std::sync::mpsc::channel();
+        let worker = std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(move || {
+                body();
+                let _ = done.send(());
+            })
+            .expect("spawn a 2 MiB thread");
+        match finished.recv_timeout(deadline) {
+            Ok(()) => worker.join().expect("the check panicked"),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("the check did not finish within {deadline:?}")
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = worker.join();
+                panic!("the check panicked")
+            }
+        }
+    }
+
+    #[test]
+    fn a_count_too_large_to_compute_is_never_dropped_from_a_join() {
+        within_deadline(|| {
+            let strategy = (
+                prop::collection::vec(too_large_to_compute(), 1..3),
+                prop::collection::vec(prop_oneof![closed(), open()], 0..4),
+                any::<usize>(),
+            );
+            let mut runner =
+                proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(256));
+            runner
+                .run(&strategy, |(huge, others, rotation)| {
+                    let mut streams = others.clone();
+                    streams.extend(huge.iter().cloned());
+                    let joined = fold_program_cardinality(streams.clone());
+                    let len = streams.len();
+                    streams.rotate_left(rotation % len);
+                    prop_assert_eq!(&joined, &fold_program_cardinality(streams.clone()));
+                    let mut parts = flattened(&joined);
+                    for stream in &huge {
+                        for term in flattened(stream) {
+                            let index = parts.iter().position(|p| *p == term);
+                            prop_assert!(index.is_some(), "{} lost {}", joined, term);
+                            if let Some(index) = index {
+                                parts.swap_remove(index);
+                            }
+                        }
+                    }
+                    prop_assert_eq!(ceiling(&joined, &at(3, 3)), None);
+                    let pair = huge[0].clone().max(Cardinality::Exact(BigUint::from(5u32)));
+                    prop_assert!(flattened(&pair).contains(&flattened(&huge[0])[0]));
+                    Ok(())
+                })
+                .unwrap();
+        });
     }
 
     fn unknown_bearing() -> BoxedStrategy<Cardinality> {

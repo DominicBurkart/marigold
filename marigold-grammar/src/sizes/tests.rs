@@ -939,3 +939,58 @@ fn a_stage_that_no_longer_depends_on_the_input_drops_its_stale_reasons() {
         &[ReasonCode::OpaquePredicate]
     );
 }
+
+fn huge_kind_strategy() -> impl Strategy<Value = StreamFunctionKind> {
+    prop_oneof![
+        Just(StreamFunctionKind::Map),
+        Just(StreamFunctionKind::Filter),
+        Just(StreamFunctionKind::Ok),
+        Just(StreamFunctionKind::Permutations(52_429)),
+        Just(StreamFunctionKind::PermutationsWithReplacement(524_289)),
+        Just(StreamFunctionKind::Combinations(61_681)),
+        Just(StreamFunctionKind::KeepFirstN(4)),
+        Just(StreamFunctionKind::Fold),
+    ]
+}
+
+#[test]
+fn resolutions_with_counts_too_large_to_compute_pass_the_checked_constructor() {
+    crate::complexity::cardinality_join::within_deadline(|| {
+        let strategy = (
+            prop_oneof![
+                Just(exact(1_000_000)),
+                Just(exact(123_362)),
+                Just(symbolic_n()),
+                Just(unbound()),
+            ],
+            prop::collection::vec(huge_kind_strategy(), 0..4),
+        );
+        let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(64));
+        runner
+            .run(&strategy, |(source, stages)| {
+                let mut resolution = source;
+                for kind in &stages {
+                    resolution = resolution.after(kind);
+                    let rebuilt = Resolution::checked(
+                        resolution.lo().clone(),
+                        resolution.hi().cloned(),
+                        resolution.reasons().to_vec(),
+                    );
+                    prop_assert_eq!(rebuilt, Ok(resolution.clone()));
+                    let named = resolution.lo().to_string().contains('$')
+                        || resolution
+                            .hi()
+                            .is_some_and(|hi| hi.to_string().contains('$'));
+                    if resolution.kind() == ResolutionKind::Symbolic {
+                        prop_assert!(named, "{:?}", resolution);
+                    }
+                    if resolution.kind() == ResolutionKind::Exact {
+                        prop_assert!(!named, "{:?}", resolution);
+                        prop_assert!(resolution.reasons().is_empty());
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+    });
+}

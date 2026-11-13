@@ -5,7 +5,9 @@
 //! [`Resolution`], an interval `[lo, hi]` of [`Symbolic`] item counts, whose [`ResolutionKind`]
 //! says how much is known:
 //!
-//! - `exact`: `lo == hi` and both are numbers.
+//! - `exact`: `lo == hi` and neither names a size. This is usually a number; a count too large
+//!   to compute (see [`Symbolic::evaluate`]) stays written out, such as
+//!   `P(1000000, 52429)`, and evaluates to `None` although it is exact.
 //! - `symbolic`: `lo == hi` and both mention a named size, so the count is exact once the size is
 //!   bound.
 //! - `bounded`: `lo` and `hi` differ, typically after a `filter` or a `keep_first_n`.
@@ -118,7 +120,8 @@ pub enum ReasonCode {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ResolutionKind {
-    /// `lo == hi` and both are numbers.
+    /// `lo == hi` and neither names a size; usually a number, or a count written out because it
+    /// is too large to compute.
     Exact,
     /// `lo == hi` and both mention a named size.
     Symbolic,
@@ -134,10 +137,12 @@ pub enum ResolutionKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct EvaluatedRange {
-    /// The fewest items the stage can produce, or `None` when `lo` mentions an unbound size.
+    /// The fewest items the stage can produce, or `None` when `lo` mentions an unbound size or
+    /// is too large to compute, whatever the kind.
     pub lo: Option<BigUint>,
-    /// The most items the stage can produce, or `None` when `hi` is open-ended or mentions an
-    /// unbound size, even if a `min` would cap it.
+    /// The most items the stage can produce, or `None` when `hi` is open-ended, mentions an
+    /// unbound size (even if a `min` would cap it) or is too large to compute, whatever the
+    /// kind.
     pub hi: Option<BigUint>,
 }
 
@@ -243,12 +248,30 @@ fn floor(expression: &Symbolic) -> Option<BigUint> {
     expression.evaluate(&bindings)
 }
 
+fn names_a_size(expression: &Symbolic) -> bool {
+    match expression {
+        Symbolic::Param(_) => true,
+        Symbolic::Constant(_) | Symbolic::Unknown => false,
+        Symbolic::Filtered(n)
+        | Symbolic::Permutations { n, .. }
+        | Symbolic::PermutationsWithReplacement { n, .. }
+        | Symbolic::Combinations { n, .. } => names_a_size(n),
+        Symbolic::Min(a, b) => names_a_size(a) || names_a_size(b),
+        Symbolic::Sum(parts) => parts.iter().any(names_a_size),
+    }
+}
+
 fn provably_at_most(lo: &Symbolic, hi: &Symbolic) -> bool {
     if lo == hi {
         return true;
     }
     if let Some(low) = lo.try_evaluate() {
-        return floor(hi).is_some_and(|least| low <= least);
+        if low.is_zero() {
+            return true;
+        }
+        if let Some(least) = floor(hi) {
+            return low <= least;
+        }
     }
     match (lo, hi) {
         (_, Symbolic::Min(a, b)) => provably_at_most(lo, a) && provably_at_most(lo, b),
@@ -520,10 +543,10 @@ impl Resolution {
             }
             None => ResolutionKind::Unresolvable,
             Some(hi) if *hi == self.lo => {
-                if hi.try_evaluate().is_some() {
-                    ResolutionKind::Exact
-                } else {
+                if names_a_size(hi) {
                     ResolutionKind::Symbolic
+                } else {
+                    ResolutionKind::Exact
                 }
             }
             Some(_) => ResolutionKind::Bounded,

@@ -584,3 +584,60 @@ fn a_sized_program_cardinality_bounds_every_stream_even_beside_a_filtered_one() 
     let default = marigold_analyze(source).unwrap();
     assert_eq!(default.program_cardinality, Cardinality::Unknown);
 }
+
+#[test]
+fn a_count_too_large_to_compute_is_kept_in_a_sized_program_cardinality() {
+    let source = "struct D { x: i32 }\nrange(0, 1000000).permutations(52429).return\nrange(0, 5).return\nread_file(\"d.csv\", csv, struct=D).ok_or_panic().return";
+    let analysis = analyze(source, &[(2, "n")]);
+    assert_eq!(
+        analysis.program.program_cardinality.to_string(),
+        "$n + 5 + P(1000000, 52429)"
+    );
+    let default = marigold_analyze(source).unwrap();
+    assert_eq!(default.program_cardinality, Cardinality::Unknown);
+}
+
+#[test]
+fn stages_whose_counts_are_too_large_to_compute_keep_the_resolution_invariants() {
+    let prelude = "fn keepi(i: &i32) -> bool { true }\n";
+    for (body, last_kind) in [
+        (
+            "range(0, 1000000).filter(keepi).permutations(52429).return",
+            ResolutionKind::Bounded,
+        ),
+        (
+            "range(0, 1000000).permutations(52429).return",
+            ResolutionKind::Exact,
+        ),
+        (
+            "range(0, 123362).combinations(61681).return",
+            ResolutionKind::Exact,
+        ),
+        (
+            "range(0, 3).permutations_with_replacement(524289).keep_first_n(4, cmp).return",
+            ResolutionKind::Exact,
+        ),
+    ] {
+        let source = format!("{prelude}{body}");
+        let analysis = analyze(&source, &[]);
+        for stage in &analysis.streams[0].stages {
+            let resolution = &stage.resolution;
+            assert_eq!(
+                Resolution::checked(
+                    resolution.lo().clone(),
+                    resolution.hi().cloned(),
+                    resolution.reasons().to_vec()
+                ),
+                Ok(resolution.clone()),
+                "{body} at {}",
+                stage.stage
+            );
+            assert_ne!(resolution.kind(), ResolutionKind::Symbolic, "{body}");
+        }
+        let last = last(&analysis.streams[0]);
+        assert_eq!(last.kind(), last_kind, "{body}");
+    }
+    let capped = analyze("range(0, 1000000).permutations(52429).return", &[]);
+    let range = last(&capped.streams[0]).evaluate(&SizeBindings::new());
+    assert_eq!((range.lo, range.hi), (None, None));
+}

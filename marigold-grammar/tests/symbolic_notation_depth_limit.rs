@@ -11,13 +11,27 @@ use proptest::test_runner::{Config, TestRunner};
 const LIMIT: usize = Symbolic::MAX_NOTATION_DEPTH;
 const SMALL_STACK: usize = 2 << 20;
 
+const DEADLINE: Duration = Duration::from_secs(60);
+
 fn on_small_stack(body: fn()) {
-    std::thread::Builder::new()
+    let (done, finished) = std::sync::mpsc::channel();
+    let worker = std::thread::Builder::new()
         .stack_size(SMALL_STACK)
-        .spawn(body)
-        .expect("spawn a 2 MiB thread")
-        .join()
-        .expect("the check panicked");
+        .spawn(move || {
+            body();
+            let _ = done.send(());
+        })
+        .expect("spawn a 2 MiB thread");
+    match finished.recv_timeout(DEADLINE) {
+        Ok(()) => worker.join().expect("the check panicked"),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            panic!("the check did not finish within {DEADLINE:?}")
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = worker.join();
+            panic!("the check panicked")
+        }
+    }
 }
 
 fn children(expression: &Symbolic) -> Vec<&Symbolic> {
@@ -417,6 +431,73 @@ fn counts_too_large_to_compute_evaluate_to_none_quickly() {
         );
         assert!(
             start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+    });
+}
+
+#[test]
+fn trivial_bases_and_impossible_choices_skip_the_size_estimate() {
+    on_small_stack(|| {
+        let start = Instant::now();
+        for (text, value) in [
+            ("1^2000000", 1u32),
+            ("0^5000000000", 0),
+            ("1^5000000000", 1),
+            ("C(3, 2000000)", 0),
+            ("P(3, 2000000)", 0),
+            ("C(1000000000000, 0)", 1),
+        ] {
+            assert_eq!(
+                Symbolic::from_str(text).unwrap().try_evaluate(),
+                Some(BigUint::from(value)),
+                "{text}"
+            );
+        }
+        let program = marigold_grammar::marigold_analyze(
+            "range(0, 1).permutations_with_replacement(2000000).return",
+        )
+        .unwrap();
+        assert_eq!(
+            program.program_cardinality,
+            Cardinality::Exact(BigUint::from(1u32))
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+    });
+}
+
+#[test]
+fn a_combination_is_computed_from_the_smaller_side() {
+    on_small_stack(|| {
+        let start = Instant::now();
+        let near_all = Symbolic::from_str("C(100000, 99990)")
+            .unwrap()
+            .try_evaluate();
+        let few = Symbolic::from_str("C(100000, 10)").unwrap().try_evaluate();
+        assert!(near_all.is_some());
+        assert_eq!(near_all, few);
+        assert_eq!(near_all.unwrap().to_string().len(), 44);
+        assert!(Symbolic::from_str("C(123361, 61680)")
+            .unwrap()
+            .try_evaluate()
+            .is_some());
+        assert_eq!(
+            Symbolic::from_str("C(123362, 61681)")
+                .unwrap()
+                .try_evaluate(),
+            None
+        );
+        let program =
+            marigold_grammar::marigold_analyze("range(0, 100000).combinations(99990).return")
+                .unwrap();
+        assert!(matches!(program.program_cardinality, Cardinality::Exact(_)));
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
             "{:?}",
             start.elapsed()
         );
