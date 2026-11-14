@@ -81,7 +81,7 @@ where
             Ordering::Less => Ordering::Less,
             Ordering::Greater => Ordering::Greater,
             // When equal, prefer lower index (earlier in stream)
-            Ordering::Equal => a.0.cmp(&b.0),
+            Ordering::Equal => b.0.cmp(&a.0),
         }
     };
     let mut first_n =
@@ -203,15 +203,18 @@ where
         }
 
         // use the reverse ordering so that the smallest value is always the first to pop.
-        let mut first_n = BinaryHeap::with_capacity_by(n, |a, b| match sorted_by(a, b) {
-            Ordering::Less => Ordering::Greater,
-            Ordering::Equal => Ordering::Equal,
-            Ordering::Greater => Ordering::Less,
+        let mut first_n = BinaryHeap::with_capacity_by(n, |a: &(usize, T), b: &(usize, T)| {
+            match sorted_by(&a.1, &b.1) {
+                Ordering::Less => Ordering::Greater,
+                Ordering::Greater => Ordering::Less,
+                Ordering::Equal => a.0.cmp(&b.0),
+            }
         });
+        let mut indexed_stream = self.enumerate();
 
         while first_n.len() < n {
-            if let Some(item) = self.next().await {
-                first_n.push(item);
+            if let Some(indexed_item) = indexed_stream.next().await {
+                first_n.push(indexed_item);
             } else {
                 break;
             }
@@ -219,7 +222,14 @@ where
 
         // If we have exhausted the stream before reaching n values, we can exit early.
         if first_n.len() < n {
-            return futures::stream::iter(first_n.into_sorted_vec().into_iter());
+            return futures::stream::iter(
+                first_n
+                    .into_sorted_vec()
+                    .into_iter()
+                    .map(|(_idx, item)| item)
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+            );
         }
 
         // Otherwise, we can check each remaining value in the stream against the smallest
@@ -228,21 +238,38 @@ where
         let smallest_kept =
             parking_lot::RwLock::new(first_n_mutex.lock().peek().unwrap().to_owned());
 
-        self.for_each_concurrent(
-            /* arbitrarily set concurrency limit */ 256,
-            |item| async {
-                if sorted_by(&*smallest_kept.read(), &item) == Ordering::Less {
-                    let mut first_n_mut = first_n_mutex.lock();
-                    first_n_mut.pop();
-                    first_n_mut.push(item);
-                    let mut update_smallest_kept = smallest_kept.write();
-                    *update_smallest_kept = first_n_mut.peek().unwrap().to_owned();
-                }
-            },
-        )
-        .await;
+        indexed_stream
+            .for_each_concurrent(
+                /* arbitrarily set concurrency limit */ 256,
+                |indexed_item| async {
+                    let should_keep = {
+                        let smallest = smallest_kept.read();
+                        match sorted_by(&smallest.1, &indexed_item.1) {
+                            Ordering::Less => true,
+                            Ordering::Greater => false,
+                            Ordering::Equal => indexed_item.0 < smallest.0,
+                        }
+                    };
+                    if should_keep {
+                        let mut first_n_mut = first_n_mutex.lock();
+                        first_n_mut.pop();
+                        first_n_mut.push(indexed_item);
+                        let mut update_smallest_kept = smallest_kept.write();
+                        *update_smallest_kept = first_n_mut.peek().unwrap().to_owned();
+                    }
+                },
+            )
+            .await;
 
-        futures::stream::iter(first_n_mutex.into_inner().into_sorted_vec().into_iter())
+        futures::stream::iter(
+            first_n_mutex
+                .into_inner()
+                .into_sorted_vec()
+                .into_iter()
+                .map(|(_idx, item)| item)
+                .collect::<Vec<_>>()
+                .into_iter(),
+        )
     }
 }
 
