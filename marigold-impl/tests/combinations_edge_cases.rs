@@ -56,3 +56,47 @@ async fn combinations_single_element() {
         .await;
     assert_eq!(result, vec![vec![42]]);
 }
+
+fn binomial(n: usize, k: usize) -> usize {
+    if k > n {
+        return 0;
+    }
+    (0..k).fold(1, |acc, i| acc * (n - i) / (i + 1))
+}
+
+#[tokio::test]
+async fn combinations_count_is_binomial_with_no_two_equal_as_sets_exhaustively() {
+    for n in 0..=7usize {
+        for k in 0..=8usize {
+            let items: Vec<usize> = (0..n).collect();
+            let result = futures::stream::iter(items)
+                .combinations(k)
+                .await
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(result.len(), binomial(n, k), "n={n} k={k}");
+            let as_sets: std::collections::HashSet<std::collections::BTreeSet<usize>> = result
+                .iter()
+                .map(|combination| combination.iter().copied().collect())
+                .collect();
+            assert_eq!(as_sets.len(), result.len(), "n={n} k={k}");
+            for combination in &result {
+                assert_eq!(combination.len(), k);
+                assert!(
+                    combination.windows(2).all(|w| w[0] < w[1]),
+                    "{combination:?}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn combinations_count_is_by_position_not_by_value() {
+    let result = futures::stream::iter(vec![1, 1, 2])
+        .combinations(2)
+        .await
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(result, vec![vec![1, 1], vec![1, 2], vec![1, 2]]);
+}
