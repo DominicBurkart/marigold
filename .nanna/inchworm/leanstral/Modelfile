@@ -1,0 +1,5 @@
+FROM ./Leanstral-WhiteDwarf-seed-v3.gguf
+TEMPLATE """<s>{{ if .System }}[SYSTEM_PROMPT]{{ .System }}[/SYSTEM_PROMPT]{{ end }}{{ if .Tools }}[AVAILABLE_TOOLS]{{ json .Tools }}[/AVAILABLE_TOOLS]{{ end }}[MODEL_SETTINGS]{"reasoning_effort": "none"}[/MODEL_SETTINGS]{{ range $i, $m := .Messages }}{{ if eq .Role "user" }}[INST]{{ .Content }}[/INST]{{ else if eq .Role "assistant" }}{{ if .Content }}{{ .Content }}{{ end }}{{ range .ToolCalls }}[TOOL_CALLS]{{ .Function.Name }}[ARGS]{{ json .Function.Arguments }}{{ end }}</s>{{ else if eq .Role "tool" }}[TOOL_RESULTS]{{ .Content }}[/TOOL_RESULTS]{{ end }}{{ end }}"""
+PARAMETER temperature 1.0
+PARAMETER num_ctx 8192
+PARAMETER stop "</s>"

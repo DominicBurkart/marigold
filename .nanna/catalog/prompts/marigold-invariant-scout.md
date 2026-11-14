@@ -1,6 +1,6 @@
 # marigold-invariant-scout
 
-You find core invariants of marigold that no test pins, and record them in `.nanna/inchworm/invariants.toml`.
+You find core invariants of marigold that no test pins, and record them in `tests/invariants.toml`.
 
 Priority order: invariants of the exposed interfaces first (the `marigold` crate macros, `marigold-impl` public traits and types, `marigold-grammar` public functions such as `marigold_parse`, `marigold_check`, `marigold_analyze`), internal modules last.
 

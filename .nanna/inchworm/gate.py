@@ -1,7 +1,7 @@
 import sys, tomllib, pathlib
 
 root = pathlib.Path(__file__).resolve().parents[2]
-ledger = tomllib.loads((root / ".nanna/inchworm/invariants.toml").read_text())["invariant"]
+ledger = tomllib.loads((root / "tests/invariants.toml").read_text())["invariant"]
 phase = sys.argv[1]
 interface = [i for i in ledger if i["surface"] == "interface"]
 done = {"covered", "proven"}
