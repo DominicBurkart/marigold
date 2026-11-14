@@ -392,4 +392,72 @@ mod tests {
         sorted.sort();
         assert_eq!(sorted, vec![0, 1, 10, 11, 20, 21]);
     }
+
+    #[tokio::test]
+    async fn macro_permutation_and_combination_counts() {
+        let permutations = m!(
+            range(0, 5)
+                .permutations(3)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(permutations.len(), 60);
+        assert_eq!(
+            permutations
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            60
+        );
+
+        let combinations = m!(
+            range(0, 5)
+                .combinations(2)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(combinations.len(), 10);
+        assert!(combinations.iter().all(|c| c[0] < c[1]));
+    }
+
+    #[tokio::test]
+    async fn macro_keep_first_n_returns_the_largest_in_descending_order() {
+        let sorter = |a: &i32, b: &i32| a.cmp(b);
+        let r = m!(
+            range(0, 10)
+                .keep_first_n(3, sorter)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(r, vec![9, 8, 7]);
+    }
+
+    #[tokio::test]
+    async fn macro_keep_first_n_zero_and_oversized() {
+        let sorter = |a: &i32, b: &i32| a.cmp(b);
+        let none = m!(
+            range(0, 4)
+                .keep_first_n(0, sorter)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert!(none.is_empty());
+        let all = m!(
+            range(0, 4)
+                .keep_first_n(10, sorter)
+                .return
+        )
+        .await
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(all, vec![3, 2, 1, 0]);
+    }
 }

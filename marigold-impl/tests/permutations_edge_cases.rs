@@ -91,3 +91,67 @@ async fn permutations_with_replacement_count_matches_formula() {
         .await;
     assert_eq!(result.len(), 9);
 }
+
+fn falling_factorial(n: usize, k: usize) -> usize {
+    if k > n {
+        0
+    } else {
+        (n - k + 1..=n).product()
+    }
+}
+
+#[tokio::test]
+async fn permutations_count_is_n_falling_k_with_distinct_orderings_exhaustively() {
+    for n in 0..=6usize {
+        for k in 0..=7usize {
+            let items: Vec<usize> = (0..n).collect();
+            let result = futures::stream::iter(items)
+                .permutations(k)
+                .await
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(result.len(), falling_factorial(n, k), "n={n} k={k}");
+            let distinct: std::collections::HashSet<Vec<usize>> = result.iter().cloned().collect();
+            assert_eq!(distinct.len(), result.len(), "n={n} k={k}");
+            for permutation in &result {
+                assert_eq!(permutation.len(), k);
+                let members: std::collections::HashSet<usize> =
+                    permutation.iter().copied().collect();
+                assert_eq!(members.len(), k, "an item repeats in {permutation:?}");
+                assert!(permutation.iter().all(|item| *item < n));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn permutations_count_is_by_position_not_by_value() {
+    let result = futures::stream::iter(vec![1, 1, 2])
+        .permutations(2)
+        .await
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(result.len(), 6);
+    let distinct: std::collections::HashSet<Vec<i32>> = result.iter().cloned().collect();
+    assert_eq!(distinct.len(), 3);
+}
+
+#[tokio::test]
+async fn permutations_with_replacement_count_is_n_pow_k_for_positive_k_exhaustively() {
+    for n in 0..=4usize {
+        for k in 0..=4usize {
+            let items: Vec<usize> = (0..n).collect();
+            let result = futures::stream::iter(items)
+                .permutations_with_replacement(k)
+                .await
+                .collect::<Vec<_>>()
+                .await;
+            let expected = if k == 0 { 0 } else { n.pow(k as u32) };
+            assert_eq!(result.len(), expected, "n={n} k={k}");
+            let distinct: std::collections::HashSet<Vec<usize>> = result.iter().cloned().collect();
+            assert_eq!(distinct.len(), result.len(), "n={n} k={k}");
+            assert!(result.iter().all(|sequence| sequence.len() == k));
+            assert!(result.iter().flatten().all(|item| *item < n));
+        }
+    }
+}
