@@ -157,3 +157,29 @@ async fn keep_first_n_cutoff_tie_keeps_the_earlier_item_and_drops_the_later() {
     indices.sort_unstable();
     assert_eq!(indices, vec![1, 2]);
 }
+
+#[tokio::test]
+async fn keep_first_n_strictly_larger_arrival_does_not_evict_the_earlier_tied_item() {
+    let items = vec![(0u8, 0usize), (0, 1), (1, 2)];
+    let result = futures::stream::iter(items)
+        .keep_first_n(2, |a: &(u8, usize), b: &(u8, usize)| a.0.cmp(&b.0))
+        .await
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(result, vec![(1, 2), (0, 0)]);
+}
+
+#[tokio::test]
+async fn keep_first_n_matches_the_documented_tie_break_model_exhaustively() {
+    for keys in sequences(3, 6) {
+        let items: Vec<(u8, usize)> = keys.iter().copied().zip(0..).collect();
+        for n in 0..=keys.len() + 1 {
+            let result = futures::stream::iter(items.clone())
+                .keep_first_n(n, |a: &(u8, usize), b: &(u8, usize)| a.0.cmp(&b.0))
+                .await
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(result, reference(&items, n), "{keys:?} n={n}");
+        }
+    }
+}
