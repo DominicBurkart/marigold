@@ -2,46 +2,201 @@
 id = "grammar-parse-total"
 surface = "interface"
 statement = "marigold_parse never panics on any input string; it returns Ok(code) or Err."
-status = "candidate"
+status = "covered"
 provable = "none"
-covered_by = []
+covered_by = [
+  "marigold-grammar/tests/interface_invariants.rs::parse_never_panics_on_arbitrary_text",
+  "marigold-grammar/tests/interface_invariants.rs::parse_never_panics_on_arbitrary_ascii_with_newlines",
+  "marigold-grammar/tests/interface_invariants.rs::parse_never_panics_on_mutated_programs",
+  "marigold-grammar/tests/interface_invariants.rs::parse_is_total_on_adversarial_inputs",
+]
 
 [[invariant]]
 id = "grammar-check-agrees-with-parse"
 surface = "interface"
-statement = "marigold_check returns no error diagnostics exactly when marigold_parse returns Ok."
-status = "candidate"
+statement = "For input of at most diagnostics::MAX_CHECK_INPUT_BYTES, marigold_check returns no error diagnostics exactly when marigold_parse returns Ok; larger input yields a single input-too-large error without being parsed."
+status = "covered"
 provable = "none"
-covered_by = []
+covered_by = [
+  "marigold-grammar/tests/check_diagnostics.rs::check_agrees_with_parse",
+  "marigold-grammar/tests/check_diagnostics.rs::mutated_programs_have_valid_ranges_and_agree_with_parse",
+  "marigold-grammar/tests/check_diagnostics.rs::oversized_input_is_rejected_with_a_single_bounded_diagnostic",
+  "marigold-grammar/tests/check_diagnostics.rs::input_at_the_size_limit_is_still_checked",
+  "marigold-grammar/tests/interface_invariants.rs::parse_is_total_on_adversarial_inputs",
+]
 
 [[invariant]]
 id = "keep-first-n-bounded-descending"
 surface = "interface"
 statement = "KeepFirstN returns at most N items in descending order, and exactly the N largest by the comparator, with ties broken by earlier stream position."
-status = "candidate"
+status = "disputed"
 provable = "kani"
 covered_by = []
+note = "The tie clause is false. For keys [0, 0, 1] with N=2 (items (key, position) = (0,0), (0,1), (1,2)) keep_first_n returns [(1,2), (0,1)] instead of keeping the earlier tied item (0,0): when a strictly larger item arrives, the heap evicts the tied item with the LOWEST position, the opposite of the documented preference. The same output occurs with no runtime feature, tokio and async-std. A later tied item that merely arrives after a full heap never displaces an earlier one, so the two paths disagree. The bounded, descending and N-largest-keys parts are pinned by keep-first-n-largest-keys. Not provable by kani as stated: the implementation is async and heap based."
+
+[[invariant]]
+id = "keep-first-n-largest-keys"
+surface = "interface"
+statement = "KeepFirstN returns at most N items, never repeats an input position, and the sequence of its items' sort keys is the descending sequence of the N largest keys of the stream, for every comparator-consistent stream; which of several items that tie under the comparator are kept is not part of this invariant."
+status = "covered"
+provable = "none"
+covered_by = [
+  "marigold-impl/tests/keep_first_n_edge_cases.rs::keep_first_n_is_bounded_descending_and_keeps_the_largest_keys_exhaustively",
+  "marigold-impl/tests/keep_first_n_edge_cases.rs::keep_first_n_keeps_the_earliest_of_many_ties_across_chunks",
+  "marigold-impl/tests/keep_first_n_edge_cases.rs::keep_first_n_cutoff_tie_keeps_the_earlier_item_and_drops_the_later",
+  "marigold-impl/tests/keep_first_n_edge_cases.rs::keep_first_n_zero",
+  "marigold-impl/tests/keep_first_n_edge_cases.rs::keep_first_n_exceeds_stream_length",
+  "tests/src/lib.rs::tests::macro_keep_first_n_returns_the_largest_in_descending_order",
+]
 
 [[invariant]]
 id = "permutations-count"
 surface = "interface"
-statement = "Permutable over n items with length k yields n!/(n-k)! items, each a distinct ordering."
-status = "candidate"
+statement = "Permutable::permutations(k) over n items yields n!/(n-k)! items when k <= n and none when k > n, each with k distinct positions of the input, no two equal as position sequences; k = 0 yields exactly one empty item. Equal input values are distinct positions, so equal-valued outputs can repeat."
+status = "covered"
 provable = "lean"
-covered_by = []
+covered_by = [
+  "marigold-impl/tests/permutations_edge_cases.rs::permutations_count_is_n_falling_k_with_distinct_orderings_exhaustively",
+  "marigold-impl/tests/permutations_edge_cases.rs::permutations_count_is_by_position_not_by_value",
+  "marigold-impl/tests/permutations_edge_cases.rs::permutations_count_matches_formula",
+  "marigold-impl/tests/permutations_edge_cases.rs::permutations_k_zero",
+  "tests/src/lib.rs::tests::macro_permutation_and_combination_counts",
+]
 
 [[invariant]]
 id = "combinations-count"
 surface = "interface"
-statement = "Combinable over n items with length k yields C(n,k) items, no two equal as sets."
-status = "candidate"
+statement = "Combinable::combinations(k) over n items yields C(n,k) items, each a strictly position-increasing selection of k items, no two equal as position sets; k = 0 yields exactly one empty item and k > n none. Equal input values are distinct positions, so equal-valued outputs can repeat."
+status = "covered"
 provable = "lean"
-covered_by = []
+covered_by = [
+  "marigold-impl/tests/combinations_edge_cases.rs::combinations_count_is_binomial_with_no_two_equal_as_sets_exhaustively",
+  "marigold-impl/tests/combinations_edge_cases.rs::combinations_count_is_by_position_not_by_value",
+  "marigold-impl/tests/combinations_edge_cases.rs::combinations_k_zero",
+  "marigold-impl/tests/combinations_edge_cases.rs::combinations_k_exceeds_n",
+  "tests/src/lib.rs::tests::macro_permutation_and_combination_counts",
+]
 
 [[invariant]]
 id = "multi-consumer-fanout"
 surface = "interface"
-statement = "Every receiver from MultiConsumerStream::get observes every item of the source exactly once, in source order."
-status = "candidate"
+statement = "With the tokio or async-std feature, every receiver from MultiConsumerStream::get observes every item of the source exactly once, in source order, and ends when the source ends."
+status = "covered"
 provable = "none"
-covered_by = []
+covered_by = [
+  "marigold-impl/src/multi_consumer_stream.rs::tests::runtime::multiple_consumers_each_receive_full_stream",
+  "marigold-impl/src/multi_consumer_stream.rs::tests::runtime::single_consumer_receives_all_items_in_order",
+  "marigold-impl/src/multi_consumer_stream.rs::tests::runtime::slow_consumer_does_not_lose_items",
+  "marigold-impl/src/multi_consumer_stream.rs::tests::runtime::consumers_terminate_after_source_exhaustion",
+  "marigold-impl/src/multi_consumer_stream.rs::tests::runtime::empty_source_produces_empty_consumers",
+]
+
+[[invariant]]
+id = "permutations-with-replacement-count"
+surface = "interface"
+statement = "Permutable::permutations_with_replacement(k) over n items yields n^k items for k >= 1, each of length k, no two equal as position sequences; k = 0 yields no items (not one empty item, unlike permutations(0))."
+status = "covered"
+provable = "lean"
+covered_by = [
+  "marigold-impl/tests/permutations_edge_cases.rs::permutations_with_replacement_count_is_n_pow_k_for_positive_k_exhaustively",
+  "marigold-impl/tests/permutations_edge_cases.rs::permutations_with_replacement_k_zero",
+  "marigold-impl/tests/permutations_edge_cases.rs::permutations_with_replacement_count_matches_formula",
+]
+
+[[invariant]]
+id = "keep-first-n-zero-and-short-stream"
+surface = "interface"
+statement = "KeepFirstN with N = 0 yields no items, and with N at least the stream length yields every item in descending order."
+status = "covered"
+provable = "none"
+covered_by = [
+  "marigold-impl/tests/keep_first_n_edge_cases.rs::keep_first_n_zero",
+  "marigold-impl/tests/keep_first_n_edge_cases.rs::keep_first_n_exceeds_stream_length",
+  "tests/src/lib.rs::tests::macro_keep_first_n_zero_and_oversized",
+]
+
+[[invariant]]
+id = "marifold-single-output"
+surface = "interface"
+statement = "Marifold::marifold yields exactly one item, the final accumulator, even for an empty stream (then the initial state)."
+status = "covered"
+provable = "none"
+covered_by = [
+  "marigold-impl/tests/marifold_edge_cases.rs::fold_empty_stream",
+  "marigold-impl/tests/marifold_edge_cases.rs::fold_single_element",
+]
+
+[[invariant]]
+id = "generate-agrees-with-parse"
+surface = "interface"
+statement = "marigold_generate returns the same Rust text as marigold_parse and fails exactly when marigold_parse fails, with the same message."
+status = "covered"
+provable = "none"
+covered_by = [
+  "marigold-grammar/tests/otel_source_map.rs::without_a_plan_generation_is_exactly_the_plain_output",
+  "marigold-grammar/tests/generated_rust_golden.rs",
+]
+
+[[invariant]]
+id = "check-ranges-in-bounds"
+surface = "interface"
+statement = "Every diagnostic range from marigold_check lies within the input, starts at or before its end, and falls on char boundaries, for any input."
+status = "covered"
+provable = "none"
+covered_by = [
+  "marigold-grammar/tests/check_diagnostics.rs::ranges_are_in_bounds_for_arbitrary_input",
+  "marigold-grammar/tests/check_diagnostics.rs::mutated_programs_have_valid_ranges_and_agree_with_parse",
+]
+
+[[invariant]]
+id = "analyze-accepts-whatever-parse-accepts"
+surface = "interface"
+statement = "Whenever marigold_parse returns Ok, marigold_analyze and marigold_stream_complexities return Ok; whenever either returns Err, marigold_parse returns Err. The converse is false: a program that redeclares a stream variable is rejected by marigold_parse and marigold_check but analyzed successfully."
+status = "covered"
+provable = "none"
+covered_by = [
+  "marigold-grammar/tests/interface_invariants.rs::analyze_and_stream_complexities_accept_every_program_parse_accepts",
+  "marigold-grammar/tests/interface_invariants.rs::analyze_and_stream_complexities_reject_syntax_errors",
+  "marigold-grammar/tests/interface_invariants.rs::parse_is_stricter_than_analyze_on_a_redeclared_stream_variable",
+  "marigold-grammar/tests/interface_invariants.rs::parse_ok_implies_analyze_and_complexities_ok_on_arbitrary_text",
+  "marigold-grammar/tests/interface_invariants.rs::parse_ok_implies_analyze_ok_on_mutated_programs",
+]
+
+[[invariant]]
+id = "symbols-total-and-ranges-valid"
+surface = "interface"
+statement = "marigold_symbols never panics, and for any input every declaration and reference range lies within the input on char boundaries and slices to exactly its name."
+status = "covered"
+provable = "none"
+covered_by = [
+  "marigold-grammar/tests/interface_invariants.rs::symbols_ranges_are_valid_for_arbitrary_text",
+  "marigold-grammar/tests/interface_invariants.rs::symbols_ranges_are_valid_for_mutated_programs",
+  "marigold-grammar/tests/interface_invariants.rs::symbols_of_the_empty_and_adversarial_inputs_are_valid",
+]
+
+[[invariant]]
+id = "node-ids-stable-unique-namespaced"
+surface = "interface"
+statement = "marigold_node_ids never panics, is deterministic, returns ids unique within a program (including repeated identical expressions) with in-bounds char-boundary ranges, returns no nodes for the empty program, and returns disjoint id sets for different program names."
+status = "covered"
+provable = "none"
+covered_by = [
+  "marigold-grammar/tests/interface_invariants.rs::node_ids_are_namespaced_by_program",
+  "marigold-grammar/tests/interface_invariants.rs::node_ids_of_repeated_identical_expressions_are_distinct",
+  "marigold-grammar/tests/interface_invariants.rs::node_ids_of_the_empty_program_are_empty",
+  "marigold-grammar/tests/interface_invariants.rs::node_ids_are_valid_for_broken_and_adversarial_input",
+  "marigold-grammar/tests/interface_invariants.rs::node_ids_are_valid_for_arbitrary_text",
+  "marigold-grammar/tests/interface_invariants.rs::node_ids_are_valid_for_mutated_programs",
+]
+
+[[invariant]]
+id = "macro-permutation-combination-keep-first-n"
+surface = "interface"
+statement = "In the marigold! macro, range(0, 5).permutations(3) yields 60 distinct items, range(0, 5).combinations(2) yields 10 items with ascending members, and keep_first_n(k, cmp) yields the k largest in descending order."
+status = "covered"
+provable = "none"
+covered_by = [
+  "tests/src/lib.rs::tests::macro_permutation_and_combination_counts",
+  "tests/src/lib.rs::tests::macro_keep_first_n_returns_the_largest_in_descending_order",
+  "tests/src/lib.rs::tests::macro_keep_first_n_zero_and_oversized",
+]
