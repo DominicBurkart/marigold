@@ -29,10 +29,15 @@ covered_by = [
 id = "keep-first-n-bounded-descending"
 surface = "interface"
 statement = "KeepFirstN returns at most N items in descending order, and exactly the N largest by the comparator, with ties broken by earlier stream position."
-status = "disputed"
+status = "covered"
 provable = "kani"
-covered_by = []
-note = "The tie clause is false. For keys [0, 0, 1] with N=2 (items (key, position) = (0,0), (0,1), (1,2)) keep_first_n returns [(1,2), (0,1)] instead of keeping the earlier tied item (0,0): when a strictly larger item arrives, the heap evicts the tied item with the LOWEST position, the opposite of the documented preference. The same output occurs with no runtime feature, tokio and async-std. A later tied item that merely arrives after a full heap never displaces an earlier one, so the two paths disagree. The bounded, descending and N-largest-keys parts are pinned by keep-first-n-largest-keys. Not provable by kani as stated: the implementation is async and heap based."
+covered_by = [
+  "marigold-impl/tests/keep_first_n_edge_cases.rs::keep_first_n_strictly_larger_arrival_does_not_evict_the_earlier_tied_item",
+  "marigold-impl/tests/keep_first_n_edge_cases.rs::keep_first_n_matches_the_documented_tie_break_model_exhaustively",
+  "marigold-impl/tests/keep_first_n_edge_cases.rs::keep_first_n_keeps_the_earliest_of_many_ties_across_chunks",
+  "marigold-impl/tests/keep_first_n_edge_cases.rs::keep_first_n_cutoff_tie_keeps_the_earlier_item_and_drops_the_later",
+]
+note = "Tie clause fixed in #461. Not provable by kani as stated: the implementation is async and heap based."
 
 [[invariant]]
 id = "keep-first-n-largest-keys"
