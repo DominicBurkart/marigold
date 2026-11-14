@@ -81,8 +81,7 @@ Output:
 ### Returning results
 
 A program that ends in `.return` hands its items to the command line:
-`marigold run` prints each one on its own line using Rust's `{:?}` (Debug)
-formatting, then exits.
+`marigold run` prints each one on its own line as JSON (JSON Lines), then exits.
 
 ```marigold
 fn double(x: i32) -> i32 { x * 2 }
@@ -103,9 +102,9 @@ Output:
 6
 ```
 
-Numbers print as plain numbers. Strings print quoted, and arrays, structs and
-enums print in their Debug form (`[1, 2]`), so use `write_file` with `csv`
-when a program should produce CSV rows. A program may mix `.return` and
+Numbers print as plain numbers, strings as quoted JSON strings, arrays as JSON
+arrays (`[1,2]`) and structs as JSON objects (`{"x":0,"y":1}`). Use `write_file`
+with `csv` when a program should produce CSV rows. A program may mix `.return` and
 `write_file` streams: the returned items are printed and the files are written.
 When a program has several `.return` streams, their items are interleaved as
 they arrive, so the order across streams is unspecified.

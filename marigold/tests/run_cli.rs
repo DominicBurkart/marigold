@@ -90,10 +90,7 @@ fn run_handles_returning_writing_and_mixed_programs() {
     );
     let out = marigold_run(&sandbox, &arrays);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(
-        stdout(&out),
-        "[0, 1]\n[0, 2]\n[1, 0]\n[1, 2]\n[2, 0]\n[2, 1]\n"
-    );
+    assert_eq!(stdout(&out), "[0,1]\n[0,2]\n[1,0]\n[1,2]\n[2,0]\n[2,1]\n");
 
     let structs = sandbox.write(
         "returning_structs.marigold",
@@ -101,7 +98,7 @@ fn run_handles_returning_writing_and_mixed_programs() {
     );
     let out = marigold_run(&sandbox, &structs);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(stdout(&out), "Pt { x: 0, y: 1 }\nPt { x: 1, y: 2 }\n");
+    assert_eq!(stdout(&out), "{\"x\":0,\"y\":1}\n{\"x\":1,\"y\":2}\n");
 
     let written = sandbox.path("written.csv");
     let writing = sandbox.write(

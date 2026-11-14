@@ -367,7 +367,7 @@ impl MarigoldFinish for () {
     }
 }
 
-impl<T: ::std::fmt::Debug + 'static> MarigoldFinish
+impl<T: ::marigold::marigold_impl::serde::Serialize + 'static> MarigoldFinish
     for ::marigold::marigold_impl::futures::stream::SelectAll<
         ::std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item = T>>>,
     >
@@ -376,7 +376,7 @@ impl<T: ::std::fmt::Debug + 'static> MarigoldFinish
         Box::pin(async move {
             use ::marigold::marigold_impl::futures::StreamExt;
             while let Some(item) = self.next().await {
-                println!("{:?}", item);
+                println!("{}", ::serde_json::to_string(&item).expect("could not serialize a returned item as JSON"));
             }
         })
     }
@@ -530,6 +530,7 @@ version = "0.0.1"
 
 [dependencies]
 serde = "1"
+serde_json = "1"
 tokio = {{ version = "1", features = ["full"]}}
 {marigold_dep}
         "#
@@ -625,7 +626,7 @@ mod wrapper_tests {
     fn the_prelude_finishes_both_shapes_of_program_value() {
         assert!(MAIN_PRELUDE.contains("impl MarigoldFinish for () {"));
         assert!(MAIN_PRELUDE.contains("stream::SelectAll<"));
-        assert!(MAIN_PRELUDE.contains("println!(\"{:?}\", item)"));
+        assert!(MAIN_PRELUDE.contains("::serde_json::to_string(&item)"));
     }
 }
 
