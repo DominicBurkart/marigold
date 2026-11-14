@@ -11,7 +11,7 @@ Four nanna identities, an invariant ledger, a gate, and three inchworm flows tha
 
 ## Flows
 
-`flows.toml` holds three `[[flow]]` tables in inchworm's merged schema. Merge them into the repository's root `inchworm.toml`, which also needs the required `[auditor]` table and an `inchworm.toml` entry in `.nanna/protected.toml`. Each flow is label-triggered, ends in a draft PR, and forbids edits to CI, release scripts, cards, the gate and manifests.
+The root `inchworm.toml` holds the repository's `[auditor]` table, the existing `issue` flow and these three flows, in inchworm's merged schema (`inchworm validate` reports 0 errors and 0 warnings). `inchworm.toml` is listed in `.nanna/protected.toml`. Each flow is label-triggered, ends in a draft PR, and forbids edits to CI, release scripts, cards, the gate and manifests.
 
 | Flow | Label | Steps |
 |---|---|---|
