@@ -100,6 +100,28 @@ fn run_handles_returning_writing_and_mixed_programs() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stdout(&out), "{\"x\":0,\"y\":1}\n{\"x\":1,\"y\":2}\n");
 
+    let wide = sandbox.write(
+        "returning_wide_arrays.marigold",
+        "fn wide(i: u32) -> [u32; 40] { [i; 40] }\nfn nested(i: u32) -> [[u32; 40]; 2] { [[i; 40]; 2] }\nrange(0, 2).map(wide).return",
+    );
+    let out = marigold_run(&sandbox, &wide);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let expected = format!(
+        "[{}]\n[{}]\n",
+        vec!["0"; 40].join(","),
+        vec!["1"; 40].join(",")
+    );
+    assert_eq!(stdout(&out), expected);
+
+    let nested = sandbox.write(
+        "returning_nested_arrays.marigold",
+        "fn nested(i: u32) -> [[u32; 40]; 2] { [[i; 40]; 2] }\nrange(0, 1).map(nested).return",
+    );
+    let out = marigold_run(&sandbox, &nested);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let row = format!("[{}]", vec!["0"; 40].join(","));
+    assert_eq!(stdout(&out), format!("[{row},{row}]\n"));
+
     let written = sandbox.path("written.csv");
     let writing = sandbox.write(
         "writing_program.marigold",

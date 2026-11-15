@@ -357,36 +357,71 @@ fn run_emit(format: EmitFormat, file: Option<&str>) -> i32 {
 }
 
 #[cfg(feature = "cli")]
-const MAIN_PRELUDE: &str = r#"trait MarigoldFinish {
-    fn finish(self) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ()>>>;
+const MAIN_PRELUDE: &str = r#"#![allow(dead_code)]
+trait MarigoldFinish {
+    type Item;
+    fn items(self) -> ::std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item = Self::Item>>>;
 }
 
 impl MarigoldFinish for () {
-    fn finish(self) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ()>>> {
-        Box::pin(async {})
+    type Item = ();
+    fn items(self) -> ::std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item = ()>>> {
+        Box::pin(::marigold::marigold_impl::futures::stream::empty())
     }
 }
 
-impl<T: ::marigold::marigold_impl::serde::Serialize + 'static> MarigoldFinish
+impl<T: 'static> MarigoldFinish
     for ::marigold::marigold_impl::futures::stream::SelectAll<
         ::std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item = T>>>,
     >
 {
-    fn finish(mut self) -> ::std::pin::Pin<Box<dyn ::std::future::Future<Output = ()>>> {
-        Box::pin(async move {
-            use ::marigold::marigold_impl::futures::StreamExt;
-            while let Some(item) = self.next().await {
-                println!("{}", ::serde_json::to_string(&item).expect("could not serialize a returned item as JSON"));
-            }
-        })
+    type Item = T;
+    fn items(self) -> ::std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item = T>>> {
+        Box::pin(self)
     }
+}
+
+struct MarigoldJson<'a, T>(&'a T);
+
+trait MarigoldJsonArray {
+    fn json_line(&self) -> String;
+}
+impl<'a, T: ::marigold::marigold_impl::serde::Serialize, const N: usize> MarigoldJsonArray for &&MarigoldJson<'a, [T; N]> {
+    fn json_line(&self) -> String {
+        ::serde_json::to_string(&self.0[..]).expect("could not serialize a returned item as JSON")
+    }
+}
+
+trait MarigoldJsonNestedArray {
+    fn json_line(&self) -> String;
+}
+impl<'a, T: ::marigold::marigold_impl::serde::Serialize, const M: usize, const N: usize> MarigoldJsonNestedArray for &MarigoldJson<'a, [[T; M]; N]> {
+    fn json_line(&self) -> String {
+        let rows: Vec<&[T]> = self.0.iter().map(|row| &row[..]).collect();
+        ::serde_json::to_string(&rows).expect("could not serialize a returned item as JSON")
+    }
+}
+
+trait MarigoldJsonSerialize {
+    fn json_line(&self) -> String;
+}
+impl<'a, T: ::marigold::marigold_impl::serde::Serialize> MarigoldJsonSerialize for MarigoldJson<'a, T> {
+    fn json_line(&self) -> String {
+        ::serde_json::to_string(self.0).expect("could not serialize a returned item as JSON")
+    }
+}
+
+macro_rules! marigold_print_json {
+    ($item:expr) => {
+        println!("{}", (&&&MarigoldJson(&$item)).json_line())
+    };
 }
 "#;
 
 #[cfg(feature = "cli")]
 fn program_main_source(program_contents: &str) -> String {
     format!(
-        "{MAIN_PRELUDE}\n#[tokio::main] async fn main() {{ MarigoldFinish::finish(marigold::m!({program_contents}).await).await }}"
+        "{MAIN_PRELUDE}\n#[tokio::main] async fn main() {{ use ::marigold::marigold_impl::futures::StreamExt; let mut items = MarigoldFinish::items(marigold::m!({program_contents}).await); while let Some(item) = items.next().await {{ marigold_print_json!(item); }} }}"
     )
 }
 
@@ -605,7 +640,7 @@ mod wrapper_tests {
         let wrapper = &before[MAIN_PRELUDE.len()..];
         let main_at = wrapper.find("async fn main()").unwrap();
         assert!(wrapper[..main_at].contains("#[tokio::main]"));
-        let finish_at = wrapper.find("MarigoldFinish::finish(").unwrap();
+        let finish_at = wrapper.find("MarigoldFinish::items(").unwrap();
         assert!(main_at < finish_at);
         assert!(wrapper.ends_with("marigold::m!("));
         assert!(after.starts_with(").await"));
@@ -626,7 +661,7 @@ mod wrapper_tests {
     fn the_prelude_finishes_both_shapes_of_program_value() {
         assert!(MAIN_PRELUDE.contains("impl MarigoldFinish for () {"));
         assert!(MAIN_PRELUDE.contains("stream::SelectAll<"));
-        assert!(MAIN_PRELUDE.contains("::serde_json::to_string(&item)"));
+        assert!(MAIN_PRELUDE.contains("macro_rules! marigold_print_json"));
     }
 }
 
