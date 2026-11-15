@@ -1630,10 +1630,9 @@ impl Remapper<'_> {
         };
         let mut expression = None;
         let mut widest: Option<usize> = None;
-        for i in lower..upper {
+        for (i, slot) in self.slots.iter().enumerate().take(upper).skip(lower) {
             #[cfg(test)]
             count(&SCANNED);
-            let slot = &self.slots[i];
             if slot.end <= a {
                 continue;
             }
