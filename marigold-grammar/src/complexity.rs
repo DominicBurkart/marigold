@@ -27,6 +27,7 @@ use pest::Parser;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::nodes::{InputCount, InputVariability, StreamFunctionKind, TypedExpression};
+use crate::sizes::{Resolution, StageResolution};
 
 #[derive(pest_derive::Parser)]
 #[grammar = "complexity_notation.pest"]
@@ -379,48 +380,247 @@ fn parse_base_complexity(s: &str) -> Result<ComplexityClass, String> {
     }
 }
 
+/// The name of an input size: an ASCII letter or underscore followed by ASCII letters, digits or
+/// underscores. It prints as `$name` inside a [`Symbolic`].
+///
+/// ```
+/// use marigold_grammar::complexity::SizeName;
+///
+/// assert_eq!(SizeName::new("rows_2").unwrap().as_str(), "rows_2");
+/// assert!(SizeName::new("2rows").is_err());
+/// assert!("a-b".parse::<SizeName>().is_err());
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SizeName(String);
+
+/// A string that [`SizeName::new`] rejected.
+///
+/// ```
+/// use marigold_grammar::complexity::SizeName;
+///
+/// let error = SizeName::new("2rows").unwrap_err();
+/// assert_eq!(error.name(), "2rows");
+/// assert!(error.to_string().starts_with("\"2rows\" is not a valid size name"));
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct InvalidSizeName(String);
+
+impl InvalidSizeName {
+    /// The rejected name, as given.
+    pub fn name(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for InvalidSizeName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:?} is not a valid size name: use an ASCII letter or underscore followed by letters, digits or underscores",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for InvalidSizeName {}
+
+impl SizeName {
+    /// Validates `name`, which is given without the `$` sigil.
+    ///
+    /// ```
+    /// use marigold_grammar::complexity::SizeName;
+    ///
+    /// assert!(SizeName::new("_n").is_ok());
+    /// assert!(SizeName::new("").is_err());
+    /// assert!(SizeName::new("$n").is_err());
+    /// assert!(SizeName::new("n\u{e9}").is_err());
+    /// ```
+    pub fn new(name: &str) -> Result<SizeName, InvalidSizeName> {
+        let mut chars = name.chars();
+        let valid = match chars.next() {
+            Some(first) if first.is_ascii_alphabetic() || first == '_' => {
+                chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+            }
+            _ => false,
+        };
+        if valid {
+            Ok(SizeName(name.to_string()))
+        } else {
+            Err(InvalidSizeName(name.to_string()))
+        }
+    }
+
+    /// The name without the `$` sigil.
+    ///
+    /// ```
+    /// use marigold_grammar::complexity::{SizeName, Symbolic};
+    ///
+    /// let rows = SizeName::new("rows").unwrap();
+    /// assert_eq!(rows.as_str(), "rows");
+    /// assert_eq!(Symbolic::Param(rows).to_string(), "$rows");
+    /// ```
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SizeName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl FromStr for SizeName {
+    type Err = InvalidSizeName;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        SizeName::new(s)
+    }
+}
+
+/// Item counts for named sizes, used to evaluate a [`Symbolic`].
+///
+/// ```
+/// use marigold_grammar::complexity::{SizeBindings, SizeName, Symbolic};
+/// use num_bigint::BigUint;
+///
+/// let mut bindings = SizeBindings::new();
+/// bindings.insert(SizeName::new("n").unwrap(), BigUint::from(5u32));
+/// let permutations: Symbolic = "P($n, 2)".parse().unwrap();
+/// assert_eq!(permutations.evaluate(&bindings), Some(BigUint::from(20u32)));
+/// ```
+pub type SizeBindings = BTreeMap<SizeName, BigUint>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Symbolic {
     Constant(BigUint),
+    /// The size of an input bound to this name, printed and parsed as `$name`.
+    Param(SizeName),
     Unknown,
     Filtered(Box<Symbolic>),
-    Permutations { n: Box<Symbolic>, k: u64 },
-    PermutationsWithReplacement { n: Box<Symbolic>, k: u64 },
-    Combinations { n: Box<Symbolic>, k: u64 },
+    Permutations {
+        n: Box<Symbolic>,
+        k: u64,
+    },
+    PermutationsWithReplacement {
+        n: Box<Symbolic>,
+        k: u64,
+    },
+    Combinations {
+        n: Box<Symbolic>,
+        k: u64,
+    },
     Min(Box<Symbolic>, Box<Symbolic>),
     Sum(Vec<Symbolic>),
 }
 
 impl Symbolic {
+    /// The deepest tree that [`Symbolic::from_str`](FromStr::from_str) builds, counted in
+    /// edges from the root to the farthest leaf: a number, `$n` or `?` is 0 deep, and each
+    /// `min`, `P`, `C`, `≤`, `^k` and sum adds one level above what it contains. A `^k` after a
+    /// closing parenthesis sits on top of everything inside it, so `P(P(1, 2)^2, 2)^2` is 4
+    /// deep. A linear scan of the string computes this depth before anything is parsed, and a
+    /// deeper string is an error, so every recursive operation on a parsed value (`Display`,
+    /// evaluation, `Clone`, `Drop`) stays shallow.
+    ///
+    /// The parser itself recurses once per parenthesis and once per `≤` prefix, and a
+    /// parenthesis costs about three times the stack of a `≤`. The scan also rejects a string
+    /// whose open parentheses, counted as 3 each, plus the `≤` prefixes on the current path
+    /// exceed this limit, so parentheses nest at most 20 levels and `≤` prefixes at most 60. In
+    /// a 2 MiB thread of a debug build, before this limit, the parser overflowed at 40 nested
+    /// parentheses, 126 nested `≤` and 32 nested `C(≤ .. )^2` pairs, and `Display` of a power
+    /// chain overflowed at about 2,000 carets, so every shape keeps about half of the stack: 20
+    /// nested `P(` were measured to need about 1.07 MiB (a 1,060 KiB thread aborts, 1,088 KiB
+    /// passes), 52% of a 2 MiB debug thread, and far less in a release build.
+    ///
+    /// The analyzer prints at most 3 levels for every program in the repository's corpus. Its
+    /// output does not parse back exactly when the printed tree is more than 60 levels deep or
+    /// a path costs more than 60 (3 per `min`, `P` or `C`, 1 per `≤`): for example 61 stacked
+    /// filters, `5` followed by 61 `^2`, or 15 nested `P(` around 16 `≤`.
+    ///
+    /// ```
+    /// use marigold_grammar::complexity::Symbolic;
+    ///
+    /// assert_eq!(Symbolic::MAX_NOTATION_DEPTH, 60);
+    /// let powers = |d: usize| format!("1{}", "^2".repeat(d));
+    /// assert!(powers(60).parse::<Symbolic>().is_ok());
+    /// assert!(powers(61).parse::<Symbolic>().unwrap_err().contains("nested more than 60"));
+    ///
+    /// let carried = |d: usize| format!("P(P(1, 2)^2, 2)^2{}", "^2".repeat(d));
+    /// assert!(carried(56).parse::<Symbolic>().is_ok());
+    /// assert!(carried(57).parse::<Symbolic>().is_err());
+    ///
+    /// let nested = |d: usize| format!("{}$n{}", "P(".repeat(d), ", 2)".repeat(d));
+    /// assert!(nested(20).parse::<Symbolic>().is_ok());
+    /// assert!(nested(21).parse::<Symbolic>().is_err());
+    /// ```
+    pub const MAX_NOTATION_DEPTH: usize = 60;
+
     pub fn try_evaluate(&self) -> Option<BigUint> {
+        self.evaluate(&SizeBindings::new())
+    }
+
+    /// The exact item count under `bindings`, or `None` when an unbound size or an unknown or
+    /// filtered part makes it unknowable. A count is also `None` when its size estimate exceeds
+    /// 2^20 bits: `bits(n) × k` for `n^k` and `P(n, k)`, and `bits(n) × min(k, n - k)` for
+    /// `C(n, k)`. The estimate bounds every intermediate value, so memory stays bounded for any
+    /// input, but it can exceed the true size by up to a factor of two (`3^524289` is about
+    /// 831,000 bits and is not computed). Time is not bounded: it grows with the number of
+    /// multiplications, about `k` per term, so a string of many large terms can take seconds.
+    /// `k` above `u32::MAX` never reaches the arithmetic, so it is never truncated.
+    ///
+    /// In the default analysis a single stage reaches the cap only near its edge (for example
+    /// `range(0, 1000000).permutations(52429)` or
+    /// `range(0, 3).permutations_with_replacement(524289)`), but two chained combinatorial stages with `k` of a few hundred commonly do:
+    /// `range(0, 1000000).combinations(300).combinations(300)`,
+    /// `range(0, 10).permutations_with_replacement(1000).permutations(1000)` (`P(10^1000, 1000)`)
+    /// or `range(0, 1000).permutations(500).permutations(500)`. Such a count prints as its
+    /// expression instead of a number and its stage resolutions evaluate to `None`; the cost
+    /// classes do not change, because whether a count is constant is decided from its structure,
+    /// not by evaluating it.
+    ///
+    /// ```
+    /// use marigold_grammar::complexity::{SizeBindings, SizeName, Symbolic};
+    /// use num_bigint::BigUint;
+    ///
+    /// let capped: Symbolic = "min(C($n, 2), 5)".parse().unwrap();
+    /// let at = |n: u32| SizeBindings::from([(SizeName::new("n").unwrap(), BigUint::from(n))]);
+    /// assert_eq!(capped.evaluate(&at(3)), Some(BigUint::from(3u32)));
+    /// assert_eq!(capped.evaluate(&at(4)), Some(BigUint::from(5u32)));
+    /// assert_eq!(capped.evaluate(&SizeBindings::new()), None);
+    ///
+    /// let filtered: Symbolic = "\u{2264}$n".parse().unwrap();
+    /// assert_eq!(filtered.evaluate(&at(3)), None);
+    /// ```
+    pub fn evaluate(&self, bindings: &SizeBindings) -> Option<BigUint> {
         match self {
             Symbolic::Constant(v) => Some(v.clone()),
+            Symbolic::Param(name) => bindings.get(name).cloned(),
             Symbolic::Unknown => None,
             Symbolic::Filtered(_) => None,
             Symbolic::Permutations { n, k } => {
-                let n_val = n.try_evaluate()?;
-                let k_val = *k;
-                Some(falling_factorial(&n_val, k_val))
+                let n_val = n.evaluate(bindings)?;
+                falling_factorial(&n_val, *k)
             }
             Symbolic::PermutationsWithReplacement { n, k } => {
-                let n_val = n.try_evaluate()?;
-                let k_val = *k;
-                Some(n_val.pow(k_val as u32))
+                let n_val = n.evaluate(bindings)?;
+                power(&n_val, *k)
             }
             Symbolic::Combinations { n, k } => {
-                let n_val = n.try_evaluate()?;
-                let k_val = *k;
-                Some(binomial(&n_val, k_val))
+                let n_val = n.evaluate(bindings)?;
+                binomial(&n_val, *k)
             }
             Symbolic::Min(a, b) => {
-                let a_val = a.try_evaluate()?;
-                let b_val = b.try_evaluate()?;
+                let a_val = a.evaluate(bindings)?;
+                let b_val = b.evaluate(bindings)?;
                 Some(a_val.min(b_val))
             }
             Symbolic::Sum(parts) => {
                 let mut total = BigUint::zero();
                 for part in parts {
-                    total += part.try_evaluate()?;
+                    total += part.evaluate(bindings)?;
                 }
                 Some(total)
             }
@@ -429,7 +629,7 @@ impl Symbolic {
 
     pub fn classify_as_time(&self) -> ComplexityClass {
         match self {
-            Symbolic::Constant(_) => ComplexityClass::O1,
+            Symbolic::Constant(_) | Symbolic::Param(_) => ComplexityClass::O1,
             Symbolic::Unknown => ComplexityClass::Unknown,
             Symbolic::Filtered(inner) => inner.classify_as_time(),
             Symbolic::Permutations { k, .. } => ComplexityClass::OPermutational(*k),
@@ -452,7 +652,7 @@ impl Symbolic {
     pub fn contains_unknown(&self) -> bool {
         match self {
             Symbolic::Unknown => true,
-            Symbolic::Constant(_) => false,
+            Symbolic::Constant(_) | Symbolic::Param(_) => false,
             Symbolic::Filtered(inner) => inner.contains_unknown(),
             Symbolic::Permutations { n, .. }
             | Symbolic::PermutationsWithReplacement { n, .. }
@@ -463,31 +663,51 @@ impl Symbolic {
     }
 
     pub fn upper_bound(&self) -> Option<BigUint> {
+        self.upper_bound_with(&SizeBindings::new())
+    }
+
+    /// An upper bound on the item count under `bindings`: like [`Symbolic::evaluate`], except a
+    /// filtered part contributes the bound of what it filters.
+    ///
+    /// ```
+    /// use marigold_grammar::complexity::{SizeBindings, SizeName, Symbolic};
+    /// use num_bigint::BigUint;
+    ///
+    /// let filtered: Symbolic = "\u{2264}$n".parse().unwrap();
+    /// let bindings = SizeBindings::from([(SizeName::new("n").unwrap(), BigUint::from(5u32))]);
+    /// assert_eq!(filtered.evaluate(&bindings), None);
+    /// assert_eq!(filtered.upper_bound_with(&bindings), Some(BigUint::from(5u32)));
+    /// assert_eq!(filtered.upper_bound_with(&SizeBindings::new()), None);
+    /// ```
+    pub fn upper_bound_with(&self, bindings: &SizeBindings) -> Option<BigUint> {
         match self {
             Symbolic::Constant(v) => Some(v.clone()),
+            Symbolic::Param(name) => bindings.get(name).cloned(),
             Symbolic::Unknown => None,
-            Symbolic::Filtered(inner) => inner.upper_bound(),
+            Symbolic::Filtered(inner) => inner.upper_bound_with(bindings),
             Symbolic::Permutations { n, k } => {
-                let n_val = n.upper_bound()?;
-                Some(falling_factorial(&n_val, *k))
+                let n_val = n.upper_bound_with(bindings)?;
+                falling_factorial(&n_val, *k)
             }
             Symbolic::PermutationsWithReplacement { n, k } => {
-                let n_val = n.upper_bound()?;
-                Some(n_val.pow(*k as u32))
+                let n_val = n.upper_bound_with(bindings)?;
+                power(&n_val, *k)
             }
             Symbolic::Combinations { n, k } => {
-                let n_val = n.upper_bound()?;
-                Some(binomial(&n_val, *k))
+                let n_val = n.upper_bound_with(bindings)?;
+                binomial(&n_val, *k)
             }
-            Symbolic::Min(a, b) => match (a.upper_bound(), b.upper_bound()) {
-                (Some(av), Some(bv)) => Some(av.min(bv)),
-                (Some(v), None) | (None, Some(v)) => Some(v),
-                (None, None) => None,
-            },
+            Symbolic::Min(a, b) => {
+                match (a.upper_bound_with(bindings), b.upper_bound_with(bindings)) {
+                    (Some(av), Some(bv)) => Some(av.min(bv)),
+                    (Some(v), None) | (None, Some(v)) => Some(v),
+                    (None, None) => None,
+                }
+            }
             Symbolic::Sum(parts) => {
                 let mut total = BigUint::zero();
                 for part in parts {
-                    total += part.upper_bound()?;
+                    total += part.upper_bound_with(bindings)?;
                 }
                 Some(total)
             }
@@ -509,6 +729,7 @@ impl fmt::Display for Symbolic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Symbolic::Constant(v) => write!(f, "{v}"),
+            Symbolic::Param(name) => write!(f, "${name}"),
             Symbolic::Unknown => write!(f, "?"),
             Symbolic::Filtered(inner) => write!(f, "\u{2264}{inner}"),
             Symbolic::Permutations { n, k } => write!(f, "P({n}, {k})"),
@@ -523,10 +744,126 @@ impl fmt::Display for Symbolic {
     }
 }
 
+const PARENTHESIS_STACK_COST: usize = 3;
+
+#[derive(Default)]
+struct NotationFrame {
+    deepest_part: usize,
+    parts: usize,
+    deepest_argument: usize,
+    filters: usize,
+    base: usize,
+    powers: usize,
+}
+
+impl NotationFrame {
+    fn term(&self) -> usize {
+        self.filters + self.base + self.powers
+    }
+
+    fn end_term(&mut self) {
+        self.deepest_part = self.deepest_part.max(self.term());
+        self.parts += 1;
+        self.filters = 0;
+        self.base = 0;
+        self.powers = 0;
+    }
+
+    fn end_expression(&mut self) -> usize {
+        self.end_term();
+        let depth = self.deepest_part + usize::from(self.parts > 1);
+        self.deepest_part = 0;
+        self.parts = 0;
+        depth
+    }
+}
+
+fn notation_depth_error(s: &str) -> Option<String> {
+    let limit = Symbolic::MAX_NOTATION_DEPTH;
+    let too_deep = || {
+        Some(format!(
+            "Invalid symbolic notation: notation nested more than {limit} levels"
+        ))
+    };
+    let mut frames = vec![NotationFrame::default()];
+    let mut costs: Vec<(usize, usize)> = Vec::new();
+    let mut cost = 0usize;
+    let mut cost_at_term_start = 0usize;
+    for ch in s.chars() {
+        match ch {
+            '(' => {
+                frames.push(NotationFrame::default());
+                costs.push((cost, cost_at_term_start));
+                cost += PARENTHESIS_STACK_COST;
+                cost_at_term_start = cost;
+            }
+            ')' => {
+                if frames.len() > 1 {
+                    if let Some(mut inner) = frames.pop() {
+                        let argument = inner.end_expression();
+                        let depth = 1 + inner.deepest_argument.max(argument);
+                        if let Some(outer) = frames.last_mut() {
+                            outer.base = depth;
+                        }
+                    }
+                }
+                if let Some((outer_cost, outer_start)) = costs.pop() {
+                    cost = outer_cost;
+                    cost_at_term_start = outer_start;
+                }
+            }
+            ',' => {
+                if let Some(frame) = frames.last_mut() {
+                    let argument = frame.end_expression();
+                    frame.deepest_argument = frame.deepest_argument.max(argument);
+                }
+                cost = cost_at_term_start;
+            }
+            '+' => {
+                if let Some(frame) = frames.last_mut() {
+                    frame.end_term();
+                }
+                cost = cost_at_term_start;
+            }
+            '^' => {
+                if let Some(frame) = frames.last_mut() {
+                    frame.powers += 1;
+                }
+            }
+            '\u{2264}' => {
+                if let Some(frame) = frames.last_mut() {
+                    frame.filters += 1;
+                }
+                cost += 1;
+            }
+            _ => {}
+        }
+        let enclosing = frames.len() - 1;
+        let current = frames.last().map_or(0, NotationFrame::term);
+        if cost > limit || enclosing + current > limit {
+            return too_deep();
+        }
+    }
+    let depth = frames.first_mut().map_or(0, NotationFrame::end_expression);
+    if depth > limit {
+        return too_deep();
+    }
+    None
+}
+
 impl FromStr for Symbolic {
     type Err = String;
 
+    /// Parses the notation that `Display` prints. A linear scan runs first and rejects a string
+    /// whose tree would be more than [`Symbolic::MAX_NOTATION_DEPTH`] levels deep or whose
+    /// nesting would exhaust the parser's stack, so untrusted input cannot overflow the stack
+    /// while parsing or while using the parsed value. `Display` output deeper than the limit
+    /// does not round-trip: a printed tree more than 60 levels deep or with a path costing more
+    /// than 60 (3 per `min`, `P` or `C`, 1 per `≤`) is rejected.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(error) = notation_depth_error(s) {
+            return Err(error);
+        }
         let pairs = ComplexityNotationParser::parse(Rule::symbolic, s)
             .map_err(|e| format!("Invalid symbolic notation: {e}"))?;
 
@@ -556,9 +893,15 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
             parse_symbolic_pair(inner)
         }
         Rule::symbolic_sum => {
-            let parts: Result<Vec<Symbolic>, String> =
-                pair.into_inner().map(parse_symbolic_pair).collect();
-            Ok(Symbolic::Sum(parts?))
+            let mut parts = pair
+                .into_inner()
+                .map(parse_symbolic_pair)
+                .collect::<Result<Vec<Symbolic>, String>>()?;
+            if parts.len() == 1 {
+                Ok(parts.remove(0))
+            } else {
+                Ok(Symbolic::Sum(parts))
+            }
         }
         Rule::symbolic_atom => {
             let inner = pair
@@ -602,24 +945,28 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
         }
         Rule::symbolic_perm_rep => {
             let mut inner = pair.into_inner();
-            let n_str = inner
+            let base = inner
                 .next()
-                .ok_or_else(|| "Missing perm_rep n".to_string())?
-                .as_str();
-            let k_str = inner
+                .ok_or_else(|| "Missing perm_rep n".to_string())?;
+            let mut result = parse_symbolic_pair(base)?;
+            for k_pair in inner {
+                let k: u64 = k_pair
+                    .as_str()
+                    .parse()
+                    .map_err(|_| "Invalid perm_rep k value".to_string())?;
+                result = Symbolic::PermutationsWithReplacement {
+                    n: Box::new(result),
+                    k,
+                };
+            }
+            Ok(result)
+        }
+        Rule::symbolic_rep_base => {
+            let inner = pair
+                .into_inner()
                 .next()
-                .ok_or_else(|| "Missing perm_rep k".to_string())?
-                .as_str();
-            let n: BigUint = n_str
-                .parse()
-                .map_err(|_| "Invalid perm_rep n value".to_string())?;
-            let k: u64 = k_str
-                .parse()
-                .map_err(|_| "Invalid perm_rep k value".to_string())?;
-            Ok(Symbolic::PermutationsWithReplacement {
-                n: Box::new(Symbolic::Constant(n)),
-                k,
-            })
+                .ok_or_else(|| "Empty perm_rep base".to_string())?;
+            parse_symbolic_pair(inner)
         }
         Rule::symbolic_comb => {
             let mut inner = pair.into_inner();
@@ -641,9 +988,54 @@ fn parse_symbolic_pair(pair: pest::iterators::Pair<Rule>) -> Result<Symbolic, St
                 .map_err(|_| "Invalid constant".to_string())?;
             Ok(Symbolic::Constant(v))
         }
+        Rule::symbolic_param => SizeName::new(&pair.as_str()[1..])
+            .map(Symbolic::Param)
+            .map_err(|e| e.to_string()),
         Rule::symbolic_unknown => Ok(Symbolic::Unknown),
         _ => Err(format!("Unexpected rule: {:?}", pair.as_rule())),
     }
+}
+
+pub(crate) fn fold_program_cardinality(
+    cardinalities: impl IntoIterator<Item = Cardinality>,
+) -> Cardinality {
+    let cardinalities: Vec<Cardinality> = cardinalities.into_iter().collect();
+    if !cardinalities.iter().any(Cardinality::mentions_size) {
+        return cardinalities
+            .into_iter()
+            .fold(Cardinality::Exact(BigUint::zero()), Cardinality::max);
+    }
+    if cardinalities
+        .iter()
+        .any(|cardinality| matches!(cardinality, Cardinality::Unknown))
+    {
+        return Cardinality::Unknown;
+    }
+    cardinalities
+        .into_iter()
+        .reduce(Cardinality::join_open)
+        .unwrap_or(Cardinality::Exact(BigUint::zero()))
+}
+
+fn depends_on_bindings(expression: &Symbolic) -> bool {
+    match expression {
+        Symbolic::Param(_) | Symbolic::Unknown => true,
+        Symbolic::Constant(_) => false,
+        Symbolic::Filtered(n)
+        | Symbolic::Permutations { n, .. }
+        | Symbolic::PermutationsWithReplacement { n, .. }
+        | Symbolic::Combinations { n, .. } => depends_on_bindings(n),
+        Symbolic::Min(a, b) => depends_on_bindings(a) || depends_on_bindings(b),
+        Symbolic::Sum(parts) => parts.iter().any(depends_on_bindings),
+    }
+}
+
+fn open_term(expression: &Symbolic) -> bool {
+    depends_on_bindings(expression) || expression.upper_bound().is_none()
+}
+
+fn canonical_key(expression: &Symbolic) -> (String, String) {
+    (expression.to_string(), format!("{expression:?}"))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -662,12 +1054,108 @@ impl Cardinality {
         }
     }
 
+    fn mentions_size(&self) -> bool {
+        matches!(self, Cardinality::Bounded(sym) if open_term(sym))
+    }
+
+    fn summands(self) -> (Vec<Symbolic>, Option<Symbolic>) {
+        fn flatten(expression: Symbolic, open: &mut Vec<Symbolic>, closed: &mut Vec<Symbolic>) {
+            match expression {
+                Symbolic::Sum(parts) => {
+                    for part in parts {
+                        flatten(part, open, closed);
+                    }
+                }
+                part if open_term(&part) => open.push(part),
+                Symbolic::Constant(v) if v.is_zero() => {}
+                part => closed.push(part),
+            }
+        }
+        let mut open = Vec::new();
+        let mut closed = Vec::new();
+        match self {
+            Cardinality::Exact(v) => flatten(Symbolic::Constant(v), &mut open, &mut closed),
+            Cardinality::Bounded(sym) => flatten(sym, &mut open, &mut closed),
+            Cardinality::Unknown => open.push(Symbolic::Unknown),
+        }
+        closed.sort_by_cached_key(canonical_key);
+        let closed = match closed.len() {
+            0 => None,
+            1 => closed.pop(),
+            _ => Some(Symbolic::Sum(closed)),
+        };
+        (open, closed)
+    }
+
+    fn join_open(self, other: Cardinality) -> Cardinality {
+        let (mut left_open, left_closed) = self.summands();
+        let (right_open, right_closed) = other.summands();
+        let mut parts = Vec::new();
+        for part in right_open {
+            match left_open.iter().position(|p| *p == part) {
+                Some(index) => parts.push(left_open.swap_remove(index)),
+                None => parts.push(part),
+            }
+        }
+        parts.append(&mut left_open);
+        let closed = match (left_closed, right_closed) {
+            (Some(a), Some(b)) => {
+                let key = |s: &Symbolic| (s.upper_bound(), std::cmp::Reverse(canonical_key(s)));
+                Some(if key(&a) >= key(&b) { a } else { b })
+            }
+            (a, b) => a.or(b),
+        };
+        match closed {
+            Some(Symbolic::Sum(closed_parts)) => parts.extend(closed_parts),
+            Some(part) => parts.push(part),
+            None => {}
+        }
+        parts.sort_by_cached_key(canonical_key);
+        match parts.len() {
+            1 => Cardinality::Bounded(parts.remove(0)),
+            _ => Cardinality::Bounded(Symbolic::Sum(parts)),
+        }
+    }
+
+    /// The larger of two stream lengths. When either side mentions a named size or `?`, or holds
+    /// a count too large to compute (see [`Symbolic::evaluate`]), the result is the sum of both
+    /// sides' open terms (those three kinds), counted once when both sides share them, plus
+    /// whichever remaining number-valued term has the larger upper bound: it does not depend on
+    /// the order of the arguments and is at least each side under every binding. A `?`
+    /// inside a bounded value counts as a size-dependent term and is kept, so the result has no
+    /// upper bound whenever either side has none; the analyzer never builds such a value (it
+    /// reports `Unknown` instead), so this only concerns parsed or hand-built values.
+    ///
+    /// The result is in canonical form: sums are flattened and their terms sorted by their
+    /// notation, so a non-canonical input such as `C(0, 0) + $n` comes back as `$n + C(0, 0)`,
+    /// equal in value but not in structure. In the default analysis a count too large to compute
+    /// is such an open term as well, so `range(0, 5)` beside
+    /// `range(0, 1000000).permutations(52429)` gives `5 + P(1000000, 52429)`: a sound upper
+    /// bound, where the exact count would be the larger stream's alone. Two values without any
+    /// size keep the default analysis's rule, which is neither commutative on ties nor always
+    /// sound (`100` against
+    /// `≤3` gives `≤3`); for `program_cardinality` of a program with a bound input, every stream
+    /// is joined with the size rule above instead.
+    ///
+    /// ```
+    /// use marigold_grammar::complexity::Cardinality;
+    ///
+    /// let linear: Cardinality = "$n".parse().unwrap();
+    /// let quadratic: Cardinality = "P($n, 2)".parse().unwrap();
+    /// let joined = linear.clone().max(quadratic.clone());
+    /// assert_eq!(joined, quadratic.clone().max(linear.clone()));
+    /// assert_eq!(joined.to_string(), "$n + P($n, 2)");
+    /// assert_eq!(linear.clone().max(linear.clone()), linear);
+    /// ```
     pub fn max(self, other: Cardinality) -> Cardinality {
         match (&self, &other) {
             (Cardinality::Exact(a), Cardinality::Exact(b)) => {
                 Cardinality::Exact(a.clone().max(b.clone()))
             }
             (Cardinality::Unknown, _) | (_, Cardinality::Unknown) => Cardinality::Unknown,
+            _ if self.mentions_size() || other.mentions_size() => {
+                Cardinality::join_open(self, other)
+            }
             (Cardinality::Bounded(a), Cardinality::Bounded(b)) => {
                 match (a.upper_bound(), b.upper_bound()) {
                     (Some(av), Some(bv)) => {
@@ -744,29 +1232,59 @@ impl<'de> Deserialize<'de> for Cardinality {
     }
 }
 
-fn falling_factorial(n: &BigUint, k: u64) -> BigUint {
+const EVALUATION_BIT_LIMIT: u64 = 1 << 20;
+
+fn within_bit_limit(n: &BigUint, k: u64) -> bool {
+    n.bits()
+        .checked_mul(k)
+        .is_some_and(|bits| bits <= EVALUATION_BIT_LIMIT)
+}
+
+/// `n^k`, or `None` past the bit limit. Past the shortcut for `n <= 1`, `bits(n) >= 2`, so the
+/// limit leaves `k <= 2^19` and the conversion to `u32` is exact.
+fn power(n: &BigUint, k: u64) -> Option<BigUint> {
+    if k == 0 || *n <= BigUint::one() {
+        return Some(if k == 0 { BigUint::one() } else { n.clone() });
+    }
+    if !within_bit_limit(n, k) {
+        return None;
+    }
+    Some(n.pow(k as u32))
+}
+
+fn falling_factorial(n: &BigUint, k: u64) -> Option<BigUint> {
+    if BigUint::from(k) > *n {
+        return Some(BigUint::zero());
+    }
+    if !within_bit_limit(n, k) {
+        return None;
+    }
     let mut result = BigUint::one();
     let mut current = n.clone();
     for _ in 0..k {
-        if current.is_zero() {
-            return BigUint::zero();
-        }
         result *= &current;
         current -= BigUint::one();
     }
-    result
+    Some(result)
 }
 
-fn binomial(n: &BigUint, k: u64) -> BigUint {
-    if k == 0 {
-        return BigUint::one();
+fn binomial(n: &BigUint, k: u64) -> Option<BigUint> {
+    if BigUint::from(k) > *n {
+        return Some(BigUint::zero());
     }
-    let numerator = falling_factorial(n, k);
+    let k = match u64::try_from(n - BigUint::from(k)) {
+        Ok(rest) if rest < k => rest,
+        _ => k,
+    };
+    if k == 0 {
+        return Some(BigUint::one());
+    }
+    let numerator = falling_factorial(n, k)?;
     let mut denominator = BigUint::one();
     for i in 1..=k {
         denominator *= BigUint::from(i);
     }
-    numerator / denominator
+    Some(numerator / denominator)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -814,7 +1332,7 @@ pub struct ProgramComplexity {
     pub program_cardinality: Cardinality,
 }
 
-fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
+pub(crate) fn input_cardinality(inp: &crate::nodes::InputFunctionNode) -> Symbolic {
     match (&inp.variability, &inp.input_count) {
         (InputVariability::Constant, InputCount::Known(n)) => Symbolic::Constant(n.clone()),
         _ => Symbolic::Unknown,
@@ -865,8 +1383,20 @@ fn space_for_kind(kind: &StreamFunctionKind) -> ComplexityClass {
     }
 }
 
+fn is_constant_count(expression: &Symbolic) -> bool {
+    match expression {
+        Symbolic::Constant(_) => true,
+        Symbolic::Param(_) | Symbolic::Unknown | Symbolic::Filtered(_) => false,
+        Symbolic::Permutations { n, .. }
+        | Symbolic::PermutationsWithReplacement { n, .. }
+        | Symbolic::Combinations { n, .. } => is_constant_count(n),
+        Symbolic::Min(a, b) => is_constant_count(a) && is_constant_count(b),
+        Symbolic::Sum(parts) => parts.iter().all(is_constant_count),
+    }
+}
+
 fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
-    if cardinality.try_evaluate().is_some() {
+    if is_constant_count(cardinality) {
         return ComplexityClass::O1;
     }
     let base = cardinality.classify_as_time();
@@ -878,7 +1408,7 @@ fn cardinality_to_time_class(cardinality: &Symbolic) -> ComplexityClass {
 }
 
 fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
-    if cardinality.try_evaluate().is_some() {
+    if is_constant_count(cardinality) {
         return ComplexityClass::O1;
     }
     match kind {
@@ -890,7 +1420,7 @@ fn step_work_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> Complex
 }
 
 fn step_space_class(cardinality: &Symbolic, kind: &StreamFunctionKind) -> ComplexityClass {
-    if cardinality.try_evaluate().is_some() {
+    if is_constant_count(cardinality) {
         return ComplexityClass::O1;
     }
     match kind {
@@ -913,23 +1443,37 @@ struct PipelineState {
     exact_time: ExactComplexity,
     exact_space: ExactComplexity,
     collects: bool,
+    resolution: Resolution,
+    stages: Vec<StageResolution>,
+    traced: bool,
 }
 
 impl PipelineState {
-    fn from_source(cardinality: Symbolic) -> Self {
+    fn from_source(cardinality: Symbolic, traced: bool) -> Self {
+        let resolution = Resolution::of_source(&cardinality);
+        PipelineState::with_resolution(cardinality, resolution, traced)
+    }
+
+    fn with_resolution(cardinality: Symbolic, resolution: Resolution, traced: bool) -> Self {
         PipelineState {
+            traced,
             cardinality,
             unknown_source: false,
             exact_time: ExactComplexity::new(),
             exact_space: ExactComplexity::new(),
             collects: false,
+            stages: vec![StageResolution {
+                stage: "input".to_string(),
+                resolution: resolution.clone(),
+            }],
+            resolution,
         }
     }
 
-    fn undeclared() -> Self {
+    fn undeclared(traced: bool) -> Self {
         PipelineState {
             unknown_source: true,
-            ..PipelineState::from_source(Symbolic::Unknown)
+            ..PipelineState::with_resolution(Symbolic::Unknown, Resolution::undeclared(), traced)
         }
     }
 
@@ -959,6 +1503,13 @@ impl PipelineState {
             std::mem::replace(&mut self.cardinality, Symbolic::Unknown),
             &f.kind,
         );
+        if self.traced {
+            self.resolution = self.resolution.after(&f.kind);
+            self.stages.push(StageResolution {
+                stage: describe_stream_fn(&f.kind),
+                resolution: self.resolution.clone(),
+            });
+        }
     }
 
     fn extended(&self, funs: &[crate::nodes::StreamFunctionNode]) -> Self {
@@ -993,22 +1544,26 @@ impl PipelineState {
     }
 }
 
+fn describe_stream_fn(kind: &StreamFunctionKind) -> String {
+    match kind {
+        StreamFunctionKind::Map => "map(...)".to_string(),
+        StreamFunctionKind::Filter => "filter(...)".to_string(),
+        StreamFunctionKind::FilterMap => "filter_map(...)".to_string(),
+        StreamFunctionKind::Permutations(k) => format!("permutations({k})"),
+        StreamFunctionKind::PermutationsWithReplacement(k) => {
+            format!("permutations_with_replacement({k})")
+        }
+        StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
+        StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
+        StreamFunctionKind::Fold => "fold(...)".to_string(),
+        StreamFunctionKind::Ok => "ok()".to_string(),
+        StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
+    }
+}
+
 fn describe_stream_fns(funs: &[crate::nodes::StreamFunctionNode]) -> String {
     funs.iter()
-        .map(|f| match &f.kind {
-            StreamFunctionKind::Map => "map(...)".to_string(),
-            StreamFunctionKind::Filter => "filter(...)".to_string(),
-            StreamFunctionKind::FilterMap => "filter_map(...)".to_string(),
-            StreamFunctionKind::Permutations(k) => format!("permutations({k})"),
-            StreamFunctionKind::PermutationsWithReplacement(k) => {
-                format!("permutations_with_replacement({k})")
-            }
-            StreamFunctionKind::Combinations(k) => format!("combinations({k})"),
-            StreamFunctionKind::KeepFirstN(k) => format!("keep_first_n({k}, ...)"),
-            StreamFunctionKind::Fold => "fold(...)".to_string(),
-            StreamFunctionKind::Ok => "ok()".to_string(),
-            StreamFunctionKind::OkOrPanic => "ok_or_panic()".to_string(),
-        })
+        .map(|f| describe_stream_fn(&f.kind))
         .collect::<Vec<_>>()
         .join(".")
 }
@@ -1034,14 +1589,60 @@ pub(crate) fn analyze_nodes(
     ProgramComplexity,
     Vec<(usize, Option<String>, StreamComplexity)>,
 ) {
+    let analysis = analyze_nodes_with(expressions, &|_, inp| input_cardinality(inp), false);
+    (analysis.program, analysis.nodes)
+}
+
+pub(crate) struct TracedAnalysis {
+    pub(crate) program: ProgramComplexity,
+    pub(crate) nodes: Vec<(usize, Option<String>, StreamComplexity)>,
+    pub(crate) traces: Vec<(Option<usize>, Vec<StageResolution>)>,
+}
+
+fn expression_input(expr: &TypedExpression) -> Option<&crate::nodes::InputFunctionNode> {
+    match expr {
+        TypedExpression::StreamVariable(v) => Some(&v.inp),
+        TypedExpression::UnnamedReturningStream(s)
+        | TypedExpression::UnnamedNonReturningStream(s) => Some(&s.inp_and_funs.inp),
+        TypedExpression::StreamVariableFromPriorStreamVariable(_)
+        | TypedExpression::NamedReturningStream(_)
+        | TypedExpression::NamedNonReturningStream(_)
+        | TypedExpression::StructDeclaration(_)
+        | TypedExpression::EnumDeclaration(_)
+        | TypedExpression::FnDeclaration(_) => None,
+    }
+}
+
+pub(crate) fn input_nodes(
+    expressions: &[TypedExpression],
+) -> Vec<&crate::nodes::InputFunctionNode> {
+    expressions.iter().filter_map(expression_input).collect()
+}
+
+pub(crate) fn analyze_nodes_with(
+    expressions: &[TypedExpression],
+    source_cardinality: &dyn Fn(usize, &crate::nodes::InputFunctionNode) -> Symbolic,
+    traced: bool,
+) -> TracedAnalysis {
+    let ordinals: Vec<usize> = expressions
+        .iter()
+        .scan(0, |seen, expr| {
+            let ordinal = *seen;
+            *seen += usize::from(expression_input(expr).is_some());
+            Some(ordinal)
+        })
+        .collect();
     let mut nodes: Vec<(usize, Option<String>, StreamComplexity)> = Vec::new();
+    let mut traces: Vec<(usize, Option<usize>, Vec<StageResolution>)> = Vec::new();
     let mut declared: std::collections::HashMap<String, PipelineState> =
         std::collections::HashMap::new();
 
     for (expr_index, expr) in expressions.iter().enumerate() {
         match expr {
             TypedExpression::StreamVariable(v) => {
-                let state = PipelineState::from_source(input_cardinality(&v.inp)).extended(&v.funs);
+                let ordinal = ordinals[expr_index];
+                let state = PipelineState::from_source(source_cardinality(ordinal, &v.inp), traced)
+                    .extended(&v.funs);
                 let desc = if v.funs.is_empty() {
                     format!("{} = input", v.variable_name)
                 } else {
@@ -1056,13 +1657,14 @@ pub(crate) fn analyze_nodes(
                     Some(v.variable_name.clone()),
                     state.finish(&desc),
                 ));
+                traces.push((expr_index, None, state.stages.clone()));
                 declared.insert(v.variable_name.clone(), state);
             }
             TypedExpression::StreamVariableFromPriorStreamVariable(v) => {
                 let state = declared
                     .get(&v.prior_stream_variable)
                     .cloned()
-                    .unwrap_or_else(PipelineState::undeclared)
+                    .unwrap_or_else(|| PipelineState::undeclared(traced))
                     .extended(&v.funs);
                 let desc = if v.funs.is_empty() {
                     format!("{} = {}", v.variable_name, v.prior_stream_variable)
@@ -1079,6 +1681,7 @@ pub(crate) fn analyze_nodes(
                     Some(v.variable_name.clone()),
                     state.finish(&desc),
                 ));
+                traces.push((expr_index, None, state.stages.clone()));
                 declared.insert(v.variable_name.clone(), state);
             }
             _ => {}
@@ -1090,10 +1693,10 @@ pub(crate) fn analyze_nodes(
     let mut program_exact_time = ExactComplexity::new();
     let mut program_space = ComplexityClass::O1;
     let mut program_exact_space = ExactComplexity::new();
-    let mut program_cardinality = Cardinality::Exact(BigUint::zero());
+    let mut stream_cardinalities = Vec::new();
 
     for (expr_index, expr) in expressions.iter().enumerate() {
-        let sc = match expr {
+        let (sc, trace) = match expr {
             TypedExpression::UnnamedReturningStream(s)
             | TypedExpression::UnnamedNonReturningStream(s) => {
                 let funs_desc = describe_stream_fns(&s.inp_and_funs.funs);
@@ -1107,9 +1710,13 @@ pub(crate) fn analyze_nodes(
                 } else {
                     format!("input.{funs_desc}.{out_desc}")
                 };
-                PipelineState::from_source(input_cardinality(&s.inp_and_funs.inp))
-                    .extended(&s.inp_and_funs.funs)
-                    .finish(&desc)
+                let ordinal = ordinals[expr_index];
+                let state = PipelineState::from_source(
+                    source_cardinality(ordinal, &s.inp_and_funs.inp),
+                    traced,
+                )
+                .extended(&s.inp_and_funs.funs);
+                (state.finish(&desc), state.stages)
             }
             TypedExpression::NamedReturningStream(s)
             | TypedExpression::NamedNonReturningStream(s) => {
@@ -1124,12 +1731,12 @@ pub(crate) fn analyze_nodes(
                 } else {
                     format!("{}.{funs_desc}.{out_desc}", s.stream_variable)
                 };
-                declared
+                let state = declared
                     .get(&s.stream_variable)
                     .cloned()
-                    .unwrap_or_else(PipelineState::undeclared)
-                    .extended(&s.funs)
-                    .finish(&desc)
+                    .unwrap_or_else(|| PipelineState::undeclared(traced))
+                    .extended(&s.funs);
+                (state.finish(&desc), state.stages)
             }
             _ => continue,
         };
@@ -1138,11 +1745,14 @@ pub(crate) fn analyze_nodes(
         program_exact_time.merge(&sc.exact_time);
         program_space = program_space.max(sc.space_class.clone());
         program_exact_space.merge(&sc.exact_space);
-        program_cardinality = program_cardinality.max(sc.cardinality.clone());
+        stream_cardinalities.push(sc.cardinality.clone());
         nodes.push((expr_index, None, sc.clone()));
+        traces.push((expr_index, Some(streams.len()), trace));
         streams.push(sc);
     }
     nodes.sort_by_key(|n| n.0);
+    traces.sort_by_key(|t| t.0);
+    let program_cardinality = fold_program_cardinality(stream_cardinalities);
 
     let program = ProgramComplexity {
         streams,
@@ -1152,7 +1762,14 @@ pub(crate) fn analyze_nodes(
         program_exact_space,
         program_cardinality,
     };
-    (program, nodes)
+    TracedAnalysis {
+        program,
+        nodes,
+        traces: traces
+            .into_iter()
+            .map(|(_, program_stream, trace)| (program_stream, trace))
+            .collect(),
+    }
 }
 
 #[cfg(test)]
@@ -1197,7 +1814,7 @@ mod tests {
                 kind: kind.clone(),
                 code: String::new(),
             };
-            let analyzed = PipelineState::from_source(Symbolic::Unknown)
+            let analyzed = PipelineState::from_source(Symbolic::Unknown, true)
                 .extended(&[node])
                 .finish("t");
             if analyzed.collects_input {
@@ -2368,5 +2985,390 @@ mod proptests {
         let small = steps_applied_for(&chain_source(500));
         let large = steps_applied_for(&chain_source(2000));
         assert_eq!(large, small * 4);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod cardinality_join {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn size(name: &str) -> Symbolic {
+        Symbolic::Param(SizeName::new(name).unwrap())
+    }
+
+    fn tree(with_sizes: bool) -> BoxedStrategy<Symbolic> {
+        let leaf = if with_sizes {
+            prop_oneof![
+                (0u64..20).prop_map(|v| Symbolic::Constant(BigUint::from(v))),
+                Just(size("n")),
+                Just(size("m")),
+            ]
+            .boxed()
+        } else {
+            (0u64..20)
+                .prop_map(|v| Symbolic::Constant(BigUint::from(v)))
+                .boxed()
+        };
+        leaf.prop_recursive(3, 12, 3, |inner| {
+            prop_oneof![
+                inner.clone().prop_map(|n| Symbolic::Filtered(Box::new(n))),
+                (inner.clone(), 0u64..3)
+                    .prop_map(|(n, k)| Symbolic::Permutations { n: Box::new(n), k }),
+                (inner.clone(), 0u64..3).prop_map(|(n, k)| {
+                    Symbolic::PermutationsWithReplacement { n: Box::new(n), k }
+                }),
+                (inner.clone(), 0u64..3)
+                    .prop_map(|(n, k)| Symbolic::Combinations { n: Box::new(n), k }),
+                (inner.clone(), inner.clone())
+                    .prop_map(|(a, b)| Symbolic::Min(Box::new(a), Box::new(b))),
+                prop::collection::vec(inner, 2..4).prop_map(Symbolic::Sum),
+            ]
+        })
+        .boxed()
+    }
+
+    fn open() -> BoxedStrategy<Cardinality> {
+        tree(true)
+            .prop_filter("mentions a size", depends_on_bindings)
+            .prop_map(Cardinality::Bounded)
+            .boxed()
+    }
+
+    fn closed() -> BoxedStrategy<Cardinality> {
+        prop_oneof![
+            (0u64..50).prop_map(|v| Cardinality::Exact(BigUint::from(v))),
+            tree(false).prop_map(Cardinality::Bounded),
+        ]
+        .boxed()
+    }
+
+    fn any_cardinality() -> BoxedStrategy<Cardinality> {
+        prop_oneof![open(), closed()].boxed()
+    }
+
+    fn ceiling(cardinality: &Cardinality, bindings: &SizeBindings) -> Option<BigUint> {
+        match cardinality {
+            Cardinality::Exact(v) => Some(v.clone()),
+            Cardinality::Bounded(sym) => sym.upper_bound_with(bindings),
+            Cardinality::Unknown => None,
+        }
+    }
+
+    fn at(n: u64, m: u64) -> SizeBindings {
+        SizeBindings::from([
+            (SizeName::new("n").unwrap(), BigUint::from(n)),
+            (SizeName::new("m").unwrap(), BigUint::from(m)),
+        ])
+    }
+
+    fn fold(items: &[Cardinality]) -> Cardinality {
+        items
+            .iter()
+            .cloned()
+            .fold(Cardinality::Exact(BigUint::zero()), Cardinality::max)
+    }
+
+    #[test]
+    fn a_bound_variable_consumed_twice_gives_one_program_cardinality_in_either_order() {
+        let linear = Cardinality::Bounded(size("n"));
+        let quadratic = Cardinality::Bounded(Symbolic::Permutations {
+            n: Box::new(size("n")),
+            k: 2,
+        });
+        let forward = fold_program_cardinality([linear.clone(), quadratic.clone()]);
+        let backward = fold_program_cardinality([quadratic, linear]);
+        assert_eq!(forward, backward);
+        assert_eq!(forward.to_string(), "$n + P($n, 2)");
+    }
+
+    #[test]
+    fn shared_terms_are_counted_once_and_repeated_terms_keep_their_multiplicity() {
+        let twice: Cardinality = "$n + $n".parse().unwrap();
+        let once: Cardinality = "$n".parse().unwrap();
+        assert_eq!(twice.clone().max(once.clone()), twice);
+        assert_eq!(once.clone().max(twice.clone()), twice);
+        let joined = "$n + 4"
+            .parse::<Cardinality>()
+            .unwrap()
+            .max("$m + \u{2264}9".parse().unwrap());
+        assert_eq!(joined.to_string(), "$m + $n + \u{2264}9");
+        assert_eq!(
+            Cardinality::Exact(BigUint::from(7u32))
+                .max("$n".parse().unwrap())
+                .to_string(),
+            "$n + 7"
+        );
+        assert_eq!(
+            Cardinality::Exact(BigUint::zero()).max("$n".parse().unwrap()),
+            "$n".parse().unwrap()
+        );
+        assert_eq!(
+            Cardinality::Unknown.max("$n".parse().unwrap()),
+            Cardinality::Unknown
+        );
+    }
+
+    #[test]
+    fn closed_streams_keep_the_default_fold() {
+        let cardinalities = [
+            Cardinality::Exact(BigUint::from(100u32)),
+            Cardinality::Bounded(Symbolic::Filtered(Box::new(Symbolic::Constant(
+                BigUint::from(3u32),
+            )))),
+        ];
+        assert_eq!(
+            fold_program_cardinality(cardinalities.clone()),
+            fold(&cardinalities)
+        );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        #[test]
+        fn max_with_a_size_is_commutative_and_bounds_both_sides(
+            a in any_cardinality(),
+            b in any_cardinality(),
+        ) {
+            prop_assume!(a.mentions_size() || b.mentions_size());
+            let ab = a.clone().max(b.clone());
+            let ba = b.clone().max(a.clone());
+            prop_assert_eq!(&ab, &ba);
+            prop_assert_eq!(ab.clone().max(ab.clone()), ab.clone());
+            for n in 0..10 {
+                for bindings in [at(n, n), at(n, 9 - n)] {
+                    let joined = ceiling(&ab, &bindings).expect("every size is bound");
+                    for side in [&a, &b] {
+                        let side = ceiling(side, &bindings).expect("every size is bound");
+                        prop_assert!(joined >= side, "{} < {} at n={}", ab, side, n);
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn max_over_sized_streams_does_not_depend_on_their_order(
+            items in prop::collection::vec(open(), 1..5),
+            reordered in prop::collection::vec(open(), 1..5).prop_flat_map(|v| Just(v).prop_shuffle()),
+            rotation in any::<usize>(),
+        ) {
+            let mut rotated = items.clone();
+            let len = rotated.len();
+            rotated.rotate_left(rotation % len);
+            rotated.reverse();
+            prop_assert_eq!(fold(&items), fold(&rotated));
+            let mut sorted = reordered.clone();
+            sorted.sort_by_cached_key(|c| c.to_string());
+            prop_assert_eq!(fold(&reordered), fold(&sorted));
+        }
+
+        #[test]
+        fn with_a_sized_stream_the_program_fold_ignores_order_and_bounds_every_stream(
+            sized in open(),
+            others in prop::collection::vec(any_cardinality(), 0..5),
+            rotation in any::<usize>(),
+        ) {
+            let mut streams = others.clone();
+            streams.push(sized);
+            let forward = fold_program_cardinality(streams.clone());
+            let mut reversed = streams.clone();
+            reversed.reverse();
+            let mut rotated = streams.clone();
+            let len = rotated.len();
+            rotated.rotate_left(rotation % len);
+            prop_assert_eq!(&forward, &fold_program_cardinality(reversed));
+            prop_assert_eq!(&forward, &fold_program_cardinality(rotated));
+            for n in 0..10 {
+                for bindings in [at(n, n), at(n, 9 - n)] {
+                    let joined = ceiling(&forward, &bindings).expect("every size is bound");
+                    for stream in &streams {
+                        let one = ceiling(stream, &bindings).expect("every size is bound");
+                        prop_assert!(joined >= one, "{} < {} at n={}", forward, stream, n);
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn a_question_mark_in_a_bounded_value_is_kept_as_an_unbounded_term(
+            a in unknown_bearing(),
+            b in prop_oneof![unknown_bearing(), closed()],
+        ) {
+            let ab = a.clone().max(b.clone());
+            prop_assert_eq!(&ab, &b.clone().max(a.clone()));
+            let Cardinality::Bounded(joined) = &ab else {
+                return Err(TestCaseError::fail(format!("{ab:?} is not bounded")));
+            };
+            prop_assert!(depends_on_bindings(joined), "{}", ab);
+            prop_assert_eq!(ceiling(&ab, &at(3, 3)), None);
+        }
+    }
+
+    fn too_large_to_compute() -> BoxedStrategy<Cardinality> {
+        prop_oneof![
+            (3u64..10, 524_289u64..530_000).prop_map(|(n, k)| {
+                Symbolic::PermutationsWithReplacement {
+                    n: Box::new(Symbolic::Constant(BigUint::from(n))),
+                    k,
+                }
+            }),
+            (52_429u64..60_000).prop_map(|k| Symbolic::Permutations {
+                n: Box::new(Symbolic::Constant(BigUint::from(1_000_000u32))),
+                k,
+            }),
+        ]
+        .prop_map(Cardinality::Bounded)
+        .boxed()
+    }
+
+    fn flattened(cardinality: &Cardinality) -> Vec<Symbolic> {
+        match cardinality {
+            Cardinality::Bounded(Symbolic::Sum(parts)) => parts.clone(),
+            Cardinality::Bounded(part) => vec![part.clone()],
+            Cardinality::Exact(v) => vec![Symbolic::Constant(v.clone())],
+            Cardinality::Unknown => vec![Symbolic::Unknown],
+        }
+    }
+
+    pub(crate) fn within_deadline(body: fn()) {
+        let deadline = std::time::Duration::from_secs(60);
+        let (done, finished) = std::sync::mpsc::channel();
+        let worker = std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(move || {
+                body();
+                let _ = done.send(());
+            })
+            .expect("spawn a 2 MiB thread");
+        match finished.recv_timeout(deadline) {
+            Ok(()) => worker.join().expect("the check panicked"),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("the check did not finish within {deadline:?}")
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = worker.join();
+                panic!("the check panicked")
+            }
+        }
+    }
+
+    #[test]
+    fn a_count_too_large_to_compute_is_never_dropped_from_a_join() {
+        within_deadline(|| {
+            let strategy = (
+                prop::collection::vec(too_large_to_compute(), 1..3),
+                prop::collection::vec(prop_oneof![closed(), open()], 0..4),
+                any::<usize>(),
+            );
+            let mut runner =
+                proptest::test_runner::TestRunner::new(ProptestConfig::with_cases(256));
+            runner
+                .run(&strategy, |(huge, others, rotation)| {
+                    let mut streams = others.clone();
+                    streams.extend(huge.iter().cloned());
+                    let joined = fold_program_cardinality(streams.clone());
+                    let len = streams.len();
+                    streams.rotate_left(rotation % len);
+                    prop_assert_eq!(&joined, &fold_program_cardinality(streams.clone()));
+                    let mut parts = flattened(&joined);
+                    for stream in &huge {
+                        for term in flattened(stream) {
+                            let index = parts.iter().position(|p| *p == term);
+                            prop_assert!(index.is_some(), "{} lost {}", joined, term);
+                            if let Some(index) = index {
+                                parts.swap_remove(index);
+                            }
+                        }
+                    }
+                    prop_assert_eq!(ceiling(&joined, &at(3, 3)), None);
+                    let pair = huge[0].clone().max(Cardinality::Exact(BigUint::from(5u32)));
+                    prop_assert!(flattened(&pair).contains(&flattened(&huge[0])[0]));
+                    Ok(())
+                })
+                .unwrap();
+        });
+    }
+
+    fn unknown_bearing() -> BoxedStrategy<Cardinality> {
+        let leaf = prop_oneof![
+            (0u64..20).prop_map(|v| Symbolic::Constant(BigUint::from(v))),
+            Just(Symbolic::Unknown),
+        ];
+        leaf.prop_recursive(3, 12, 3, |inner| {
+            prop_oneof![
+                inner.clone().prop_map(|n| Symbolic::Filtered(Box::new(n))),
+                (inner.clone(), 0u64..3)
+                    .prop_map(|(n, k)| Symbolic::Permutations { n: Box::new(n), k }),
+                (inner.clone(), inner.clone())
+                    .prop_map(|(a, b)| Symbolic::Min(Box::new(a), Box::new(b))),
+                prop::collection::vec(inner, 2..4).prop_map(Symbolic::Sum),
+            ]
+        })
+        .prop_filter("contains ?", |s| {
+            s.contains_unknown() && s.upper_bound().is_none()
+        })
+        .prop_map(Cardinality::Bounded)
+        .boxed()
+    }
+
+    #[test]
+    fn a_question_mark_beside_a_number_keeps_both() {
+        let unknown_pair = Symbolic::Min(Box::new(Symbolic::Unknown), Box::new(Symbolic::Unknown));
+        assert_eq!(
+            Cardinality::Bounded(Symbolic::Constant(BigUint::zero()))
+                .max(Cardinality::Bounded(unknown_pair.clone())),
+            Cardinality::Bounded(unknown_pair.clone())
+        );
+        assert_eq!(
+            Cardinality::Exact(BigUint::from(4u32))
+                .max(Cardinality::Bounded(unknown_pair))
+                .to_string(),
+            "4 + min(?, ?)"
+        );
+    }
+
+    #[test]
+    fn a_sized_program_bounds_a_large_exact_stream_beside_a_filtered_one() {
+        let filtered_seven = Cardinality::Bounded(Symbolic::Filtered(Box::new(
+            Symbolic::Constant(BigUint::from(7u32)),
+        )));
+        let sized = Cardinality::Bounded(Symbolic::Combinations {
+            n: Box::new(size("n")),
+            k: 2,
+        });
+        let joined = fold_program_cardinality([
+            Cardinality::Exact(BigUint::from(100u32)),
+            filtered_seven,
+            sized,
+        ]);
+        assert_eq!(joined.to_string(), "100 + C($n, 2)");
+        for n in 0..15 {
+            assert!(ceiling(&joined, &at(n, n)).unwrap() >= BigUint::from(100u32));
+        }
+        assert_eq!(
+            fold_program_cardinality([Cardinality::Bounded(size("n")), Cardinality::Unknown]),
+            Cardinality::Unknown
+        );
+    }
+
+    #[test]
+    fn the_verifiers_mixed_triple_folds_the_same_in_every_order() {
+        let a: Cardinality = "\u{2264}$n".parse().unwrap();
+        let b: Cardinality = "\u{2264}\u{2264}0".parse().unwrap();
+        let c = Cardinality::Exact(BigUint::one());
+        let orders = [
+            [a.clone(), b.clone(), c.clone()],
+            [a.clone(), c.clone(), b.clone()],
+            [b.clone(), a.clone(), c.clone()],
+            [b.clone(), c.clone(), a.clone()],
+            [c.clone(), a.clone(), b.clone()],
+            [c, b, a],
+        ];
+        let first = fold_program_cardinality(orders[0].clone());
+        for order in orders {
+            assert_eq!(fold_program_cardinality(order), first);
+        }
+        assert_eq!(first.to_string(), "1 + \u{2264}$n");
     }
 }

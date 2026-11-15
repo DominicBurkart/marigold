@@ -72,6 +72,18 @@ impl PestParser {
         Ok(crate::complexity::analyze_program(&expressions))
     }
 
+    pub(crate) fn analyze_with_sizes(
+        input: &str,
+        sizes: &crate::sizes::InputSizes,
+    ) -> Result<crate::sizes::SymbolicAnalysis, crate::sizes::SizeAnalysisError> {
+        let pairs = MarigoldPestParser::parse(Rule::program, input)
+            .map_err(|e| MarigoldParseError(format!("Parse error: {}", e)))?;
+        let mut expressions = crate::pest_ast_builder::PestAstBuilder::build_program(pairs)
+            .map_err(MarigoldParseError)?;
+        Self::resolve_enum_range_counts(&mut expressions).map_err(MarigoldParseError)?;
+        crate::sizes::analyze_with_sizes(&expressions, sizes)
+    }
+
     pub fn stream_complexities(
         input: &str,
     ) -> Result<Vec<crate::complexity::NodeComplexity>, MarigoldParseError> {

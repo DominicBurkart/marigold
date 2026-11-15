@@ -1,0 +1,29 @@
+{
+  "analyze": {
+    "streams": [],
+    "program_time": "O(1)",
+    "program_exact_time": "O(1)",
+    "program_space": "O(1)",
+    "program_exact_space": "O(1)",
+    "program_cardinality": "0"
+  },
+  "nodes": [
+    {
+      "name": "x",
+      "expr_index": 0,
+      "range": {
+        "start": 0,
+        "end": 15
+      },
+      "complexity": {
+        "description": "x = input",
+        "cardinality": "3",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    }
+  ]
+}
