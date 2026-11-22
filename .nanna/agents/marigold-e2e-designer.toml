@@ -1,0 +1,18 @@
+[identity]
+name = "marigold-e2e-designer"
+description = "Writes integration tests that follow real user journeys through the public marigold API."
+loop = "inner"
+model = "gemma4:e4b"
+system_prompt = { inline = "You write integration tests only, under tests/. Never edit production code, examples, manifests, CI or the nanna and inchworm configuration. Add no code comments." }
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = ["tests/**"]
+read_paths = ["marigold/**", "marigold-macros/**", "marigold-grammar/**", "marigold-lsp/**", "marigold-impl/**", "tests/**", "examples/**", "integrations/**", "docs/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "deny.toml", "README.md"]
+max_effect = "workspace"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file", "cargo_check", "cargo_test"]
+
+[limits]
+max_iterations = 100
+max_wall_clock_secs = 1800
+max_concurrent = 1

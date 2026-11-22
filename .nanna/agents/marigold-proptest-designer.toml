@@ -1,0 +1,18 @@
+[identity]
+name = "marigold-proptest-designer"
+description = "Writes property tests (proptest) on the key interfaces of marigold-grammar and marigold-impl."
+loop = "inner"
+model = "gemma4:e4b"
+system_prompt = { inline = "You write property tests only, under tests and the existing test modules of marigold-grammar and marigold-impl. Never edit production code, manifests, CI or the nanna and inchworm configuration. Add no code comments." }
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = ["marigold-impl/**", "marigold-grammar/**", "tests/**"]
+read_paths = ["marigold/**", "marigold-macros/**", "marigold-grammar/**", "marigold-lsp/**", "marigold-impl/**", "tests/**", "examples/**", "integrations/**", "docs/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "deny.toml", "README.md"]
+max_effect = "workspace"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file", "cargo_check", "cargo_test"]
+
+[limits]
+max_iterations = 100
+max_wall_clock_secs = 1800
+max_concurrent = 1
