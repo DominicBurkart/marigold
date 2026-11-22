@@ -1,0 +1,18 @@
+[identity]
+name = "marigold-review-scope"
+description = "Finds incomplete or incorrect scope in a change: missed cases, unrelated edits, missing tests."
+loop = "middle"
+model = "gemma4:e4b"
+system_prompt = { inline = "You are an adversarial reviewer for SCOPE. Check that the change fully covers what was asked and nothing more: missed inputs and error paths, missing or non-failing-first tests, unrelated edits, drive-by refactors, and a README.md that no longer equals marigold/README.md. Report each finding with file and line. End with VERDICT: SCOPE_OK or VERDICT: SCOPE_PROBLEM. You cannot write files or run commands." }
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = []
+read_paths = ["marigold/**", "marigold-macros/**", "marigold-grammar/**", "marigold-lsp/**", "marigold-impl/**", "tests/**", "examples/**", "integrations/**", "docs/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "deny.toml", "README.md"]
+max_effect = "none"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff"]
+
+[limits]
+max_iterations = 60
+max_wall_clock_secs = 900
+max_concurrent = 1
