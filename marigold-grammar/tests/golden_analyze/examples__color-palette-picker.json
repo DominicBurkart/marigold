@@ -1,0 +1,39 @@
+{
+  "analyze": {
+    "streams": [
+      {
+        "description": "input.filter(...).permutations_with_replacement(3).combinations(3).keep_first_n(5, ...).write_file(...)",
+        "cardinality": "min(C(≤256^3, 3), 5)",
+        "time_class": "O(C(n,3))",
+        "exact_time": "O(2C(n,3) + n^3)",
+        "space_class": "O(n^3)",
+        "exact_space": "O(n^3 + n)",
+        "collects_input": true
+      }
+    ],
+    "program_time": "O(C(n,3))",
+    "program_exact_time": "O(2C(n,3) + n^3)",
+    "program_space": "O(n^3)",
+    "program_exact_space": "O(n^3 + n)",
+    "program_cardinality": "min(C(≤256^3, 3), 5)"
+  },
+  "nodes": [
+    {
+      "name": null,
+      "expr_index": 15,
+      "range": {
+        "start": 5258,
+        "end": 5432
+      },
+      "complexity": {
+        "description": "input.filter(...).permutations_with_replacement(3).combinations(3).keep_first_n(5, ...).write_file(...)",
+        "cardinality": "min(C(≤256^3, 3), 5)",
+        "time_class": "O(C(n,3))",
+        "exact_time": "O(2C(n,3) + n^3)",
+        "space_class": "O(n^3)",
+        "exact_space": "O(n^3 + n)",
+        "collects_input": true
+      }
+    }
+  ]
+}
