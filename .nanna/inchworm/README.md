@@ -7,7 +7,8 @@ Four nanna identities, an invariant ledger, a gate, and three inchworm flows tha
 | marigold-invariant-scout | gemma4:e4b | finds untested interface invariants, writes the ledger |
 | marigold-test-designer | gemma4:e4b | pins one `untested` invariant per run with tests |
 | marigold-coverage-closer | gemma4:e4b | closes remaining coverage, only after the interface gate passes |
-| marigold-kani-prover | leanstral-whitedwarf | Kani harnesses (bounded) and Lean 4 via Aeneas (unbounded) |
+| marigold-kani-prover | leanstral-whitedwarf | Kani harnesses (bounded) |
+| marigold-lean-prover | leanstral-whitedwarf | Lean 4 proofs over Aeneas translations (unbounded) |
 
 ## Flows
 
@@ -17,7 +18,8 @@ The root `inchworm.toml` holds the repository's `[auditor]` table, the existing 
 |---|---|---|
 | test-design | `inchworm:test-design` | scout, design |
 | close-coverage | `inchworm:coverage` | close |
-| prove | `inchworm:prove` | prove |
+| prove-kani | `inchworm:prove-kani` | prove |
+| prove-lean | `inchworm:prove-lean` | prove |
 
 ## Ordering is enforced by the gate
 
@@ -25,7 +27,7 @@ The root `inchworm.toml` holds the repository's `[auditor]` table, the existing 
 
 ## Schedule
 
-Inchworm has no time trigger yet (inchworm issue 13). Until it lands, apply `inchworm:test-design` weekly and `inchworm:prove` after invariants are covered.
+Inchworm has no time trigger yet (inchworm issue 13). Until it lands, apply `inchworm:test-design` weekly and `inchworm:prove-kani` and `inchworm:prove-lean` after invariants are covered.
 
 ## Install
 

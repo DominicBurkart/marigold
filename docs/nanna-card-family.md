@@ -58,9 +58,10 @@ writers. Every card has `max_concurrent = 1`.
 - `marigold-test-designer` is unchanged and still pins one ledger invariant
   per run in the `test-design` flow. The new orchestrator is named
   `marigold-test-lead` so that flow keeps working.
-- `marigold-kani-prover` is unchanged and still serves the `prove` flow. The
-  new `marigold-formal-methods-designer` owns design and iteration of harnesses
-  for the test lead; the prover stays the per-invariant proof step.
+- `marigold-kani-prover` serves the `prove-kani` flow and no longer handles
+  Lean; `marigold-lean-prover` serves `prove-lean`. The new
+  `marigold-formal-methods-designer` owns design and iteration of harnesses
+  for the test lead; the provers stay the per-invariant proof steps.
 
 ## Researcher areas
 

@@ -1,0 +1,36 @@
+FROM docker.io/library/debian:trixie-slim AS aeneas-build
+ARG AENEAS_COMMIT=fb44cb400eb6bfe7dce97422ebe8fa748b7e4f9b
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates git build-essential pkg-config curl opam bubblewrap unzip libgmp-dev \
+ && rm -rf /var/lib/apt/lists/*
+RUN git clone https://github.com/AeneasVerif/aeneas /src/aeneas \
+ && git -C /src/aeneas checkout "$AENEAS_COMMIT" \
+ && git clone https://github.com/AeneasVerif/charon /src/aeneas/charon \
+ && git -C /src/aeneas/charon checkout "$(cat /src/aeneas/charon-pin)"
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH
+RUN curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+RUN cd /src/aeneas/charon && make build-charon-rust
+RUN opam init --disable-sandboxing -y --bare \
+ && opam switch create aeneas 5.3.0 -y \
+ && cd /src/aeneas \
+ && opam install ./src --deps-only -y \
+ && eval "$(opam env --switch=aeneas)" \
+ && make build-bin
+
+FROM docker.io/library/debian:trixie-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates git ripgrep build-essential pkg-config curl libgmp10 \
+ && rm -rf /var/lib/apt/lists/*
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo ELAN_HOME=/usr/local/elan PATH=/usr/local/cargo/bin:/usr/local/elan/bin:/opt/aeneas/bin:$PATH
+RUN curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable -c rustfmt -c clippy
+COPY --from=aeneas-build /usr/local/rustup /usr/local/rustup
+COPY --from=aeneas-build /src/aeneas/bin/aeneas /opt/aeneas/bin/aeneas
+COPY --from=aeneas-build /src/aeneas/charon/bin/charon /opt/aeneas/bin/charon
+COPY --from=aeneas-build /src/aeneas/charon/bin/charon-driver /opt/aeneas/bin/charon-driver
+COPY --from=aeneas-build /src/aeneas/backends/lean /opt/aeneas/lean
+RUN curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none \
+ && cd /opt/aeneas/lean \
+ && elan toolchain install "$(cat lean-toolchain)" \
+ && lake exe cache get \
+ && lake build
+CMD ["sleep", "infinity"]

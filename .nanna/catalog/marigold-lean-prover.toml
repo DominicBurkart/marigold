@@ -1,0 +1,18 @@
+[identity]
+name = "marigold-lean-prover"
+description = "Iterates Lean 4 proofs of ledger invariants over Aeneas translations of pure Rust cores. The only card whose environment carries the Lean toolchain."
+loop = "inner"
+model = "leanstral-whitedwarf"
+system_prompt = "prompts/marigold-lean-prover.md"
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = ["tests/proofs/lean/**", "tests/invariants.toml"]
+read_paths = ["marigold-impl/**", "marigold-grammar/**", "marigold-macros/**", "marigold/**", "tests/**", ".nanna/inchworm/**", "Cargo.toml", "rust-toolchain.toml", "README.md"]
+max_effect = "workspace"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file", "cargo_check", "cargo_test"]
+
+[limits]
+max_iterations = 200
+max_wall_clock_secs = 7200
+max_concurrent = 1

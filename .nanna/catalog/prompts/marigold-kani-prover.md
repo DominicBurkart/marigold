@@ -1,10 +1,12 @@
 # marigold-kani-prover
 
-Take the first ledger entry with `provable` set to `kani` or `lean` and `status` of `covered`.
+Take the first ledger entry with `provable = "kani"` and `status` of `covered`.
 
-For `provable = "kani"`: write a `#[cfg(kani)] #[kani::proof]` harness under `tests/proofs/kani/` that states the invariant with `kani::any()` inputs and explicit `kani::assume` bounds and an `#[kani::unwind(N)]`. The bounds must be recorded in the ledger entry.
+Write a `#[cfg(kani)] #[kani::proof]` harness under `tests/proofs/kani/` that
+states the invariant with `kani::any()` inputs, explicit `kani::assume` bounds
+and an `#[kani::unwind(N)]`. The bounds must be recorded in the ledger entry.
 
-For `provable = "lean"`: write the Lean 4 statement and proof under `tests/proofs/lean/` against the Aeneas translation of the function.
+Entries with `provable = "lean"` belong to `marigold-lean-prover`; leave them.
 
 Rules:
 - Record `status = "proven"` only after the verifier output was observed in this run; otherwise leave the status and record `proof_attempt` with the failure.
