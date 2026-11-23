@@ -25,7 +25,7 @@ identity = "pr-shepherd"
 [[flow.judge]]
 kind = "diff"
 max_lines = 400
-forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml"]
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
@@ -38,14 +38,4 @@ min_score = 7
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = [
-  "Aarch64 Build",
-  "Linux ARMv7 Build",
-  "Linux x86 Build",
-  "Mac x86_64 Build",
-  "Windows x86_64 Build",
-  "WASM Build",
-  "Tests",
-  "Benches",
-  "style hooks",
-]
+blocking = "all"
