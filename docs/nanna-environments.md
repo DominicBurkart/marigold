@@ -1,9 +1,9 @@
 # Nanna card environments
 
-Each marigold card runs in the smallest container that holds the tools it
-needs. Every environment is a Nix-built image defined in `flake.nix`. The Lean
-toolchain lives only in the `lean` image, which is built only when a card that
-needs it is spawned.
+Each marigold card runs in the smallest container that holds the tools it needs.
+Every environment is a Nix-built image defined in `flake.nix`. The Lean
+toolchain is present only in the `lean` image, and only `marigold-lean-prover`
+is mapped to it.
 
 ## Requirements
 
@@ -61,28 +61,44 @@ unchanged.
 
 ## Why Lean is isolated
 
-`marigold-lean-prover` is the only card mapped to `lean`. `validate.py` parses
-the per-environment package lists in `flake.nix`, follows the bindings they
-reference, and rejects any environment other than `lean` that reaches Lean,
-Aeneas, charon, elan or lake. It also rejects a second card mapped to `lean`.
-Spawning any other card never builds that image.
+`marigold-lean-prover` is the only card mapped to `lean`, and `validate.py`
+rejects a second card mapped to it. `flake.nix` exports a manifest of the
+package names of every image, built from the same specs passed to `mkImage`, so
+anything added when images are generated is included:
+
+```text
+nix eval --json path:.#lib.<system>.environmentManifest
+```
+
+When `nix` is on `PATH`, `validate.py` evaluates that attribute (about 3 s warm
+cache). It rejects any environment other than `lean` whose packages match lean,
+aeneas, charon, elan, lake, mathlib, batteries, fstar or hol4, and it requires
+the `lean` environment to contain lean and aeneas. A failing evaluation is an
+error, not a fallback.
+
+Without `nix`, `validate.py` prints a text fallback warning and parses
+`flake.nix` itself: comments and string contents are ignored, the bindings an
+environment references (and the image-generating bindings) are followed, quoted
+or dynamic attribute access is refused because it cannot be analysed, and
+structure it cannot parse fails closed. The fallback is weaker than the
+evaluated manifest.
 
 ## Card to environment map
 
 Nanna's card schema rejects unknown fields today, so cards cannot carry an
 `[environment]` table yet. `.nanna/environments/cards.toml` maps every catalog
-card to one environment. When the per-identity design lands in nanna-coder,
-each mapping moves into its card.
+card to one environment. When the per-identity design lands in nanna-coder, each
+mapping moves into its card.
 
 ## Capabilities
 
-A listed capability is a provided capability. Each environment lists only
-tools nanna has today (`cargo_check`, `cargo_test`, `cargo_build`), and the
-set must equal the container tools the card lists. `exec` is omitted, so the
-built-in tool runs inside the environment's container. `coverage_report`,
-`kani_verify`, `aeneas_extract` and `lean_check` are added to the `rust-cov`,
-`kani` and `lean` environments and to their cards together, once nanna-coder
-issues 1049, 1050 and 1051 land.
+A listed capability is a provided capability. Each environment lists only tools
+nanna has today (`cargo_check`, `cargo_test`, `cargo_build`), and the set must
+equal the container tools the card lists. `exec` is omitted, so the built-in
+tool runs inside the environment's container. `coverage_report`, `kani_verify`,
+`aeneas_extract` and `lean_check` are added to the `rust-cov`, `kani` and `lean`
+environments and to their cards together, once nanna-coder issues 1049, 1050 and
+1051 land.
 
 ## Validation
 
@@ -91,10 +107,27 @@ python3 -I .nanna/environments/validate.py .
 cd .nanna/environments && python3 -m unittest test_validate
 ```
 
-The validator checks that every catalog card is mapped, every mapped
-environment declares a well-formed `flake_output` that `flake.nix` defines, the
-card's cargo tools equal the environment's available capabilities, and Lean
-stays confined to its card. It is not yet run in CI.
+The validator checks that every catalog card is mapped, every mapped environment
+declares a well-formed `flake_output` that the flake defines, no unknown keys
+appear in `environment.toml`, the card's cargo tools equal the environment's
+available capabilities, and Lean stays confined to its card. The tests also
+assert that every inchworm flow forbids edits to `flake.nix`, `flake.lock` and
+`.nanna/environments/**`, and that `.nanna/protected.toml` lists them. It is not
+yet run in CI.
+
+## Proofs are unchecked drafts for now
+
+No tool can run `kani`, `lean`, `lake`, `aeneas` or `charon` yet, because the
+cards list only `cargo_check` and `cargo_test`. Until nanna-coder #1049 to #1051
+land, `prove-kani` and `prove-lean` produce unchecked draft proofs only: they
+record `proof_attempt` and never `proven`.
+
+When those issues land, these capability ids are added to the environment and to
+its card together, so the equality rule keeps holding:
+
+- `coverage_report` to `rust-cov` and `marigold-coverage-closer`.
+- `kani_verify` to `kani` and `marigold-kani-prover`.
+- `aeneas_extract` and `lean_check` to `lean` and `marigold-lean-prover`.
 
 ## Known gaps
 
@@ -106,6 +139,6 @@ stays confined to its card. It is not yet run in CI.
   pinned at v4.36.0.
 - `cargo-tarpaulin` is 0.37.5 from nixpkgs, where the Containerfile pinned
   0.37.6.
-- Only the evaluation for aarch64 has been checked. Images were built on
-  x86_64 only.
+- Only the evaluation for aarch64 has been checked. Images were built on x86_64
+  only.
 - No image has been tested inside a loaded `--network=none` container.
