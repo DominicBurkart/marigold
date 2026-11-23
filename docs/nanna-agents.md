@@ -133,14 +133,17 @@ warning, since the repo catalog is intentionally a marigold-only subset.
 It reads each card name from `[identity]` with `tomllib`. It exits 1 when an
 override widens its base (from either catalog), names an unknown card, fails to
 parse, declares a name that differs from its file name, or when
-`.nanna/agents` has no cards. It is not wired into CI.
+`.nanna/agents` is empty or absent. An empty `NANNA_CONFIG_DIR` counts as unset,
+as in nanna. It is not wired into CI.
 
 `scripts/test_check_nanna_agents.sh` runs the script against fixtures under
 `scripts/fixtures/nanna_agents/` and asserts the exact exit status and message
 for a narrowed card (0), one widened card per dimension (`scope.paths`,
-`scope.max_effect`, `scope.tools`; 1), a name and file mismatch (1), a missing
-agents directory (1), a matching host catalog (0), a drifted but compatible host
-catalog (0 with a warning) and a host base narrower than the repo catalog (1).
+`scope.max_effect`, `scope.tools`; 1), a name and file mismatch (1), an empty
+or absent agents directory (1), a matching host catalog (0), a drifted but
+compatible host catalog (0 with a warning), a host base narrower than the repo
+catalog (1, with the `widens` cause) and an empty `NANNA_CONFIG_DIR` falling
+back to `XDG_CONFIG_HOME` (1 when that host catalog rejects the cards).
 
 ## Limits
 
