@@ -10,7 +10,8 @@ cargo test --all-features --doc
 cargo test --all-features
 cargo audit
 cargo deny check
-git diff --cached | claude "You are a security engineer. Review the code being committed to determine if it can be committed/pushed. Does this commit leak any secrets, tokens, sensitive internals, or PII? Your response MUST start with exactly 'VERDICT: SAFE' or 'VERDICT: UNSAFE'. If UNSAFE, follow with a list of problems to fix before the commit can be completed." | tee /tmp/claude_review; if grep -qi "^VERDICT: UNSAFE" /tmp/claude_review; then echo "Security issues found above. Please fix before committing." && exit 1; fi
+python3 -I scripts/tests/test_nanna_security_review.py
+git diff --cached | bash scripts/nanna_security_review.sh
 cmp -- README.md ./marigold/README.md
 TARPAULIN_ARGS=(--skip-clean --ignore-tests --timeout 1800 --workspace --exclude color-palette-picker --exclude csv --exclude multi-consumer --exclude select-all --exclude stateful --exclude bounded-types)
 
