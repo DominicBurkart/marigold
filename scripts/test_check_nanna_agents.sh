@@ -11,7 +11,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 absent=$tmp/absent
 host=$tmp/host
-mkdir -p "$host/agents" "$tmp/empty-repo/.nanna/agents"
+mkdir -p "$host/agents" "$tmp/empty-repo/.nanna/agents" "$tmp/no-agents-repo"
 cp -r "$root/.nanna/catalog"/. "$host/agents/"
 
 expect() {
@@ -36,7 +36,8 @@ expect 1 "widens .scope.paths" "widened paths" env NANNA_CONFIG_DIR="$absent" NA
 expect 1 "widens .scope.max_effect" "widened max_effect" env NANNA_CONFIG_DIR="$absent" NANNA_REPO="$fixtures/widened-effect" "$check"
 expect 1 "widens .scope.tools" "widened tools" env NANNA_CONFIG_DIR="$absent" NANNA_REPO="$fixtures/widened-tools" "$check"
 expect 1 "differs from its file name" "name and file mismatch" env NANNA_CONFIG_DIR="$absent" NANNA_REPO="$fixtures/mismatch" "$check"
-expect 1 "no cards in" "missing agents dir" env NANNA_CONFIG_DIR="$absent" NANNA_REPO="$tmp/empty-repo" "$check"
+expect 1 "no cards in" "empty agents dir" env NANNA_CONFIG_DIR="$absent" NANNA_REPO="$tmp/empty-repo" "$check"
+expect 1 "no cards in" "absent agents dir" env NANNA_CONFIG_DIR="$absent" NANNA_REPO="$tmp/no-agents-repo" "$check"
 expect 0 "" "narrowed card against matching host catalog" env NANNA_CONFIG_DIR="$host" NANNA_REPO="$fixtures/ok" "$check"
 
 sed -i 's/^max_iterations = .*/max_iterations = 300/' "$host/agents/reviewer.toml"
@@ -44,5 +45,10 @@ expect 0 "warning: .* differs" "drifted but compatible host catalog warns only" 
 
 sed -i 's/^tools = .*/tools = ["list_directory"]/' "$host/agents/reviewer.toml"
 expect 1 "host catalog .* rejects the repo cards" "repo catalog passes but host base is narrower" env NANNA_CONFIG_DIR="$host" NANNA_REPO="$fixtures/ok" "$check"
+expect 1 "widens .scope.tools" "host base is narrower, cause reported" env NANNA_CONFIG_DIR="$host" NANNA_REPO="$fixtures/ok" "$check"
+
+mkdir -p "$tmp/xdg/nanna"
+cp -r "$host/agents" "$tmp/xdg/nanna/agents"
+expect 1 "xdg/nanna/agents rejects the repo cards" "empty NANNA_CONFIG_DIR falls back to XDG_CONFIG_HOME" env NANNA_CONFIG_DIR= XDG_CONFIG_HOME="$tmp/xdg" NANNA_REPO="$fixtures/ok" "$check"
 
 exit "$failures"

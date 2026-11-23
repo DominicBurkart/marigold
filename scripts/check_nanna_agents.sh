@@ -5,7 +5,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 repo=${NANNA_REPO:-$root}
 catalog=${NANNA_CATALOG_DIR:-$root/.nanna/catalog}
 
-if [ -n "${NANNA_CONFIG_DIR+x}" ]; then
+if [ -n "${NANNA_CONFIG_DIR:-}" ]; then
   host_config=$NANNA_CONFIG_DIR
 elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
   host_config=$XDG_CONFIG_HOME/nanna
@@ -38,7 +38,11 @@ cp -r "$catalog"/. "$scratch/agents/"
 
 status=0
 
-listing=$(NANNA_CONFIG_DIR="$scratch" "$nanna_bin" agents list --repo "$repo") || status=1
+listing_failed=0
+listing=$(NANNA_CONFIG_DIR="$scratch" "$nanna_bin" agents list --repo "$repo") || {
+  status=1
+  listing_failed=1
+}
 echo "$listing"
 
 if [ -d "$host_config/agents" ]; then
@@ -68,7 +72,7 @@ with open(sys.argv[1], "rb") as f:
     echo "check_nanna_agents: $file declares name $name which differs from its file name" >&2
     status=1
   fi
-  if ! printf '%s\n' "$listing" | awk -v n="$name" '$1 == n { found = 1 } END { exit !found }'; then
+  if [ "$listing_failed" -eq 0 ] && ! printf '%s\n' "$listing" | awk -v n="$name" '$1 == n { found = 1 } END { exit !found }'; then
     echo "check_nanna_agents: $name from $file missing from the listing" >&2
     status=1
   fi
