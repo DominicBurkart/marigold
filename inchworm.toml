@@ -55,10 +55,14 @@ identity = "marigold-invariant-scout"
 name = "design"
 identity = "marigold-test-designer"
 
+[[flow.step]]
+name = "publish"
+identity = "pr-shepherd"
+
 [[flow.judge]]
 kind = "diff"
 max_lines = 600
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/catalog/**", ".nanna/agents/**", ".nanna/inchworm/gate.py", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
@@ -78,10 +82,14 @@ retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
 name = "close"
 identity = "marigold-coverage-closer"
 
+[[flow.step]]
+name = "publish"
+identity = "pr-shepherd"
+
 [[flow.judge]]
 kind = "diff"
 max_lines = 600
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
@@ -101,10 +109,14 @@ retry_on = ["agent_failed", "judge_rejected"]
 name = "prove"
 identity = "marigold-kani-prover"
 
+[[flow.step]]
+name = "publish"
+identity = "pr-shepherd"
+
 [[flow.judge]]
 kind = "diff"
 max_lines = 800
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/catalog/**", ".nanna/agents/**", ".nanna/inchworm/gate.py", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
