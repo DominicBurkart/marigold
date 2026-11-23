@@ -13,7 +13,24 @@ def write(path, text):
     path.write_text(textwrap.dedent(text))
 
 
-def make_repo(tmp, cards, mapping, envs):
+def flake_text(bodies, bindings=""):
+    entries = "".join(
+        f"          {name} = {{\n            packages = {body};\n          }};\n"
+        for name, body in bodies.items()
+    )
+    return (
+        "{\n  outputs = { self }:\n    let\n"
+        "        basePackages = [ pkgs.git ];\n"
+        f"{bindings}"
+        "        environments = {\n"
+        f"{entries}"
+        "        };\n"
+        "        environmentImages = {};\n"
+        "    in { };\n}\n"
+    )
+
+
+def make_repo(tmp, cards, mapping, envs, flake_output=None, flake=None):
     for name, tools in cards.items():
         tool_list = ", ".join(f'"{t}"' for t in tools)
         write(
@@ -22,16 +39,19 @@ def make_repo(tmp, cards, mapping, envs):
         )
     map_lines = "\n".join(f'{k} = "{v}"' for k, v in mapping.items())
     write(tmp / ".nanna/environments/cards.toml", f"[map]\n{map_lines}\n")
-    for env, (caps, containerfile) in envs.items():
+    bodies = {}
+    for env, (caps, body) in envs.items():
         cap_text = "".join(
             f'\n[[capability]]\nid = "{c}"\ndescription = "d"\n{extra}'
             for c, extra in caps
         )
+        output = flake_output(env) if flake_output else f"devContainerImage-{env}"
         write(
             tmp / ".nanna/environments" / env / "environment.toml",
-            f'schema = 1\nname = "{env}"\n[build]\ncontainerfile = "Containerfile"\n{cap_text}',
+            f'schema = 1\nname = "{env}"\n[build]\nflake_output = "{output}"\n{cap_text}',
         )
-        write(tmp / ".nanna/environments" / env / "Containerfile", containerfile)
+        bodies[env] = body
+    write(tmp / "flake.nix", flake if flake is not None else flake_text(bodies))
 
 
 class RealRepo(unittest.TestCase):
@@ -50,7 +70,7 @@ class Rules(unittest.TestCase):
         errors = self.run_case(
             {"a": ["read_file", "cargo_check"]},
             {"a": "e"},
-            {"e": ([("cargo_check", "")], "FROM x\n")},
+            {"e": ([("cargo_check", "")], "basePackages")},
         )
         self.assertEqual(errors, [])
 
@@ -58,7 +78,7 @@ class Rules(unittest.TestCase):
         errors = self.run_case(
             {"a": ["cargo_check", "cargo_build"]},
             {"a": "e"},
-            {"e": ([("cargo_check", "")], "FROM x\n")},
+            {"e": ([("cargo_check", "")], "basePackages")},
         )
         self.assertTrue(any("cargo_build" in e for e in errors))
 
@@ -66,7 +86,7 @@ class Rules(unittest.TestCase):
         errors = self.run_case(
             {"a": ["cargo_check"]},
             {"a": "e"},
-            {"e": ([("cargo_check", ""), ("cargo_test", "")], "FROM x\n")},
+            {"e": ([("cargo_check", ""), ("cargo_test", "")], "basePackages")},
         )
         self.assertTrue(any("cargo_test" in e for e in errors))
 
@@ -74,7 +94,7 @@ class Rules(unittest.TestCase):
         errors = self.run_case(
             {"a": ["cargo_check"]},
             {"a": "e"},
-            {"e": ([("cargo_check", ""), ("lean_check", "")], "FROM x\n")},
+            {"e": ([("cargo_check", ""), ("lean_check", "")], "basePackages")},
         )
         self.assertTrue(any("lean_check" in e for e in errors))
 
@@ -82,7 +102,7 @@ class Rules(unittest.TestCase):
         errors = self.run_case(
             {"a": ["cargo_check", "lean_check"]},
             {"a": "e"},
-            {"e": ([("cargo_check", ""), ("lean_check", "")], "FROM x\n")},
+            {"e": ([("cargo_check", ""), ("lean_check", "")], "basePackages")},
         )
         self.assertEqual(errors, [])
 
@@ -90,7 +110,7 @@ class Rules(unittest.TestCase):
         errors = self.run_case(
             {"a": ["cargo_check"]},
             {"a": "e"},
-            {"e": ([("cargo_check", "available = true\n")], "FROM x\n")},
+            {"e": ([("cargo_check", "available = true\n")], "basePackages")},
         )
         self.assertTrue(any("available" in e for e in errors))
 
@@ -98,7 +118,7 @@ class Rules(unittest.TestCase):
         errors = self.run_case(
             {"a": ["cargo_check"]},
             {"a": "e"},
-            {"e": ([("cargo_check", 'exec = ["cargo", "check"]\n')], "FROM x\n")},
+            {"e": ([("cargo_check", 'exec = ["cargo", "check"]\n')], "basePackages")},
         )
         self.assertEqual(errors, [])
 
@@ -106,7 +126,7 @@ class Rules(unittest.TestCase):
         errors = self.run_case(
             {"a": ["cargo_check", "cargo_test"], "b": ["cargo_check"]},
             {"a": "e", "b": "e"},
-            {"e": ([("cargo_check", ""), ("cargo_test", "")], "FROM x\n")},
+            {"e": ([("cargo_check", ""), ("cargo_test", "")], "basePackages")},
         )
         self.assertTrue(any(e.startswith("b:") and "cargo_test" in e for e in errors))
 
@@ -114,42 +134,135 @@ class Rules(unittest.TestCase):
         errors = self.run_case(
             {"a": [], "b": []},
             {"a": "e"},
-            {"e": ([], "FROM x\n")},
+            {"e": ([], "basePackages")},
         )
         self.assertTrue(any("b" in e and "unmapped" in e for e in errors))
 
     def test_rejects_unknown_environment(self):
-        errors = self.run_case({"a": []}, {"a": "nope"}, {"e": ([], "FROM x\n")})
+        errors = self.run_case({"a": []}, {"a": "nope"}, {"e": ([], "basePackages")})
         self.assertTrue(any("nope" in e for e in errors))
 
-    def test_rejects_lean_toolchain_outside_lean_env(self):
+    def test_rejects_lean_package_in_non_lean_env(self):
         errors = self.run_case(
-            {"a": []},
-            {"a": "e"},
-            {"e": ([], "FROM x\nRUN elan toolchain install stable\n")},
+            {"a": []}, {"a": "e"}, {"e": ([], "basePackages ++ [ pkgs.lean4 ]")}
         )
         self.assertTrue(any("lean" in e.lower() for e in errors))
+
+    def test_rejects_aeneas_charon_elan_in_non_lean_env(self):
+        for marker in ("aeneas.packages.x.aeneas", "pkgs.charon", "pkgs.elan"):
+            with self.subTest(marker=marker):
+                errors = self.run_case(
+                    {"a": []}, {"a": "e"}, {"e": ([], f"basePackages ++ [ {marker} ]")}
+                )
+                self.assertTrue(any("lean" in e.lower() for e in errors))
+
+    def test_rejects_lean_reached_through_a_shared_binding(self):
+        flake = flake_text(
+            {"e": "tainted", "lean": "tainted"},
+            bindings="        inner = [ pkgs.lean4 ];\n        tainted = basePackages ++ inner;\n",
+        )
+        with tempfile.TemporaryDirectory() as d:
+            tmp = pathlib.Path(d)
+            make_repo(
+                tmp, {"a": [], "b": []}, {"a": "e", "b": "lean"},
+                {"e": ([], "x"), "lean": ([], "x")}, flake=flake,
+            )
+            errors = validate.validate(tmp)
+        self.assertTrue(any(e.startswith("e:") and "lean" in e for e in errors))
+        self.assertFalse(any(e.startswith("lean:") and "toolchain" in e for e in errors))
+
+    def test_accepts_lean_packages_in_lean_env(self):
+        errors = self.run_case(
+            {"a": []}, {"a": "lean"}, {"lean": ([], "basePackages ++ [ pkgs.lean4 ]")}
+        )
+        self.assertEqual(errors, [])
+
+    def test_clean_is_not_a_lean_marker(self):
+        errors = self.run_case(
+            {"a": []}, {"a": "e"}, {"e": ([], "basePackages ++ [ pkgs.cleanup ]")}
+        )
+        self.assertEqual(errors, [])
 
     def test_rejects_lean_env_shared_by_two_cards(self):
         errors = self.run_case(
             {"a": [], "b": []},
             {"a": "lean", "b": "lean"},
-            {"lean": ([], "FROM x\nRUN elan toolchain install stable\n")},
+            {"lean": ([], "basePackages ++ [ pkgs.lean4 ]")},
         )
         self.assertTrue(any("lean" in e and "one card" in e for e in errors))
 
-    def test_rejects_missing_containerfile(self):
+    def test_rejects_missing_flake_output_definition(self):
         with tempfile.TemporaryDirectory() as d:
             tmp = pathlib.Path(d)
-            make_repo(tmp, {"a": []}, {"a": "e"}, {"e": ([], "FROM x\n")})
-            (tmp / ".nanna/environments/e/Containerfile").unlink()
+            make_repo(tmp, {"a": []}, {"a": "e"}, {"e": ([], "basePackages")},
+                      flake=flake_text({"other": "basePackages"}))
             errors = validate.validate(tmp)
-        self.assertTrue(any("Containerfile" in e for e in errors))
+        self.assertTrue(any("devContainerImage-e" in e and "flake.nix" in e for e in errors))
+
+    def test_rejects_missing_flake(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = pathlib.Path(d)
+            make_repo(tmp, {"a": []}, {"a": "e"}, {"e": ([], "basePackages")})
+            (tmp / "flake.nix").unlink()
+            errors = validate.validate(tmp)
+        self.assertTrue(any("flake.nix" in e for e in errors))
+
+    def test_rejects_containerfile_key(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = pathlib.Path(d)
+            make_repo(tmp, {"a": []}, {"a": "e"}, {"e": ([], "basePackages")})
+            path = tmp / ".nanna/environments/e/environment.toml"
+            path.write_text(path.read_text().replace(
+                'flake_output = "devContainerImage-e"', 'containerfile = "Containerfile"'))
+            errors = validate.validate(tmp)
+        self.assertTrue(any("containerfile" in e and "flake_output" in e for e in errors))
+
+    def test_rejects_containerfile_alongside_flake_output(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = pathlib.Path(d)
+            make_repo(tmp, {"a": []}, {"a": "e"}, {"e": ([], "basePackages")})
+            path = tmp / ".nanna/environments/e/environment.toml"
+            path.write_text(path.read_text().replace(
+                "[build]\n", '[build]\ncontainerfile = "Containerfile"\n'))
+            errors = validate.validate(tmp)
+        self.assertTrue(any("containerfile" in e for e in errors))
+
+    def test_rejects_missing_flake_output_key(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = pathlib.Path(d)
+            make_repo(tmp, {"a": []}, {"a": "e"}, {"e": ([], "basePackages")})
+            path = tmp / ".nanna/environments/e/environment.toml"
+            path.write_text(path.read_text().replace(
+                'flake_output = "devContainerImage-e"', ""))
+            errors = validate.validate(tmp)
+        self.assertTrue(any("flake_output" in e for e in errors))
+
+    def test_rejects_flake_output_with_bad_charset(self):
+        for bad in ("devContainerImage-E", "devContainerImage-", "devContainerImage--x",
+                    "devContainerImage-a b", "other-e", "devContainerImage-e;rm"):
+            with self.subTest(bad=bad):
+                with tempfile.TemporaryDirectory() as d:
+                    tmp = pathlib.Path(d)
+                    make_repo(tmp, {"a": []}, {"a": "e"}, {"e": ([], "basePackages")})
+                    path = tmp / ".nanna/environments/e/environment.toml"
+                    path.write_text(path.read_text().replace("devContainerImage-e", bad))
+                    errors = validate.validate(tmp)
+                self.assertTrue(any("flake_output" in e for e in errors))
+
+    def test_rejects_flake_output_not_matching_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = pathlib.Path(d)
+            make_repo(tmp, {"a": []}, {"a": "e"}, {"e": ([], "basePackages")},
+                      flake=flake_text({"e": "basePackages", "z": "basePackages"}))
+            path = tmp / ".nanna/environments/e/environment.toml"
+            path.write_text(path.read_text().replace("devContainerImage-e", "devContainerImage-z"))
+            errors = validate.validate(tmp)
+        self.assertTrue(any("devContainerImage-e" in e for e in errors))
 
     def test_rejects_env_name_not_matching_directory(self):
         with tempfile.TemporaryDirectory() as d:
             tmp = pathlib.Path(d)
-            make_repo(tmp, {"a": []}, {"a": "e"}, {"e": ([], "FROM x\n")})
+            make_repo(tmp, {"a": []}, {"a": "e"}, {"e": ([], "basePackages")})
             path = tmp / ".nanna/environments/e/environment.toml"
             path.write_text(path.read_text().replace('name = "e"', 'name = "z"'))
             errors = validate.validate(tmp)
