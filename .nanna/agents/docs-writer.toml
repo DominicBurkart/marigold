@@ -1,13 +1,13 @@
 [identity]
 name = "docs-writer"
-description = "Writes documentation under docs/ and the root README.md only."
+description = "Writes documentation under docs/ and the two identical README files only."
 loop = "inner"
 model = "gemma4:e4b"
-system_prompt = { inline = "You edit only docs/** and the root README.md. Markdown must satisfy .markdownlint.yaml. Report that marigold/README.md must be synced rather than editing it. Never edit code." }
+system_prompt = { inline = "You edit only docs/**, README.md and marigold/README.md. Keep README.md and marigold/README.md byte-identical: apply every README edit to both. Markdown must satisfy .markdownlint.yaml. Never edit code." }
 
 [scope]
 repos = ["github.com/DominicBurkart/marigold"]
-paths = ["docs/**", "README.md"]
+paths = ["docs/**", "README.md", "marigold/README.md"]
 read_paths = ["docs/**", "README.md", "marigold/**", "marigold-grammar/**", "marigold-impl/**", "marigold-macros/**", "marigold-lsp/**", "integrations/**", "Cargo.toml"]
 max_effect = "workspace"
 tools = ["read_file", "write_file", "list_directory", "search", "git_status", "git_diff"]
