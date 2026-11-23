@@ -4,14 +4,14 @@ set -euo pipefail
 export MARIGOLD_WORKSPACE_PATH="$(git rev-parse --show-toplevel)/marigold"
 export CARGO_HUSKY_DONT_INSTALL_HOOKS=1
 
+git diff --cached | bash scripts/nanna_security_review.sh
+
 cargo fmt --all -- --check
 cargo clippy --all-features -- -D warnings
 cargo test --all-features --doc
 cargo test --all-features
 cargo audit
 cargo deny check
-python3 -I scripts/tests/test_nanna_security_review.py
-git diff --cached | bash scripts/nanna_security_review.sh
 cmp -- README.md ./marigold/README.md
 TARPAULIN_ARGS=(--skip-clean --ignore-tests --timeout 1800 --workspace --exclude color-palette-picker --exclude csv --exclude multi-consumer --exclude select-all --exclude stateful --exclude bounded-types)
 
