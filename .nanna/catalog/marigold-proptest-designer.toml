@@ -7,7 +7,7 @@ system_prompt = "prompts/marigold-proptest-designer.md"
 
 [scope]
 repos = ["github.com/DominicBurkart/marigold"]
-paths = ["marigold-impl/**", "marigold-grammar/**", "marigold/**", "tests/**"]
+paths = ["marigold-impl/tests/**", "marigold-grammar/tests/**", "marigold/tests/**", "tests/**"]
 read_paths = ["marigold/**", "marigold-macros/**", "marigold-grammar/**", "marigold-lsp/**", "marigold-impl/**", "tests/**", "examples/**", "integrations/**", "docs/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "deny.toml", "codecov.yml", "README.md", "install.sh", "publish.sh"]
 max_effect = "workspace"
 tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file", "cargo_check", "cargo_test"]

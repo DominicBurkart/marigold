@@ -147,7 +147,7 @@ identity = "marigold-review-duplication"
 [[flow.judge]]
 kind = "diff"
 max_lines = 800
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
@@ -178,7 +178,7 @@ identity = "marigold-review-alignment"
 [[flow.judge]]
 kind = "diff"
 max_lines = 800
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
@@ -209,7 +209,7 @@ identity = "marigold-review-scope"
 [[flow.judge]]
 kind = "diff"
 max_lines = 800
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
@@ -297,7 +297,7 @@ identity = "marigold-research-grammar"
 
 [[flow.judge]]
 kind = "diff"
-max_lines = 200
+max_lines = 400
 forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
 
 [[flow.judge]]
@@ -324,7 +324,7 @@ identity = "marigold-research-runtime"
 
 [[flow.judge]]
 kind = "diff"
-max_lines = 200
+max_lines = 400
 forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
 
 [[flow.judge]]
@@ -351,7 +351,7 @@ identity = "marigold-research-analyzer-lsp"
 
 [[flow.judge]]
 kind = "diff"
-max_lines = 200
+max_lines = 400
 forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
 
 [[flow.judge]]
@@ -378,7 +378,7 @@ identity = "marigold-research-integrations"
 
 [[flow.judge]]
 kind = "diff"
-max_lines = 200
+max_lines = 400
 forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
 
 [[flow.judge]]
@@ -405,7 +405,7 @@ identity = "marigold-research-docs"
 
 [[flow.judge]]
 kind = "diff"
-max_lines = 200
+max_lines = 400
 forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
 
 [[flow.judge]]

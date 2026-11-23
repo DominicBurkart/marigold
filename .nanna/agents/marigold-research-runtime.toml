@@ -8,7 +8,7 @@ system_prompt = { inline = "You are a code researcher for the marigold runtime: 
 [scope]
 repos = ["github.com/DominicBurkart/marigold"]
 paths = ["docs/research/runtime.txt"]
-read_paths = ["marigold-impl/**", "tests/**", "Cargo.toml"]
+read_paths = ["marigold-impl/**", "marigold/**", "tests/**", "examples/**", "Cargo.toml", "Cargo.lock"]
 max_effect = "workspace"
 tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file"]
 
