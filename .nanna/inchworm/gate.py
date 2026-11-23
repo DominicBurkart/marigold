@@ -4,6 +4,9 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
+import time
+import json
 import tomllib
 import types
 import unicodedata
@@ -22,7 +25,8 @@ MOD_ALLOWED = LINTS | {"cfg"}
 PROOF_FN_ALLOWED = LINTS | {"kani::proof", "kani::unwind", "kani::solver", "cfg"}
 PROPTEST_INNER = {"proptest_config"}
 LOCATIONS = "<crate>/tests/*.rs or a <crate>/src file declared by mod"
-SECRET_WORDS = ("TOKEN", "SECRET", "KEY", "PASSWORD")
+SECRET_WORDS = ("TOKEN", "SECRET", "KEY", "PASS", "AUTH", "CREDENTIAL")
+SECRET_NAMES = ("DATABASE_URL",)
 DEFAULT_TIMEOUT = 900
 
 SPECIAL = re.compile(r"""//|/\*|"|'|(?<![\w])(?:(?:br|cr|r)#*"|[bc]"|b')""")
@@ -38,21 +42,39 @@ MOD_HEADER = re.compile(r"(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)")
 FN_HEADER = re.compile(r"(?:^|\W)fn\s+\w+")
 PROPTEST_HEAD = re.compile(r"(?:proptest::)?proptest\s*!")
 FEATURE_NAME = re.compile(r'feature\s*=\s*"([^"]+)"')
-FEATURE_OK = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*")
-ASSERT_RE = re.compile(r"\bkani::assert\s*\(|\bassert(?:_eq|_ne)?\s*!\s*[(\[{]")
-ASSUME_FALSE = re.compile(r"kani::assume\s*\(\s*false\s*\)")
-LEAN_FORBIDDEN = ("sorry", "axiom", "admit", "native_decide", "ofReduceBool", "unsafe", "implemented_by")
+FEATURE_OK = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]*")
+ASSERT_EQ = re.compile(r"\bassert_(?:eq|ne)\s*!\s*[(\[{]")
+ASSERT_CALL = re.compile(r"(?:\bkani::assert|\bassert)(?P<bang>!?)\s*[(\[{]\s*(?P<cond>[^,)\]}]*)")
+ASSUME_CALL = re.compile(r"kani::assume\s*\(\s*(?P<cond>[^;]*?)\s*\)\s*;")
+LEAN_FORBIDDEN = (
+    ("sorry", r"\bsorry\b"),
+    ("sorryAx", r"\bsorryAx\b"),
+    ("stop", r"\bstop\b"),
+    ("axiom", r"\baxiom\b"),
+    ("admit", r"\badmit\b"),
+    ("native_decide", r"\bnative_decide\b"),
+    ("ofReduceBool", r"\bofReduceBool\b"),
+    ("reduceBool", r"\breduceBool\b"),
+    ("unsafe", r"\bunsafe\b"),
+    ("implemented_by", r"\bimplemented_by\b"),
+    ("macro_rules", r"\bmacro_rules\b"),
+    ("macro", r"\bmacro\b"),
+    ("elab", r"\belab\b"),
+    ("syntax", r"\bsyntax\b"),
+    ("run_cmd", r"\brun_cmd\b"),
+    ("import Lean", r"\bimport\s+Lean\b"),
+)
 
 
-def cfg_regex(extra=()):
-    atoms = ["test", *extra, r'feature\s*=\s*"(?:tokio|async-std)"']
+def cfg_regex(extra=(), include_test=True):
+    atoms = (["test"] if include_test else []) + [*extra, r'feature\s*=\s*"(?:tokio|async-std)"']
     atom = "(?:" + "|".join(atoms) + ")"
     anyp = rf"any\s*\(\s*{atom}(?:\s*,\s*{atom})*\s*,?\s*\)"
     return re.compile(rf"cfg\s*\(\s*(?:{atom}|{anyp})\s*\)")
 
 
 CFG_TEST = cfg_regex()
-CFG_PROOF = cfg_regex(("kani",))
+CFG_PROOF = cfg_regex(("kani",), include_test=False)
 
 
 def blank(chunk):
@@ -396,6 +418,23 @@ def harness_body(stripped, pos):
     return stripped[j:close] if close != -1 else stripped[j:]
 
 
+def meaningful_assertion(body):
+    if ASSERT_EQ.search(body):
+        return True
+    return any(m.group("cond").strip() not in ("true", "") for m in ASSERT_CALL.finditer(body))
+
+
+def vacuous_assume(body):
+    for m in ASSUME_CALL.finditer(body):
+        cond = m.group("cond").strip()
+        if cond in ("false", "!true"):
+            return cond
+        eq = re.fullmatch(r"(\d+)\s*(==|!=)\s*(\d+)", cond)
+        if eq and ((eq.group(2) == "==") != (eq.group(1) == eq.group(3))):
+            return cond
+    return None
+
+
 def proof_harness_problem(text):
     a = Analysis(text)
     if a.global_problem:
@@ -415,17 +454,23 @@ def proof_harness_problem(text):
         body = harness_body(a.stripped, pos)
         if body is None:
             last = f"fn {name} has no body"
-        elif ASSUME_FALSE.search(body):
-            last = f"fn {name} uses kani::assume(false)"
-        elif not ASSERT_RE.search(body):
-            last = f"fn {name} has no assertion (kani::assert, assert!, assert_eq! or assert_ne!)"
+            continue
+        vacuous = vacuous_assume(body)
+        if vacuous is not None:
+            last = f"fn {name} uses a vacuous kani::assume({vacuous})"
+        elif not meaningful_assertion(body):
+            last = f"fn {name} has no non-trivial assertion (kani::assert, assert!, assert_eq! or assert_ne!)"
         else:
             return None
     return f"no proof harness: {last}"
 
 
-def module_info(root, crate, parts, depth=0):
-    if parts in (["lib.rs"], ["main.rs"]):
+DEFAULT_ROOTS = (("lib.rs",), ("main.rs",))
+
+
+def module_info(root, crate, parts, depth=0, roots=DEFAULT_ROOTS):
+    roots = [list(r) for r in roots]
+    if parts in roots:
         return [], [], None
     last = f"{'/'.join([crate, 'src', *parts])} is not declared by a mod chain from lib.rs or main.rs"
     if depth > 32:
@@ -438,10 +483,12 @@ def module_info(root, crate, parts, depth=0):
         name = fname[:-3]
         D = dirs
     base = root / crate / "src"
+    if base.joinpath(*D, name + ".rs").is_file() and base.joinpath(*D, name, "mod.rs").is_file():
+        return [], [], f"both {name}.rs and {name}/mod.rs exist next to each other"
     for split in range(len(D), -1, -1):
         inline = D[split:]
         if split == 0:
-            parents = [["lib.rs"], ["main.rs"]]
+            parents = roots
         else:
             parents = [D[:split - 1] + [D[split - 1] + ".rs"], D[:split] + ["mod.rs"]]
         for par in parents:
@@ -469,10 +516,10 @@ def module_info(root, crate, parts, depth=0):
                 if problem:
                     last = problem
                     continue
-                if par in (["lib.rs"], ["main.rs"]):
+                if par in roots:
                     pm, pf, pp = [], [], None
                 else:
-                    pm, pf, pp = module_info(root, crate, par, depth + 1)
+                    pm, pf, pp = module_info(root, crate, par, depth + 1, roots)
                 if pp:
                     last = pp
                     continue
@@ -554,9 +601,16 @@ def check_covered_by(root, inv, errors, targets, features):
             errors.append(f"{label}: {path}: {problem}")
             continue
         _, modpath, decl_features = location_info(root, path)
-        expected = "::".join(modpath + chain + [name.split("::")[-1]])
-        wanted = sorted(set(found) | set(decl_features) | set(features.get(path.split("/")[0], [])))
-        targets.append((label, path, expected, wanted))
+        targets.append(
+            {
+                "label": label,
+                "path": path,
+                "tail": chain + [name.split("::")[-1]],
+                "modpath": modpath,
+                "features": sorted(set(found) | set(features.get(path.split("/")[0], []))),
+                "decl_features": decl_features,
+            }
+        )
 
 
 def check_proof(root, inv, errors, proofs):
@@ -594,8 +648,8 @@ def check_proof(root, inv, errors, proofs):
             errors.append(f"{label}: {proof}: {problem}")
         return
     code = strip_lean(text)
-    for word in LEAN_FORBIDDEN:
-        if re.search(rf"\b{word}\b", code):
+    for word, pattern in LEAN_FORBIDDEN:
+        if re.search(pattern, code):
             errors.append(f"{label}: {proof} contains {word}")
             return
     if not re.search(r"\b(?:theorem|lemma)\b", code):
@@ -664,20 +718,17 @@ def check_entry(root, inv, seen, errors, targets, proofs):
     check_proof(root, inv, errors, proofs)
 
 
-def cargo_args(root, path, features):
-    parts = path.split("/")
-    base = ["test"]
+def cargo_flags(root):
+    flags = []
     if (root / "Cargo.lock").exists():
-        base.append("--locked")
+        flags.append("--locked")
     if os.environ.get("GATE_OFFLINE") == "1":
-        base.append("--offline")
-    base += ["-p", parts[0]]
-    if parts[1] == "tests":
-        base += ["--test", parts[2][:-3]]
-    elif (root / parts[0] / "src" / "lib.rs").exists():
-        base += ["--lib"]
-    else:
-        base += ["--bins"]
+        flags.append("--offline")
+    return flags
+
+
+def cargo_args(root, crate, selector, features):
+    base = ["test", *cargo_flags(root), "-p", crate, *selector]
     if features:
         base += ["--features", ",".join(features)]
     return base
@@ -687,44 +738,137 @@ def scrubbed_env():
     env = {}
     for k, v in os.environ.items():
         upper = k.upper()
-        if k.startswith("GIT_") or any(w in upper for w in SECRET_WORDS):
+        if k.startswith("GIT_") or k in SECRET_NAMES or any(w in upper for w in SECRET_WORDS):
             continue
         env[k] = v
     return env
 
 
 def run_cargo(root, args, env, timeout):
-    proc = subprocess.Popen(
-        ["cargo", *args],
-        cwd=root,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    )
-    try:
-        out, err = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        proc = subprocess.Popen(
+            ["cargo", *args],
+            cwd=root,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=out,
+            stderr=err,
+            start_new_session=True,
+        )
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-        proc.communicate()
-        raise
-    return types.SimpleNamespace(returncode=proc.returncode, stdout=out, stderr=err)
+            deadline = time.monotonic() + timeout
+            while os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+                if time.monotonic() > deadline:
+                    raise subprocess.TimeoutExpired(args, timeout)
+                time.sleep(0.05)
+        finally:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            proc.wait()
+        out.seek(0)
+        err.seek(0)
+        return types.SimpleNamespace(
+            returncode=proc.returncode,
+            stdout=out.read().decode(errors="replace"),
+            stderr=err.read().decode(errors="replace"),
+        )
+
+
+LIB_KINDS = {"lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"}
+
+
+def package_targets(metadata, crate):
+    for package in metadata.get("packages", []):
+        if package.get("name") == crate:
+            return package.get("targets", [])
+    return None
+
+
+def src_roots(root, crate, targets):
+    base = (root / crate / "src").resolve()
+    found = []
+    for t in targets:
+        kinds = set(t.get("kind", []))
+        path = pathlib.Path(t.get("src_path", "")).resolve()
+        if not path.is_relative_to(base):
+            continue
+        rel = list(path.relative_to(base).parts)
+        if kinds & LIB_KINDS:
+            found.append((rel, ["--lib"]))
+        elif "bin" in kinds:
+            found.append((rel, ["--bin", t["name"]]))
+    return found
+
+
+def select_target(root, crate, path, tail, base_modpath, targets):
+    parts = path.split("/")
+    if parts[1] == "tests":
+        want = (root / path).resolve()
+        for t in targets:
+            if "test" in t.get("kind", []) and pathlib.Path(t.get("src_path", "")).resolve() == want:
+                return ["--test", t["name"]], base_modpath, None, None
+        return None, [], None, f"no cargo test target has {path} as its source"
+    roots = src_roots(root, crate, targets)
+    if not roots:
+        return None, [], None, f"{crate} has no lib or bin root under src/"
+    matches = []
+    last = f"{path} is not declared by a mod chain from any lib or bin root"
+    for rel, selector in roots:
+        modpath, feats, problem = module_info(root, crate, parts[2:], 0, [rel])
+        if problem:
+            last = problem
+        else:
+            matches.append((selector, modpath, feats))
+    if not matches:
+        return None, [], None, last
+    if len(matches) > 1:
+        return None, [], None, f"ambiguous: {path} is declared from several roots ({', '.join(' '.join(m[0]) for m in matches)})"
+    selector, modpath, feats = matches[0]
+    return selector, modpath, feats, None
 
 
 def run_targets(root, targets, timeout):
     env = scrubbed_env()
     errors = []
+    if not targets:
+        return errors
+    try:
+        meta = run_cargo(root, ["metadata", *cargo_flags(root), "--no-deps", "--format-version", "1"], env, timeout)
+        try:
+            metadata = json.loads(meta.stdout)
+            if meta.returncode != 0 or not isinstance(metadata, dict):
+                raise ValueError
+        except ValueError:
+            return ["cargo metadata failed or printed invalid JSON"]
+    except FileNotFoundError:
+        return ["cargo not found on PATH"]
+    except subprocess.TimeoutExpired:
+        return [f"cargo metadata timed out after {timeout}s (GATE_CARGO_TIMEOUT)"]
+    except OSError as e:
+        return [f"cannot run cargo: {e.strerror or e}"]
     done = set()
-    for label, path, expected, features in targets:
-        key = (path, expected, tuple(features))
+    for item in targets:
+        label, path = item["label"], item["path"]
+        crate = path.split("/")[0]
+        crate_targets = package_targets(metadata, crate)
+        if crate_targets is None:
+            errors.append(f"{label}: cargo metadata has no package named {crate}")
+            continue
+        selector, modpath, decl_features, problem = select_target(
+            root, crate, path, item["tail"], item["modpath"], crate_targets
+        )
+        if problem:
+            errors.append(f"{label}: {problem}")
+            continue
+        features = sorted(set(item["features"]) | set(decl_features if decl_features is not None else item["decl_features"]))
+        expected = "::".join(modpath + item["tail"])
+        key = (path, expected, tuple(selector), tuple(features))
         if key in done:
             continue
         done.add(key)
-        base = cargo_args(root, path, features)
+        base = cargo_args(root, crate, selector, features)
         try:
             listed = run_cargo(root, base + ["--", "--list"], env, timeout)
             if listed.returncode != 0:
@@ -822,4 +966,8 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        print("interrupted", file=sys.stderr)
+        sys.exit(130)
