@@ -1,18 +1,43 @@
+import json
 import pathlib
+import platform
 import re
+import shutil
+import subprocess
 import sys
 import tomllib
 
-LEAN_MARKER = re.compile(r"\b(lean|aeneas|charon|elan|lake)", re.IGNORECASE)
+FORBIDDEN_MARKER = re.compile(
+    r"\b(lean|aeneas|charon|elan|lake|mathlib|batteries|fstar|hol4)", re.IGNORECASE
+)
+REQUIRED_LEAN_MARKERS = ("lean", "aeneas")
 FLAKE_OUTPUT = re.compile(r"^devContainerImage-[a-z0-9][a-z0-9-]*$")
 FLAKE_PREFIX = "devContainerImage-"
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_'-]*")
-BINDING = re.compile(r"^ {8}([A-Za-z_][A-Za-z0-9_'-]*) = ")
-ENVIRONMENTS_OPEN = re.compile(r"^\s*environments = \{\s*$")
-ENTRY_OPEN = re.compile(r"^\s*([A-Za-z0-9_-]+) = \{\s*$")
-SKIPPED_BINDINGS = {"environments", "environmentImages"}
+BINDING = re.compile(r"(?<![\w.'-])([A-Za-z_][\w'-]*)\s*=(?!=)")
+ENVIRONMENTS_OPEN = re.compile(r"\benvironments\s*=\s*\{")
+ENTRY_NAME = re.compile(r"([A-Za-z0-9_][A-Za-z0-9_-]*)\s*=$")
+ASSIGN = re.compile(r"(?<![=!<>])=(?!=)")
+DYNAMIC = re.compile(
+    r"\.\s*\"|\.\s*\$\{(?!system\})|\bgetAttr\b|\battrByPath\b|\bgetFlake\b"
+)
+ALWAYS = (
+    "environmentSpecs",
+    "environmentImages",
+    "environmentManifest",
+    "mkImage",
+    "packageName",
+)
 LEAN_ENV = "lean"
 CAPABILITY_KEYS = {"id", "description", "exec"}
+TOP_KEYS = {"schema", "name", "build", "capability"}
+BUILD_KEYS = {"flake_output"}
+MANIFEST_ATTR = "environmentManifest"
+NIX_TIMEOUT = 600
+
+
+class FlakeError(Exception):
+    pass
 
 
 def load(path):
@@ -20,55 +45,224 @@ def load(path):
         return tomllib.load(handle)
 
 
-def flake_environments(text):
-    lines = text.splitlines()
-    start = next((i for i, l in enumerate(lines) if ENVIRONMENTS_OPEN.match(l)), None)
-    if start is None:
-        return {}
-    result = {}
-    depth = 1
-    current = None
-    for line in lines[start + 1:]:
-        if depth == 1:
-            match = ENTRY_OPEN.match(line)
-            if match:
-                current = match.group(1)
-                result[current] = []
-        elif current is not None:
-            result[current].append(line)
-        depth += line.count("{") - line.count("}")
-        if depth <= 0:
-            break
-        if depth == 1:
-            current = None
-    return {name: "\n".join(body) for name, body in result.items()}
+def blank(text, spans):
+    chars = list(text)
+    for start, end in spans:
+        for i in range(start, end):
+            if chars[i] != "\n":
+                chars[i] = " "
+    return "".join(chars)
 
 
-def flake_bindings(text):
-    bindings = {}
-    current = None
-    for line in text.splitlines():
-        match = BINDING.match(line)
-        if match:
-            current = match.group(1)
-            bindings[current] = []
-        if current is not None:
-            bindings[current].append(line)
-    return {k: "\n".join(v) for k, v in bindings.items() if k not in SKIPPED_BINDINGS}
+def scan(text):
+    comments = []
+    strings = []
+    i = 0
+    n = len(text)
+    while i < n:
+        two = text[i:i + 2]
+        if text[i] == "#":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            comments.append((i, j))
+            i = j
+        elif two == "/*":
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            comments.append((i, j))
+            i = j
+        elif two == "''":
+            j = i + 2
+            while j < n and text[j:j + 2] != "''":
+                j += 3 if text[j:j + 3] in ("'''", "''$") else 1
+            strings.append((i + 2, min(j, n)))
+            i = min(j + 2, n)
+        elif text[i] == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            strings.append((i + 1, min(j, n)))
+            i = min(j + 1, n)
+        else:
+            i += 1
+    return comments, strings
 
 
-def reachable_text(body, bindings):
-    seen = set()
-    chunks = [body]
-    queue = list(IDENT.findall(body))
-    while queue:
-        ident = queue.pop()
-        if ident in seen or ident not in bindings:
+def depths(text):
+    result = []
+    depth = 0
+    for ch in text:
+        if ch in "{[(":
+            depth += 1
+        result.append(depth)
+        if ch in "}])":
+            depth -= 1
+    return result
+
+
+def parse_flake_text(text):
+    comments, _ = scan(text)
+    uncommented = blank(text, comments)
+    _, strings = scan(uncommented)
+    blanked = blank(uncommented, strings)
+    opening = ENVIRONMENTS_OPEN.search(blanked)
+    if opening is None:
+        raise FlakeError("no `environments = {` attrset found")
+    depth = depths(blanked)
+    base = depth[opening.start()]
+    inner = base + 1
+    block_start = opening.end()
+    block_end = block_start
+    while block_end < len(blanked) and depth[block_end] >= inner:
+        block_end += 1
+
+    entries = {}
+    for eq in ASSIGN.finditer(blanked, block_start, block_end):
+        at = eq.start()
+        if depth[at] != inner:
             continue
-        seen.add(ident)
-        chunks.append(bindings[ident])
-        queue.extend(IDENT.findall(bindings[ident]))
-    return "\n".join(chunks)
+        head = ENTRY_NAME.search(blanked[block_start:at + 1])
+        if head is None:
+            raise FlakeError("cannot parse an environment name inside `environments`")
+        name = head.group(1)
+        after = at + 1
+        while after < len(blanked) and blanked[after].isspace():
+            after += 1
+        if after >= len(blanked) or blanked[after] != "{":
+            raise FlakeError(f"environment {name} is not an attrset literal")
+        close = after + 1
+        while close < len(blanked) and depth[close] > inner:
+            close += 1
+        entries[name] = (after, close)
+    if not entries:
+        raise FlakeError("`environments` attrset has no entries")
+
+    bindings = {}
+    for match in BINDING.finditer(blanked):
+        if depth[match.start()] != base:
+            continue
+        if opening.start() <= match.start() < block_end:
+            continue
+        end = match.end()
+        while end < len(blanked) and not (blanked[end] == ";" and depth[end] == base):
+            end += 1
+        bindings.setdefault(match.group(1), []).append((match.end(), end))
+    return uncommented, blanked, entries, bindings
+
+
+def reachable_texts(span, blanked, uncommented, bindings):
+    queue = [span]
+    seen_names = set(ALWAYS)
+    for name in ALWAYS:
+        queue.extend(bindings.get(name, []))
+    seen_spans = set()
+    blank_chunks = []
+    raw_chunks = []
+    while queue:
+        start, end = queue.pop()
+        if (start, end) in seen_spans:
+            continue
+        seen_spans.add((start, end))
+        blank_chunks.append(blanked[start:end])
+        raw_chunks.append(uncommented[start:end])
+        for ident in IDENT.findall(blanked[start:end]):
+            if ident in seen_names or ident not in bindings:
+                continue
+            seen_names.add(ident)
+            queue.extend(bindings[ident])
+    return "\n".join(blank_chunks), "\n".join(raw_chunks)
+
+
+def text_manifest(text):
+    uncommented, blanked, entries, bindings = parse_flake_text(text)
+    manifest = {}
+    dynamic = {}
+    for name, span in entries.items():
+        blank_text, raw_text = reachable_texts(span, blanked, uncommented, bindings)
+        manifest[name] = [blank_text]
+        dynamic[name] = DYNAMIC.search(raw_text) is not None
+    return manifest, dynamic
+
+
+def nix_system():
+    machine = platform.machine().lower()
+    arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
+    return f"{arch}-linux"
+
+
+def nix_manifest(nix, root):
+    ref = f"path:{root}#lib.{nix_system()}.{MANIFEST_ATTR}"
+    try:
+        done = subprocess.run(
+            [nix, "eval", "--json", ref],
+            capture_output=True,
+            text=True,
+            timeout=NIX_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise FlakeError(f"nix eval of {ref} could not run: {exc}")
+    if done.returncode != 0:
+        raise FlakeError(f"nix eval of {ref} failed: {done.stderr.strip()[-400:]}")
+    try:
+        data = json.loads(done.stdout)
+    except json.JSONDecodeError as exc:
+        raise FlakeError(f"nix eval of {ref} returned invalid JSON: {exc}")
+    shape_ok = isinstance(data, dict) and all(
+        isinstance(v, list) and all(isinstance(x, str) for x in v) for v in data.values()
+    )
+    if not shape_ok:
+        raise FlakeError(
+            f"{MANIFEST_ATTR} must map environment names to lists of package names"
+        )
+    return data
+
+
+def flake_manifest(root):
+    nix = shutil.which("nix")
+    if nix:
+        return nix_manifest(nix, root), {}
+    print(
+        "warning: nix not found, using the text fallback for flake.nix "
+        "(weaker than evaluating the manifest)",
+        file=sys.stderr,
+    )
+    try:
+        return text_manifest((root / "flake.nix").read_text())
+    except FlakeError as exc:
+        raise FlakeError(f"flake.nix: text fallback cannot parse the flake: {exc}")
+
+
+def check_flake(root, envs, outputs_wanted):
+    errors = []
+    if not (root / "flake.nix").is_file():
+        return ["flake.nix: not found"]
+    try:
+        manifest, dynamic = flake_manifest(root)
+    except FlakeError as exc:
+        return [str(exc)]
+    for name, output in sorted(outputs_wanted.items()):
+        if name not in manifest:
+            errors.append(f"{name}: {output} is not defined in flake.nix")
+    for name, packages in sorted(manifest.items()):
+        if name not in envs:
+            continue
+        joined = " ".join(packages)
+        if name == LEAN_ENV:
+            for marker in REQUIRED_LEAN_MARKERS:
+                if not re.search(rf"\b{marker}", joined, re.IGNORECASE):
+                    errors.append(f"{name}: environment must contain {marker}")
+            continue
+        if FORBIDDEN_MARKER.search(joined):
+            errors.append(
+                f"{name}: lean toolchain must only be built by the {LEAN_ENV} environment"
+            )
+        if dynamic.get(name):
+            errors.append(
+                f"{name}: dynamic attribute access cannot be analysed textually, "
+                "install nix to evaluate the manifest"
+            )
+    return errors
 
 
 def validate(root):
@@ -89,9 +283,15 @@ def validate(root):
             errors.append(f"{name}: schema must be 1")
         if data.get("name") != name:
             errors.append(f"{name}: name must equal the directory name")
+        extra_top = set(data) - TOP_KEYS
+        if extra_top:
+            errors.append(f"{name}: unsupported keys {sorted(extra_top)}")
         build = data.get("build", {})
         if "containerfile" in build:
             errors.append(f"{name}: containerfile is no longer supported, use [build] flake_output")
+        extra_build = set(build) - BUILD_KEYS - {"containerfile"}
+        if extra_build:
+            errors.append(f"{name}: unsupported [build] keys {sorted(extra_build)}")
         output = build.get("flake_output")
         if output is None:
             errors.append(f"{name}: [build] flake_output is required")
@@ -108,22 +308,9 @@ def validate(root):
             extra = set(cap) - CAPABILITY_KEYS
             if extra:
                 errors.append(f"{name}: capability {cap.get('id')} has unsupported keys {sorted(extra)}")
-        available = set(ids)
-        envs[name] = available
+        envs[name] = set(ids)
 
-    flake = root / "flake.nix"
-    if not flake.is_file():
-        errors.append("flake.nix: not found")
-    else:
-        text = flake.read_text()
-        defined = flake_environments(text)
-        bindings = flake_bindings(text)
-        for name, output in sorted(outputs_wanted.items()):
-            if name not in defined:
-                errors.append(f"{name}: {output} is not defined in flake.nix")
-        for name, body in sorted(defined.items()):
-            if name != LEAN_ENV and name in envs and LEAN_MARKER.search(reachable_text(body, bindings)):
-                errors.append(f"{name}: lean toolchain must only be built by the {LEAN_ENV} environment")
+    errors.extend(check_flake(root, envs, outputs_wanted))
 
     cards = {}
     for card_file in sorted((root / ".nanna/catalog").glob("*.toml")):
