@@ -37,23 +37,43 @@ fails closed if an ESC byte or a NUL byte remains. It then runs two layers.
    - Cloud and forge tokens: AWS, GitHub, GitLab, Slack and Slack webhooks,
      Google, Stripe live and test keys, Twilio, Azure, SendGrid, Hugging
      Face, npm, `sk-` keys and JWTs.
-   - `Authorization: Bearer` and `Authorization: Basic` headers, and URLs
-     with credentials.
-   - Generic credential assignments, best effort: a `password`, `secret`,
-     `token`, `api_key`, `access_key`, `private_key` or `credential` name
-     (with any prefix or suffix, in JSON, YAML, env or code, including
-     JSON-escaped quotes, nested quotes and Rust raw strings) assigned a
-     quoted value of 6 or more characters, or an unquoted value of 12 or more
-     characters that is not followed by `(` or `.`.
-   - Placeholder exemptions apply to the value only: a whole `${VAR}`,
-     `$(...)` or `$VAR`, an angle placeholder such as `<your-api-key-here>`,
-     a value starting with `dummy`, `example`, `changeme`, `your-`, `xxx` or
-     `todo`, an `sk-` value containing `dummy`, `example` or `offline-ci`,
-     and, for unquoted values, a pure PascalCase type name. A variable name or
-     the middle of a longer value never exempts a match. The `?token=` query
-     of an `https://codecov.io/` badge URL is exempt.
+   - `Authorization: Bearer` and `Authorization: Basic` headers, also in
+     JSON, dict and call forms (`"Authorization": "Bearer ..."`,
+     `("Authorization", "Basic ...")`), standalone `Bearer <20+ chars>`
+     tokens, Google OAuth `ya29.` tokens, and URLs with credentials
+     (including an empty user name before the colon).
+   - Generic credential assignments, best effort: a `password`, `passwd`,
+     `passphrase`, `secret`, `token`, `api_key`, `access_key`, `private_key`,
+     `signing_key`, `encryption_key`, `master_key`, `hmac_key` or
+     `credential` name (with any prefix or suffix), or a standalone word
+     `pass`, `pwd` or `creds`, followed by `:`, `=` or `=>` in JSON, YAML,
+     env or code. Quoted values of 6 or more characters match, including
+     JSON-escaped quotes, nested quotes, apostrophes inside the value and Rust
+     raw strings. Unquoted values of 12 or more characters match when not
+     followed by `(` or `.`, and so do `$`-prefixed values that are not a
+     plain variable reference.
+   - Placeholder exemptions apply to the whole value only: `${VAR}`, `$(...)`
+     or an upper-case `$ENV_NAME`; a lower-case angle placeholder of at most
+     24 characters that contains key, token, secret, password, here, value or
+     your (for example `<your-api-key-here>`); and a value that is entirely
+     `dummy`, `example`, `changeme`, `your-<words>`, `xxx...` or `todo`
+     (optionally followed by up to two digits) or `dummy-` or `example-`
+     followed by lower-case words, and an `sk-` value containing `dummy`,
+     `example` or `offline-ci`. A variable name or a prefix of a longer value
+     never exempts a match. For unquoted `name: Type` annotations a PascalCase
+     type is exempt only before `,`, `)`, `>` or `;`, or when it is one of
+     `CancellationToken`, `TokenStream`, `TokenTree`, `SecretString` or
+     `SecretBox`. A PascalCase value assigned to a password name in YAML or
+     env files still matches.
+   - The only URL exemption is the `token=` value of an
+     `https://codecov.io/.../badge.svg?` URL that stands alone (not inside
+     another URL's query). Other parameters in that URL are still scanned, and
+     other codecov URLs such as `/upload?token=` match.
    - The `sk-` family requires a left boundary, so words like
      `disk-usage-monitoring` pass.
+   - Known best-effort misses: multi-line PEM bodies and YAML block scalars,
+     hex-escaped or split strings, fullwidth look-alike characters, a raw AWS
+     secret key with no key name next to it, and base64 blobs.
    - A PEM body whose BEGIN line is unchanged context is not detected, and
      secrets in files git reports as binary (NUL bytes or a `-diff`
      attribute) are not seen by either layer.
@@ -64,7 +84,7 @@ fails closed if an ESC byte or a NUL byte remains. It then runs two layers.
    tracing log lines that nanna prints on stdout are skipped. The first line
    of the answer must then be exactly `VERDICT: SAFE` or `VERDICT: UNSAFE`
    (an `Assistant:` prefix and trailing whitespace are tolerated), and a SAFE
-   answer is rejected if any later line contains the word UNSAFE in any case.
+   answer is rejected if any later line contains `unsafe` in any case.
    Control characters are stripped from anything printed.
 
 ### Allow marker
@@ -108,8 +128,10 @@ file does not make a commit impossible. In those unreviewed chunks only the
 deterministic patterns are checked: PII, internal hostnames and every other
 shape that only the model could catch are not, and padding can push such
 content out of the reviewed chunks. Set `NANNA_REVIEW_STRICT=1` in your
-environment to fail closed on oversized diffs instead. It is honoured outside
-test mode too, because it only makes the hook stricter.
+environment to fail closed on oversized diffs instead. Only the literal value
+`1` enables it, and it is honoured outside test mode too, because it only
+makes the hook stricter. This PR's own diff needs well over 10 chunks, so with
+the strict setting it could not be committed without splitting.
 
 Each nanna call is limited to 120 seconds (then killed after 5 more) and the
 review stops at the first UNSAFE chunk, so the worst case is 10 chunks times
