@@ -66,10 +66,11 @@ Residual risk: `forbid_paths` is a path blocklist and cannot express "only test
 code". Test code that lives inside `src/` files (`#[cfg(test)]` modules,
 doctests) is out of scope for these identities, and a path outside the listed
 globs can still be edited by a judge-passing diff (for example `tests/src/**`,
-the helper crate shared by tests). Dev-dependencies are added by hand, because
-the judges forbid `Cargo.toml`; `proptest = "1"` is a dev-dependency of
-`marigold-impl` and the `tests` crate and is used by
-`marigold-impl/tests/count_properties.rs`. `local only` is a property of the
+the helper crate shared by tests). The designer cannot add dev-dependencies,
+because the judges forbid every `Cargo.toml`; that is why this PR adds
+`proptest = "1"` by hand to `marigold-impl` and the `tests` crate, where
+`marigold-impl/tests/count_properties.rs` uses it. A new dev-dependency needs a
+manual change. `local only` is a property of the
 card models, and nanna does not enforce it (nanna-coder #1048).
 
 ## The gate is manual
@@ -86,16 +87,28 @@ What it checks:
 - Required fields, unique ids, and the enums `status` (`candidate`, `covered`,
   `proven`, `disputed`), `surface` (`interface`, `internal`) and `provable`
   (`none`, `kani`, `lean`); a value of the wrong type is a clean error.
-- Every `covered_by` entry is a repository-relative file under `tests/`,
+- Every `covered_by` entry is a repository-relative `.rs` file under `tests/`,
   `marigold/tests/` or `marigold-*/` (no absolute paths, no `..`, no symlink
   escapes).
-- For `covered` and `proven`, entries must be written `path::name`. After
-  stripping comments and string literals, the last segment must be a `fn` in
-  that file carrying `#[test]`, `#[tokio::test(...)]`, `#[async_std::test]` or
-  similar, or living inside `proptest!`; `#[ignore]` is rejected. Module
-  segments before the last one are not checked.
-- `proven` needs `provable` other than `none` and a non-empty `proof` file
-  under `tests/proofs/`.
+- For `covered` and `proven`, entries must be written `path::name`, with
+  optional module segments before the name. After stripping comments and string
+  literals, exactly one `fn` of that name must match (the module segments must
+  be the innermost enclosing modules; without them the name must be unique in
+  the file), so a same-named test elsewhere cannot satisfy a citation.
+- That fn must carry `#[test]`, `#[tokio::test(...)]`, `#[async_std::test]` or
+  similar, or live inside `proptest!`. Only a bounded set of attributes is
+  accepted on the fn: `test`, `*::test`, `should_panic`, `allow`, `doc` and
+  `cfg` whose predicate is `test`, `feature = "tokio"`,
+  `feature = "async-std"` or an `any(...)` of the two features. The same
+  `cfg` rule applies to every enclosing module and to a file-level `#![cfg]`.
+  `#[ignore]`, any other `cfg`, `cfg_attr` and any other attribute are rejected
+  (`cfg_attr(test, test)` is reported as an unsupported attribute form), as is
+  an fn nested in another fn, inside `macro_rules!` or in any other block.
+- `proven` needs `provable` other than `none` and a `proof` file under
+  `tests/proofs/` whose resolved path stays under that directory, with suffix
+  `.rs` or `.lean` and non-empty content. A `.rs` proof must contain a
+  `#[kani::proof]` or `#[test]` harness; a `.lean` proof is only checked for
+  being non-empty.
 - `proof_blocker` is an optional string saying why `provable = "none"` for code
   that is provable in principle.
 
@@ -116,9 +129,11 @@ This is a production bug in `marigold-impl/src/keep_first_n.rs`, tracked in
 [issue 461](https://github.com/DominicBurkart/marigold/issues/461) with a fix
 proposed in [PR 463](https://github.com/DominicBurkart/marigold/pull/463); it is
 not fixed here. `keep-first-n-bounded-descending` is stated for the tokio
-feature only, because no async-std test exists. The keep-first-n, permutations
-and combinations invariants are `provable = "none"` because their code is async
-or itertools-based and Aeneas and Kani cannot translate it; each carries
+feature only, because no async-std test exists, and so is
+`multi-consumer-fanout`, whose cited test is written with `#[tokio::test]`. The
+keep-first-n, permutations and combinations invariants are
+`provable = "none"` because their code is async or itertools-based and Aeneas
+and Kani cannot translate it; each carries
 `proof_blocker = "needs a pure sync core extracted from the async wrapper"`.
 
 ## Schedule
