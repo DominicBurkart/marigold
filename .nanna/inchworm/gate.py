@@ -63,7 +63,14 @@ LEAN_FORBIDDEN = (
     ("syntax", r"\bsyntax\b"),
     ("run_cmd", r"\brun_cmd\b"),
     ("import Lean", r"\bimport\s+Lean\b"),
+    ("open Lean", r"\bopen\s+Lean\b"),
+    ("skipKernelTC", r"\bdebug\.skipKernelTC\b"),
+    ("initialize", r"\binitialize\b"),
+    ("opaque", r"\bopaque\b"),
+    ("extern", r"@\[\s*extern\b"),
+    ("import", r"(?m)^\s*import\s+(?!(?:Mathlib|Aeneas|Std|Init)\b)"),
 )
+LEAN_CHAR = re.compile(r"'(?:\\(?:[nrt\\'\"]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4})|[^\\'\n])'")
 
 
 def cfg_regex(extra=(), include_test=True):
@@ -163,7 +170,8 @@ def strip_lean(text):
             i = min(j + 1, n)
             out.append(" ")
         elif text[i] == "'":
-            cm = CHAR_RE.match(text, i)
+            prev = text[i - 1] if i else " "
+            cm = None if prev.isalnum() or prev in "_'!?" else LEAN_CHAR.match(text, i)
             if cm:
                 i = cm.end()
                 out.append(" ")
@@ -424,15 +432,51 @@ def meaningful_assertion(body):
     return any(m.group("cond").strip() not in ("true", "") for m in ASSERT_CALL.finditer(body))
 
 
+def strip_parens(cond):
+    cond = cond.strip()
+    while cond.startswith("(") and matching(cond, 0, "(", ")", len(cond)) == len(cond) - 1:
+        cond = cond[1:-1].strip()
+    return cond
+
+
+COMPARISON = re.compile(r"(?P<l>.+?)\s*(?P<op><=|>=|==|!=|<|>)\s*(?P<r>.+)", re.S)
+OPS = {
+    "<": lambda a, b: a < b,
+    ">": lambda a, b: a > b,
+    "<=": lambda a, b: a <= b,
+    ">=": lambda a, b: a >= b,
+    "==": lambda a, b: a == b,
+    "!=": lambda a, b: a != b,
+}
+
+
+def is_vacuous(cond):
+    c = strip_parens(cond)
+    if c == "false":
+        return True
+    neg = re.fullmatch(r"!\s*(.+)", c, re.S)
+    if neg and strip_parens(neg.group(1)) == "true":
+        return True
+    m = COMPARISON.fullmatch(c)
+    if not m:
+        return False
+    left, op, right = strip_parens(m.group("l")), m.group("op"), strip_parens(m.group("r"))
+    if re.fullmatch(r"\d+", left) and re.fullmatch(r"\d+", right):
+        return not OPS[op](int(left), int(right))
+    if left == right and re.fullmatch(r"[A-Za-z_][\w.]*", left):
+        return op in ("!=", "<", ">")
+    return False
+
+
 def vacuous_assume(body):
     for m in ASSUME_CALL.finditer(body):
-        cond = m.group("cond").strip()
-        if cond in ("false", "!true"):
-            return cond
-        eq = re.fullmatch(r"(\d+)\s*(==|!=)\s*(\d+)", cond)
-        if eq and ((eq.group(2) == "==") != (eq.group(1) == eq.group(3))):
-            return cond
+        if is_vacuous(m.group("cond")):
+            return m.group("cond").strip()
     return None
+
+
+def is_cfg_kani(attr):
+    return attr_name(attr) == "cfg" and re.fullmatch(r"cfg\s*\(\s*kani\s*\)", attr) is not None
 
 
 def proof_harness_problem(text):
@@ -450,6 +494,10 @@ def proof_harness_problem(text):
         problem = problem or check_attrs(attrs, PROOF_FN_ALLOWED, CFG_PROOF, f"fn {name}")
         if problem:
             last = problem
+            continue
+        gates = list(a.file_inner) + [x for c in stack for x in c.get("attrs", []) + c.get("inner", [])] + attrs
+        if not any(is_cfg_kani(x) for x in gates):
+            last = f"fn {name} is not gated by cfg(kani) on the file, a module or the fn"
             continue
         body = harness_body(a.stripped, pos)
         if body is None:
@@ -829,6 +877,11 @@ def select_target(root, crate, path, tail, base_modpath, targets):
     return selector, modpath, feats, None
 
 
+def stderr_tail(result, lines=5):
+    tail = [x for x in result.stderr.splitlines() if x.strip()][-lines:]
+    return " | ".join(tail) if tail else "no stderr"
+
+
 def run_targets(root, targets, timeout):
     env = scrubbed_env()
     errors = []
@@ -872,7 +925,10 @@ def run_targets(root, targets, timeout):
         try:
             listed = run_cargo(root, base + ["--", "--list"], env, timeout)
             if listed.returncode != 0:
-                errors.append(f"{label}: cargo test --list failed for {path}::{expected}")
+                errors.append(
+                    f"{label}: cargo test --list failed for {path}::{expected}; likely a build error or a "
+                    f"target with required-features that are not enabled; last stderr lines: {stderr_tail(listed)}"
+                )
                 continue
             hits = []
             for line in listed.stdout.splitlines():
@@ -893,7 +949,7 @@ def run_targets(root, targets, timeout):
             errors.append(f"cannot run cargo: {e.strerror or e}")
             return errors
         if ran.returncode != 0 or not re.search(r"test result: ok\. 1 passed;", ran.stdout):
-            errors.append(f"{label}: {path}::{expected} did not pass exactly one test")
+            errors.append(f"{label}: {path}::{expected} did not pass exactly one test; last stderr lines: {stderr_tail(ran)}")
     return errors
 
 
@@ -965,9 +1021,23 @@ def main(argv):
     return 1 if errors else 0
 
 
+class Terminated(BaseException):
+    def __init__(self, signum):
+        self.signum = signum
+
+
+def raise_terminated(signum, frame):
+    raise Terminated(signum)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, raise_terminated)
+    signal.signal(signal.SIGHUP, raise_terminated)
     try:
         sys.exit(main(sys.argv[1:]))
     except KeyboardInterrupt:
         print("interrupted", file=sys.stderr)
         sys.exit(130)
+    except Terminated as t:
+        print(f"terminated by {signal.Signals(t.signum).name}", file=sys.stderr)
+        sys.exit(128 + t.signum)

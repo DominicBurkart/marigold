@@ -455,7 +455,7 @@ class ProvenTests(GateCase):
 
     def test_proven_with_existing_proof_passes(self):
         (self.root / "tests/proofs/kani").mkdir(parents=True)
-        (self.root / "tests/proofs/kani/p.rs").write_text("#[kani::proof]\nfn proof() { assert!(1 < 2); }\n")
+        (self.root / "tests/proofs/kani/p.rs").write_text("#[cfg(kani)]\n#[kani::proof]\nfn proof() { assert!(1 < 2); }\n")
         self.proven(proof="tests/proofs/kani/p.rs")
         self.assert_ok()
 
@@ -515,7 +515,7 @@ class ProvenTests(GateCase):
 
     def test_rs_proof_harness_only_in_comment_rejected(self):
         (self.root / "tests/proofs").mkdir()
-        (self.root / "tests/proofs/p.rs").write_text("// #[kani::proof]\nfn check() { assert!(1 < 2); }\n")
+        (self.root / "tests/proofs/p.rs").write_text("// #[cfg(kani)]\n#[kani::proof]\nfn check() { assert!(1 < 2); }\n")
         self.proven(proof="tests/proofs/p.rs")
         self.assert_fail("harness")
 
@@ -710,7 +710,7 @@ class ProofStrictnessTests(GateCase):
         self.assert_fail("suffix")
 
     def test_lean_requires_lean_suffix(self):
-        self.prove("tests/proofs/p.rs", "#[kani::proof]\nfn c() { assert!(1 < 2); }\n", provable="lean")
+        self.prove("tests/proofs/p.rs", "#[cfg(kani)]\n#[kani::proof]\nfn c() { assert!(1 < 2); }\n", provable="lean")
         self.assert_fail("suffix")
 
     def test_test_attribute_is_not_a_proof_harness(self):
@@ -718,23 +718,23 @@ class ProofStrictnessTests(GateCase):
         self.assert_fail("harness")
 
     def test_kani_harness_in_macro_rules_rejected(self):
-        self.prove("tests/proofs/p.rs", "macro_rules! m {\n    () => {\n        #[kani::proof]\n        fn c() { assert!(1 < 2); }\n    };\n}\n")
+        self.prove("tests/proofs/p.rs", "macro_rules! m {\n    () => {\n        #[cfg(kani)]\n#[kani::proof]\n        fn c() { assert!(1 < 2); }\n    };\n}\n")
         self.assert_fail("harness")
 
     def test_kani_harness_under_bad_cfg_rejected(self):
-        self.prove("tests/proofs/p.rs", "#[cfg(not(kani))]\nmod m {\n    #[kani::proof]\n    fn c() { assert!(1 < 2); }\n}\n")
+        self.prove("tests/proofs/p.rs", "#[cfg(not(kani))]\nmod m {\n    #[cfg(kani)]\n#[kani::proof]\n    fn c() { assert!(1 < 2); }\n}\n")
         self.assert_fail("harness")
 
     def test_kani_harness_under_cfg_kani_accepted(self):
-        self.prove("tests/proofs/p.rs", "#[cfg(kani)]\nmod m {\n    #[kani::proof]\n    #[kani::unwind(4)]\n    fn c() { assert!(1 < 2); }\n}\n")
+        self.prove("tests/proofs/p.rs", "#[cfg(kani)]\nmod m {\n    #[cfg(kani)]\n#[kani::proof]\n    #[kani::unwind(4)]\n    fn c() { assert!(1 < 2); }\n}\n")
         self.assert_ok()
 
     def test_kani_harness_nested_in_fn_rejected(self):
-        self.prove("tests/proofs/p.rs", "fn outer() {\n    #[kani::proof]\n    fn c() { assert!(1 < 2); }\n}\n")
+        self.prove("tests/proofs/p.rs", "fn outer() {\n    #[cfg(kani)]\n#[kani::proof]\n    fn c() { assert!(1 < 2); }\n}\n")
         self.assert_fail("harness")
 
     def test_proof_file_shared_by_two_ids_rejected(self):
-        self.prove("tests/proofs/p.rs", "#[kani::proof]\nfn c() { assert!(1 < 2); }\n")
+        self.prove("tests/proofs/p.rs", "#[cfg(kani)]\n#[kani::proof]\nfn c() { assert!(1 < 2); }\n")
         entry = {
             "status": "proven",
             "provable": "kani",
@@ -746,7 +746,7 @@ class ProofStrictnessTests(GateCase):
 
     def test_symlinked_proofs_dir_rejected(self):
         (self.root / "elsewhere").mkdir()
-        (self.root / "elsewhere/p.rs").write_text("#[kani::proof]\nfn c() { assert!(1 < 2); }\n")
+        (self.root / "elsewhere/p.rs").write_text("#[cfg(kani)]\n#[kani::proof]\nfn c() { assert!(1 < 2); }\n")
         (self.root / "tests/proofs").symlink_to(self.root / "elsewhere")
         entry = {
             "status": "proven",
@@ -822,7 +822,9 @@ if [ -n "$FAKE_CARGO_PID" ]; then
 fi
 if [ -n "$FAKE_CARGO_SLEEP" ]; then sleep "$FAKE_CARGO_SLEEP"; fi
 case "$*" in
-  *--list*) printf '%b' "$FAKE_CARGO_LIST"; exit 0 ;;
+  *--list*)
+    if [ -n "$FAKE_CARGO_LIST_ERR" ]; then printf '%b' "$FAKE_CARGO_LIST_ERR" >&2; exit 101; fi
+    printf '%b' "$FAKE_CARGO_LIST"; exit 0 ;;
   *--exact*) printf '%b' "$FAKE_CARGO_RUN"; exit ${FAKE_CARGO_RC:-0} ;;
 esac
 exit 3
@@ -1006,7 +1008,7 @@ class RunModeTests(RunBase):
 
     def test_proven_citations_are_run(self):
         (self.root / "tests/proofs").mkdir()
-        (self.root / "tests/proofs/p.rs").write_text("#[kani::proof]\nfn c() { assert!(1 < 2); }\n")
+        (self.root / "tests/proofs/p.rs").write_text("#[cfg(kani)]\n#[kani::proof]\nfn c() { assert!(1 < 2); }\n")
         self.ledger(
             {
                 "status": "proven",
@@ -1393,6 +1395,39 @@ class LeanStrictnessTests(GateCase):
     def test_import_lean_rejected(self):
         self.lean("import Lean\ntheorem t : True := trivial\n", False, "import Lean")
 
+    def test_prime_identifier_then_sorry_between_char_like_quotes_rejected(self):
+        self.lean("theorem t : True := by\n  have := x'\\/ sorry ' '\n  trivial\n", False, "sorry")
+
+    def test_real_char_literal_is_skipped(self):
+        self.lean("def c := 'a'\ndef d := '\\n'\ndef e := '\\x41'\ntheorem t : True := trivial\n", True)
+
+    def test_char_literal_containing_double_quote_does_not_desync(self):
+        self.lean("def q := '\"'\ntheorem t : True := by sorry\n", False, "sorry")
+
+    def test_non_lean_escape_is_not_a_char_literal(self):
+        self.lean("def a := x'\\q sorry ' '\ntheorem t : True := trivial\n", False, "sorry")
+
+    def test_skip_kernel_tc_rejected(self):
+        self.lean("set_option debug.skipKernelTC true\ntheorem t : True := trivial\n", False, "skipKernelTC")
+
+    def test_initialize_rejected(self):
+        self.lean("initialize foo : Nat <- pure 1\ntheorem t : True := trivial\n", False, "initialize")
+
+    def test_opaque_rejected(self):
+        self.lean("opaque f : Nat\ntheorem t : True := trivial\n", False, "opaque")
+
+    def test_extern_attribute_rejected(self):
+        self.lean('@[extern "c_f"] def f := 1\ntheorem t : True := trivial\n', False, "extern")
+
+    def test_open_lean_rejected(self):
+        self.lean("open Lean\ntheorem t : True := trivial\n", False, "open Lean")
+
+    def test_unknown_import_rejected(self):
+        self.lean("import Foo.Bar\ntheorem t : True := trivial\n", False, "import")
+
+    def test_mathlib_and_aeneas_imports_accepted(self):
+        self.lean("import Mathlib.Tactic\nimport Aeneas\nimport Std\ntheorem t : True := trivial\n", True)
+
     def test_stop_inside_identifier_is_fine(self):
         self.lean("theorem stop_ok : True := trivial\n", True)
 
@@ -1418,43 +1453,68 @@ class KaniStrictnessTests(GateCase):
             self.assert_fail(needle)
 
     def test_harness_without_assertion_rejected(self):
-        self.kani("#[kani::proof]\nfn c() { let _x: u8 = kani::any(); }\n", False, "assertion")
+        self.kani("#[cfg(kani)]\n#[kani::proof]\nfn c() { let _x: u8 = kani::any(); }\n", False, "assertion")
 
     def test_assertion_only_in_string_rejected(self):
-        self.kani('#[kani::proof]\nfn c() { let _s = "assert!(1 < 2)"; }\n', False, "assertion")
+        self.kani('#[cfg(kani)]\n#[kani::proof]\nfn c() { let _s = "assert!(1 < 2)"; }\n', False, "assertion")
 
     def test_assume_false_rejected(self):
-        self.kani("#[kani::proof]\nfn c() { kani::assume(false); assert!(1 < 2); }\n", False, "assume(false)")
+        self.kani("#[cfg(kani)]\n#[kani::proof]\nfn c() { kani::assume(false); assert!(1 < 2); }\n", False, "assume(false)")
 
     def test_cfg_test_harness_rejected(self):
-        self.kani("#[cfg(test)]\nmod m {\n    #[kani::proof]\n    fn c() { assert!(1 < 2); }\n}\n", False, "harness")
+        self.kani("#[cfg(test)]\nmod m {\n    #[cfg(kani)]\n#[kani::proof]\n    fn c() { assert!(1 < 2); }\n}\n", False, "harness")
 
     def test_cfg_test_on_harness_fn_rejected(self):
-        self.kani("#[kani::proof]\n#[cfg(test)]\nfn c() { assert!(1 < 2); }\n", False, "harness")
+        self.kani("#[cfg(kani)]\n#[kani::proof]\n#[cfg(test)]\nfn c() { assert!(1 < 2); }\n", False, "harness")
 
     def test_literal_true_assertion_rejected(self):
-        self.kani("#[kani::proof]\nfn c() { assert!(true); }\n", False, "assertion")
+        self.kani("#[cfg(kani)]\n#[kani::proof]\nfn c() { assert!(true); }\n", False, "assertion")
 
     def test_kani_assert_true_rejected(self):
-        self.kani('#[kani::proof]\nfn c() { kani::assert(true, "x"); }\n', False, "assertion")
+        self.kani('#[cfg(kani)]\n#[kani::proof]\nfn c() { kani::assert(true, "x"); }\n', False, "assertion")
 
     def test_literal_false_equality_assume_rejected(self):
-        self.kani("#[kani::proof]\nfn c() { kani::assume(1 == 2); assert!(1 < 2); }\n", False, "assume")
+        self.kani("#[cfg(kani)]\n#[kani::proof]\nfn c() { kani::assume(1 == 2); assert!(1 < 2); }\n", False, "assume")
 
     def test_negated_true_assume_rejected(self):
-        self.kani("#[kani::proof]\nfn c() { kani::assume(!true); assert!(1 < 2); }\n", False, "assume")
+        self.kani("#[cfg(kani)]\n#[kani::proof]\nfn c() { kani::assume(!true); assert!(1 < 2); }\n", False, "assume")
 
     def test_meaningful_assume_accepted(self):
-        self.kani("#[kani::proof]\nfn c() { let x: u8 = kani::any(); kani::assume(x < 10); assert!(x < 11); }\n", True)
+        self.kani("#[cfg(kani)]\n#[kani::proof]\nfn c() { let x: u8 = kani::any(); kani::assume(x < 10); assert!(x < 11); }\n", True)
+
+    def test_harness_without_cfg_kani_rejected(self):
+        self.kani("#[kani::proof]\nfn c() { assert!(1 < 2); }\n", False, "cfg(kani)")
+
+    def test_cfg_kani_on_module_accepted(self):
+        self.kani("#[cfg(kani)]\nmod m {\n    #[kani::proof]\n    fn c() { assert!(1 < 2); }\n}\n", True)
+
+    def test_cfg_kani_at_file_head_accepted(self):
+        self.kani("#![cfg(kani)]\n#[kani::proof]\nfn c() { assert!(1 < 2); }\n", True)
+
+    def test_cfg_kani_on_fn_accepted(self):
+        self.kani("#[cfg(kani)]\n#[kani::proof]\nfn c() { assert!(1 < 2); }\n", True)
+
+    def test_double_parenthesised_false_assume_rejected(self):
+        self.kani("#[cfg(kani)]\n#[kani::proof]\nfn c() { kani::assume((false)); assert!(1 < 2); }\n", False, "assume")
+
+    def test_comparison_assumes_that_are_false_are_rejected(self):
+        for cond in ("0 > 1", "2 <= 1", "1 >= 2", "3 != 3", "x != x", "x < x", "x > x", "(1 == 2)", "!(true)"):
+            with self.subTest(cond=cond):
+                self.kani(f"#[cfg(kani)]\n#[kani::proof]\nfn c() {{ kani::assume({cond}); assert!(1 < 2); }}\n", False, "assume")
+
+    def test_comparison_assumes_that_can_hold_are_accepted(self):
+        for cond in ("1 < 2", "x == x", "x < y", "2 >= 2", "x != y"):
+            with self.subTest(cond=cond):
+                self.kani(f"#[cfg(kani)]\n#[kani::proof]\nfn c() {{ kani::assume({cond}); assert!(1 < 2); }}\n", True)
 
     def test_kani_assert_accepted(self):
-        self.kani('#[kani::proof]\nfn c() { kani::assert(1 < 2, "x"); }\n', True)
+        self.kani('#[cfg(kani)]\n#[kani::proof]\nfn c() { kani::assert(1 < 2, "x"); }\n', True)
 
     def test_assert_eq_accepted(self):
-        self.kani("#[kani::proof]\nfn c() { assert_eq!(1, 1); }\n", True)
+        self.kani("#[cfg(kani)]\n#[kani::proof]\nfn c() { assert_eq!(1, 1); }\n", True)
 
     def test_assert_in_other_fn_does_not_count(self):
-        self.kani("fn h() { assert!(1 < 2); }\n#[kani::proof]\nfn c() {}\n", False, "assertion")
+        self.kani("fn h() { assert!(1 < 2); }\n#[cfg(kani)]\n#[kani::proof]\nfn c() {}\n", False, "assertion")
 
 
 class RunHardeningTests(RunBase):
@@ -1556,11 +1616,10 @@ class RunHardeningTests(RunBase):
             os.kill(pid, 9)
             self.fail("leaked child survived the successful run")
 
-    def test_sigint_kills_cargo_and_exits_130_cleanly(self):
-        import signal
+    def signal_case(self, sig, code, word):
         import time
 
-        pidfile = self.root / "int.pid"
+        pidfile = self.root / f"sig{int(sig)}.pid"
         env = self.env_for(extra_env={"FAKE_CARGO_PID": str(pidfile)})
         proc = subprocess.Popen(
             [sys.executable, "-I", str(GATE), "ledger", str(self.root), "--run"],
@@ -1574,11 +1633,11 @@ class RunHardeningTests(RunBase):
                 break
             time.sleep(0.1)
         child = int(pidfile.read_text())
-        proc.send_signal(signal.SIGINT)
+        proc.send_signal(sig)
         out, err = proc.communicate(timeout=20)
-        self.assertEqual(proc.returncode, 130, out + err)
+        self.assertEqual(proc.returncode, code, out + err)
         self.assertNotIn("Traceback", out + err)
-        self.assertIn("interrupted", out + err)
+        self.assertIn(word, out + err)
         for _ in range(40):
             try:
                 os.kill(child, 0)
@@ -1587,7 +1646,31 @@ class RunHardeningTests(RunBase):
             time.sleep(0.1)
         else:
             os.kill(child, 9)
-            self.fail("cargo child survived SIGINT")
+            self.fail(f"cargo child survived signal {int(sig)}")
+
+    def test_sigint_kills_cargo_and_exits_130_cleanly(self):
+        import signal
+
+        self.signal_case(signal.SIGINT, 130, "interrupted")
+
+    def test_sigterm_kills_cargo_and_exits_143_cleanly(self):
+        import signal
+
+        self.signal_case(signal.SIGTERM, 143, "SIGTERM")
+
+    def test_sighup_kills_cargo_and_exits_129_cleanly(self):
+        import signal
+
+        self.signal_case(signal.SIGHUP, 129, "SIGHUP")
+
+    def test_list_failure_reports_stderr_tail_and_likely_cause(self):
+        err_text = "".join(f"line{i}\\n" for i in range(1, 9))
+        code, out, err = self.run_mode(extra_env={"FAKE_CARGO_LIST_ERR": err_text})
+        self.assertEqual(code, 1)
+        self.assertIn("required-features", out)
+        self.assertIn("line8", out)
+        self.assertIn("line4", out)
+        self.assertNotIn("line3", out)
 
     def test_timeout_kills_the_process_group(self):
         import time
