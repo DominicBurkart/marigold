@@ -1,9 +1,12 @@
 # marigold test-design inchworm
 
-Four nanna identities, an invariant ledger, a manual gate, and three inchworm
-flows that find interface invariants without a pinning test, pin them with
-tests, then close coverage, and prove what can be proven. Everything is meant to
-run on local models.
+Four test-design identities, an invariant ledger, a manual gate, and three
+inchworm flows that find interface invariants without a pinning test, pin them
+with tests, then close coverage, and prove what can be proven. Everything is
+meant to run on local models. The root `inchworm.toml` also holds ten
+delegation flows (test leads, implementers, researchers) built from seventeen
+more identities; they are described in
+[docs/nanna-card-family.md](../../docs/nanna-card-family.md), not here.
 
 ## Identities
 
@@ -23,12 +26,13 @@ Cards live in `.nanna/catalog/`.
 ## Flows
 
 The root `inchworm.toml` holds the repository's `[offramp]`, `[auditor]` and
-`[merge]` tables, the existing `issue` flow and these three flows.
+`[merge]` tables, the existing `issue` flow, these three flows and the ten
+flows of the card family (fourteen flows in all).
 `inchworm.toml` is listed in `.nanna/protected.toml`. The `inchworm` binary is
 not installed on the machine that edited this file, so the file is checked only
-as valid TOML; run `inchworm validate` before relying on it. Each flow is
-label-triggered, ends with the same `publish` step (`pr-shepherd`) as the
-`issue` flow, and ends in a draft PR.
+as valid TOML; run `inchworm validate` before relying on it. Each of the three
+flows below is label-triggered, ends with the same `publish` step
+(`pr-shepherd`) as the `issue` flow, and ends in a draft PR.
 
 - `test-design`, label `inchworm:test-design`. Steps: scout, design, publish.
   Can run once the pi broker (nanna-coder #962) lands.
@@ -245,7 +249,7 @@ covered.
 Do not copy `.nanna/catalog` over a host catalog: it is shared across
 repositories and a recursive copy would overwrite its cards. Merge only the
 marigold cards by hand into the host catalog (see `docs/nanna-agents.md`): the
-four `.nanna/catalog/marigold-*.toml` cards and their
+four test-design `.nanna/catalog/marigold-*.toml` cards and their
 `.nanna/catalog/prompts/marigold-*.md` prompts. To try them without touching a
 host catalog, copy just those files into a scratch directory and point
 `NANNA_CONFIG_DIR` at it.
