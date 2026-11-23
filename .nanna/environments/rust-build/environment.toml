@@ -2,7 +2,7 @@ schema = 1
 name = "rust-build"
 
 [build]
-containerfile = "Containerfile"
+flake_output = "devContainerImage-rust-build"
 
 [[capability]]
 id = "cargo_check"

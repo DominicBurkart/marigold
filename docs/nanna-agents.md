@@ -6,23 +6,24 @@ check that parses both with nanna's own parser.
 
 ## Files
 
-| Path | Role |
-| --- | --- |
-| `.nanna/agents/*.toml` | Repo-local cards. Each names a base card and may only narrow it. |
-| `.nanna/catalog/*.toml` | Reference copy of the base catalog (including the required `auditor`). |
-| `.nanna/catalog/prompts/` | System prompts for the base cards. |
-| `scripts/check_nanna_agents.sh` | Parses both layers with nanna and fails on a widening override. |
+- `.nanna/agents/*.toml`: repo-local cards. Each names a base card and may only
+  narrow it.
+- `.nanna/catalog/*.toml`: reference copy of the base catalog (including the
+  required `auditor`).
+- `.nanna/catalog/prompts/`: system prompts for the base cards.
+- `scripts/check_nanna_agents.sh`: parses both layers with nanna and fails on a
+  widening override.
 
-`.nanna/**` is in nanna's fixed protected set for every repository, so an
-agent cannot edit these cards.
+`.nanna/**` is in nanna's fixed protected set for every repository, so an agent
+cannot edit these cards.
 
 ## Installing the base catalog
 
 nanna merges `.nanna/agents/` over a host-owned global catalog
 (`$NANNA_CONFIG_DIR/agents`, else `$XDG_CONFIG_HOME/nanna/agents`, else
 `~/.config/nanna/agents`). A repo-local card must share its name with a global
-card and may only narrow it: `scope.max_effect` and every `[limits]` value at
-or below the base; `scope.repos`, `scope.paths`, `scope.tools` and
+card and may only narrow it: `scope.max_effect` and every `[limits]` value at or
+below the base; `scope.repos`, `scope.paths`, `scope.tools` and
 `scope.read_paths` string-subsets of the base lists. A name with no global card
 is rejected, and `auditor` cannot be overridden. Installing the base is a human
 step on the host that runs nanna:
@@ -38,25 +39,31 @@ Write scopes (`paths`) use the workspace crates: `marigold`, `marigold-macros`,
 `marigold-grammar`, `marigold-lsp`, `marigold-impl`, plus `tests/` and
 `examples/`.
 
-| Name | Loop | Writes (`paths`, repo-local) | Ceiling | Tools (repo-local) |
-| --- | --- | --- | --- | --- |
-| `rust-implementer` | inner | the five crates and `tests/**` (base also allows `examples/**`) | workspace | `read_file`, `write_file`, `list_directory`, `search`, `git_status`, `git_diff`, `cargo_check`, `cargo_test` (base adds `cargo_build`) |
-| `pr-shepherd` | middle | none | repository | `read_file`, `search`, `git_status`, `git_diff`, `git_commit`, `git_push_branch`, `github_pr_open`, `github_pr_comments` |
-| `reviewer` | middle | none | none | `read_file`, `list_directory`, `search`, `git_status`, `git_diff` |
-| `docs-writer` | inner | `docs/**`, `README.md` | workspace | `read_file`, `write_file`, `list_directory`, `search`, `git_status`, `git_diff` |
-| `auditor` | inner | none | none | none (base only, cannot be overridden) |
+- `rust-implementer` (inner loop): writes the five crates and `tests/**` (base
+  also allows `examples/**`); ceiling workspace; tools `read_file`,
+  `write_file`, `list_directory`, `search`, `git_status`, `git_diff`,
+  `cargo_check`, `cargo_test` (base adds `cargo_build`).
+- `pr-shepherd` (middle loop): writes nothing; ceiling repository; tools
+  `read_file`, `search`, `git_status`, `git_diff`, `git_commit`,
+  `git_push_branch`, `github_pr_open`, `github_pr_comments`.
+- `reviewer` (middle loop): writes nothing; ceiling none; tools `read_file`,
+  `list_directory`, `search`, `git_status`, `git_diff`.
+- `docs-writer` (inner loop): writes `docs/**` and `README.md`; ceiling
+  workspace; tools `read_file`, `write_file`, `list_directory`, `search`,
+  `git_status`, `git_diff`.
+- `auditor` (inner loop): writes nothing; ceiling none; no tools (base only,
+  cannot be overridden).
 
 All cards use model `gemma4:e4b` and repository
-`github.com/DominicBurkart/marigold`.
-`rust-implementer` has no network: its ceiling is workspace and it is given no
-`github_*` tool. `pr-shepherd` is the only card with the repository ceiling.
-Its four tools (`git_commit`, `git_push_branch`, `github_pr_open`,
-`github_pr_comments`) all exist on nanna main, so none was omitted. It is
-classified `middle` because it also reads pull request comments.
+`github.com/DominicBurkart/marigold`. `rust-implementer` has no network: its
+ceiling is workspace and it is given no `github_*` tool. `pr-shepherd` is the
+only card with the repository ceiling. Its four tools (`git_commit`,
+`git_push_branch`, `github_pr_open`, `github_pr_comments`) all exist on nanna
+main, so none was omitted. It is classified `middle` because it also reads pull
+request comments.
 
-Because every writing card restricts paths, none receives `run_command`.
-Tool names are exact strings, since the narrowing check does not interpret
-globs.
+Because every writing card restricts paths, none receives `run_command`. Tool
+names are exact strings, since the narrowing check does not interpret globs.
 
 `docs-writer` has no markdown-specific tool: nanna ships none, so it gets the
 file tools only. The pre-commit hook requires `README.md` and
@@ -77,9 +84,9 @@ scripts/check_nanna_agents.sh
 ```
 
 The script (needs a `nanna` binary on `PATH`, or `NANNA_BIN`) copies the base
-catalog to a scratch config directory and runs `nanna agents list --repo .`.
-It exits non-zero when an override widens its base, names an unknown card, or
-fails to parse. It is not wired into CI.
+catalog to a scratch config directory and runs `nanna agents list --repo .`. It
+exits non-zero when an override widens its base, names an unknown card, or fails
+to parse. It is not wired into CI.
 
 ## Limits
 
@@ -94,13 +101,15 @@ fails to parse. It is not wired into CI.
 nanna runs a task in a dev container only when the repository has both
 `flake.nix` and `.devcontainer/`. This repository now has both:
 
-| Path | Role |
-| --- | --- |
-| `flake.nix` | Exposes `packages.<system>.devContainerImage` (nix2container, x86_64 and aarch64 linux) and a `devShells.default`. |
-| `flake.lock` | Pins nixpkgs, rust-overlay and nix2container. |
-| `.devcontainer/devcontainer.json` | Opt-in marker; nanna only checks that the directory exists. |
-| `.nanna/protected.toml` | Declares `.inchworm/**` as an extra protected glob. |
-| `.nanna/prompt.md` | Per-project prompt: workspace layout and the checks CI and the pre-commit hook run. |
+- `flake.nix`: exposes `packages.<system>.devContainerImage` (nix2container,
+  x86_64 and aarch64 linux) and a `devShells.default`.
+- `flake.lock`: pins nixpkgs, rust-overlay and nix2container.
+- `.devcontainer/devcontainer.json`: opt-in marker; nanna only checks that the
+  directory exists.
+- `.nanna/protected.toml`: declares extra protected globs, including
+  `flake.nix`, `flake.lock`, `.devcontainer/**` and `.nanna/environments/**`.
+- `.nanna/prompt.md`: per-project prompt: workspace layout and the checks CI and
+  the pre-commit hook run.
 
 The image carries the toolchain read from `rust-toolchain.toml` through
 `rust-bin.fromRustupToolchainFile` (stable, with rustfmt and clippy), a C

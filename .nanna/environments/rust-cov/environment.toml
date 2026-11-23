@@ -2,7 +2,7 @@ schema = 1
 name = "rust-cov"
 
 [build]
-containerfile = "Containerfile"
+flake_output = "devContainerImage-rust-cov"
 
 [[capability]]
 id = "cargo_check"

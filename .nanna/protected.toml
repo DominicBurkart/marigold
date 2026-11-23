@@ -1,1 +1,1 @@
-extra = [".inchworm/**", "inchworm.toml", "publish.sh", ".github/**"]
+extra = [".inchworm/**", "inchworm.toml", "publish.sh", ".github/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/environments/**", ".nanna/protected.toml", ".nanna/prompt.md"]

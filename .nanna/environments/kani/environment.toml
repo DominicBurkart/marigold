@@ -2,7 +2,7 @@ schema = 1
 name = "kani"
 
 [build]
-containerfile = "Containerfile"
+flake_output = "devContainerImage-kani"
 
 [[capability]]
 id = "cargo_check"
