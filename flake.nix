@@ -74,6 +74,60 @@
             "RUST_LOG=info"
           ];
         };
+
+        kaniVersion = "0.68.0";
+
+        kaniBundles = {
+          x86_64-linux = {
+            triple = "x86_64-unknown-linux-gnu";
+            hash = "sha256-MuK0hNc+3gu/ZKLPCHnEJZQiSX2K7E7mfUSN6a54Q9M=";
+          };
+          aarch64-linux = {
+            triple = "aarch64-unknown-linux-gnu";
+            hash = "sha256-AELSaIvxVQJw3vSnnJaq7qE4YxgYy0q1SAEg8tUalCw=";
+          };
+        };
+
+        kaniBundle = kaniBundles.${system};
+
+        kaniToolchain = pkgs.rust-bin.fromRustupToolchain {
+          channel = "nightly-2026-08-21";
+          components = [ "llvm-tools" "rustc-dev" "rust-src" "rustfmt" "cargo" "rustc" ];
+        };
+
+        kani = pkgs.stdenv.mkDerivation {
+          pname = "kani";
+          version = kaniVersion;
+
+          src = pkgs.fetchurl {
+            url = "https://github.com/model-checking/kani/releases/download/kani-${kaniVersion}/kani-${kaniVersion}-${kaniBundle.triple}.tar.gz";
+            inherit (kaniBundle) hash;
+          };
+
+          nativeBuildInputs = [ pkgs.autoPatchelfHook ];
+          buildInputs = [ pkgs.stdenv.cc.cc.lib pkgs.zlib ];
+
+          dontConfigure = true;
+          dontBuild = true;
+
+          preFixup = ''
+            addAutoPatchelfSearchPath ${kaniToolchain}/lib
+          '';
+
+          installPhase = ''
+            mkdir -p $out/share $out/bin
+            cp -r . $out/share/kani-${kaniVersion}
+            ln -s ${kaniToolchain} $out/share/kani-${kaniVersion}/toolchain
+            ln -s kani-driver $out/share/kani-${kaniVersion}/bin/cargo-kani
+            ln -s kani-driver $out/share/kani-${kaniVersion}/bin/kani
+            for b in $out/share/kani-${kaniVersion}/bin/*; do
+              ln -s $b $out/bin/$(basename $b)
+            done
+          '';
+
+          meta.platforms = [ "x86_64-linux" "aarch64-linux" ];
+        };
+
         basePackages = [
           pkgs.bash
           pkgs.coreutils
@@ -119,6 +173,10 @@
           };
           rust-cov = {
             packages = rustPackages ++ [ pkgs.cargo-tarpaulin ];
+            extraEnv = rustEnv;
+          };
+          kani = {
+            packages = rustPackages ++ [ kani ];
             extraEnv = rustEnv;
           };
         };
