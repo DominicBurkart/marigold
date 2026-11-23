@@ -141,6 +141,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn permutations_count_and_distinctness_over_small_inputs() {
+        for n in 0usize..=5 {
+            for k in 0usize..=6 {
+                let result: Vec<Vec<usize>> = futures::stream::iter(0..n)
+                    .permutations(k)
+                    .await
+                    .collect::<Vec<_>>()
+                    .await;
+                let expected = if k > n {
+                    0
+                } else {
+                    (n - k + 1..=n).product::<usize>()
+                };
+                assert_eq!(result.len(), expected, "n={n} k={k}");
+                let distinct: std::collections::HashSet<_> = result.iter().cloned().collect();
+                assert_eq!(distinct.len(), result.len(), "n={n} k={k}");
+                assert!(result.iter().all(|p| p.len() == k));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn permutations_of_repeated_items_are_not_distinct() {
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 1])
+            .permutations(2)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![vec![1, 1], vec![1, 1]]);
+    }
+
+    #[tokio::test]
     async fn permutations_with_replacement_empty_stream() {
         // empty stream yields nothing regardless of k
         let result: Vec<Vec<i32>> = futures::stream::iter(Vec::<i32>::new())
