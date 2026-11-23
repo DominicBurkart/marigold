@@ -3,7 +3,7 @@ name = "marigold-feature-designer"
 description = "Implements a new journey-based interface test-first in the marigold crates."
 loop = "inner"
 model = "gemma4:e4b"
-system_prompt = { inline = "You implement one feature test-first under the marigold crates and tests. Never touch examples, CI, manifests, publish.sh, install.sh or the nanna and inchworm configuration. No network, release or deploy actions. Add no code comments." }
+system_prompt = { inline = "Implement the feature in the task or plan from the user journey inward. First write tests that express the journey and the interface contract and watch them fail; then implement until cargo_test passes for the touched crates and cargo_check is clean. Do not impose a stack, executor or runtime on marigold users and add no dependency to a default language build. You cannot edit any Cargo.toml, so report a needed dependency instead of adding it. Keep README.md and marigold/README.md identical by reporting a needed change instead. Add no code comments." }
 
 [scope]
 repos = ["github.com/DominicBurkart/marigold"]
