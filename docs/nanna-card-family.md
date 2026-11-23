@@ -42,8 +42,9 @@ writers. Every card has `max_concurrent = 1`.
 
 - `marigold-test-lead`: scopes a test effort and writes the plan.
   Writes `docs/plans/**`.
-- `marigold-proptest-designer`: property tests. Writes the grammar and impl
-  crates and `tests/**` (base also `marigold/**`).
+- `marigold-proptest-designer`: property tests. Writes only test locations:
+  `marigold-impl/tests/**`, `marigold-grammar/tests/**` and `tests/**` (base
+  also `marigold/tests/**`), never a `src` directory.
 - `marigold-e2e-designer`: user-journey integration tests. Writes `tests/**`
   (base also `marigold/tests/**`).
 - `marigold-formal-methods-designer`: drafts Kani harnesses and Lean files.
@@ -144,9 +145,11 @@ per label, each ending in a draft PR with diff and `nanna_clean` judges.
 - Reviewer findings driving a retry or a change. Reviewers run last, nothing
   parses their verdict, and inchworm passes only a failure summary to the next
   attempt, so no implementer ever sees a review.
-- Handing the plan to later steps by file. Each step gets a fresh worktree and
-  sees only the previous step's summary and patch, so the plan reaches the
-  next step only as that patch.
+- Handing the plan to later steps by file. Every step is dispatched on the
+  flow's base branch and inchworm forwards only the previous step's patch and
+  summary, so the plan reaches the next step only as that patch. Whether
+  earlier steps' files reach the pull request depends on nanna publishing the
+  branch, which it cannot yet.
 - Research that writes nothing. A single-step read-only flow is not allowed,
   so the research flows use a lead step and a researcher that writes its
   findings file.
@@ -187,8 +190,28 @@ asserts that each repo-local card narrows its base (exact-string subsets of
 tools, paths, read paths and repos, the same ceiling, limits at or below), that
 a card with a write tool has a write path and a non-`none` ceiling, that every
 flow identity exists, that flow names, labels and step names are unique, that
-every non-final step can write files, and that every system prompt file
-exists.
+every non-final step can write files, that every non-legacy flow identity
+has a narrowing card, that `blocking` is `required`, that `retry_on` holds only
+known values, that `max_lines` is positive, and that every system prompt file
+exists. The label comparison ignores case. Each assertion has a mutation test
+that must be flagged.
+
+Two checks are approximations. Forbid globs are matched with a small
+translation (`**/` is an optional directory prefix, `**` crosses directories,
+`*` stays inside one segment), not the judge's own matcher. For each card write
+glob the test samples a source, bench, `build.rs` and `Cargo.toml` file under
+the glob's crate root and requires the flow's forbid globs to cover every
+sample the card could write; the legacy `issue` flow is skipped and the
+implementer flows may write `src`. The test designers (proptest, e2e,
+formal-methods) must not be able to write those production samples at all.
+The equal-`max_effect` assertion is intentionally stricter than nanna's own
+narrowing rule, which would allow a lower ceiling; a lower ceiling here would
+mean a card silently lost its write tool. A scope key the test does not know
+(for example `message_reach`) may not widen its base.
+
+The research flows allow 400 changed lines in the diff judge: the lead's plan
+file plus the researcher's findings file, each of which can be a few hundred
+lines of wrapped text.
 
 The cargo-running designer and implementer narrowing cards keep the base
 iteration and wall-clock limits, because a cold build of the workspace does
