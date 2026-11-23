@@ -24,6 +24,7 @@ surface = "interface"
 statement = "With the tokio feature, KeepFirstN returns at most N items in descending order of the comparator and exactly the N largest by it."
 status = "covered"
 provable = "none"
+features = ["tokio"]
 proof_blocker = "needs a pure sync core extracted from the async wrapper"
 covered_by = [
   "marigold-impl/src/keep_first_n.rs::large_stream_correctness",
@@ -75,4 +76,5 @@ surface = "interface"
 statement = "With the tokio feature and T: Copy, every receiver obtained from MultiConsumerStream::get before run() is called observes every item of the source exactly once, in source order."
 status = "covered"
 provable = "none"
+features = ["tokio"]
 covered_by = ["marigold-impl/src/multi_consumer_stream.rs::multiple_consumers_each_receive_full_stream"]
