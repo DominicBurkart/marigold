@@ -90,13 +90,29 @@ There are two modes.
 - `--run` (for example `CARGO_TARGET_DIR=/var/tmp/gate-target python3 -I
   .nanna/inchworm/gate.py ledger --run`): after the lint passes, it runs cargo
   for every `covered` or `proven` citation. It needs `CARGO_TARGET_DIR` in the
-  environment, scrubs `GIT_*` variables, and for each citation runs
-  `cargo test -p <crate> (--lib | --test <file>) [--features ...] -- --list` to
-  require exactly one collected test of that name (and module path), then runs
-  it with `-- --exact` and requires exactly one passing test. Features come from
-  the `cfg(feature = ...)` gates the lint saw and from an optional `features`
-  list on the ledger entry. This is the source of truth; the lint is only a
-  pre-filter.
+  environment. For each citation it derives the full test name from the cited
+  file (its module path from the `mod` chain, any inline modules, then the fn,
+  for example `src/a/b.rs` with `mod tests` gives `a::b::tests::foo`) and the
+  features from the `cfg(feature = ...)` gates on the `mod` declaration chain,
+  the enclosing modules and the fn. It runs `cargo test [--locked] [--offline]
+  -p <crate> (--lib | --test <file>) [--features ...] -- --list`, requires
+  exactly one collected test with exactly that full name, then runs it with
+  `-- --exact` and requires exit 0 and `1 passed`. `--locked` is added when a
+  `Cargo.lock` exists (it is git-ignored here) and `--offline` when
+  `GATE_OFFLINE=1`. An optional ledger `features` list (one crate) or table
+  (`[invariant.features]`, `crate = [names]`) adds features per crate; names
+  must match `[A-Za-z0-9_][A-Za-z0-9_./-]*`. This is the source of truth; the
+  lint is only a pre-filter.
+
+Running `--run` executes repository code: build scripts, proc-macros,
+`.cargo/config.toml` runners and rustc wrappers, `rust-toolchain.toml` and the
+tests themselves. The environment is passed through except `GIT_*` and any
+variable whose name contains `TOKEN`, `SECRET`, `KEY` or `PASSWORD`. Never run
+it on untrusted PR code outside a sandbox. A test target with `harness = false`
+can print `test result: ok. 1 passed;` without running anything, so `--run`
+does not defend against a hostile repository. Each cargo call has a timeout
+(`GATE_CARGO_TIMEOUT` seconds, default 900, positive integer, otherwise exit
+2); on expiry the whole process group is killed.
 
 What the lint checks:
 
@@ -119,21 +135,29 @@ What the lint checks:
 - That fn must carry `#[test]`, `#[tokio::test(...)]`, `#[async_std::test]` or
   `#[rstest::rstest]`, including inside `proptest!` (a bare fn there is a plain
   function, so it still needs `#[test]`; the macro head must be `proptest` or
-  `proptest::proptest`). Only `should_panic`, `allow`, `doc` and `cfg` are
-  accepted besides, where a `cfg` predicate must be `test`,
+  `proptest::proptest`, with braces, parentheses or brackets). Only
+  `should_panic`, lint attributes (`allow`, `warn`, `deny`, `forbid`, `expect`),
+  `doc` and `cfg` are accepted besides, where a `cfg` predicate must be `test`,
   `feature = "tokio"`, `feature = "async-std"` or an `any(...)` of the two
   features. The same `cfg` rule applies to every enclosing module, to inner
   `#![...]` attributes at the head of a file or body, and to the `mod`
   declaration of a cited `src` file. An inner attribute anywhere else,
   `#[ignore]`, any other `cfg`, `cfg_attr` and any other attribute are
-  rejected, as is an fn nested in another fn, inside `macro_rules!` or in any
-  other block.
+  rejected, as is an fn nested in another fn, or inside `macro_rules!`, any
+  other macro invocation (`name!{}`, `name!()`, `name![]`) or any other block.
+  A cited `src` file must be declared by a top-level or inline-module `mod x;`
+  (not in an fn body, macro, impl or extern block) whose location matches the
+  file; the declaration's own `cfg` is checked.
 - `proven` needs `provable` other than `none`, and a `proof` file under
   `tests/proofs/` (the directory must not be a symlink and the resolved path
   must stay inside it), used by one id only. For `kani` it is a `.rs` file with
   a `#[kani::proof]` fn (not in a macro, a nested fn or an unsupported cfg
   gate; `cfg(kani)` is fine); for `lean` it is a `.lean` file with a `theorem`
-  or `lemma` and no `sorry`, `axiom` or `admit` outside comments.
+  or `lemma` and none of `sorry`, `axiom`, `admit`, `native_decide`,
+  `ofReduceBool`, `unsafe` or `implemented_by` outside comments and strings
+  (nested block comments and string escapes are handled). A kani harness must
+  also contain an assertion (`kani::assert`, `assert!`, `assert_eq!` or
+  `assert_ne!`) and no literal `kani::assume(false)`.
 - `proof_blocker` is an optional string saying why `provable = "none"` for code
   that is provable in principle.
 
