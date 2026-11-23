@@ -42,30 +42,37 @@
           pkgs.zlib
         ];
 
-        devContainerImage = nix2containerPkgs.nix2container.buildImage {
+        mkImage = { name, tag ? "latest", packages, extraEnv ? [ ] }:
+          nix2containerPkgs.nix2container.buildImage {
+            inherit name tag;
+
+            copyToRoot = pkgs.buildEnv {
+              name = "dev-env";
+              paths = packages;
+              pathsToLink = [ "/bin" "/etc" "/share" "/lib" "/include" ];
+            };
+
+            config = {
+              Cmd = [ "${pkgs.coreutils}/bin/sleep" "infinity" ];
+              Env = [
+                "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+                "PATH=/bin"
+              ] ++ extraEnv;
+              WorkingDir = "/workspace";
+            };
+
+            maxLayers = 100;
+          };
+
+        devContainerImage = mkImage {
           name = "marigold-dev";
-          tag = "latest";
-
-          copyToRoot = pkgs.buildEnv {
-            name = "dev-env";
-            paths = devContainerPackages;
-            pathsToLink = [ "/bin" "/etc" "/share" "/lib" "/include" ];
-          };
-
-          config = {
-            Cmd = [ "${pkgs.coreutils}/bin/sleep" "infinity" ];
-            Env = [
-              "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-              "PATH=/bin"
-              "CARGO_HOME=/tmp/cargo"
-              "PKG_CONFIG_PATH=/lib/pkgconfig"
-              "MARIGOLD_WORKSPACE_PATH=/workspace/marigold"
-              "RUST_LOG=info"
-            ];
-            WorkingDir = "/workspace";
-          };
-
-          maxLayers = 100;
+          packages = devContainerPackages;
+          extraEnv = [
+            "CARGO_HOME=/tmp/cargo"
+            "PKG_CONFIG_PATH=/lib/pkgconfig"
+            "MARIGOLD_WORKSPACE_PATH=/workspace/marigold"
+            "RUST_LOG=info"
+          ];
         };
       in
       {
