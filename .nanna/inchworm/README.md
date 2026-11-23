@@ -88,31 +88,55 @@ There are two modes.
   including raw, byte and C strings, braces, attributes) and can be fooled by
   constructs it does not model.
 - `--run` (for example `CARGO_TARGET_DIR=/var/tmp/gate-target python3 -I
-  .nanna/inchworm/gate.py ledger --run`): after the lint passes, it runs cargo
-  for every `covered` or `proven` citation. It needs `CARGO_TARGET_DIR` in the
-  environment. For each citation it derives the full test name from the cited
-  file (its module path from the `mod` chain, any inline modules, then the fn,
-  for example `src/a/b.rs` with `mod tests` gives `a::b::tests::foo`) and the
-  features from the `cfg(feature = ...)` gates on the `mod` declaration chain,
-  the enclosing modules and the fn. It runs `cargo test [--locked] [--offline]
-  -p <crate> (--lib | --test <file>) [--features ...] -- --list`, requires
-  exactly one collected test with exactly that full name, then runs it with
-  `-- --exact` and requires exit 0 and `1 passed`. `--locked` is added when a
-  `Cargo.lock` exists (it is git-ignored here) and `--offline` when
-  `GATE_OFFLINE=1`. An optional ledger `features` list (one crate) or table
-  (`[invariant.features]`, `crate = [names]`) adds features per crate; names
-  must match `[A-Za-z0-9_][A-Za-z0-9_./-]*`. This is the source of truth; the
-  lint is only a pre-filter.
+  .nanna/inchworm/gate.py ledger --run`): after the lint passes, it asks cargo
+  what it builds and runs the cited tests. It needs `CARGO_TARGET_DIR` in the
+  environment. It first runs `cargo metadata --no-deps --format-version 1` and
+  requires the selected target's `src_path` to be the cited file for
+  `<crate>/tests/*.rs`, or, for `<crate>/src` citations, derives the `mod`
+  chain from the crate's real lib or bin roots (a root that is not under `src/`
+  is ignored; a file declared from several roots is rejected as ambiguous;
+  `--lib` or `--bin <name>` is chosen by the root that holds the chain). It
+  then derives the full test name (module path, inline modules, fn, for example
+  `a::b::tests::foo`) and the features from the `cfg(feature = ...)` gates on
+  the `mod` declaration chain, the enclosing modules and the fn, and runs
+  `cargo test [--locked] [--offline] -p <crate> <target> [--features ...] --
+  --list`. It requires exactly one collected test with exactly that name, then
+  runs it with `-- --exact` and requires exit 0 and `1 passed`. An optional
+  ledger `features` list (one crate) or table (`[invariant.features]`,
+  `crate = [names]`) adds features per crate; names must match
+  `[A-Za-z0-9_][A-Za-z0-9_-]*`, so `dep/feat` syntax, which can enable
+  dependency features no cfg mentions, is not accepted. This is the stronger
+  check; it still executes repository code and is not tamper-proof.
 
-Running `--run` executes repository code: build scripts, proc-macros,
-`.cargo/config.toml` runners and rustc wrappers, `rust-toolchain.toml` and the
-tests themselves. The environment is passed through except `GIT_*` and any
-variable whose name contains `TOKEN`, `SECRET`, `KEY` or `PASSWORD`. Never run
-it on untrusted PR code outside a sandbox. A test target with `harness = false`
-can print `test result: ok. 1 passed;` without running anything, so `--run`
-does not defend against a hostile repository. Each cargo call has a timeout
-(`GATE_CARGO_TIMEOUT` seconds, default 900, positive integer, otherwise exit
-2); on expiry the whole process group is killed.
+`--run` safety and limits:
+
+- It executes repository code: build scripts, proc-macros, `.cargo/config.toml`
+  runners and rustc wrappers, `rust-toolchain.toml` and the tests themselves.
+  Never run it on untrusted PR code outside a sandbox.
+- Dropping variables is not a sandbox. The child environment loses `GIT_*`,
+  `DATABASE_URL` and every variable whose name contains `TOKEN`, `SECRET`,
+  `KEY`, `PASS`, `AUTH` or `CREDENTIAL` (so `SSH_AUTH_SOCK` and
+  `CARGO_REGISTRIES_*_TOKEN` are gone, which breaks private registries), but
+  `HOME`, `PATH`, `CARGO_HOME`, `RUSTUP_HOME` and `LD_LIBRARY_PATH` stay, so
+  files such as `~/.ssh`, `~/.cargo/credentials.toml` and the `gh` config remain
+  readable by the code that runs.
+- A test target with `harness = false` can print `test result: ok. 1 passed;`
+  without running anything.
+- `Cargo.lock` is git-ignored here, so the first `--run` in a fresh checkout
+  resolves floating dependency versions and results are not reproducible across
+  machines. `--locked` is added only when a `Cargo.lock` exists, and `--offline`
+  when `GATE_OFFLINE=1`.
+- Each cargo call has a timeout (`GATE_CARGO_TIMEOUT` seconds, default 900, a
+  positive integer, otherwise exit 2). Output goes to temporary files, and the
+  cargo process group is killed on timeout, on SIGINT (the gate then prints
+  `interrupted` and exits 130) and after every call, so daemons left in the
+  group do not leak. A grandchild that starts its own session escapes that.
+
+Cases the lint accepts but cargo rejects, which `--run` catches: an inner `cfg`
+inside an fn body, a module declared only in `main.rs` while `lib.rs` also
+exists (the lint tries both, `--run` picks the right target), `x.rs` next to
+`x/mod.rs` (the lint rejects this up front), and the same test name in two
+bins.
 
 What the lint checks:
 
@@ -153,11 +177,17 @@ What the lint checks:
   must stay inside it), used by one id only. For `kani` it is a `.rs` file with
   a `#[kani::proof]` fn (not in a macro, a nested fn or an unsupported cfg
   gate; `cfg(kani)` is fine); for `lean` it is a `.lean` file with a `theorem`
-  or `lemma` and none of `sorry`, `axiom`, `admit`, `native_decide`,
-  `ofReduceBool`, `unsafe` or `implemented_by` outside comments and strings
-  (nested block comments and string escapes are handled). A kani harness must
-  also contain an assertion (`kani::assert`, `assert!`, `assert_eq!` or
-  `assert_ne!`) and no literal `kani::assume(false)`.
+  or `lemma` and none of `sorry`, `sorryAx`, `stop`, `axiom`, `admit`,
+  `native_decide`, `ofReduceBool`, `reduceBool`, `unsafe`, `implemented_by`,
+  `macro`, `macro_rules`, `elab`, `syntax`, `run_cmd` or `import Lean` outside
+  comments and strings (nested block comments and string escapes are handled).
+  This Lean lint is advisory: a reviewer must read the proof, and `lean_check`
+  (nanna-coder #1051) is the real check. A kani harness must be built under
+  `cfg(kani)` (a `cfg(test)` harness is rejected), contain an assertion
+  (`kani::assert`, `assert!` with a condition other than the literal `true`,
+  `assert_eq!` or `assert_ne!`) and no literal vacuous `kani::assume` (`false`,
+  `!true`, or two different integer literals compared equal); a harness can
+  still be trivial in ways the lint cannot see.
 - `proof_blocker` is an optional string saying why `provable = "none"` for code
   that is provable in principle.
 
@@ -165,6 +195,9 @@ What `proven` means: a proof artifact of the right kind exists, is wired to one
 ledger id and passes this lint. It does not mean Kani or Lean were run or that
 the harness proves the statement; the gate does not execute either tool, and a
 reviewer must read the proof.
+
+Likewise `covered` is only as good as the reviewer's reading: a vacuous
+`#[test] fn t() {}` or a `should_panic` body passes both modes.
 
 `python3 -I .nanna/inchworm/gate.py coverage` additionally fails while any
 `surface = "interface"` invariant is not `covered` or `proven`. Both phases take
