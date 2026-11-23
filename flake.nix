@@ -8,13 +8,14 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    aeneas.url = "github:AeneasVerif/aeneas/fb44cb400eb6bfe7dce97422ebe8fa748b7e4f9b";
     nix2container = {
       url = "github:nlewo/nix2container";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay, nix2container }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay, nix2container, aeneas }:
     flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" ] (system:
       let
         pkgs = import nixpkgs {
@@ -42,9 +43,11 @@
           pkgs.zlib
         ];
 
-        mkImage = { name, tag ? "latest", packages, extraEnv ? [ ] }:
+        mkImage = { name, tag ? "latest", packages, extraEnv ? [ ], layerDeps ? [ ] }:
           nix2containerPkgs.nix2container.buildImage {
             inherit name tag;
+
+            layers = map (deps: nix2containerPkgs.nix2container.buildLayer { inherit deps; }) layerDeps;
 
             copyToRoot = pkgs.buildEnv {
               name = "dev-env";
@@ -128,6 +131,8 @@
           meta.platforms = [ "x86_64-linux" "aarch64-linux" ];
         };
 
+        leanLibs = [ pkgs.leanPackages.mathlib ] ++ pkgs.leanPackages.mathlib.allLeanDeps;
+
         basePackages = [
           pkgs.bash
           pkgs.coreutils
@@ -179,12 +184,26 @@
             packages = rustPackages ++ [ kani ];
             extraEnv = rustEnv;
           };
+          lean = {
+            packages = rustPackages ++ [
+              pkgs.lean4
+              aeneas.packages.${system}.aeneas
+            ];
+            extraEnv = rustEnv ++ [
+              "LEAN_PATH=${pkgs.lib.concatMapStringsSep ":" (d: "${d}/.lake/build/lib/lean") leanLibs}"
+            ];
+            layerDeps = [
+              [ pkgs.lean4 ]
+              leanLibs
+            ];
+          };
         };
 
         environmentImages = pkgs.lib.mapAttrs'
           (envName: env: pkgs.lib.nameValuePair "devContainerImage-${envName}" (mkImage {
             name = "marigold-${envName}";
             inherit (env) packages extraEnv;
+            layerDeps = env.layerDeps or [ ];
           }))
           environments;
       in
