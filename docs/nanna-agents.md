@@ -35,12 +35,18 @@ nanna merges `.nanna/agents/` over a host-owned global catalog
 card and may only narrow it: `scope.max_effect` and every `[limits]` value at
 or below the base; `scope.repos`, `scope.paths`, `scope.tools` and
 `scope.read_paths` string-subsets of the base lists. A name with no global card
-is rejected, and `auditor` cannot be overridden. Installing the base is a human
-step on the host that runs nanna:
+is rejected, and `auditor` cannot be overridden.
+
+`.nanna/catalog` is a marigold-only reference copy, not an installer. A host
+catalog is shared across repositories (its cards list several repositories and
+paths), so copying this directory over it would overwrite those cards. Merge
+the marigold entries into the host cards by hand, or install the reference only
+into a scratch directory:
 
 ```sh
-mkdir -p ~/.config/nanna/agents
-cp -r .nanna/catalog/. ~/.config/nanna/agents/
+mkdir -p /tmp/nanna-scratch/agents
+cp -r .nanna/catalog/. /tmp/nanna-scratch/agents/
+NANNA_CONFIG_DIR=/tmp/nanna-scratch nanna agents list --repo .
 ```
 
 ## Identities
@@ -71,7 +77,7 @@ Write scopes (`paths`) use the workspace crates: `marigold`, `marigold-macros`,
     `git_diff`
 - `docs-writer`
   - Loop: inner
-  - Writes (`paths`, repo-local): `docs/**`, `README.md`, `marigold/README.md`
+  - Writes (`paths`, repo-local): `docs/**`, `README.md`
   - Ceiling: workspace
   - Tools (repo-local): `read_file`, `write_file`, `list_directory`, `search`,
     `git_status`, `git_diff`
@@ -95,8 +101,12 @@ globs.
 
 `docs-writer` has no markdown-specific tool: nanna ships none, so it gets the
 file tools only. The pre-commit hook requires `README.md` and
-`marigold/README.md` to be identical, so the card may write both and its prompt
-tells it to apply every README edit to each.
+`marigold/README.md` to be identical, but the host base card does not allow
+writing `marigold/README.md`, and a repo card cannot widen its base. So
+`docs-writer` cannot keep the two files identical: its prompt tells it to
+report the needed sync, and a human or a card with the right paths does the
+copy. No flow step can sync them today. `rust-implementer`'s `marigold/**` path
+technically allows writing `marigold/README.md`, while its prompt forbids it.
 
 ## No deployer card
 
@@ -112,25 +122,25 @@ scripts/check_nanna_agents.sh
 ```
 
 The script (needs a `nanna` binary on `PATH`, or `NANNA_BIN`, and `python3`)
-copies the base catalog to a scratch config directory and runs
-`nanna agents list --repo .`. It reads each card name from `[identity]` with
-`tomllib`. It exits non-zero when an override widens its base, names an unknown
-card, fails to parse, or declares a name that differs from its file name. It is
-not wired into CI.
+copies the repo catalog to a scratch config directory and runs
+`nanna agents list --repo .`. When a host catalog exists (`NANNA_CONFIG_DIR`,
+else `$XDG_CONFIG_HOME/nanna`, else `~/.config/nanna`, with an `agents`
+directory), it also runs the listing against that real config, because the
+host base is what nanna merges at run time. Rejection by the host is a failure.
+A difference between `.nanna/catalog` and the host catalog is only a printed
+warning, since the repo catalog is intentionally a marigold-only subset.
+
+It reads each card name from `[identity]` with `tomllib`. It exits 1 when an
+override widens its base (from either catalog), names an unknown card, fails to
+parse, declares a name that differs from its file name, or when
+`.nanna/agents` has no cards. It is not wired into CI.
 
 `scripts/test_check_nanna_agents.sh` runs the script against fixtures under
-`scripts/fixtures/nanna_agents/` and asserts exit status for a narrowed card
-(zero), a widened card (non-zero), a name and file mismatch (non-zero), and a
-host catalog that matches or drifts from `.nanna/catalog`.
-
-### Catalog drift
-
-The check validates the overrides against the repo copy in `.nanna/catalog`,
-but nanna merges them over the host's global catalog at run time. If the two
-differ, the check can pass while the host rejects or widens a card. When
-`NANNA_CONFIG_DIR` is set and has an `agents` directory, the script also runs
-`diff -r` between `.nanna/catalog` and that directory and fails on any
-difference. Without `NANNA_CONFIG_DIR` the drift is not checked.
+`scripts/fixtures/nanna_agents/` and asserts the exact exit status and message
+for a narrowed card (0), one widened card per dimension (`scope.paths`,
+`scope.max_effect`, `scope.tools`; 1), a name and file mismatch (1), a missing
+agents directory (1), a matching host catalog (0), a drifted but compatible host
+catalog (0 with a warning) and a host base narrower than the repo catalog (1).
 
 ## Limits
 
