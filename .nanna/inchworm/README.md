@@ -75,48 +75,78 @@ card models, and nanna does not enforce it (nanna-coder #1048).
 
 ## The gate is manual
 
-`python3 -I .nanna/inchworm/gate.py ledger` validates `tests/invariants.toml`.
-It is not invoked by any flow, CI job or git hook yet: inchworm cannot run a
-repo command as a gate step (inchworm issue 14), and wiring it and its tests
-into CI is tracked in
-[issue 470](https://github.com/DominicBurkart/marigold/issues/470). Until then
-run it by hand, and the identities are told to run it themselves.
+`python3 -I .nanna/inchworm/gate.py ledger` checks `tests/invariants.toml`. It
+is not invoked by any flow, CI job or git hook yet: inchworm cannot run a repo
+command as a gate step (inchworm issue 14), and wiring it and its tests into CI
+is tracked in [issue 470](https://github.com/DominicBurkart/marigold/issues/470).
+Until then run it by hand, and the identities are told to run it themselves.
 
-What it checks:
+There are two modes.
 
-- Required fields, unique ids, and the enums `status` (`candidate`, `covered`,
+- Default: a fast, offline static LINT. It is not a proof that a cited test
+  runs: it reads Rust with a hand-written scanner (comments, string literals
+  including raw, byte and C strings, braces, attributes) and can be fooled by
+  constructs it does not model.
+- `--run` (for example `CARGO_TARGET_DIR=/var/tmp/gate-target python3 -I
+  .nanna/inchworm/gate.py ledger --run`): after the lint passes, it runs cargo
+  for every `covered` or `proven` citation. It needs `CARGO_TARGET_DIR` in the
+  environment, scrubs `GIT_*` variables, and for each citation runs
+  `cargo test -p <crate> (--lib | --test <file>) [--features ...] -- --list` to
+  require exactly one collected test of that name (and module path), then runs
+  it with `-- --exact` and requires exactly one passing test. Features come from
+  the `cfg(feature = ...)` gates the lint saw and from an optional `features`
+  list on the ledger entry. This is the source of truth; the lint is only a
+  pre-filter.
+
+What the lint checks:
+
+- Required fields, unique ids (compared after Unicode NFC normalisation, case
+  folding and trimming), and the enums `status` (`candidate`, `covered`,
   `proven`, `disputed`), `surface` (`interface`, `internal`) and `provable`
-  (`none`, `kani`, `lean`); a value of the wrong type is a clean error.
-- Every `covered_by` entry is a repository-relative `.rs` file under `tests/`,
-  `marigold/tests/` or `marigold-*/` (no absolute paths, no `..`, no symlink
-  escapes).
+  (`none`, `kani`, `lean`); a value of the wrong type or an invalid UTF-8
+  ledger is a clean error.
+- Every `covered_by` entry is a repository-relative `.rs` file that cargo
+  compiles as a test: `<crate>/tests/*.rs` directly (no subdirectories, no
+  `benches/`, no `tests/proofs/`), or a `<crate>/src` file declared by a `mod`
+  chain from `lib.rs` or `main.rs`, for the crates `marigold`, `marigold-impl`,
+  `marigold-grammar`, `marigold-lsp`, `marigold-macros` and `tests`. No absolute
+  paths, no `..`, no symlink escapes.
 - For `covered` and `proven`, entries must be written `path::name`, with
-  optional module segments before the name. After stripping comments and string
-  literals, exactly one `fn` of that name must match (the module segments must
-  be the innermost enclosing modules; without them the name must be unique in
-  the file), so a same-named test elsewhere cannot satisfy a citation.
+  optional module segments before the name. Exactly one `fn` of that name must
+  match (the module segments must be the innermost enclosing modules; without
+  them the name must be unique in the file), so a same-named test elsewhere
+  cannot satisfy a citation.
 - That fn must carry `#[test]`, `#[tokio::test(...)]`, `#[async_std::test]` or
-  similar, or live inside `proptest!`. Only a bounded set of attributes is
-  accepted on the fn: `test`, `*::test`, `should_panic`, `allow`, `doc` and
-  `cfg` whose predicate is `test`, `feature = "tokio"`,
-  `feature = "async-std"` or an `any(...)` of the two features. The same
-  `cfg` rule applies to every enclosing module and to a file-level `#![cfg]`.
-  `#[ignore]`, any other `cfg`, `cfg_attr` and any other attribute are rejected
-  (`cfg_attr(test, test)` is reported as an unsupported attribute form), as is
-  an fn nested in another fn, inside `macro_rules!` or in any other block.
-- `proven` needs `provable` other than `none` and a `proof` file under
-  `tests/proofs/` whose resolved path stays under that directory, with suffix
-  `.rs` or `.lean` and non-empty content. A `.rs` proof must contain a
-  `#[kani::proof]` or `#[test]` harness; a `.lean` proof is only checked for
-  being non-empty.
+  `#[rstest::rstest]`, including inside `proptest!` (a bare fn there is a plain
+  function, so it still needs `#[test]`; the macro head must be `proptest` or
+  `proptest::proptest`). Only `should_panic`, `allow`, `doc` and `cfg` are
+  accepted besides, where a `cfg` predicate must be `test`,
+  `feature = "tokio"`, `feature = "async-std"` or an `any(...)` of the two
+  features. The same `cfg` rule applies to every enclosing module, to inner
+  `#![...]` attributes at the head of a file or body, and to the `mod`
+  declaration of a cited `src` file. An inner attribute anywhere else,
+  `#[ignore]`, any other `cfg`, `cfg_attr` and any other attribute are
+  rejected, as is an fn nested in another fn, inside `macro_rules!` or in any
+  other block.
+- `proven` needs `provable` other than `none`, and a `proof` file under
+  `tests/proofs/` (the directory must not be a symlink and the resolved path
+  must stay inside it), used by one id only. For `kani` it is a `.rs` file with
+  a `#[kani::proof]` fn (not in a macro, a nested fn or an unsupported cfg
+  gate; `cfg(kani)` is fine); for `lean` it is a `.lean` file with a `theorem`
+  or `lemma` and no `sorry`, `axiom` or `admit` outside comments.
 - `proof_blocker` is an optional string saying why `provable = "none"` for code
   that is provable in principle.
 
+What `proven` means: a proof artifact of the right kind exists, is wired to one
+ledger id and passes this lint. It does not mean Kani or Lean were run or that
+the harness proves the statement; the gate does not execute either tool, and a
+reviewer must read the proof.
+
 `python3 -I .nanna/inchworm/gate.py coverage` additionally fails while any
-`surface = "interface"` invariant is not `covered` or `proven`. Exit codes: 0
-pass, 1 ledger problems, 2 usage. Tests: `python3 -I
-.nanna/inchworm/test_gate.py`, `test_import.py` and `test_check_models.py` in
-the same directory.
+`surface = "interface"` invariant is not `covered` or `proven`. Both phases take
+`--run`. Exit codes: 0 pass, 1 ledger problems, 2 usage. Tests (the run mode
+uses a fake `cargo` on `PATH`): `python3 -I .nanna/inchworm/test_gate.py`,
+`test_import.py` and `test_check_models.py` in the same directory.
 
 ## Ledger status
 
