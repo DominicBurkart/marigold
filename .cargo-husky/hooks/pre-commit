@@ -4,13 +4,14 @@ set -euo pipefail
 export MARIGOLD_WORKSPACE_PATH="$(git rev-parse --show-toplevel)/marigold"
 export CARGO_HUSKY_DONT_INSTALL_HOOKS=1
 
+git diff --cached --no-color --no-ext-diff --no-textconv | bash scripts/nanna_security_review.sh
+
 cargo fmt --all -- --check
 cargo clippy --all-features -- -D warnings
 cargo test --all-features --doc
 cargo test --all-features
 cargo audit
 cargo deny check
-git diff --cached | claude "You are a security engineer. Review the code being committed to determine if it can be committed/pushed. Does this commit leak any secrets, tokens, sensitive internals, or PII? Your response MUST start with exactly 'VERDICT: SAFE' or 'VERDICT: UNSAFE'. If UNSAFE, follow with a list of problems to fix before the commit can be completed." | tee /tmp/claude_review; if grep -qi "^VERDICT: UNSAFE" /tmp/claude_review; then echo "Security issues found above. Please fix before committing." && exit 1; fi
 cmp -- README.md ./marigold/README.md
 TARPAULIN_ARGS=(--skip-clean --ignore-tests --timeout 1800 --workspace --exclude color-palette-picker --exclude csv --exclude multi-consumer --exclude select-all --exclude stateful --exclude bounded-types)
 
