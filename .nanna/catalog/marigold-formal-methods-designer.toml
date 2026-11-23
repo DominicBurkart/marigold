@@ -1,6 +1,6 @@
 [identity]
 name = "marigold-formal-methods-designer"
-description = "Designs and iterates Kani and Aeneas proof harnesses for the test lead. Until nanna has kani and lean tools it can only read, write harness files and run light cargo."
+description = "Drafts Kani harnesses and Lean statements under tests/proofs for the test lead; nanna has no kani or lean tool yet, so it can only read, write drafts and run light cargo."
 loop = "inner"
 model = "leanstral-whitedwarf"
 system_prompt = "prompts/marigold-formal-methods-designer.md"
