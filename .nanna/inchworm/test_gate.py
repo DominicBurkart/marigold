@@ -1,3 +1,4 @@
+import re
 import pathlib
 import subprocess
 import sys
@@ -40,9 +41,11 @@ class GateCase(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name)
         (self.root / "tests").mkdir()
         (self.root / "marigold-impl/src").mkdir(parents=True)
-        (self.root / "tests/t.rs").write_text("fn real_test() {}\n")
-        (self.root / "marigold-impl/src/x.rs").write_text("fn other_test() {}\n")
-        (self.root / "outside.rs").write_text("fn real_test() {}\n")
+        (self.root / "tests/t.rs").write_text("#[test]\nfn real_test() {}\n")
+        (self.root / "marigold-impl/src/x.rs").write_text("#[cfg(test)]\nmod t {\n    #[tokio::test]\n    async fn other_test() {}\n}\n")
+        (self.root / "outside.rs").write_text("#[test]\nfn real_test() {}\n")
+        (self.root / "marigold/src").mkdir(parents=True)
+        (self.root / "marigold/src/x.rs").write_text("#[test]\nfn real_test() {}\n")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -140,9 +143,35 @@ class SchemaTests(GateCase):
         self.ledger({"proof_blocker": 3})
         self.assert_fail("proof_blocker")
 
-    def test_untested_and_disputed_statuses_accepted(self):
-        self.ledger({"id": "a", "status": "untested"}, {"id": "b", "status": "disputed"})
+    def test_disputed_status_accepted(self):
+        self.ledger({"status": "disputed"})
         self.assert_ok()
+
+    def test_untested_status_rejected(self):
+        self.ledger({"status": "untested"})
+        self.assert_fail("status")
+
+    def test_list_valued_status_is_clean_error(self):
+        (self.root / "tests/invariants.toml").write_text(
+            '[[invariant]]\nid="a"\nsurface="interface"\nstatement="s"\n'
+            'status=["covered"]\nprovable="none"\ncovered_by=[]\n'
+        )
+        self.assert_fail("status")
+
+    def test_list_valued_surface_and_provable_are_clean_errors(self):
+        for key in ("surface", "provable"):
+            self.ledger({})
+            path = self.root / "tests/invariants.toml"
+            text = path.read_text()
+            path.write_text(re.sub(rf'^{key} = ".*"$', f'{key} = ["x"]', text, flags=re.M))
+            self.assert_fail(key)
+
+    def test_integer_id_is_clean_error(self):
+        (self.root / "tests/invariants.toml").write_text(
+            '[[invariant]]\nid=1\nsurface="interface"\nstatement="s"\n'
+            'status="candidate"\nprovable="none"\ncovered_by=[]\n'
+        )
+        self.assert_fail("id")
 
 
 class CoveredByTests(GateCase):
@@ -154,9 +183,113 @@ class CoveredByTests(GateCase):
         self.ledger({"status": "covered", "covered_by": ["tests/t.rs::real_test"]})
         self.assert_ok()
 
-    def test_path_without_name_passes_when_file_exists(self):
+    def test_covered_requires_a_named_test(self):
         self.ledger({"status": "covered", "covered_by": ["tests/t.rs"]})
+        self.assert_fail("path::name")
+
+    def test_candidate_may_omit_name(self):
+        self.ledger({"covered_by": ["tests/t.rs"]})
         self.assert_ok()
+
+    def write_t(self, text):
+        (self.root / "tests/t.rs").write_text(text)
+
+    def covered_t(self, name="real_test"):
+        self.ledger({"status": "covered", "covered_by": [f"tests/t.rs::{name}"]})
+
+    def test_fn_only_in_line_comment_rejected(self):
+        self.write_t("// #[test]\n// fn real_test() {}\n")
+        self.covered_t()
+        self.assert_fail("real_test")
+
+    def test_fn_only_in_block_comment_rejected(self):
+        self.write_t("/* #[test]\nfn real_test() {} */\n")
+        self.covered_t()
+        self.assert_fail("real_test")
+
+    def test_fn_only_in_string_rejected(self):
+        self.write_t('const S: &str = "#[test]\\nfn real_test() {}";\n')
+        self.covered_t()
+        self.assert_fail("real_test")
+
+    def test_fn_only_in_raw_string_rejected(self):
+        self.write_t('const S: &str = r#"#[test]\nfn real_test() {}"#;\n')
+        self.covered_t()
+        self.assert_fail("real_test")
+
+    def test_plain_non_test_fn_rejected(self):
+        self.write_t("fn real_test() {}\n")
+        self.covered_t()
+        self.assert_fail("not a test")
+
+    def test_ignored_test_rejected(self):
+        self.write_t("#[test]\n#[ignore]\nfn real_test() {}\n")
+        self.covered_t()
+        self.assert_fail("ignore")
+
+    def test_ignored_with_reason_rejected(self):
+        self.write_t('#[ignore = "slow"]\n#[test]\nfn real_test() {}\n')
+        self.covered_t()
+        self.assert_fail("ignore")
+
+    def test_tokio_test_with_args_accepted(self):
+        self.write_t('#[tokio::test(flavor = "multi_thread", worker_threads = 4)]\nasync fn real_test() {}\n')
+        self.covered_t()
+        self.assert_ok()
+
+    def test_async_std_test_accepted(self):
+        self.write_t("#[async_std::test]\nasync fn real_test() {}\n")
+        self.covered_t()
+        self.assert_ok()
+
+    def test_cfg_test_alone_is_not_a_test(self):
+        self.write_t("#[cfg(test)]\nfn real_test() {}\n")
+        self.covered_t()
+        self.assert_fail("not a test")
+
+    def test_fn_inside_proptest_macro_accepted(self):
+        self.write_t("proptest! {\n    #[test]\n    fn real_test(x in 0..3) {}\n}\n")
+        self.covered_t()
+        self.assert_ok()
+
+    def test_proptest_fn_without_test_attribute_accepted(self):
+        self.write_t("proptest! {\n    fn real_test(x in 0..3) {}\n}\n")
+        self.covered_t()
+        self.assert_ok()
+
+    def test_ignored_fn_inside_proptest_rejected(self):
+        self.write_t("proptest! {\n    #[ignore]\n    #[test]\n    fn real_test(x in 0..3) {}\n}\n")
+        self.covered_t()
+        self.assert_fail("ignore")
+
+    def test_fn_after_proptest_macro_is_not_inside_it(self):
+        self.write_t("proptest! {\n    #[test]\n    fn other(x in 0..3) {}\n}\nfn real_test() {}\n")
+        self.covered_t()
+        self.assert_fail("not a test")
+
+    def test_char_literal_quote_does_not_break_stripping(self):
+        self.write_t("const Q: char = '\"';\n#[test]\nfn real_test() {}\n")
+        self.covered_t()
+        self.assert_ok()
+
+    def test_lifetime_does_not_break_stripping(self):
+        self.write_t("fn f<'a>(x: &'a str) -> &'a str { x }\n#[test]\nfn real_test() {}\n")
+        self.covered_t()
+        self.assert_ok()
+
+    def test_production_crate_path_rejected(self):
+        self.ledger({"status": "covered", "covered_by": ["marigold/src/x.rs::real_test"]})
+        self.assert_fail("tests/")
+
+    def test_marigold_tests_dir_accepted(self):
+        (self.root / "marigold/tests").mkdir()
+        (self.root / "marigold/tests/y.rs").write_text("#[test]\nfn real_test() {}\n")
+        self.ledger({"status": "covered", "covered_by": ["marigold/tests/y.rs::real_test"]})
+        self.assert_ok()
+
+    def test_wrong_final_segment_rejected(self):
+        self.ledger({"status": "covered", "covered_by": ["tests/t.rs::m::other_test"]})
+        self.assert_fail("other_test")
 
     def test_crate_dir_path_passes(self):
         self.ledger({"status": "covered", "covered_by": ["marigold-impl/src/x.rs::other_test"]})
@@ -224,7 +357,7 @@ class ProvenTests(GateCase):
 
     def test_proven_with_existing_proof_passes(self):
         (self.root / "tests/proofs/kani").mkdir(parents=True)
-        (self.root / "tests/proofs/kani/p.rs").write_text("")
+        (self.root / "tests/proofs/kani/p.rs").write_text("fn proof() {}\n")
         self.proven(proof="tests/proofs/kani/p.rs")
         self.assert_ok()
 
@@ -240,13 +373,19 @@ class ProvenTests(GateCase):
         self.proven(proof="/tests/proofs/p.rs")
         self.assert_fail("absolute")
 
+    def test_empty_proof_file_rejected(self):
+        (self.root / "tests/proofs").mkdir()
+        (self.root / "tests/proofs/p.rs").write_text("  \n")
+        self.proven(proof="tests/proofs/p.rs")
+        self.assert_fail("empty")
+
     def test_proof_missing_file_rejected(self):
         self.proven(provable="lean", proof="tests/proofs/lean/none.lean")
         self.assert_fail("missing")
 
     def test_proven_with_provable_none_rejected(self):
         (self.root / "tests/proofs").mkdir()
-        (self.root / "tests/proofs/p.lean").write_text("")
+        (self.root / "tests/proofs/p.lean").write_text("theorem t : True := trivial\n")
         self.proven(provable="none", proof="tests/proofs/p.lean")
         self.assert_fail("provable")
 
