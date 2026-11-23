@@ -1,0 +1,18 @@
+[identity]
+name = "marigold-research-runtime"
+description = "Researcher for the marigold runtime area; writes its findings to docs/research/runtime.txt only."
+loop = "middle"
+model = "gemma4:e4b"
+system_prompt = "prompts/marigold-research-runtime.md"
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = ["docs/research/runtime.txt"]
+read_paths = ["marigold-impl/**", "marigold/**", "tests/**", "examples/**", "Cargo.toml", "Cargo.lock"]
+max_effect = "workspace"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file"]
+
+[limits]
+max_iterations = 200
+max_wall_clock_secs = 3600
+max_concurrent = 1

@@ -1,0 +1,18 @@
+[identity]
+name = "marigold-feature-designer"
+description = "Implements a new journey-based interface test-first in the marigold crates."
+loop = "inner"
+model = "gemma4:e4b"
+system_prompt = { inline = "Implement the feature in the task or plan from the user journey inward. First write tests that express the journey and the interface contract and watch them fail; then implement until cargo_test passes for the touched crates and cargo_check is clean. Do not impose a stack, executor or runtime on marigold users and add no dependency to a default language build. You cannot edit any Cargo.toml, so report a needed dependency instead of adding it. Keep README.md and marigold/README.md identical by reporting a needed change instead. Add no code comments." }
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = ["marigold/**", "marigold-macros/**", "marigold-grammar/**", "marigold-lsp/**", "marigold-impl/**", "tests/**"]
+read_paths = ["marigold/**", "marigold-macros/**", "marigold-grammar/**", "marigold-lsp/**", "marigold-impl/**", "tests/**", "examples/**", "integrations/**", "docs/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "deny.toml", "README.md"]
+max_effect = "workspace"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file", "cargo_check", "cargo_test", "cargo_build"]
+
+[limits]
+max_iterations = 200
+max_wall_clock_secs = 3600
+max_concurrent = 1

@@ -51,4 +51,44 @@ mkdir -p "$tmp/xdg/nanna"
 cp -r "$host/agents" "$tmp/xdg/nanna/agents"
 expect 1 "xdg/nanna/agents rejects the repo cards" "empty NANNA_CONFIG_DIR falls back to XDG_CONFIG_HOME" env NANNA_CONFIG_DIR= XDG_CONFIG_HOME="$tmp/xdg" NANNA_REPO="$fixtures/ok" "$check"
 
+mutate() {
+  local file=$1 expr=$2
+  rm -rf "$tmp/m"
+  mkdir -p "$tmp/m/repo/.nanna"
+  cp -r "$root/.nanna/agents" "$tmp/m/repo/.nanna/agents"
+  cp -r "$root/.nanna/catalog" "$tmp/m/cat"
+  sed -i "$expr" "$tmp/m/cat/$file" "$tmp/m/repo/.nanna/agents/$file"
+}
+mutated() {
+  env NANNA_CONFIG_DIR="$absent" NANNA_REPO="$tmp/m/repo" NANNA_CATALOG_DIR="$tmp/m/cat" "$check"
+}
+mutated_elsewhere() {
+  bash -c 'cd / && exec "$@"' _ env NANNA_CONFIG_DIR="$absent" NANNA_REPO="$tmp/m/repo" NANNA_CATALOG_DIR="$tmp/m/cat" "$check"
+}
+
+rm -rf "$tmp/m"
+mkdir -p "$tmp/m/repo/.nanna"
+cp -r "$root/.nanna/agents" "$tmp/m/repo/.nanna/agents"
+cp -r "$root/.nanna/catalog" "$tmp/m/cat"
+expect 0 "" "unmodified family passes" mutated
+expect 0 "" "unmodified family passes from another working directory" mutated_elsewhere
+
+mutate marigold-research-grammar.toml 's/^tools = \[/tools = ["cargo_check", /'
+expect 1 "execution or forge tool" "researcher with a cargo tool" mutated
+expect 1 "execution or forge tool" "researcher with a cargo tool, other working directory" mutated_elsewhere
+
+mutate marigold-research-grammar.toml 's|^paths = .*|paths = ["docs/research/other.txt"]|'
+expect 1 "other than docs/research/grammar.txt" "researcher with a wrong write path" mutated
+expect 1 "other than docs/research/grammar.txt" "researcher with a wrong write path, other working directory" mutated_elsewhere
+
+mutate marigold-research-lead.toml 's|^paths = .*|paths = ["docs/**"]|'
+expect 1 "other than docs/research/\*\*" "lead with a wrong glob" mutated
+expect 1 "other than docs/research/\*\*" "lead with a wrong glob, other working directory" mutated_elsewhere
+
+mutate marigold-review-scope.toml 's/^tools = \[/tools = ["write_file", /'
+expect 1 "execution, write or forge tool" "reviewer with a write tool, other working directory" mutated_elsewhere
+
+mutate marigold-research-grammar.toml 's/^max_effect = .*/max_effect = "none"/'
+expect 1 "ceiling is not workspace" "researcher with ceiling none" mutated
+
 exit "$failures"

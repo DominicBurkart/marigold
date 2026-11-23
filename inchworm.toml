@@ -124,3 +124,293 @@ kind = "nanna_clean"
 [flow.outcome]
 mode = "draft_pr"
 blocking = "required"
+
+[[flow]]
+name = "test-lead-proptest"
+trigger = { kind = "label", label = "inchworm:test-proptest" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "plan"
+identity = "marigold-test-lead"
+
+[[flow.step]]
+name = "work"
+identity = "marigold-proptest-designer"
+
+[[flow.step]]
+name = "review"
+identity = "marigold-review-duplication"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 800
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
+
+[[flow]]
+name = "test-lead-e2e"
+trigger = { kind = "label", label = "inchworm:test-e2e" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "plan"
+identity = "marigold-test-lead"
+
+[[flow.step]]
+name = "work"
+identity = "marigold-e2e-designer"
+
+[[flow.step]]
+name = "review"
+identity = "marigold-review-alignment"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 800
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
+
+[[flow]]
+name = "test-lead-formal"
+trigger = { kind = "label", label = "inchworm:test-formal" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "plan"
+identity = "marigold-test-lead"
+
+[[flow.step]]
+name = "work"
+identity = "marigold-formal-methods-designer"
+
+[[flow.step]]
+name = "review"
+identity = "marigold-review-scope"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 800
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
+
+[[flow]]
+name = "implement-bugfix"
+trigger = { kind = "label", label = "inchworm:bugfix" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "plan"
+identity = "marigold-implementer-lead"
+
+[[flow.step]]
+name = "work"
+identity = "marigold-bugfix-implementer"
+
+[[flow.step]]
+name = "review"
+identity = "marigold-review-secondary-impact"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 600
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
+
+[[flow]]
+name = "implement-feature"
+trigger = { kind = "label", label = "inchworm:feature" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "plan"
+identity = "marigold-implementer-lead"
+
+[[flow.step]]
+name = "work"
+identity = "marigold-feature-designer"
+
+[[flow.step]]
+name = "review"
+identity = "marigold-review-alignment"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 1000
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
+
+[[flow]]
+name = "research-grammar"
+trigger = { kind = "label", label = "inchworm:research-grammar" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "plan"
+identity = "marigold-research-lead"
+
+[[flow.step]]
+name = "research"
+identity = "marigold-research-grammar"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 400
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
+
+[[flow]]
+name = "research-runtime"
+trigger = { kind = "label", label = "inchworm:research-runtime" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "plan"
+identity = "marigold-research-lead"
+
+[[flow.step]]
+name = "research"
+identity = "marigold-research-runtime"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 400
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
+
+[[flow]]
+name = "research-analyzer-lsp"
+trigger = { kind = "label", label = "inchworm:research-analyzer-lsp" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "plan"
+identity = "marigold-research-lead"
+
+[[flow.step]]
+name = "research"
+identity = "marigold-research-analyzer-lsp"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 400
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
+
+[[flow]]
+name = "research-integrations"
+trigger = { kind = "label", label = "inchworm:research-integrations" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "plan"
+identity = "marigold-research-lead"
+
+[[flow.step]]
+name = "research"
+identity = "marigold-research-integrations"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 400
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
+
+[[flow]]
+name = "research-docs"
+trigger = { kind = "label", label = "inchworm:research-docs" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "plan"
+identity = "marigold-research-lead"
+
+[[flow.step]]
+name = "research"
+identity = "marigold-research-docs"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 400
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
