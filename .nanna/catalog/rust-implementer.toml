@@ -1,0 +1,18 @@
+[identity]
+name = "rust-implementer"
+description = "Implements a scoped change in the marigold workspace crates."
+loop = "inner"
+model = "gemma4:e4b"
+system_prompt = "prompts/rust-implementer.md"
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = ["marigold/**", "marigold-macros/**", "marigold-grammar/**", "marigold-lsp/**", "marigold-impl/**", "tests/**", "examples/**"]
+read_paths = ["marigold/**", "marigold-macros/**", "marigold-grammar/**", "marigold-lsp/**", "marigold-impl/**", "tests/**", "examples/**", "integrations/**", "docs/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "deny.toml", "codecov.yml", "README.md", "install.sh", "publish.sh"]
+max_effect = "workspace"
+tools = ["read_file", "write_file", "list_directory", "search", "git_status", "git_diff", "cargo_check", "cargo_test", "cargo_build"]
+
+[limits]
+max_iterations = 200
+max_wall_clock_secs = 3600
+max_concurrent = 4

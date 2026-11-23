@@ -1,0 +1,41 @@
+[offramp]
+default = "noop"
+
+[auditor]
+runs_in = { kind = "nanna", identity = "auditor" }
+on_failure = "block"
+
+[merge]
+allow = false
+
+[[flow]]
+name = "issue"
+trigger = { kind = "label", label = "inchworm" }
+base = "main"
+max_attempts = 3
+
+[[flow.step]]
+name = "implement"
+identity = "rust-implementer"
+
+[[flow.step]]
+name = "publish"
+identity = "pr-shepherd"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 400
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[[flow.judge]]
+kind = "llm"
+rubric = ".inchworm/rubric.md"
+model = "gemma4:e4b"
+min_score = 7
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"

@@ -1,0 +1,18 @@
+[identity]
+name = "docs-writer"
+description = "Writes documentation under docs/ and the root README.md only."
+loop = "inner"
+model = "gemma4:e4b"
+system_prompt = { inline = "You edit only docs/** and the root README.md. Markdown must satisfy .markdownlint.yaml. Report that marigold/README.md must be synced rather than editing it. Never edit code." }
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = ["docs/**", "README.md"]
+read_paths = ["docs/**", "README.md", "marigold/**", "marigold-grammar/**", "marigold-impl/**", "marigold-macros/**", "marigold-lsp/**", "integrations/**", "Cargo.toml"]
+max_effect = "workspace"
+tools = ["read_file", "write_file", "list_directory", "search", "git_status", "git_diff"]
+
+[limits]
+max_iterations = 60
+max_wall_clock_secs = 900
+max_concurrent = 1

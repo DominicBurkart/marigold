@@ -1,0 +1,18 @@
+[identity]
+name = "docs-writer"
+description = "Writes documentation under docs/ and the root README.md only."
+loop = "inner"
+model = "gemma4:e4b"
+system_prompt = "prompts/docs-writer.md"
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = ["docs/**", "README.md"]
+read_paths = ["marigold/**", "marigold-macros/**", "marigold-grammar/**", "marigold-lsp/**", "marigold-impl/**", "tests/**", "examples/**", "integrations/**", "docs/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "deny.toml", "codecov.yml", "README.md", "install.sh", "publish.sh"]
+max_effect = "workspace"
+tools = ["read_file", "write_file", "list_directory", "search", "git_status", "git_diff"]
+
+[limits]
+max_iterations = 100
+max_wall_clock_secs = 1800
+max_concurrent = 2
