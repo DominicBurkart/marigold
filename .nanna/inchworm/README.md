@@ -128,9 +128,11 @@ There are two modes.
   when `GATE_OFFLINE=1`.
 - Each cargo call has a timeout (`GATE_CARGO_TIMEOUT` seconds, default 900, a
   positive integer, otherwise exit 2). Output goes to temporary files, and the
-  cargo process group is killed on timeout, on SIGINT (the gate then prints
-  `interrupted` and exits 130) and after every call, so daemons left in the
-  group do not leak. A grandchild that starts its own session escapes that.
+  cargo process group is killed on timeout, on SIGINT (the gate prints
+  `interrupted` and exits 130), on SIGTERM (exit 143) and SIGHUP (exit 129),
+  so CI cancellation or `timeout N` stop cargo too, and after every call, so
+  daemons left in the group do not leak. SIGKILL cannot be caught, and a
+  grandchild that starts its own session escapes the group kill.
 
 Cases the lint accepts but cargo rejects, which `--run` catches: an inner `cfg`
 inside an fn body, a module declared only in `main.rs` while `lib.rs` also
@@ -179,15 +181,21 @@ What the lint checks:
   gate; `cfg(kani)` is fine); for `lean` it is a `.lean` file with a `theorem`
   or `lemma` and none of `sorry`, `sorryAx`, `stop`, `axiom`, `admit`,
   `native_decide`, `ofReduceBool`, `reduceBool`, `unsafe`, `implemented_by`,
-  `macro`, `macro_rules`, `elab`, `syntax`, `run_cmd` or `import Lean` outside
-  comments and strings (nested block comments and string escapes are handled).
+  `macro`, `macro_rules`, `elab`, `syntax`, `run_cmd`, `import Lean`,
+  `open Lean`, `debug.skipKernelTC`, `initialize`, `opaque`, `@[extern` or an
+  `import` other than `Mathlib`, `Aeneas`, `Std` and `Init` outside comments
+  and strings (nested block comments, string escapes and real char literals are
+  handled; a `'` after an identifier character is a prime, not a char).
   This Lean lint is advisory: a reviewer must read the proof, and `lean_check`
-  (nanna-coder #1051) is the real check. A kani harness must be built under
-  `cfg(kani)` (a `cfg(test)` harness is rejected), contain an assertion
+  (nanna-coder #1051) is the real check. A kani harness must be gated by
+  `cfg(kani)` exactly (on the file, an enclosing module or the fn; `cfg(test)`,
+  `any(kani, test)` and `not(kani)` are rejected), contain an assertion
   (`kani::assert`, `assert!` with a condition other than the literal `true`,
-  `assert_eq!` or `assert_ne!`) and no literal vacuous `kani::assume` (`false`,
-  `!true`, or two different integer literals compared equal); a harness can
-  still be trivial in ways the lint cannot see.
+  `assert_eq!` or `assert_ne!`) and no syntactically vacuous `kani::assume`
+  (`false`, `!true`, redundant parentheses around either, a comparison of two
+  integer literals that is false, or `x != x`, `x < x`, `x > x`); the check is
+  literal and syntactic only (`let b = false; kani::assume(b)` passes), and a
+  harness can still be trivial in ways the lint cannot see.
 - `proof_blocker` is an optional string saying why `provable = "none"` for code
   that is provable in principle.
 
@@ -201,7 +209,10 @@ Likewise `covered` is only as good as the reviewer's reading: a vacuous
 
 `python3 -I .nanna/inchworm/gate.py coverage` additionally fails while any
 `surface = "interface"` invariant is not `covered` or `proven`. Both phases take
-`--run`. Exit codes: 0 pass, 1 ledger problems, 2 usage. Tests (the run mode
+`--run`. Exit codes: 0 pass, 1 ledger problems, 2 usage, 129 SIGHUP, 130
+SIGINT, 143 SIGTERM. When `cargo test --list` fails, the error names the likely
+causes (a build error, or a target with `required-features` that are not
+enabled) and shows the last five stderr lines. Tests (the run mode
 uses a fake `cargo` on `PATH`): `python3 -I .nanna/inchworm/test_gate.py`,
 `test_import.py` and `test_check_models.py` in the same directory.
 
