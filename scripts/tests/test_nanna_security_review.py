@@ -30,6 +30,9 @@ case "${STUB_MODE:-safe}" in
   safe_then_unsafe_text) printf 'VERDICT: SAFE\nVERDICT: UNSAFE\n' ;;
   safely) printf 'VERDICT: SAFELY done\n' ;;
   padded) printf '\n\n   Assistant:   VERDICT: SAFE  \r\n' ;;
+  ansi_output) printf 'VERDICT: SAFE\033[31m red\007\n' ;;
+  log_prefix) printf '\033[2m2026-11-23T16:04:53.031279Z\033[0m \033[31mERROR\033[0m \033[2mnanna\033[0m: Failed to scan workspace\nAssistant: VERDICT: SAFE\n' ;;
+  log_then_text) printf '2026-11-23T16:04:53.031279Z ERROR nanna: x\nHello there\nAssistant: VERDICT: SAFE\n' ;;
   empty) ;;
   fail) echo "connection refused" >&2; exit 7 ;;
   sleep) sleep 30 ;;
@@ -47,6 +50,41 @@ def fake_aws_key():
 
 def fake_private_key_header():
     return "-----BEGIN " + "RSA PRIVATE KEY-----"
+
+
+def shell_comments(src):
+    found = []
+    quote = None
+    i = 0
+    n = len(src)
+    line = 1
+    while i < n:
+        c = src[i]
+        if c == "\n":
+            line += 1
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif quote == '"':
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                quote = None
+        else:
+            if c == "\\":
+                i += 1
+            elif c in "'\"":
+                quote = c
+            elif c == "#":
+                prev = src[i - 1] if i > 0 else "\n"
+                if prev not in "$" and not (prev == "{" and i > 1 and src[i - 2] == "$"):
+                    if not (line == 1 and src.startswith("#!")):
+                        found.append(line)
+                    while i < n and src[i] != "\n":
+                        i += 1
+                    continue
+        i += 1
+    return found
 
 
 def as_bytes(value):
@@ -114,6 +152,14 @@ class ReviewTest(unittest.TestCase):
         r = self.run_review(CLEAN_DIFF, "garbled")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("verdict", self.out(r).lower())
+
+    def test_leading_tracing_log_lines_are_skipped(self):
+        r = self.run_review(CLEAN_DIFF, "log_prefix")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_only_tracing_log_lines_are_skipped_not_arbitrary_text(self):
+        r = self.run_review(CLEAN_DIFF, "log_then_text")
+        self.assertNotEqual(r.returncode, 0)
 
     def test_verdict_not_on_first_line_blocks(self):
         r = self.run_review(CLEAN_DIFF, "late_safe")
@@ -269,14 +315,131 @@ class ReviewTest(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(len(self.calls()), 1)
 
-    def test_diff_over_chunk_limit_fails_closed(self):
+    def test_default_chunk_size_is_3500_bytes(self):
+        diff = ("+" + "d" * 99 + "\n") * 60
+        r = self.run_review(diff, "safe")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_oversized_diff_warns_and_reviews_only_first_chunks(self):
         diff = ("+" + "z" * 99 + "\n") * 100
         r = self.run_review(
             diff, "safe", NANNA_REVIEW_CHUNK_BYTES="1000", NANNA_REVIEW_MAX_CHUNKS="2"
         )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("WARNING", self.out(r))
+        self.assertIn("pre-scan only", self.out(r))
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_oversized_diff_unsafe_in_reviewed_chunk_blocks(self):
+        diff = ("+" + "z" * 99 + "\n") * 100
+        r = self.run_review(
+            diff,
+            "unsafe_first",
+            NANNA_REVIEW_CHUNK_BYTES="1000",
+            NANNA_REVIEW_MAX_CHUNKS="2",
+        )
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("too large", self.out(r).lower())
+
+    def test_oversized_diff_secret_in_unreviewed_remainder_still_blocks(self):
+        diff = ("+" + "z" * 99 + "\n") * 100 + "+k=" + fake_aws_key() + "\n"
+        r = self.run_review(
+            diff, "safe", NANNA_REVIEW_CHUNK_BYTES="1000", NANNA_REVIEW_MAX_CHUNKS="2"
+        )
+        self.assertNotEqual(r.returncode, 0)
         self.assertEqual(self.calls(), [])
+
+    def test_ansi_colored_diff_is_stripped_before_scanning(self):
+        esc = "\x1b"
+        diff = (
+            esc + "[1mdiff --git a/a.rs b/a.rs" + esc + "[m\n"
+            + esc + "[32m+k=" + fake_aws_key() + esc + "[m\n"
+        )
+        r = self.run_review(diff, "safe")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("pre-scan", self.out(r).lower())
+
+    def test_ansi_split_secret_is_found(self):
+        diff = "+k=AK" + "\x1b[0m" + "IAABCDEFGHIJKLMNOP\n"
+        r = self.run_review(diff, "safe")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_clean_colored_diff_passes_and_prompt_has_no_escapes(self):
+        diff = "\x1b[32m+fn ok() {}\x1b[m\n"
+        r = self.run_review(diff, "safe")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("\x1b", self.all_prompts())
+
+    def test_lone_escape_byte_fails_closed(self):
+        r = self.run_review("+fn a() {} \x1b]0;title\x07\n", "safe")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("escape", self.out(r).lower())
+        self.assertEqual(self.calls(), [])
+
+    def test_model_output_control_characters_are_stripped(self):
+        r = self.run_review(CLEAN_DIFF, "ansi_output")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("\x1b", r.stdout)
+        self.assertNotIn("\x07", r.stdout)
+
+    def test_renamed_file_path_is_reported_and_scanned(self):
+        diff = (
+            "diff --git a/old.rs b/new dir/name b.rs\n"
+            "similarity index 90%\n"
+            "rename from old.rs\n"
+            "rename to new dir/name b.rs\n"
+            "--- a/old.rs\n"
+            "+++ b/new dir/name b.rs\n"
+            "@@ -1,1 +1,2 @@\n"
+            " ctx\n"
+            "+k=" + fake_aws_key() + "\n"
+        )
+        r = self.run_review(diff, "safe")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("new dir/name b.rs:2", self.out(r))
+
+    def test_secret_in_filename_header_is_scanned(self):
+        diff = (
+            "diff --git a/" + fake_aws_key() + ".txt b/" + fake_aws_key() + ".txt\n"
+            "+++ b/" + fake_aws_key() + ".txt\n"
+            "@@ -0,0 +1,1 @@\n"
+            "+hello\n"
+        )
+        r = self.run_review(diff, "safe")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn(fake_aws_key(), self.out(r))
+
+    def test_text_png_and_pdf_are_reviewed_not_excluded_by_extension(self):
+        diff = (
+            "diff --git a/notes.png b/notes.png\n"
+            "+++ b/notes.png\n"
+            "@@ -0,0 +1,1 @@\n"
+            "+PNGTEXTCONTENT\n"
+            "diff --git a/doc.pdf b/doc.pdf\n"
+            "+++ b/doc.pdf\n"
+            "@@ -0,0 +1,1 @@\n"
+            "+PDFTEXTCONTENT\n"
+        )
+        r = self.run_review(diff, "safe")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("PNGTEXTCONTENT", self.all_prompts())
+        self.assertIn("PDFTEXTCONTENT", self.all_prompts())
+
+    def test_git_binary_patch_is_excluded(self):
+        diff = (
+            "diff --git a/blob.bin b/blob.bin\n"
+            "GIT binary patch\n"
+            "literal 10\n"
+            "BINARYPAYLOAD\n"
+            "diff --git a/src/a.rs b/src/a.rs\n"
+            "+++ b/src/a.rs\n"
+            "@@ -0,0 +1,1 @@\n"
+            "+fn kept() {}\n"
+        )
+        r = self.run_review(diff, "safe")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("BINARYPAYLOAD", self.all_prompts())
+        self.assertIn("blob.bin", r.stdout)
 
     def test_prescan_blocks_aws_key_even_if_model_says_safe(self):
         r = self.run_review('+aws_key = "' + fake_aws_key() + '"\n', "safe")
@@ -339,6 +502,15 @@ class ReviewTest(unittest.TestCase):
             "generic password": 'password = "' + 'correcthorse"',
             "generic api key": "API_KEY: '" + "abcd1234efgh'",
             "generic token": 'token="' + 'abcdefghij"',
+            "json api key": '"api_key": "' + 'abcdefghijkl"',
+            "unquoted env key": "API_KEY=" + "abcd1234efgh5678",
+            "yaml pw": "password: " + "s3cr3tPassw0rd!",
+            "datadog": "DD_API_KEY=" + "0123456789abcdef" * 2,
+            "aws creds": 'AWS_SECRET_ACCESS_KEY="' + "wJalrXUtnFEMI/K7MDENG" + 'bPxRfiCYQZTWKEY12"',
+            "stripe test": "sk_" + "test_" + "a1B2c3D4e5F6g7H8i9J0k1L2",
+            "slack webhook": "https://hooks." + "slack.com/services/T0123ABCD/B0123ABCD/abcdEFGH1234ijkl5678",
+            "sendgrid": "SG" + "." + "abcdEFGH1234ijklMNOP56" + "." + "abcdEFGH1234ijklMNOP56qrst",
+            "single quoted json": "'secret': '" + "abcdefghijkl'",
         }
         for name, sample in samples.items():
             with self.subTest(name=name):
@@ -353,21 +525,111 @@ class ReviewTest(unittest.TestCase):
             "+fn password_strength() {}\n"
             '+let name = "short";\n'
             "+// see https://example.com/docs\n"
+            '+let t = tokenizer.next_token();\n'
+            '+password: ${DB_PASSWORD}\n'
+            '+api_key = "<your-api-key-here>"\n'
+            '+let secret_name = "short";\n'
+            "+token_type: Bearer\n"
         )
         r = self.run_review(diff, "safe")
         self.assertEqual(r.returncode, 0, r.stderr)
 
-    def test_allow_marker_suppresses_prescan_on_that_line(self):
-        diff = "+k=" + fake_aws_key() + " // nanna-review: allow\n"
+    def test_named_allow_marker_suppresses_only_that_pattern_on_that_line(self):
+        diff = "+k=" + fake_aws_key() + " // nanna-review: allow aws-access-key\n"
         r = self.run_review(diff, "safe")
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_allow_marker_without_name_is_not_a_bypass(self):
+        diff = "+k=" + fake_aws_key() + " // nanna-review: allow\n"
+        r = self.run_review(diff, "safe")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_allow_marker_with_other_pattern_name_is_not_a_bypass(self):
+        diff = "+k=" + fake_aws_key() + " // nanna-review: allow stripe-key\n"
+        r = self.run_review(diff, "safe")
+        self.assertNotEqual(r.returncode, 0)
 
     def test_allow_marker_only_applies_to_its_own_line(self):
         diff = (
-            "+k=" + fake_aws_key() + " // nanna-review: allow\n"
+            "+k=" + fake_aws_key() + " // nanna-review: allow aws-access-key\n"
             "+k2=" + fake_aws_key() + "\n"
         )
         r = self.run_review(diff, "safe")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_allow_marker_does_not_cover_a_second_secret_on_the_line(self):
+        diff = (
+            "+a="
+            + fake_aws_key()
+            + " b="
+            + "sk_"
+            + "live_"
+            + "a1B2c3D4e5F6g7H8i9J0k1L2"
+            + " // nanna-review: allow aws-access-key\n"
+        )
+        r = self.run_review(diff, "safe")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("stripe-key", self.out(r))
+
+    def test_allow_marker_inside_string_literal_not_at_end_is_ignored(self):
+        diff = '+k="' + fake_aws_key() + '"; m = "nanna-review: allow aws-access-key"; x()\n'
+        r = self.run_review(diff, "safe")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_allow_marker_in_file_path_is_ignored(self):
+        diff = (
+            "diff --git a/x b/x\n"
+            "+++ b/nanna-review: allow aws-access-key\n"
+            "@@ -0,0 +1,1 @@\n"
+            "+k=" + fake_aws_key() + "\n"
+        )
+        r = self.run_review(diff, "safe")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_private_key_block_can_never_be_allowed(self):
+        diff = "+" + fake_private_key_header() + " nanna-review: allow private-key-block\n"
+        r = self.run_review(diff, "safe")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_allow_marker_accepts_multiple_names(self):
+        diff = (
+            "+a="
+            + fake_aws_key()
+            + " b="
+            + "sk_"
+            + "live_"
+            + "a1B2c3D4e5F6g7H8i9J0k1L2"
+            + " // nanna-review: allow aws-access-key,stripe-key\n"
+        )
+        r = self.run_review(diff, "safe")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_sk_family_needs_left_boundary(self):
+        for text in (
+            "disk-usage-monitoring-dashboard",
+            "risk-assessment-framework-document",
+            "task-queue-worker-configuration-name",
+        ):
+            with self.subTest(text=text):
+                r = self.run_review("+// " + text + "\n", "safe")
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_sk_key_is_flagged_but_documented_dummies_are_not(self):
+        real = "sk-" + "Ab3dE5gH7jK9mN1pQ3sT5vW7"
+        r = self.run_review("+x = " + real + "\n", "safe")
+        self.assertNotEqual(r.returncode, 0)
+        for dummy in (
+            "  ANTHROPIC_API_KEY=sk-ant-api03-dummy-key-for-offline-ci \\",
+            '      options: { apiKey: "sk-dummy-offline-ci" },',
+            "x = sk-example-key-for-documentation-only-ok",
+        ):
+            with self.subTest(dummy=dummy):
+                r = self.run_review("+" + dummy + "\n", "safe")
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_dummy_marker_does_not_hide_a_real_key_on_same_line(self):
+        real = "sk-" + "Ab3dE5gH7jK9mN1pQ3sT5vW7"
+        r = self.run_review("+# example: " + real + "\n", "safe")
         self.assertNotEqual(r.returncode, 0)
 
     def test_prescan_reports_file_and_line_without_value(self):
@@ -440,8 +702,15 @@ class ReviewTest(unittest.TestCase):
 
     def test_script_has_no_comments(self):
         with open(SCRIPT) as f:
-            lines = f.read().splitlines()[1:]
-        self.assertEqual([l for l in lines if l.lstrip().startswith("#")], [])
+            src = f.read()
+        self.assertEqual(shell_comments(src), [])
+        self.assertNotIn("<<", src)
+
+    def test_comment_detector_finds_trailing_comments(self):
+        self.assertEqual(len(shell_comments("#!/bin/bash\nx=1 # note\n")), 1)
+        self.assertEqual(len(shell_comments("# full line\n")), 1)
+        self.assertEqual(shell_comments("x='a # b'; y=\"c # d\"; echo $# ${#x}\n"), [])
+        self.assertEqual(shell_comments("x=\"multi\nline # still string\"\n"), [])
 
 
 if __name__ == "__main__":
