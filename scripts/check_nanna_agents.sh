@@ -79,7 +79,7 @@ with open(sys.argv[1], "rb") as f:
 done
 
 exec_tools='cargo_|run_command|github_|git_commit|git_push|write_file|kani|lean|aeneas'
-for file in .nanna/catalog/marigold-review-*.toml .nanna/agents/marigold-review-*.toml; do
+for file in "$catalog"/marigold-review-*.toml "$repo"/.nanna/agents/marigold-review-*.toml; do
   [ -e "$file" ] || continue
   tools=$(sed -n 's/^tools = //p' "$file")
   if printf '%s\n' "$tools" | grep -Eq "$exec_tools"; then
@@ -91,7 +91,7 @@ for file in .nanna/catalog/marigold-review-*.toml .nanna/agents/marigold-review-
 done
 
 research_exec_tools='cargo_|run_command|github_|git_commit|git_push|kani|lean|aeneas'
-for file in .nanna/catalog/marigold-research-*.toml .nanna/agents/marigold-research-*.toml; do
+for file in "$catalog"/marigold-research-*.toml "$repo"/.nanna/agents/marigold-research-*.toml; do
   [ -e "$file" ] || continue
   tools=$(sed -n 's/^tools = //p' "$file")
   if printf '%s\n' "$tools" | grep -Eq "$research_exec_tools"; then
@@ -108,7 +108,7 @@ for file in .nanna/catalog/marigold-research-*.toml .nanna/agents/marigold-resea
   grep -qxF "paths = [\"$want\"]" "$file" || { echo "check_nanna_agents: $file may write something other than $want" >&2; status=1; }
 done
 
-for file in .nanna/catalog/marigold-*.toml .nanna/agents/marigold-*.toml; do
+for file in "$catalog"/marigold-*.toml "$repo"/.nanna/agents/marigold-*.toml; do
   [ -e "$file" ] || continue
   name=$(sed -n 's/^name = "\(.*\)"$/\1/p' "$file" | head -1)
   [ "$name" = "$(basename "$file" .toml)" ] || { echo "check_nanna_agents: $file name mismatch" >&2; status=1; }
