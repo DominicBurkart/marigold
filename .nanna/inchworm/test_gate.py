@@ -329,7 +329,12 @@ class CoveredByTests(GateCase):
         self.ledger({"status": "covered", "covered_by": ["tests/t.rs::real_test"]})
         self.assert_fail("real_test")
 
-    def test_nested_module_name_uses_last_segment(self):
+    def test_module_path_must_exist_in_file(self):
+        self.ledger({"status": "covered", "covered_by": ["tests/t.rs::m::real_test"]})
+        self.assert_fail("m::real_test")
+
+    def test_module_path_matching_file_accepted(self):
+        self.write_t("mod m {\n    #[test]\n    fn real_test() {}\n}\n")
         self.ledger({"status": "covered", "covered_by": ["tests/t.rs::m::real_test"]})
         self.assert_ok()
 
@@ -340,6 +345,94 @@ class CoveredByTests(GateCase):
     def test_candidate_name_not_required_to_exist(self):
         self.ledger({"covered_by": ["tests/t.rs::ghost_test"]})
         self.assert_ok()
+
+
+class CfgGatingTests(GateCase):
+    def check(self, body, ok, needle=None, name="t"):
+        (self.root / "tests/t.rs").write_text(body)
+        self.ledger({"status": "covered", "covered_by": [f"tests/t.rs::{name}"]})
+        if ok:
+            self.assert_ok()
+        else:
+            self.assert_fail(needle or name)
+
+    def test_cfg_not_test_module_rejected(self):
+        self.check("#[cfg(not(test))]\nmod m {\n    #[test]\n    fn t() {}\n}\n", False, "cfg")
+
+    def test_nonexistent_feature_module_rejected(self):
+        self.check('#[cfg(feature = "nonexistent")]\nmod m {\n    #[test]\n    fn t() {}\n}\n', False, "cfg")
+
+    def test_nonexistent_target_os_on_fn_rejected(self):
+        self.check('#[test]\n#[cfg(target_os = "nonexistent")]\nfn t() {}\n', False, "cfg")
+
+    def test_empty_any_rejected(self):
+        self.check("#[test]\n#[cfg(any())]\nfn t() {}\n", False, "cfg")
+
+    def test_cfg_attr_ignore_rejected(self):
+        self.check("#[test]\n#[cfg_attr(all(), ignore)]\nfn t() {}\n", False, "unsupported attribute form")
+
+    def test_cfg_attr_test_is_unsupported(self):
+        self.check("#[cfg_attr(test, test)]\nfn t() {}\n", False, "unsupported attribute form")
+
+    def test_macro_rules_body_rejected(self):
+        self.check("macro_rules! m {\n    () => {\n        #[test]\n        fn t() {}\n    };\n}\n", False, "macro")
+
+    def test_fn_nested_in_fn_rejected(self):
+        self.check("fn outer() {\n    #[test]\n    fn t() {}\n}\n", False, "nested")
+
+    def test_fn_nested_in_test_fn_rejected(self):
+        self.check("#[test]\nfn outer() {\n    #[test]\n    fn t() {}\n}\n", False, "nested")
+
+    def test_cfg_test_module_accepted(self):
+        self.check("#[cfg(test)]\nmod m {\n    #[test]\n    fn t() {}\n}\n", True)
+
+    def test_cfg_test_on_fn_accepted(self):
+        self.check("#[test]\n#[cfg(test)]\nfn t() {}\n", True)
+
+    def test_feature_tokio_module_accepted(self):
+        self.check('#[cfg(feature = "tokio")]\nmod m {\n    #[tokio::test]\n    async fn t() {}\n}\n', True)
+
+    def test_feature_async_std_module_accepted(self):
+        self.check('#[cfg(feature = "async-std")]\nmod m {\n    #[async_std::test]\n    async fn t() {}\n}\n', True)
+
+    def test_any_of_runtime_features_accepted(self):
+        self.check(
+            '#[cfg(any(feature = "tokio", feature = "async-std"))]\nmod m {\n    #[tokio::test]\n    async fn t() {}\n}\n',
+            True,
+        )
+
+    def test_nested_allowed_modules_accepted(self):
+        self.check("#[cfg(test)]\nmod a {\n    mod b {\n        #[test]\n        fn t() {}\n    }\n}\n", True)
+
+    def test_plain_module_accepted(self):
+        self.check("mod m {\n    #[test]\n    fn t() {}\n}\n", True)
+
+    def test_should_panic_accepted(self):
+        self.check('#[test]\n#[should_panic(expected = "x")]\nfn t() {}\n', True)
+
+    def test_inner_file_cfg_feature_accepted(self):
+        self.check('#![cfg(feature = "tokio")]\n#[test]\nfn t() {}\n', True)
+
+    def test_inner_file_cfg_bad_rejected(self):
+        self.check('#![cfg(feature = "nonexistent")]\n#[test]\nfn t() {}\n', False, "cfg")
+
+    def test_unknown_attribute_on_fn_rejected(self):
+        self.check("#[test]\n#[some_macro]\nfn t() {}\n", False, "unsupported attribute form")
+
+    def test_extern_c_test_fn_accepted(self):
+        self.check('#[test]\npub extern "C" fn t() {}\n', True)
+
+    def test_duplicate_name_in_file_rejected(self):
+        self.check("#[test]\nfn t() {}\nmod m {\n    fn t() {}\n}\n", False, "ambiguous")
+
+    def test_duplicate_name_disambiguated_by_module_path(self):
+        self.check("fn t() {}\nmod m {\n    #[test]\n    fn t() {}\n}\n", True, name="m::t")
+
+    def test_module_path_selecting_non_test_rejected(self):
+        self.check("#[test]\nfn t() {}\nmod m {\n    fn t() {}\n}\n", False, "not a test", name="m::t")
+
+    def test_wrong_module_path_rejected(self):
+        self.check("mod m {\n    #[test]\n    fn t() {}\n}\n", False, "x::t".split("::")[1], name="x::t")
 
 
 class ProvenTests(GateCase):
@@ -357,7 +450,7 @@ class ProvenTests(GateCase):
 
     def test_proven_with_existing_proof_passes(self):
         (self.root / "tests/proofs/kani").mkdir(parents=True)
-        (self.root / "tests/proofs/kani/p.rs").write_text("fn proof() {}\n")
+        (self.root / "tests/proofs/kani/p.rs").write_text("#[kani::proof]\nfn proof() {}\n")
         self.proven(proof="tests/proofs/kani/p.rs")
         self.assert_ok()
 
@@ -378,6 +471,54 @@ class ProvenTests(GateCase):
         (self.root / "tests/proofs/p.rs").write_text("  \n")
         self.proven(proof="tests/proofs/p.rs")
         self.assert_fail("empty")
+
+    def test_non_rs_covered_by_rejected(self):
+        (self.root / "tests/proofs").mkdir(exist_ok=True)
+        (self.root / "tests/proofs/fake.txt").write_text("#[test]\nfn t() {}\n")
+        self.ledger({"status": "covered", "covered_by": ["tests/proofs/fake.txt::t"]})
+        self.assert_fail(".rs")
+
+    def test_non_rs_candidate_covered_by_rejected(self):
+        (self.root / "tests/data.txt").write_text("x")
+        self.ledger({"covered_by": ["tests/data.txt"]})
+        self.assert_fail(".rs")
+
+    def test_proof_symlink_escaping_proofs_rejected(self):
+        (self.root / "Cargo.toml").write_text("kani::proof\n")
+        (self.root / "tests/proofs").mkdir()
+        (self.root / "tests/proofs/link.rs").symlink_to(self.root / "Cargo.toml")
+        self.proven(proof="tests/proofs/link.rs")
+        self.assert_fail("outside")
+
+    def test_proof_suffix_must_be_rs_or_lean(self):
+        (self.root / "tests/proofs").mkdir()
+        (self.root / "tests/proofs/p.txt").write_text("kani::proof\n")
+        self.proven(proof="tests/proofs/p.txt")
+        self.assert_fail("suffix")
+
+    def test_rs_proof_needs_a_harness(self):
+        (self.root / "tests/proofs").mkdir()
+        (self.root / "tests/proofs/p.rs").write_text("fn helper() {}\n")
+        self.proven(proof="tests/proofs/p.rs")
+        self.assert_fail("harness")
+
+    def test_rs_proof_with_kani_harness_accepted(self):
+        (self.root / "tests/proofs").mkdir()
+        (self.root / "tests/proofs/p.rs").write_text("#[cfg(kani)]\n#[kani::proof]\nfn check() {}\n")
+        self.proven(proof="tests/proofs/p.rs")
+        self.assert_ok()
+
+    def test_rs_proof_harness_only_in_comment_rejected(self):
+        (self.root / "tests/proofs").mkdir()
+        (self.root / "tests/proofs/p.rs").write_text("// #[kani::proof]\nfn check() {}\n")
+        self.proven(proof="tests/proofs/p.rs")
+        self.assert_fail("harness")
+
+    def test_lean_proof_accepted(self):
+        (self.root / "tests/proofs").mkdir()
+        (self.root / "tests/proofs/p.lean").write_text("theorem t : True := trivial\n")
+        self.proven(provable="lean", proof="tests/proofs/p.lean")
+        self.assert_ok()
 
     def test_proof_missing_file_rejected(self):
         self.proven(provable="lean", proof="tests/proofs/lean/none.lean")

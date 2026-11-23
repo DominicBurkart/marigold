@@ -9,6 +9,11 @@ SURFACES = {"interface", "internal"}
 PROVABLE = {"none", "kani", "lean"}
 DONE = {"covered", "proven"}
 REQUIRED = ("id", "surface", "statement", "status", "provable", "covered_by")
+FEATURE = r'feature="(?:tokio|async-std)"'
+CFG_PREDICATE = re.compile(rf"test|{FEATURE}|any\({FEATURE}(?:,{FEATURE})*,?\)")
+QUALIFIERS = re.compile(r"(?:(?:pub(?:\([^)]*\))?|async|unsafe|const|extern)\s+)+$")
+FN_ALLOWED = {"test", "should_panic", "cfg", "allow", "doc"}
+MOD_ALLOWED = {"cfg", "allow", "doc"}
 
 
 def allowed_top(parts):
@@ -17,14 +22,14 @@ def allowed_top(parts):
     return parts[0] == "marigold" and len(parts) > 1 and parts[1] == "tests"
 
 
+def blank(chunk):
+    return "".join("\n" if c == "\n" else " " for c in chunk)
+
+
 def strip_rust(text):
     out = []
     i = 0
     n = len(text)
-
-    def blank(chunk):
-        return "".join("\n" if c == "\n" else " " for c in chunk)
-
     while i < n:
         c = text[i]
         if text.startswith("//", i):
@@ -86,9 +91,9 @@ def matching(text, start, open_c, close_c):
     return -1
 
 
-def attributes_before(text, pos):
-    prefix = text[:pos].rstrip()
-    prefix = re.sub(r"(?:(?:pub(?:\([^)]*\))?|async|unsafe|const)\s+)+$", "", prefix + " ").rstrip()
+def attributes_before(stripped, orig, pos):
+    prefix = stripped[:pos].rstrip()
+    prefix = QUALIFIERS.sub("", prefix + " ").rstrip()
     attrs = []
     while prefix.endswith("]"):
         depth = 0
@@ -103,9 +108,25 @@ def attributes_before(text, pos):
             j -= 1
         if j < 1 or prefix[j - 1] != "#":
             break
-        attrs.append(prefix[j + 1:-1].strip())
+        attrs.append(orig[j + 1:len(prefix) - 1].strip())
         prefix = prefix[: j - 1].rstrip()
-    return attrs
+    return list(reversed(attrs))
+
+
+def leading_attributes(stripped, orig, start, end, inner=False):
+    attrs = []
+    i = start
+    opener = r"#!\[" if inner else r"#\["
+    while True:
+        m = re.compile(rf"\s*{opener}").match(stripped, i, end)
+        if not m:
+            break
+        close = matching(stripped, m.end() - 1, "[", "]")
+        if close == -1 or close >= end:
+            break
+        attrs.append(orig[m.end():close].strip())
+        i = close + 1
+    return attrs, i
 
 
 def attr_name(attr):
@@ -113,30 +134,102 @@ def attr_name(attr):
     return m.group(0) if m else ""
 
 
-def inside_proptest(text, pos):
-    for m in re.finditer(r"\bproptest!\s*\{", text):
-        end = matching(text, m.end() - 1, "{", "}")
-        if m.end() <= pos < (end if end != -1 else len(text)):
-            return True
-    return False
+def classify(header):
+    h = header.strip()
+    if re.fullmatch(r"(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+", h):
+        return "mod", h.split()[-1]
+    if re.match(r"macro_rules\s*!", h):
+        return "macro", ""
+    m = re.search(r"(\w+)\s*!\s*$", h)
+    if m:
+        return ("proptest", "") if m.group(1) == "proptest" else ("macro", "")
+    if re.search(r"(?:^|\W)fn\s+\w+", h):
+        return "fn", ""
+    return "other", ""
 
 
-def check_test_fn(text, name):
+def contexts_at(stripped, orig, pos):
+    stack = []
+    header_start = 0
+    pdepth = 0
+    for i in range(pos):
+        ch = stripped[i]
+        if ch in "([":
+            pdepth += 1
+        elif ch in ")]":
+            pdepth = max(0, pdepth - 1)
+        elif ch == "{":
+            attrs, after = leading_attributes(stripped, orig, header_start, i)
+            kind, name = classify(stripped[after:i])
+            stack.append({"kind": kind, "name": name, "attrs": attrs})
+            header_start = i + 1
+        elif ch == "}":
+            if stack:
+                stack.pop()
+            header_start = i + 1
+        elif ch == ";" and pdepth == 0:
+            header_start = i + 1
+    return stack
+
+
+def check_attrs(attrs, allowed, label):
+    for attr in attrs:
+        name = attr_name(attr)
+        if name == "ignore":
+            return f"{label} is #[ignore]d"
+        if name == "cfg":
+            squashed = re.sub(r"\s+", "", attr)
+            m = re.fullmatch(r"cfg\((.*)\)", squashed)
+            if not m or not CFG_PREDICATE.fullmatch(m.group(1)):
+                return f"{label} is gated by #[{attr}], which the gate cannot evaluate"
+        elif name not in allowed and not name.endswith("::test"):
+            return f"{label} has an unsupported attribute form: #[{attr}]"
+    return None
+
+
+def check_test_fn(text, entry_name):
+    *module_path, name = entry_name.split("::")
     stripped = strip_rust(text)
     matches = list(re.finditer(rf"\bfn\s+{re.escape(name)}\b", stripped))
-    if not matches:
-        return f"no fn {name} (outside comments and strings)"
-    reasons = []
+    candidates = []
     for m in matches:
-        names = [attr_name(a) for a in attributes_before(stripped, m.start())]
-        if "ignore" in names:
-            reasons.append(f"fn {name} is #[ignore]d")
+        stack = contexts_at(stripped, text, m.start())
+        chain = [c["name"] for c in stack if c["kind"] == "mod"]
+        if module_path and chain[len(chain) - len(module_path):] != module_path:
             continue
-        is_test = any(a == "test" or a.endswith("::test") for a in names)
-        if is_test or inside_proptest(stripped, m.start()):
-            return None
-        reasons.append(f"fn {name} is not a test")
-    return reasons[0]
+        candidates.append((m, stack))
+    if not candidates:
+        return f"no fn {entry_name} (outside comments and strings)"
+    if len(candidates) > 1:
+        return f"ambiguous: fn {name} is defined {len(candidates)} times; cite its module path"
+    m, stack = candidates[0]
+    label = f"fn {name}"
+    inner, _ = leading_attributes(stripped, text, 0, len(stripped), inner=True)
+    problem = check_attrs(inner, MOD_ALLOWED, "the file")
+    if problem:
+        return problem
+    in_proptest = False
+    for ctx in stack:
+        if ctx["kind"] == "fn":
+            return f"{label} is nested inside another fn"
+        if ctx["kind"] == "macro":
+            return f"{label} is defined inside a macro"
+        if ctx["kind"] == "other":
+            return f"{label} is inside an unsupported block"
+        if ctx["kind"] == "proptest":
+            in_proptest = True
+        elif ctx["kind"] == "mod":
+            problem = check_attrs(ctx["attrs"], MOD_ALLOWED, f"module {ctx['name']}")
+            if problem:
+                return problem
+    attrs = attributes_before(stripped, text, m.start())
+    problem = check_attrs(attrs, FN_ALLOWED, label)
+    if problem:
+        return problem
+    names = [attr_name(a) for a in attrs]
+    if any(n == "test" or n.endswith("::test") for n in names) or in_proptest:
+        return None
+    return f"{label} is not a test"
 
 
 def resolve(root, rel, label, errors, prefix=None):
@@ -169,6 +262,9 @@ def resolve(root, rel, label, errors, prefix=None):
     if prefix is None and not allowed_top(real.relative_to(base).parts):
         errors.append(f"{label}: resolves outside tests/ and marigold-*/: {rel}")
         return None
+    if prefix is not None and not real.is_relative_to((base / prefix).resolve()):
+        errors.append(f"{label}: resolves outside {prefix}: {rel}")
+        return None
     return full
 
 
@@ -180,13 +276,17 @@ def check_covered_by(root, inv, errors):
     for entry in inv["covered_by"]:
         path, sep, name = entry.partition("::")
         full = resolve(root, path, label, errors)
-        if full is None or not done:
+        if full is None:
             continue
-        last = name.split("::")[-1]
-        if not sep or not last:
+        if full.suffix != ".rs" or not path.endswith(".rs"):
+            errors.append(f"{label}: covered_by must name a .rs file: {path}")
+            continue
+        if not done:
+            continue
+        if not sep or not name.split("::")[-1]:
             errors.append(f"{label}: {inv['status']} entries must be path::name: {entry}")
             continue
-        problem = check_test_fn(full.read_text(errors="replace"), last)
+        problem = check_test_fn(full.read_text(errors="replace"), name)
         if problem:
             errors.append(f"{label}: {path}: {problem}")
 
@@ -202,8 +302,17 @@ def check_proof(root, inv, errors):
         errors.append(f"{label}: proven without a proof artifact path")
         return
     full = resolve(root, proof, f"{label}: proof", errors, prefix="tests/proofs/")
-    if full is not None and not full.read_text(errors="replace").strip():
+    if full is None:
+        return
+    if full.resolve().suffix not in (".rs", ".lean") or pathlib.PurePosixPath(proof).suffix not in (".rs", ".lean"):
+        errors.append(f"{label}: proof suffix must be .rs or .lean: {proof}")
+        return
+    text = full.read_text(errors="replace")
+    if not text.strip():
         errors.append(f"{label}: proof file is empty: {proof}")
+        return
+    if proof.endswith(".rs") and not re.search(r"#\s*\[\s*(?:kani::proof|test)\b", strip_rust(text)):
+        errors.append(f"{label}: no proof harness (#[kani::proof] or #[test]) in {proof}")
 
 
 def check_entry(root, inv, seen, errors):
