@@ -13,6 +13,6 @@ max_effect = "workspace"
 tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file", "cargo_check", "cargo_test"]
 
 [limits]
-max_iterations = 100
-max_wall_clock_secs = 1800
+max_iterations = 200
+max_wall_clock_secs = 3600
 max_concurrent = 1
