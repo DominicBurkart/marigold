@@ -289,7 +289,7 @@ retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
 
 [[flow.step]]
 name = "plan"
-identity = "marigold-implementer-lead"
+identity = "marigold-research-lead"
 
 [[flow.step]]
 name = "research"
@@ -316,7 +316,7 @@ retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
 
 [[flow.step]]
 name = "plan"
-identity = "marigold-implementer-lead"
+identity = "marigold-research-lead"
 
 [[flow.step]]
 name = "research"
@@ -343,7 +343,7 @@ retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
 
 [[flow.step]]
 name = "plan"
-identity = "marigold-implementer-lead"
+identity = "marigold-research-lead"
 
 [[flow.step]]
 name = "research"
@@ -370,7 +370,7 @@ retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
 
 [[flow.step]]
 name = "plan"
-identity = "marigold-implementer-lead"
+identity = "marigold-research-lead"
 
 [[flow.step]]
 name = "research"
@@ -397,7 +397,7 @@ retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
 
 [[flow.step]]
 name = "plan"
-identity = "marigold-implementer-lead"
+identity = "marigold-research-lead"
 
 [[flow.step]]
 name = "research"

@@ -79,7 +79,7 @@ with open(sys.argv[1], "rb") as f:
 done
 
 exec_tools='cargo_|run_command|github_|git_commit|git_push|write_file|kani|lean|aeneas'
-for file in .nanna/catalog/marigold-review-*.toml .nanna/agents/marigold-review-*.toml .nanna/catalog/marigold-research-*.toml .nanna/agents/marigold-research-*.toml; do
+for file in .nanna/catalog/marigold-review-*.toml .nanna/agents/marigold-review-*.toml; do
   [ -e "$file" ] || continue
   tools=$(sed -n 's/^tools = //p' "$file")
   if printf '%s\n' "$tools" | grep -Eq "$exec_tools"; then
@@ -88,6 +88,24 @@ for file in .nanna/catalog/marigold-review-*.toml .nanna/agents/marigold-review-
   fi
   grep -q '^max_effect = "none"$' "$file" || { echo "check_nanna_agents: $file ceiling is not none" >&2; status=1; }
   grep -q '^paths = \[\]$' "$file" || { echo "check_nanna_agents: $file has write paths" >&2; status=1; }
+done
+
+research_exec_tools='cargo_|run_command|github_|git_commit|git_push|kani|lean|aeneas'
+for file in .nanna/catalog/marigold-research-*.toml .nanna/agents/marigold-research-*.toml; do
+  [ -e "$file" ] || continue
+  tools=$(sed -n 's/^tools = //p' "$file")
+  if printf '%s\n' "$tools" | grep -Eq "$research_exec_tools"; then
+    echo "check_nanna_agents: $file lists an execution or forge tool" >&2
+    status=1
+  fi
+  grep -q '^max_effect = "workspace"$' "$file" || { echo "check_nanna_agents: $file ceiling is not workspace" >&2; status=1; }
+  name=$(basename "$file" .toml)
+  if [ "$name" = "marigold-research-lead" ]; then
+    want='docs/research/**'
+  else
+    want="docs/research/${name#marigold-research-}.txt"
+  fi
+  grep -qxF "paths = [\"$want\"]" "$file" || { echo "check_nanna_agents: $file may write something other than $want" >&2; status=1; }
 done
 
 for file in .nanna/catalog/marigold-*.toml .nanna/agents/marigold-*.toml; do

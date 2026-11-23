@@ -1,16 +1,16 @@
 [identity]
 name = "marigold-research-integrations"
-description = "Read-only researcher for the marigold integrations area."
+description = "Researcher for the marigold integrations area; writes its findings to docs/research/integrations.txt only."
 loop = "middle"
 model = "gemma4:e4b"
 system_prompt = "prompts/marigold-research-integrations.md"
 
 [scope]
 repos = ["github.com/DominicBurkart/marigold"]
-paths = []
+paths = ["docs/research/integrations.txt"]
 read_paths = ["integrations/**", "install.sh", "publish.sh", "Cargo.toml"]
-max_effect = "none"
-tools = ["read_file", "list_directory", "search", "git_status", "git_diff"]
+max_effect = "workspace"
+tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file"]
 
 [limits]
 max_iterations = 200
