@@ -31,6 +31,8 @@ case "${STUB_MODE:-safe}" in
   safe_comma_unsafe) printf 'VERDICT: SAFE, but UNSAFE items\n' ;;
   safeish) printf 'VERDICT: SAFE-ish unsafe\n' ;;
   safe_bullet) printf 'VERDICT: SAFE\n- also UNSAFE SSN leak\n' ;;
+  safe_underscore) printf 'VERDICT: SAFE\nUNSAFE_x\n' ;;
+  safe_unsafely) printf 'VERDICT: SAFE\nunsafely\n' ;;
   safe_lower) printf 'VERDICT: SAFE\nverdict: unsafe\n' ;;
   safe_leading_space) printf '  VERDICT: SAFE\n' ;;
   safely) printf 'VERDICT: SAFELY done\n' ;;
@@ -181,6 +183,8 @@ class ReviewTest(unittest.TestCase):
             "safeish",
             "safe_bullet",
             "safe_lower",
+            "safe_underscore",
+            "safe_unsafely",
             "safe_leading_space",
         ):
             with self.subTest(mode=mode):
@@ -541,6 +545,38 @@ class ReviewTest(unittest.TestCase):
             "angle prefixed real value": j("pass", 'word = "<', "RealValue12345", '"'),
             "placeholder in variable name": j("db_pass", 'word_example = "', "RealPass1234xyz", '"'),
             "placeholder inside real value": j("pass", 'word = "realSecret123', 'example"'),
+            "codecov password before token": j("https://codecov.io/gh/o/r/graph/badge.svg?pass", "word=", "hunter2hunter2", "&tok", "en=", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"),
+            "codecov api key before token": j("https://codecov.io/gh/o/r/graph/badge.svg?api_", "key=", "abcd1234efgh5678", "&tok", "en=", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"),
+            "codecov token before password": j("https://codecov.io/gh/o/r/graph/badge.svg?tok", "en=", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6", "&pass", "word=", "hunter2hunter2"),
+            "codecov non badge path": j("https://codecov.io/x?pass", "word=", "hunter2hunter2", "&tok", "en=", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"),
+            "codecov upload token": j("https://codecov.io/upload/v4?tok", "en=", "0123456789abcdef0123456789abcdef"),
+            "redirect to codecov": j("https://evil.example/?r=https://codecov.io/x?tok", "en=", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"),
+            "redirect to codecov badge": j("https://evil.example/?r=https://codecov.io/g/badge.svg?tok", "en=", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"),
+            "yaml pascal value": j("pass", "word: CorrectHorseBatteryStaple"),
+            "env pascal value": j("PASS", "WORD=CorrectHorseBatteryStaple"),
+            "dollar identifier real": j("pass", 'word = "$', 'Hunter2Hunter2"'),
+            "dollar then secret unquoted": j("pass", "word=$(a)hunter2hunter2"),
+            "dollar then secret quoted": j("pass", 'word = "$(a)hunter2hunter2"'),
+            "placeholder prefix of real": j("pass", 'word = "dummy', 'hunter2hunter2"'),
+            "example prefix of real": j("pass", 'word = "example-real-', 'prod-pw-9f8e7d"'),
+            "your prefix with digits": j("pass", 'word = "your-', 'pw-9f8e7d6c5b"'),
+            "angle with uppercase": j("pass", 'word = "<', 'Real-Value-Here>"'),
+            "angle too long": j("pass", 'word = "<', "your-secret-value-here-and-more-text", '>"'),
+            "angle without keyword": j("pass", 'word = "<', 'hunter-hunter>"'),
+            "google oauth": j("ya29", ".", "a0AfH6SMBx1234567890abcdefghijkl"),
+            "standalone bearer": j("curl -H ", "'", "Bearer ", "abcdefghij0123456789abcd", "'"),
+            "authorization json": j('{"Author', 'ization": "Bear', 'er abcdef0123456789"}'),
+            "authorization call": j("set_header(", "'Author", "ization', 'Bas", "ic dXNlcjpwYXNzd29yZDEy')"),
+            "keyword pwd": j("p", "wd = ", "'abcdefghij'"),
+            "keyword passphrase": j("pass", "phrase: ", "correcthorsebattery"),
+            "keyword signing key": j("signing_", "key = ", '"abcdefghijkl"'),
+            "keyword master key": j("master_", "key: ", "abcdefghijkl0123"),
+            "keyword hmac key": j("hmac_", "key=", "abcdefghijkl0123"),
+            "keyword creds": j("cre", "ds = ", '"abcdefghijkl"'),
+            "keyword bare pass": j("pa", "ss = ", '"hunter2hunter2"'),
+            "fat arrow separator": j("pass", 'word => "', "hunter2hunter2", '"'),
+            "apostrophe in value": j("pass", 'word = "it', "'s-a-long-secret", '"'),
+            "empty username url": j("redis://:", "s3cr3t", "pw@cache.internal:6379"),
             "other host token query": j("https://badges.evil.example/b.svg?tok", "en=", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"),
         }
         for name, sample in samples.items():
@@ -557,14 +593,24 @@ class ReviewTest(unittest.TestCase):
             j("pass", 'word = "', "changeme", '"'),
             j("pass", 'word = "your-', 'password-here"'),
             j("pass", 'word = "', "xxxxxxxxxx", '"'),
-            j("pass", 'word = "', "todo-fill-me-in", '"'),
-            j("pass", 'word = "', "example-value", '"'),
+            j("pass", 'word = "', "todo", '"'),
+            j("export MOCK_API_", "KEY=dummy-key-for-offline-ci"),
+            j("pa", "sses=$((pa", "sses + 1))"),
+            j("pass", 'word = "', "example", '"'),
+            j("pass", 'word = "', "changeme12", '"'),
+            j("pass", 'word: ${DB_PASS}'),
+            j("pass", 'word = $DB_PASS'),
+            j("com", "pa", "ss = \"northwest-ish\""),
+            j("by", "pa", "ss = \"abcdefghij\""),
             j("pass", 'word = "$', '{DB_PASS}"'),
             j("pass", 'word = "$', '(cat /run/secret)"'),
             j("pass", 'word = "$', 'DB_PASS"'),
             j("api_", 'key = "<your-api-key-here>"'),
             j("api_", 'key = "<api key>"'),
             j("pub tok", "en: CancellationToken,"),
+            j("pub tok", "en: CancellationToken"),
+            j("fn f(tok", "en: SomeOtherLongType) {}"),
+            j("tok", "en: Vec<TokenTree>,"),
             j("let tok", "en = get_value();"),
             j("tok", "en = tokenizer.next_value();"),
             j("pass", "word: ", "short"),
