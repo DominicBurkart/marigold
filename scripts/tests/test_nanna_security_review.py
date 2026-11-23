@@ -28,9 +28,14 @@ case "${STUB_MODE:-safe}" in
   garbled) printf 'Assistant: I think this is probably fine.\n' ;;
   late_safe) printf 'Sure!\nVERDICT: SAFE\n' ;;
   safe_then_unsafe_text) printf 'VERDICT: SAFE\nVERDICT: UNSAFE\n' ;;
+  safe_comma_unsafe) printf 'VERDICT: SAFE, but UNSAFE items\n' ;;
+  safeish) printf 'VERDICT: SAFE-ish unsafe\n' ;;
+  safe_bullet) printf 'VERDICT: SAFE\n- also UNSAFE SSN leak\n' ;;
+  safe_lower) printf 'VERDICT: SAFE\nverdict: unsafe\n' ;;
+  safe_leading_space) printf '  VERDICT: SAFE\n' ;;
   safely) printf 'VERDICT: SAFELY done\n' ;;
   padded) printf '\n\n   Assistant:   VERDICT: SAFE  \r\n' ;;
-  ansi_output) printf 'VERDICT: SAFE\033[31m red\007\n' ;;
+  ansi_output) printf 'VERDICT: SAFE\n\033[31mfine\007\n' ;;
   log_prefix) printf '\033[2m2026-11-23T16:04:53.031279Z\033[0m \033[31mERROR\033[0m \033[2mnanna\033[0m: Failed to scan workspace\nAssistant: VERDICT: SAFE\n' ;;
   log_then_text) printf '2026-11-23T16:04:53.031279Z ERROR nanna: x\nHello there\nAssistant: VERDICT: SAFE\n' ;;
   empty) ;;
@@ -50,6 +55,10 @@ def fake_aws_key():
 
 def fake_private_key_header():
     return "-----BEGIN " + "RSA PRIVATE KEY-----"
+
+
+def j(*parts):
+    return "".join(parts)
 
 
 def shell_comments(src):
@@ -165,9 +174,18 @@ class ReviewTest(unittest.TestCase):
         r = self.run_review(CLEAN_DIFF, "late_safe")
         self.assertNotEqual(r.returncode, 0)
 
-    def test_only_first_line_counts(self):
-        r = self.run_review(CLEAN_DIFF, "safe_then_unsafe_text")
-        self.assertEqual(r.returncode, 0, r.stderr)
+    def test_later_unsafe_contradiction_fails_closed(self):
+        for mode in (
+            "safe_then_unsafe_text",
+            "safe_comma_unsafe",
+            "safeish",
+            "safe_bullet",
+            "safe_lower",
+            "safe_leading_space",
+        ):
+            with self.subTest(mode=mode):
+                r = self.run_review(CLEAN_DIFF, mode)
+                self.assertNotEqual(r.returncode, 0)
 
     def test_verdict_word_boundary(self):
         r = self.run_review(CLEAN_DIFF, "safely")
@@ -487,37 +505,111 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(self.calls(), [])
 
     def test_prescan_extended_patterns(self):
+        hex32 = "0123456789abcdef" * 2
         samples = {
-            "pem public": "-----BEGIN " + "PUBLIC KEY-----",
-            "pgp": "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----",
-            "stripe": "sk_" + "live_" + "a1B2c3D4e5F6g7H8i9J0k1L2",
-            "stripe restricted": "rk_" + "live_" + "a1B2c3D4e5F6g7H8i9J0k1L2",
-            "stripe publishable": "pk_" + "live_" + "a1B2c3D4e5F6g7H8i9J0k1L2",
-            "twilio sk": "S" + "K" + "a1" * 16,
-            "twilio ac": "A" + "C" + "0f" * 16,
-            "azure": "Account" + "Key=" + "Zm9vYmFy" * 4,
-            "huggingface": "hf" + "_" + "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3f",
-            "bearer": "Authorization: " + "Bearer " + "abcdef0123456789",
-            "url credentials": "https://deploy:" + "s3cr3tpass" + "@example.com/x",
-            "generic password": 'password = "' + 'correcthorse"',
-            "generic api key": "API_KEY: '" + "abcd1234efgh'",
-            "generic token": 'token="' + 'abcdefghij"',
-            "json api key": '"api_key": "' + 'abcdefghijkl"',
-            "unquoted env key": "API_KEY=" + "abcd1234efgh5678",
-            "yaml pw": "password: " + "s3cr3tPassw0rd!",
-            "datadog": "DD_API_KEY=" + "0123456789abcdef" * 2,
-            "aws creds": 'AWS_SECRET_ACCESS_KEY="' + "wJalrXUtnFEMI/K7MDENG" + 'bPxRfiCYQZTWKEY12"',
-            "stripe test": "sk_" + "test_" + "a1B2c3D4e5F6g7H8i9J0k1L2",
-            "slack webhook": "https://hooks." + "slack.com/services/T0123ABCD/B0123ABCD/abcdEFGH1234ijkl5678",
-            "sendgrid": "SG" + "." + "abcdEFGH1234ijklMNOP56" + "." + "abcdEFGH1234ijklMNOP56qrst",
-            "single quoted json": "'secret': '" + "abcdefghijkl'",
+            "pem public": j("-----BEGIN ", "PUBLIC KEY-----"),
+            "pgp": j("-----BEGIN ", "PGP PRIVATE KEY BLOCK-----"),
+            "stripe": j("sk_", "live_", "a1B2c3D4e5F6g7H8i9J0k1L2"),
+            "stripe restricted": j("rk_", "live_", "a1B2c3D4e5F6g7H8i9J0k1L2"),
+            "stripe publishable": j("pk_", "live_", "a1B2c3D4e5F6g7H8i9J0k1L2"),
+            "twilio sk": j("S", "K", "a1" * 16),
+            "twilio ac": j("A", "C", "0f" * 16),
+            "azure": j("Account", "Key=", "Zm9vYmFy" * 4),
+            "huggingface": j("hf", "_", "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3f"),
+            "bearer": j("Authorization: ", "Bearer ", "abcdef0123456789"),
+            "basic": j("Authorization: ", "Basic ", "dXNlcjpwYXNzd29yZDEyMw=="),
+            "url credentials": j("https://dep", "loy:", "s3cr3t", "pass@example.com/x"),
+            "generic quoted": j("pass", 'word = "', "correcthorse", '"'),
+            "generic api key": j("API_", "KEY: '", "abcd1234efgh", "'"),
+            "generic token": j("tok", 'en="', "abcdefghij", '"'),
+            "json api key": j('"api_', 'key": "', "abcdefghijkl", '"'),
+            "unquoted env key": j("API_", "KEY=", "abcd1234efgh5678"),
+            "yaml pw": j("pass", "word: ", "s3cr3tPassw0rd!"),
+            "yaml pw no digits": j("pass", "word: ", "correcthorsebattery"),
+            "datadog": j("DD_API_", "KEY=", hex32),
+            "aws creds": j("AWS_SEC", 'RET_ACCESS_KEY="', "wJalrXUtnFEMI/K7MDENG", 'bPxRfiCYQZTWKEY12"'),
+            "aws bare secret": j("aws_sec", "ret_access_key = ", "wJalrXUtnFEMI/K7MDENG", "bPxRfiCYQZTWKEY1234"),
+            "stripe test": j("sk_", "test_", "a1B2c3D4e5F6g7H8i9J0k1L2"),
+            "slack webhook": j("https://hooks.", "slack.com/services/T0123ABCD/B0123ABCD/abcdEFGH1234ijkl5678"),
+            "sendgrid": j("SG", ".", "abcdEFGH1234ijklMNOP56", ".", "abcdEFGH1234ijklMNOP56qrst"),
+            "single quoted json": j("'sec", "ret': '", "abcdefghijkl", "'"),
+            "json escaped quotes": j('{\\"pass', 'word\\": \\"', "hunter2hunter2", '\\"}'),
+            "nested quotes": j("pass", "word = \"'", "hunter2hunter2", "'\""),
+            "rust raw string": j("let pass", 'word = r#"', "hunter22", '"#;'),
+            "six char quoted": j("pass", 'word = "', "abc123", '"'),
+            "dollar prefixed real value": j("pass", 'word = "$', "ecret-Value99", '"'),
+            "angle prefixed real value": j("pass", 'word = "<', "RealValue12345", '"'),
+            "placeholder in variable name": j("db_pass", 'word_example = "', "RealPass1234xyz", '"'),
+            "placeholder inside real value": j("pass", 'word = "realSecret123', 'example"'),
+            "other host token query": j("https://badges.evil.example/b.svg?tok", "en=", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"),
         }
         for name, sample in samples.items():
             with self.subTest(name=name):
+                self.stub_dir = tempfile.mkdtemp(dir=self.tmp.name)
                 r = self.run_review("+" + sample + "\n", "safe")
                 self.assertNotEqual(r.returncode, 0, name)
                 self.assertIn("pre-scan", self.out(r).lower())
                 self.assertEqual(self.calls(), [])
+
+    def test_prescan_accepts_documented_placeholders_and_short_values(self):
+        samples = [
+            j("pass", 'word = "', "abcde", '"'),
+            j("pass", 'word = "', "changeme", '"'),
+            j("pass", 'word = "your-', 'password-here"'),
+            j("pass", 'word = "', "xxxxxxxxxx", '"'),
+            j("pass", 'word = "', "todo-fill-me-in", '"'),
+            j("pass", 'word = "', "example-value", '"'),
+            j("pass", 'word = "$', '{DB_PASS}"'),
+            j("pass", 'word = "$', '(cat /run/secret)"'),
+            j("pass", 'word = "$', 'DB_PASS"'),
+            j("api_", 'key = "<your-api-key-here>"'),
+            j("api_", 'key = "<api key>"'),
+            j("pub tok", "en: CancellationToken,"),
+            j("let tok", "en = get_value();"),
+            j("tok", "en = tokenizer.next_value();"),
+            j("pass", "word: ", "short"),
+        ]
+        for sample in samples:
+            with self.subTest(sample=sample):
+                r = self.run_review("+" + sample + "\n", "safe")
+                self.assertEqual(r.returncode, 0, self.out(r))
+
+    def test_codecov_badge_token_query_is_exempt_only_for_codecov_host(self):
+        badge_id = "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"
+        ok = j("[![codecov](https://codecov.io/gh/o/r/graph/badge.svg?tok", "en=", badge_id, ")](https://codecov.io/gh/o/r)")
+        r = self.run_review("+" + ok + "\n", "safe")
+        self.assertEqual(r.returncode, 0, self.out(r))
+        spoof = j("https://codecov.io.evil.example/b.svg?tok", "en=", badge_id)
+        r = self.run_review("+" + spoof + "\n", "safe")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_own_files_and_repo_dummy_lines_pass_the_prescan(self):
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        names = [
+            "README.md",
+            "marigold/README.md",
+            "scripts/nanna_security_review.sh",
+            "scripts/tests/test_nanna_security_review.py",
+            "docs/pre-commit-hook.md",
+            ".cargo-husky/hooks/pre-commit",
+            ".github/workflows/style.yaml",
+            "integrations/ci/claude/in-container.sh",
+            "integrations/ci/opencode/in-container.sh",
+        ]
+        diff = ""
+        for name in names:
+            path = os.path.join(root, name)
+            if not os.path.isfile(path):
+                continue
+            with open(path, "rb") as f:
+                lines = f.read().decode("latin-1").splitlines()
+            diff += "diff --git a/%s b/%s\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1,%d @@\n" % (
+                name, name, name, len(lines)
+            )
+            diff += "".join("+" + line + "\n" for line in lines)
+        r = self.run_review(diff, "safe", NANNA_BIN="/nonexistent/nanna-xyz")
+        self.assertNotIn("pre-scan matched", self.out(r))
+        self.assertIn("not found", self.out(r).lower())
 
     def test_prescan_does_not_flag_ordinary_code(self):
         diff = (
@@ -667,6 +759,73 @@ class ReviewTest(unittest.TestCase):
         r = self.run_review(self.lock_diff('+x = "' + fake_aws_key() + '"\n'), "safe")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("Cargo.lock", self.out(r))
+
+    def test_exclusion_is_limited_to_known_lockfile_names_at_any_depth(self):
+        diff = (
+            "diff --git a/sub/dir/Cargo.lock b/sub/dir/Cargo.lock\n"
+            "+DEEPLOCK\n"
+            "diff --git a/notes.lock b/notes.lock\n"
+            "+PLAINLOCKTEXT\n"
+            "diff --git a/development_metadata/badges/x/y.svg b/development_metadata/badges/x/y.svg\n"
+            "+DEEPBADGE\n"
+            "diff --git a/other/development_metadata/badges/z.svg b/other/development_metadata/badges/z.svg\n"
+            "+OTHERBADGE\n"
+        )
+        r = self.run_review(diff, "safe")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        prompts = self.all_prompts()
+        self.assertNotIn("DEEPLOCK", prompts)
+        self.assertNotIn("DEEPBADGE", prompts)
+        self.assertIn("PLAINLOCKTEXT", prompts)
+        self.assertIn("OTHERBADGE", prompts)
+
+    def test_allow_marker_tolerates_crlf(self):
+        diff = "+k=" + fake_aws_key() + " // nanna-review: allow aws-access-key\r\n"
+        r = self.run_review(diff, "safe")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_allow_marker_covers_second_secret_of_same_named_pattern(self):
+        diff = "+a=" + fake_aws_key() + " b=" + fake_aws_key() + " // nanna-review: allow aws-access-key\n"
+        r = self.run_review(diff, "safe")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_smaller_files_are_reviewed_first_when_oversized(self):
+        big = "diff --git a/big.rs b/big.rs\n" + ("+" + "b" * 99 + "\n") * 60
+        small = "diff --git a/small.rs b/small.rs\n+SMALLFILEMARK\n"
+        r = self.run_review(
+            big + small,
+            "safe",
+            NANNA_REVIEW_CHUNK_BYTES="1000",
+            NANNA_REVIEW_MAX_CHUNKS="1",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        prompts = self.all_prompts()
+        self.assertIn("SMALLFILEMARK", prompts)
+        self.assertLess(prompts.index("SMALLFILEMARK"), prompts.index("bbbbbbbbbb"))
+
+    def test_strict_mode_fails_closed_on_oversize(self):
+        diff = ("+" + "z" * 99 + "\n") * 100
+        r = self.run_review(
+            diff,
+            "safe",
+            NANNA_REVIEW_STRICT="1",
+            NANNA_REVIEW_CHUNK_BYTES="1000",
+            NANNA_REVIEW_MAX_CHUNKS="2",
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("strict", self.out(r).lower())
+        self.assertEqual(self.calls(), [])
+
+    def test_strict_mode_is_honoured_outside_test_mode(self):
+        diff = ("+" + "z" * 99 + "\n") * 500
+        r = self.run_review(diff, "safe", test_mode=False, NANNA_REVIEW_STRICT="1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("strict", self.out(r).lower())
+        self.assertEqual(self.calls(), [])
+
+    def test_strict_mode_does_not_affect_diffs_within_the_limit(self):
+        r = self.run_review(CLEAN_DIFF, "safe", NANNA_REVIEW_STRICT="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_svg_badge_and_binary_excluded(self):
         diff = (
