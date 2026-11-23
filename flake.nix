@@ -1,5 +1,5 @@
 {
-  description = "marigold dev container for nanna";
+  description = "marigold development container image";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
