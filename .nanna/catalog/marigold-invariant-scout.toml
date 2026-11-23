@@ -1,6 +1,6 @@
 [identity]
 name = "marigold-invariant-scout"
-description = "Finds untested core invariants of marigold's public interfaces and records them in the invariant ledger."
+description = "Finds core invariants without a pinning test of marigold's public interfaces and records them in the invariant ledger."
 loop = "inner"
 model = "gemma4:e4b"
 system_prompt = "prompts/marigold-invariant-scout.md"

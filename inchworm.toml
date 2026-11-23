@@ -58,7 +58,7 @@ identity = "marigold-test-designer"
 [[flow.judge]]
 kind = "diff"
 max_lines = 600
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/catalog/**", ".nanna/agents/**", ".nanna/inchworm/gate.py", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/catalog/**", ".nanna/agents/**", ".nanna/inchworm/gate.py", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
@@ -81,7 +81,7 @@ identity = "marigold-coverage-closer"
 [[flow.judge]]
 kind = "diff"
 max_lines = 600
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
@@ -104,7 +104,7 @@ identity = "marigold-kani-prover"
 [[flow.judge]]
 kind = "diff"
 max_lines = 800
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/catalog/**", ".nanna/agents/**", ".nanna/inchworm/gate.py", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/catalog/**", ".nanna/agents/**", ".nanna/inchworm/gate.py", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
