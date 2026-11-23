@@ -1,0 +1,13 @@
+schema = 1
+name = "rust-cov"
+
+[build]
+containerfile = "Containerfile"
+
+[[capability]]
+id = "cargo_check"
+description = "Type-check the workspace."
+
+[[capability]]
+id = "cargo_test"
+description = "Run the workspace tests."

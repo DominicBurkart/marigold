@@ -94,8 +94,8 @@ mode = "draft_pr"
 required_checks = ["Tests", "style hooks"]
 
 [[flow]]
-name = "prove"
-trigger = { kind = "label", label = "inchworm:prove" }
+name = "prove-kani"
+trigger = { kind = "label", label = "inchworm:prove-kani" }
 base = "main"
 max_attempts = 2
 retry_on = ["agent_failed", "judge_rejected"]
@@ -103,6 +103,29 @@ retry_on = ["agent_failed", "judge_rejected"]
 [[flow.step]]
 name = "prove"
 identity = "marigold-kani-prover"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 800
+forbid_paths = [".github/**", ".inchworm/**", ".nanna/catalog/**", ".nanna/agents/**", ".nanna/inchworm/gate.py", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+required_checks = ["Tests", "style hooks"]
+
+[[flow]]
+name = "prove-lean"
+trigger = { kind = "label", label = "inchworm:prove-lean" }
+base = "main"
+max_attempts = 2
+retry_on = ["agent_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "prove"
+identity = "marigold-lean-prover"
 
 [[flow.judge]]
 kind = "diff"
