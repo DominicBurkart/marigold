@@ -38,4 +38,4 @@ min_score = 7
 
 [flow.outcome]
 mode = "draft_pr"
-blocking = "all"
+blocking = "required"
