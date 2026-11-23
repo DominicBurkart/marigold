@@ -1,5 +1,5 @@
 {
-  description = "marigold dev container for nanna";
+  description = "marigold development container image";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -199,15 +199,27 @@
           };
         };
 
-        environmentImages = pkgs.lib.mapAttrs'
-          (envName: env: pkgs.lib.nameValuePair "devContainerImage-${envName}" (mkImage {
+        environmentSpecs = pkgs.lib.mapAttrs
+          (envName: env: {
             name = "marigold-${envName}";
             inherit (env) packages extraEnv;
             layerDeps = env.layerDeps or [ ];
-          }))
+          })
           environments;
+
+        environmentImages = pkgs.lib.mapAttrs'
+          (envName: spec: pkgs.lib.nameValuePair "devContainerImage-${envName}" (mkImage spec))
+          environmentSpecs;
+
+        packageName = p: p.name or (builtins.baseNameOf (toString p));
+
+        environmentManifest = pkgs.lib.mapAttrs
+          (_: spec: map packageName (spec.packages ++ pkgs.lib.concatLists spec.layerDeps))
+          environmentSpecs;
       in
       {
+        lib = { inherit environmentManifest; };
+
         packages = {
           inherit devContainerImage;
         } // environmentImages;
