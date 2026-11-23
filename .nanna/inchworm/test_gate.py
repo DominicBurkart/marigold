@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import pathlib
 import subprocess
 import sys
@@ -453,7 +454,7 @@ class ProvenTests(GateCase):
 
     def test_proven_with_existing_proof_passes(self):
         (self.root / "tests/proofs/kani").mkdir(parents=True)
-        (self.root / "tests/proofs/kani/p.rs").write_text("#[kani::proof]\nfn proof() {}\n")
+        (self.root / "tests/proofs/kani/p.rs").write_text("#[kani::proof]\nfn proof() { assert!(true); }\n")
         self.proven(proof="tests/proofs/kani/p.rs")
         self.assert_ok()
 
@@ -507,13 +508,13 @@ class ProvenTests(GateCase):
 
     def test_rs_proof_with_kani_harness_accepted(self):
         (self.root / "tests/proofs").mkdir()
-        (self.root / "tests/proofs/p.rs").write_text("#[cfg(kani)]\n#[kani::proof]\nfn check() {}\n")
+        (self.root / "tests/proofs/p.rs").write_text("#[cfg(kani)]\n#[kani::proof]\nfn check() { assert!(true); }\n")
         self.proven(proof="tests/proofs/p.rs")
         self.assert_ok()
 
     def test_rs_proof_harness_only_in_comment_rejected(self):
         (self.root / "tests/proofs").mkdir()
-        (self.root / "tests/proofs/p.rs").write_text("// #[kani::proof]\nfn check() {}\n")
+        (self.root / "tests/proofs/p.rs").write_text("// #[kani::proof]\nfn check() { assert!(true); }\n")
         self.proven(proof="tests/proofs/p.rs")
         self.assert_fail("harness")
 
@@ -708,31 +709,31 @@ class ProofStrictnessTests(GateCase):
         self.assert_fail("suffix")
 
     def test_lean_requires_lean_suffix(self):
-        self.prove("tests/proofs/p.rs", "#[kani::proof]\nfn c() {}\n", provable="lean")
+        self.prove("tests/proofs/p.rs", "#[kani::proof]\nfn c() { assert!(true); }\n", provable="lean")
         self.assert_fail("suffix")
 
     def test_test_attribute_is_not_a_proof_harness(self):
-        self.prove("tests/proofs/p.rs", "#[test]\nfn c() {}\n")
+        self.prove("tests/proofs/p.rs", "#[test]\nfn c() { assert!(true); }\n")
         self.assert_fail("harness")
 
     def test_kani_harness_in_macro_rules_rejected(self):
-        self.prove("tests/proofs/p.rs", "macro_rules! m {\n    () => {\n        #[kani::proof]\n        fn c() {}\n    };\n}\n")
+        self.prove("tests/proofs/p.rs", "macro_rules! m {\n    () => {\n        #[kani::proof]\n        fn c() { assert!(true); }\n    };\n}\n")
         self.assert_fail("harness")
 
     def test_kani_harness_under_bad_cfg_rejected(self):
-        self.prove("tests/proofs/p.rs", "#[cfg(not(kani))]\nmod m {\n    #[kani::proof]\n    fn c() {}\n}\n")
+        self.prove("tests/proofs/p.rs", "#[cfg(not(kani))]\nmod m {\n    #[kani::proof]\n    fn c() { assert!(true); }\n}\n")
         self.assert_fail("harness")
 
     def test_kani_harness_under_cfg_kani_accepted(self):
-        self.prove("tests/proofs/p.rs", "#[cfg(kani)]\nmod m {\n    #[kani::proof]\n    #[kani::unwind(4)]\n    fn c() {}\n}\n")
+        self.prove("tests/proofs/p.rs", "#[cfg(kani)]\nmod m {\n    #[kani::proof]\n    #[kani::unwind(4)]\n    fn c() { assert!(true); }\n}\n")
         self.assert_ok()
 
     def test_kani_harness_nested_in_fn_rejected(self):
-        self.prove("tests/proofs/p.rs", "fn outer() {\n    #[kani::proof]\n    fn c() {}\n}\n")
+        self.prove("tests/proofs/p.rs", "fn outer() {\n    #[kani::proof]\n    fn c() { assert!(true); }\n}\n")
         self.assert_fail("harness")
 
     def test_proof_file_shared_by_two_ids_rejected(self):
-        self.prove("tests/proofs/p.rs", "#[kani::proof]\nfn c() {}\n")
+        self.prove("tests/proofs/p.rs", "#[kani::proof]\nfn c() { assert!(true); }\n")
         entry = {
             "status": "proven",
             "provable": "kani",
@@ -744,7 +745,7 @@ class ProofStrictnessTests(GateCase):
 
     def test_symlinked_proofs_dir_rejected(self):
         (self.root / "elsewhere").mkdir()
-        (self.root / "elsewhere/p.rs").write_text("#[kani::proof]\nfn c() {}\n")
+        (self.root / "elsewhere/p.rs").write_text("#[kani::proof]\nfn c() { assert!(true); }\n")
         (self.root / "tests/proofs").symlink_to(self.root / "elsewhere")
         entry = {
             "status": "proven",
@@ -801,7 +802,13 @@ class RobustnessTests(GateCase):
 
 FAKE_CARGO = """#!/bin/sh
 echo "$@" >> "$FAKE_CARGO_LOG"
-echo "TARGET=$CARGO_TARGET_DIR GIT=${GIT_DIR:-unset}" >> "$FAKE_CARGO_LOG"
+echo "TARGET=$CARGO_TARGET_DIR GIT=${GIT_DIR:-unset} TOKEN=${MY_API_TOKEN:-unset} SECRET=${APP_SECRET_X:-unset} KEY=${SOME_KEY:-unset} PASSWORD=${DB_PASSWORD:-unset}" >> "$FAKE_CARGO_LOG"
+if [ -n "$FAKE_CARGO_PID" ]; then
+  sleep 30 &
+  echo $! > "$FAKE_CARGO_PID"
+  wait
+fi
+if [ -n "$FAKE_CARGO_SLEEP" ]; then sleep "$FAKE_CARGO_SLEEP"; fi
 case "$*" in
   *--list*) printf '%b' "$FAKE_CARGO_LIST"; exit 0 ;;
   *--exact*) printf '%b' "$FAKE_CARGO_RUN"; exit ${FAKE_CARGO_RC:-0} ;;
@@ -813,7 +820,7 @@ LIST_ONE = "real_test: test\\n\\n1 test, 0 benchmarks\\n"
 RUN_OK = "running 1 test\\ntest real_test ... ok\\n\\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\\n"
 
 
-class RunModeTests(GateCase):
+class RunBase(GateCase):
     def setUp(self):
         super().setUp()
         self.shim = self.root / "shim"
@@ -843,6 +850,9 @@ class RunModeTests(GateCase):
     def calls(self):
         return self.log.read_text().splitlines() if self.log.exists() else []
 
+
+
+class RunModeTests(RunBase):
     def test_default_mode_never_invokes_cargo(self):
         code, out, err = self.run_mode(flag=None)
         self.assertEqual(code, 0, out + err)
@@ -898,7 +908,7 @@ class RunModeTests(GateCase):
         self.assertIn("collected 0", out)
 
     def test_two_collected_fails(self):
-        code, out, err = self.run_mode(lst="a::real_test: test\\nb::real_test: test\\n")
+        code, out, err = self.run_mode(lst="real_test: test\\nreal_test: test\\n")
         self.assertEqual(code, 1)
         self.assertIn("collected 2", out)
 
@@ -950,7 +960,7 @@ class RunModeTests(GateCase):
 
     def test_proven_citations_are_run(self):
         (self.root / "tests/proofs").mkdir()
-        (self.root / "tests/proofs/p.rs").write_text("#[kani::proof]\nfn c() {}\n")
+        (self.root / "tests/proofs/p.rs").write_text("#[kani::proof]\nfn c() { assert!(true); }\n")
         self.ledger(
             {
                 "status": "proven",
@@ -963,6 +973,459 @@ class RunModeTests(GateCase):
         self.assertEqual(code, 0, out + err)
         self.assertTrue(self.calls())
 
+
+
+class ModuleResolutionTests(RunBase):
+    def setUp(self):
+        super().setUp()
+        src = self.root / "marigold-impl/src"
+        (src / "lib.rs").write_text('#[cfg(test)]\nmod a;\n#[cfg(feature = "tokio")]\nmod b;\n')
+        (src / "a.rs").write_text("#[test]\nfn foo() {}\n")
+        (src / "b.rs").write_text("#[test]\nfn foo() { assert!(false); }\n")
+
+    def cite(self, path, name, **kw):
+        self.ledger({"status": "covered", "covered_by": [f"{path}::{name}"], **kw})
+
+    def test_expected_name_includes_file_module_and_is_run_exactly(self):
+        self.cite("marigold-impl/src/b.rs", "foo")
+        code, out, err = self.run_mode(lst="a::foo: test\\nb::foo: test\\n")
+        self.assertEqual(code, 0, out + err)
+        calls = self.calls()
+        self.assertTrue(any("--exact b::foo" in c for c in calls), calls)
+        self.assertFalse(any("--exact a::foo" in c for c in calls), calls)
+
+    def test_features_from_mod_declaration_chain_are_used(self):
+        self.cite("marigold-impl/src/b.rs", "foo")
+        self.run_mode(lst="a::foo: test\\nb::foo: test\\n")
+        self.assertIn("--features tokio", self.calls()[0])
+
+    def test_listing_without_the_file_module_prefix_fails(self):
+        self.cite("marigold-impl/src/b.rs", "foo")
+        code, out, err = self.run_mode(lst="a::foo: test\\n")
+        self.assertEqual(code, 1)
+        self.assertIn("collected 0", out)
+
+    def test_same_inline_module_in_two_files_resolves_to_the_cited_one(self):
+        src = self.root / "marigold-impl/src"
+        (src / "lib.rs").write_text("mod x;\nmod y;\n")
+        for f in ("x.rs", "y.rs"):
+            (src / f).write_text("#[cfg(test)]\nmod tests {\n    #[test]\n    fn foo() {}\n}\n")
+        self.cite("marigold-impl/src/y.rs", "tests::foo")
+        code, out, err = self.run_mode(lst="x::tests::foo: test\\ny::tests::foo: test\\n")
+        self.assertEqual(code, 0, out + err)
+        self.assertTrue(any("--exact y::tests::foo" in c for c in self.calls()))
+
+    def test_nested_file_module_path(self):
+        src = self.root / "marigold-impl/src"
+        (src / "lib.rs").write_text("mod a;\n")
+        (src / "a").mkdir()
+        (src / "a.rs").write_text("mod b;\n")
+        (src / "a/b.rs").write_text("#[test]\nfn foo() {}\n")
+        self.cite("marigold-impl/src/a/b.rs", "foo")
+        code, out, err = self.run_mode(lst="a::b::foo: test\\n")
+        self.assertEqual(code, 0, out + err)
+        self.assertTrue(any("--exact a::b::foo" in c for c in self.calls()))
+
+    def test_mod_rs_module_path(self):
+        src = self.root / "marigold-impl/src"
+        (src / "lib.rs").write_text("mod a;\n")
+        (src / "a").mkdir()
+        (src / "a/mod.rs").write_text("#[test]\nfn foo() {}\n")
+        self.cite("marigold-impl/src/a/mod.rs", "foo")
+        code, out, err = self.run_mode(lst="a::foo: test\\n")
+        self.assertEqual(code, 0, out + err)
+
+    def test_inline_module_declaring_a_file_adds_the_inline_path(self):
+        src = self.root / "marigold-impl/src"
+        (src / "lib.rs").write_text("mod outer {\n    mod x;\n}\n")
+        (src / "outer").mkdir()
+        (src / "outer/x.rs").write_text("#[test]\nfn foo() {}\n")
+        self.cite("marigold-impl/src/outer/x.rs", "foo")
+        code, out, err = self.run_mode(lst="outer::x::foo: test\\n")
+        self.assertEqual(code, 0, out + err)
+
+    def test_inline_test_module_in_integration_file(self):
+        (self.root / "marigold-impl/tests/t.rs").write_text("mod m {\n    #[test]\n    fn foo() {}\n}\n")
+        self.cite("marigold-impl/tests/t.rs", "foo")
+        code, out, err = self.run_mode(lst="m::foo: test\\n")
+        self.assertEqual(code, 0, out + err)
+        self.assertTrue(any("--exact m::foo" in c for c in self.calls()))
+
+    def test_src_file_uses_lib_and_tests_file_uses_test_target(self):
+        self.cite("marigold-impl/src/a.rs", "foo")
+        self.run_mode(lst="a::foo: test\\n")
+        first = self.calls()[0]
+        self.assertIn("-p marigold-impl", first)
+        self.assertIn("--lib", first)
+        self.assertNotIn("--test ", first)
+
+
+class ModDeclarationTests(GateCase):
+    def check(self, lib, ok, needle=None):
+        src = self.root / "marigold-impl/src"
+        (src / "lib.rs").write_text(lib)
+        (src / "x.rs").write_text("#[test]\nfn t() {}\n")
+        self.ledger({"status": "covered", "covered_by": ["marigold-impl/src/x.rs::t"]})
+        if ok:
+            self.assert_ok()
+        else:
+            self.assert_fail(needle or "not declared")
+
+    def test_top_level_declaration_accepted(self):
+        self.check("mod x;\n", True)
+
+    def test_declaration_in_fn_body_rejected(self):
+        self.check("fn f() {\n    mod x;\n}\n", False, "declared inside")
+
+    def test_declaration_in_fn_body_on_one_line_rejected(self):
+        self.check("fn f() { mod x; }\n", False, "declared inside")
+
+    def test_declaration_in_macro_rules_rejected(self):
+        self.check("macro_rules! m {\n    () => {\n        mod x;\n    };\n}\n", False, "declared inside")
+
+    def test_declaration_in_impl_rejected(self):
+        self.check("struct S;\nimpl S {\n    fn f() {}\n}\nimpl S { mod x; }\n", False, "declared inside")
+
+    def test_declaration_in_extern_block_rejected(self):
+        self.check('extern "C" {\n    mod x;\n}\n', False, "declared inside")
+
+    def test_declaration_in_inline_mod_resolves_elsewhere(self):
+        self.check("mod inner {\n    mod x;\n}\n", False)
+
+    def test_declaration_in_cfg_test_inline_mod_resolves_elsewhere(self):
+        self.check("#[cfg(test)]\nmod inner { mod x; }\n", False)
+
+    def test_inline_mod_declaration_resolves_to_nested_directory(self):
+        src = self.root / "marigold-impl/src"
+        (src / "lib.rs").write_text("#[cfg(test)]\nmod inner {\n    mod x;\n}\n")
+        (src / "inner").mkdir()
+        (src / "inner/x.rs").write_text("#[test]\nfn t() {}\n")
+        self.ledger({"status": "covered", "covered_by": ["marigold-impl/src/inner/x.rs::t"]})
+        self.assert_ok()
+
+    def test_declaration_with_bad_cfg_in_inline_mod_rejected(self):
+        src = self.root / "marigold-impl/src"
+        (src / "lib.rs").write_text('#[cfg(feature = "nope")]\nmod inner {\n    mod x;\n}\n')
+        (src / "inner").mkdir()
+        (src / "inner/x.rs").write_text("#[test]\nfn t() {}\n")
+        self.ledger({"status": "covered", "covered_by": ["marigold-impl/src/inner/x.rs::t"]})
+        self.assert_fail("cfg")
+
+    def test_commented_declaration_rejected(self):
+        self.check("// mod x;\n", False)
+
+    def test_string_declaration_rejected(self):
+        self.check('const S: &str = "mod x;";\n', False)
+
+
+class MacroDelimiterTests(GateCase):
+    def check(self, body, ok, needle="macro"):
+        (self.root / "marigold-impl/tests/t.rs").write_text(body)
+        self.ledger({"status": "covered", "covered_by": ["marigold-impl/tests/t.rs::t"]})
+        if ok:
+            self.assert_ok()
+        else:
+            self.assert_fail(needle)
+
+    def test_paren_macro_rejected(self):
+        self.check("my_macro!(\n    #[test]\n    fn t() {}\n);\n", False)
+
+    def test_bracket_macro_rejected(self):
+        self.check("m![\n    #[test]\n    fn t() {}\n];\n", False)
+
+    def test_qualified_paren_macro_rejected(self):
+        self.check("crate::m!(\n    #[test]\n    fn t() {}\n);\n", False)
+
+    def test_paren_proptest_with_test_attribute_accepted(self):
+        self.check("proptest!(\n    #[test]\n    fn t(x in 0..3) {}\n);\n", True)
+
+    def test_paren_proptest_bare_fn_rejected(self):
+        self.check("proptest!(\n    fn t(x in 0..3) {}\n);\n", False, "not a test")
+
+    def test_other_paren_macro_named_like_proptest_rejected(self):
+        self.check("my_proptest!(\n    #[test]\n    fn t(x in 0..3) {}\n);\n", False)
+
+    def test_lint_attributes_at_file_head_accepted(self):
+        self.check("#![forbid(unsafe_code)]\n#![warn(missing_docs)]\n#[test]\n#[allow(dead_code)]\nfn t() {}\n", True)
+
+    def test_vec_macro_before_test_is_fine(self):
+        self.check("const V: [u8; 3] = [1, 2, 3];\nfn h() { let v = vec![1, 2]; let _ = v[0]; }\n#[test]\nfn t() {}\n", True)
+
+    def test_not_operator_parenthesis_is_not_a_macro(self):
+        self.check("fn h(a: bool) -> bool { !(a) }\n#[test]\nfn t() {}\n", True)
+
+    def test_nested_plain_parens_inside_macro_close_correctly(self):
+        self.check("m!(f(1), (2));\n#[test]\nfn t() {}\n", True)
+
+
+class LeanStrictnessTests(GateCase):
+    def lean(self, text, ok, needle=None):
+        (self.root / "tests/proofs").mkdir(exist_ok=True)
+        (self.root / "tests/proofs/p.lean").write_text(text)
+        self.ledger(
+            {
+                "status": "proven",
+                "provable": "lean",
+                "covered_by": ["marigold-impl/tests/t.rs::real_test"],
+                "proof": "tests/proofs/p.lean",
+            }
+        )
+        if ok:
+            self.assert_ok()
+        else:
+            self.assert_fail(needle)
+
+    def test_sorry_after_string_with_line_comment_marker_rejected(self):
+        self.lean('def s := "--"\ntheorem t : True := by sorry\n', False, "sorry")
+
+    def test_axiom_after_string_with_block_comment_marker_rejected(self):
+        self.lean('def s := "/-"\naxiom a : True\ntheorem t : True := a\n', False, "axiom")
+
+    def test_string_with_escaped_quote_does_not_desync(self):
+        self.lean('def s := "a\\"--"\ntheorem t : True := by sorry\n', False, "sorry")
+
+    def test_sorry_inside_nested_block_comment_ignored(self):
+        self.lean("/- outer /- inner -/ sorry -/\ntheorem t : True := trivial\n", True)
+
+    def test_sorry_inside_string_ignored(self):
+        self.lean('def s := "sorry"\ntheorem t : True := trivial\n', True)
+
+    def test_sorry_after_nested_block_comment_rejected(self):
+        self.lean("/- a /- b -/ c -/\ntheorem t : True := by sorry\n", False, "sorry")
+
+    def test_native_decide_rejected(self):
+        self.lean("theorem t : True := by native_decide\n", False, "native_decide")
+
+    def test_of_reduce_bool_rejected(self):
+        self.lean("theorem t : True := Lean.ofReduceBool _ _ rfl\n", False, "ofReduceBool")
+
+    def test_unsafe_rejected(self):
+        self.lean("unsafe def f := 1\ntheorem t : True := trivial\n", False, "unsafe")
+
+    def test_implemented_by_rejected(self):
+        self.lean("@[implemented_by g] def f := 1\ntheorem t : True := trivial\n", False, "implemented_by")
+
+
+class KaniStrictnessTests(GateCase):
+    def kani(self, text, ok, needle=None):
+        (self.root / "tests/proofs").mkdir(exist_ok=True)
+        (self.root / "tests/proofs/p.rs").write_text(text)
+        self.ledger(
+            {
+                "status": "proven",
+                "provable": "kani",
+                "covered_by": ["marigold-impl/tests/t.rs::real_test"],
+                "proof": "tests/proofs/p.rs",
+            }
+        )
+        if ok:
+            self.assert_ok()
+        else:
+            self.assert_fail(needle)
+
+    def test_harness_without_assertion_rejected(self):
+        self.kani("#[kani::proof]\nfn c() { let _x: u8 = kani::any(); }\n", False, "assertion")
+
+    def test_assertion_only_in_string_rejected(self):
+        self.kani('#[kani::proof]\nfn c() { let _s = "assert!(true)"; }\n', False, "assertion")
+
+    def test_assume_false_rejected(self):
+        self.kani("#[kani::proof]\nfn c() { kani::assume(false); assert!(true); }\n", False, "assume(false)")
+
+    def test_kani_assert_accepted(self):
+        self.kani('#[kani::proof]\nfn c() { kani::assert(true, "x"); }\n', True)
+
+    def test_assert_eq_accepted(self):
+        self.kani("#[kani::proof]\nfn c() { assert_eq!(1, 1); }\n", True)
+
+    def test_assert_in_other_fn_does_not_count(self):
+        self.kani("fn h() { assert!(true); }\n#[kani::proof]\nfn c() {}\n", False, "assertion")
+
+
+class RunHardeningTests(RunBase):
+    def test_locked_added_only_when_a_lockfile_exists(self):
+        self.run_mode()
+        self.assertNotIn("--locked", self.calls()[0])
+        self.log.unlink()
+        (self.root / "Cargo.lock").write_text("")
+        self.run_mode()
+        self.assertIn("--locked", self.calls()[0])
+
+    def test_offline_added_when_requested(self):
+        self.run_mode(extra_env={"GATE_OFFLINE": "1"})
+        self.assertIn("--offline", self.calls()[0])
+
+    def test_offline_absent_by_default(self):
+        self.run_mode()
+        self.assertNotIn("--offline", self.calls()[0])
+
+    def test_secret_like_variables_are_scrubbed(self):
+        self.run_mode(
+            extra_env={"MY_API_TOKEN": "t", "APP_SECRET_X": "s", "SOME_KEY": "k", "DB_PASSWORD": "p"}
+        )
+        line = self.calls()[1]
+        for part in ("TOKEN=unset", "SECRET=unset", "KEY=unset", "PASSWORD=unset"):
+            self.assertIn(part, line)
+
+    def test_non_secret_target_dir_survives_scrub(self):
+        self.run_mode(target="/tmp/keep-me")
+        self.assertIn("TARGET=/tmp/keep-me", self.calls()[1])
+
+    def test_non_integer_timeout_is_usage_error(self):
+        code, out, err = self.run_mode(extra_env={"GATE_CARGO_TIMEOUT": "abc"})
+        self.assertEqual(code, 2)
+        self.assertIn("GATE_CARGO_TIMEOUT", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_zero_timeout_is_usage_error(self):
+        code, out, err = self.run_mode(extra_env={"GATE_CARGO_TIMEOUT": "0"})
+        self.assertEqual(code, 2)
+
+    def test_timeout_kills_the_process_group(self):
+        import time
+
+        pidfile = self.root / "child.pid"
+        start = time.monotonic()
+        code, out, err = self.run_mode(extra_env={"GATE_CARGO_TIMEOUT": "1", "FAKE_CARGO_PID": str(pidfile)})
+        self.assertLess(time.monotonic() - start, 15)
+        self.assertEqual(code, 1)
+        self.assertIn("timed out", out)
+        pid = int(pidfile.read_text())
+        for _ in range(40):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            os.kill(pid, 9)
+            self.fail("grandchild survived the timeout")
+
+    def test_permission_error_is_clean(self):
+        (self.shim / "cargo").chmod(0o644)
+        code, out, err = self.run_mode(extra_env={"PATH": str(self.shim)})
+        self.assertEqual(code, 1)
+        self.assertIn("cargo", out)
+        self.assertNotIn("Traceback", out + err)
+
+    def test_feature_starting_with_dash_rejected(self):
+        self.ledger({"status": "covered", "covered_by": ["marigold-impl/tests/t.rs::real_test"], "features": ["--all-features"]})
+        code, out, err = self.run_mode(flag=None)
+        self.assertEqual(code, 1)
+        self.assertIn("features", out)
+
+    def test_dependency_feature_syntax_accepted(self):
+        self.ledger({"status": "covered", "covered_by": ["marigold-impl/tests/t.rs::real_test"], "features": ["dep/feat-x.y"]})
+        code, out, err = self.run_mode(flag=None)
+        self.assertEqual(code, 0, out + err)
+
+    def test_same_test_with_different_features_runs_twice(self):
+        cited = ["marigold-impl/tests/t.rs::real_test"]
+        self.ledger(
+            {"id": "a", "status": "covered", "covered_by": cited, "features": ["tokio"]},
+            {"id": "b", "status": "covered", "covered_by": cited, "features": ["async-std"]},
+        )
+        self.run_mode()
+        lists = [c for c in self.calls() if "--list" in c]
+        self.assertEqual(len(lists), 2)
+        self.assertTrue(any("--features tokio" in c for c in lists))
+        self.assertTrue(any("--features async-std" in c for c in lists))
+
+    def test_same_test_same_features_runs_once(self):
+        cited = ["marigold-impl/tests/t.rs::real_test"]
+        self.ledger(
+            {"id": "a", "status": "covered", "covered_by": cited},
+            {"id": "b", "status": "covered", "covered_by": cited},
+        )
+        self.run_mode()
+        self.assertEqual(len([c for c in self.calls() if "--list" in c]), 1)
+
+    def test_features_table_applies_per_crate(self):
+        (self.root / "marigold-grammar/tests").mkdir(parents=True)
+        (self.root / "marigold-grammar/tests/g.rs").write_text("#[test]\nfn gtest() {}\n")
+        self.ledger(
+            {
+                "status": "covered",
+                "covered_by": ["marigold-impl/tests/t.rs::real_test", "marigold-grammar/tests/g.rs::gtest"],
+            }
+        )
+        text = (self.root / "tests/invariants.toml").read_text()
+        text += '\n[invariant.features]\nmarigold-impl = ["tokio"]\n'
+        (self.root / "tests/invariants.toml").write_text(text)
+        self.run_mode(lst="real_test: test\\ngtest: test\\n")
+        lists = [c for c in self.calls() if "--list" in c]
+        impl = [c for c in lists if "-p marigold-impl" in c][0]
+        grammar = [c for c in lists if "-p marigold-grammar" in c][0]
+        self.assertIn("--features tokio", impl)
+        self.assertNotIn("--features", grammar)
+
+    def test_features_list_with_two_crates_is_ambiguous(self):
+        (self.root / "marigold-grammar/tests").mkdir(parents=True)
+        (self.root / "marigold-grammar/tests/g.rs").write_text("#[test]\nfn gtest() {}\n")
+        self.ledger(
+            {
+                "status": "covered",
+                "covered_by": ["marigold-impl/tests/t.rs::real_test", "marigold-grammar/tests/g.rs::gtest"],
+                "features": ["tokio"],
+            }
+        )
+        code, out, err = self.run_mode(flag=None)
+        self.assertEqual(code, 1)
+        self.assertIn("ambiguous", out)
+
+
+@unittest.skipUnless(shutil.which("cargo"), "cargo is not installed")
+class RealCargoTests(GateCase):
+    def setUp(self):
+        super().setUp()
+        root = self.root
+        (root / "Cargo.toml").write_text('[workspace]\nmembers = ["marigold-impl"]\nresolver = "2"\n')
+        (root / "marigold-impl/Cargo.toml").write_text(
+            '[package]\nname = "marigold-impl"\nversion = "0.0.0"\nedition = "2021"\n\n[features]\ntokio = []\n'
+        )
+        src = root / "marigold-impl/src"
+        (src / "lib.rs").write_text('#[cfg(test)]\nmod a;\n#[cfg(feature = "tokio")]\nmod b;\n')
+        (src / "x.rs").unlink()
+        self.target = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.target.cleanup()
+        super().tearDown()
+
+    def go(self, a_body, b_body, cite):
+        src = self.root / "marigold-impl/src"
+        (src / "a.rs").write_text(f"#[test]\nfn foo() {{ {a_body} }}\n")
+        (src / "b.rs").write_text(f"#[test]\nfn foo() {{ {b_body} }}\n")
+        self.ledger({"status": "covered", "covered_by": [f"marigold-impl/src/{cite}.rs::foo"]})
+        env = {
+            "PATH": os.environ["PATH"],
+            "HOME": os.environ.get("HOME", "/nonexistent"),
+            "CARGO_TARGET_DIR": self.target.name,
+            "CARGO_HOME": os.environ.get("CARGO_HOME", str(pathlib.Path.home() / ".cargo")),
+            "RUSTUP_HOME": os.environ.get("RUSTUP_HOME", str(pathlib.Path.home() / ".rustup")),
+            "GATE_OFFLINE": "1",
+        }
+        p = subprocess.run(
+            [sys.executable, "-I", str(GATE), "ledger", "--run", str(self.root)],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=600,
+        )
+        return p.returncode, p.stdout, p.stderr
+
+    def test_cited_failing_test_in_gated_module_fails(self):
+        code, out, err = self.go("", "assert!(false);", "b")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("did not pass", out)
+
+    def test_cited_passing_test_passes_even_if_sibling_fails(self):
+        code, out, err = self.go("assert!(false);", "", "b")
+        self.assertEqual(code, 0, out + err)
+
+    def test_cited_file_a_runs_a_not_b(self):
+        code, out, err = self.go("", "assert!(false);", "a")
+        self.assertEqual(code, 0, out + err)
 
 
 class RealLedgerTests(unittest.TestCase):

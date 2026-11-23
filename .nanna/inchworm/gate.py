@@ -1,9 +1,11 @@
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 import tomllib
+import types
 import unicodedata
 
 USAGE = "usage: gate.py (ledger|coverage) [--run] [ROOT]"
@@ -14,16 +16,20 @@ DONE = {"covered", "proven"}
 REQUIRED = ("id", "surface", "statement", "status", "provable", "covered_by")
 CRATES = ("marigold", "marigold-impl", "marigold-grammar", "marigold-lsp", "marigold-macros", "tests")
 TEST_ATTRS = {"test", "tokio::test", "async_std::test", "rstest::rstest"}
-FN_ALLOWED = TEST_ATTRS | {"should_panic", "cfg", "allow", "doc"}
-MOD_ALLOWED = {"cfg", "allow", "doc"}
-PROOF_FN_ALLOWED = {"kani::proof", "kani::unwind", "kani::solver", "cfg", "allow", "doc"}
+LINTS = {"allow", "warn", "deny", "forbid", "expect", "doc"}
+FN_ALLOWED = TEST_ATTRS | LINTS | {"should_panic", "cfg"}
+MOD_ALLOWED = LINTS | {"cfg"}
+PROOF_FN_ALLOWED = LINTS | {"kani::proof", "kani::unwind", "kani::solver", "cfg"}
 PROPTEST_INNER = {"proptest_config"}
 LOCATIONS = "<crate>/tests/*.rs or a <crate>/src file declared by mod"
+SECRET_WORDS = ("TOKEN", "SECRET", "KEY", "PASSWORD")
+DEFAULT_TIMEOUT = 900
 
 SPECIAL = re.compile(r"""//|/\*|"|'|(?<![\w])(?:(?:br|cr|r)#*"|[bc]"|b')""")
 STR_RE = re.compile(r'"(?:[^"\\]|\\.)*"?', re.S)
 CHAR_RE = re.compile(r"'(?:\\.[^'\n]{0,10}|[^\\'\n])'")
 FN_RE = re.compile(r"\bfn\s+(\w+)")
+DECL_RE = re.compile(r"\bmod\s+(\w+)\s*;")
 INNER_RE = re.compile(r"#\s*!\s*\[")
 OUTER_START = re.compile(r"\s*#\s*\[")
 INNER_START = re.compile(r"\s*#\s*!\s*\[")
@@ -32,6 +38,10 @@ MOD_HEADER = re.compile(r"(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)")
 FN_HEADER = re.compile(r"(?:^|\W)fn\s+\w+")
 PROPTEST_HEAD = re.compile(r"(?:proptest::)?proptest\s*!")
 FEATURE_NAME = re.compile(r'feature\s*=\s*"([^"]+)"')
+FEATURE_OK = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*")
+ASSERT_RE = re.compile(r"\bkani::assert\s*\(|\bassert(?:_eq|_ne)?\s*!\s*[(\[{]")
+ASSUME_FALSE = re.compile(r"kani::assume\s*\(\s*false\s*\)")
+LEAN_FORBIDDEN = ("sorry", "axiom", "admit", "native_decide", "ofReduceBool", "unsafe", "implemented_by")
 
 
 def cfg_regex(extra=()):
@@ -99,6 +109,48 @@ def strip_rust(text):
         ps = end
         i = end
     out.append(text[ps:])
+    return "".join(out)
+
+
+def strip_lean(text):
+    out = []
+    n = len(text)
+    i = 0
+    while i < n:
+        if text.startswith("/-", i):
+            depth = 1
+            j = i + 2
+            while j < n and depth:
+                if text.startswith("/-", j):
+                    depth += 1
+                    j += 2
+                elif text.startswith("-/", j):
+                    depth -= 1
+                    j += 2
+                else:
+                    j += 1
+            i = j
+            out.append(" ")
+        elif text.startswith("--", i):
+            j = text.find("\n", i)
+            i = n if j == -1 else j
+        elif text[i] == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            i = min(j + 1, n)
+            out.append(" ")
+        elif text[i] == "'":
+            cm = CHAR_RE.match(text, i)
+            if cm:
+                i = cm.end()
+                out.append(" ")
+            else:
+                out.append("'")
+                i += 1
+        else:
+            out.append(text[i])
+            i += 1
     return "".join(out)
 
 
@@ -188,42 +240,71 @@ def classify(header):
 class Analysis:
     def __init__(self, text):
         self.text = text
-        self.stripped = strip_rust(text)
-        s = self.stripped
+        self.stripped = s = strip_rust(text)
         n = len(s)
         consumed = set()
         self.file_inner, _ = leading_attributes(s, text, 0, n, True, consumed)
-        marks = {m.start(): m.group(1) for m in FN_RE.finditer(s)}
+        fn_marks = {m.start(): m.group(1) for m in FN_RE.finditer(s)}
+        decl_marks = {m.start(): m.group(1) for m in DECL_RE.finditer(s)}
         self.found = []
+        self.mod_decls = []
         stack = []
         hs = 0
-        pd = 0
+
+        def visible():
+            return tuple(c for c in stack if c["kind"] != "paren")
+
         for i, ch in enumerate(s):
             if ch == "f":
-                name = marks.get(i)
+                name = fn_marks.get(i)
                 if name is not None:
-                    self.found.append((i, name, tuple(stack)))
+                    self.found.append((i, name, visible()))
+            elif ch == "m":
+                name = decl_marks.get(i)
+                if name is not None:
+                    self.mod_decls.append((i, name, visible()))
             elif ch in "([":
-                pd += 1
+                end = rstrip_index(s, i)
+                if end >= 2 and s[end - 1] == "!" and (s[end - 2].isalnum() or s[end - 2] == "_"):
+                    attrs, after = leading_attributes(s, text, hs, i, False, None)
+                    kind = "proptest" if PROPTEST_HEAD.fullmatch(s[after:end].strip()) else "macro"
+                    inner, _ = leading_attributes(s, text, i + 1, n, True, consumed)
+                    stack.append({"kind": kind, "name": "", "attrs": attrs, "inner": inner, "delim": ch})
+                    hs = i + 1
+                else:
+                    stack.append({"kind": "paren", "delim": ch})
             elif ch in ")]":
-                pd = max(0, pd - 1)
+                if stack and stack[-1]["delim"] in "([":
+                    stack.pop()
             elif ch == "{":
                 attrs, after = leading_attributes(s, text, hs, i, False, None)
                 kind, name = classify(s[after:i])
                 inner, _ = leading_attributes(s, text, i + 1, n, True, consumed)
-                stack.append({"kind": kind, "name": name, "attrs": attrs, "inner": inner})
+                stack.append({"kind": kind, "name": name, "attrs": attrs, "inner": inner, "delim": "{"})
                 hs = i + 1
             elif ch == "}":
+                while stack and stack[-1]["delim"] in "([":
+                    stack.pop()
                 if stack:
                     stack.pop()
                 hs = i + 1
-            elif ch == ";" and pd == 0:
+            elif ch == ";" and not (stack and stack[-1]["delim"] in "(["):
                 hs = i + 1
         self.global_problem = None
         for m in INNER_RE.finditer(s):
             if m.end() - 1 not in consumed:
                 self.global_problem = "inner attribute #![...] outside the head of the file or of a body"
                 break
+
+
+_ANALYSES = {}
+
+
+def analyze_file(path):
+    key = str(path)
+    if key not in _ANALYSES:
+        _ANALYSES[key] = Analysis(pathlib.Path(path).read_text(errors="replace"))
+    return _ANALYSES[key]
 
 
 def check_attrs(attrs, allowed, cfg_re, label):
@@ -251,7 +332,6 @@ def features_of(attrs):
 
 def check_contexts(stack, label, cfg_re):
     features = []
-    in_proptest = False
     for ctx in stack:
         kind = ctx["kind"]
         if kind == "fn":
@@ -261,11 +341,8 @@ def check_contexts(stack, label, cfg_re):
         if kind == "other":
             return f"{label} is inside an unsupported block", features
         if kind == "proptest":
-            in_proptest = True
             problem = check_attrs(ctx["attrs"], MOD_ALLOWED, cfg_re, "proptest!")
-            if problem:
-                return problem, features
-            problem = check_attrs(ctx["inner"], PROPTEST_INNER, cfg_re, "proptest!")
+            problem = problem or check_attrs(ctx["inner"], PROPTEST_INNER, cfg_re, "proptest!")
         else:
             problem = check_attrs(ctx["attrs"] + ctx["inner"], MOD_ALLOWED, cfg_re, f"module {ctx['name']}")
             features += features_of(ctx["attrs"] + ctx["inner"])
@@ -278,7 +355,7 @@ def locate_test(text, entry_name):
     *module_path, name = entry_name.split("::")
     a = Analysis(text)
     if a.global_problem:
-        return a.global_problem, []
+        return a.global_problem, [], []
     candidates = []
     for pos, fname, stack in a.found:
         if fname != name:
@@ -286,29 +363,37 @@ def locate_test(text, entry_name):
         chain = [c["name"] for c in stack if c["kind"] == "mod"]
         if module_path and chain[len(chain) - len(module_path):] != module_path:
             continue
-        candidates.append((pos, stack))
+        candidates.append((pos, stack, chain))
     if not candidates:
-        return f"no fn {entry_name} (outside comments and strings)", []
+        return f"no fn {entry_name} (outside comments and strings)", [], []
     if len(candidates) > 1:
-        return f"ambiguous: fn {name} is defined {len(candidates)} times; cite its module path", []
-    pos, stack = candidates[0]
+        return f"ambiguous: fn {name} is defined {len(candidates)} times; cite its module path", [], []
+    pos, stack, chain = candidates[0]
     label = f"fn {name}"
     problem = check_attrs(a.file_inner, MOD_ALLOWED, CFG_TEST, "the file")
     if problem:
-        return problem, []
+        return problem, [], []
     features = features_of(a.file_inner)
     problem, more = check_contexts(stack, label, CFG_TEST)
     if problem:
-        return problem, []
+        return problem, [], []
     features += more
     attrs = attributes_before(a.stripped, text, pos)
     problem = check_attrs(attrs, FN_ALLOWED, CFG_TEST, label)
     if problem:
-        return problem, []
+        return problem, [], []
     features += features_of(attrs)
     if not any(attr_name(x) in TEST_ATTRS for x in attrs):
-        return f"{label} is not a test", []
-    return None, sorted(set(features))
+        return f"{label} is not a test", [], []
+    return None, sorted(set(features)), chain
+
+
+def harness_body(stripped, pos):
+    j = stripped.find("{", pos)
+    if j == -1:
+        return None
+    close = matching(stripped, j, "{", "}", len(stripped))
+    return stripped[j:close] if close != -1 else stripped[j:]
 
 
 def proof_harness_problem(text):
@@ -317,63 +402,95 @@ def proof_harness_problem(text):
         return a.global_problem
     if check_attrs(a.file_inner, MOD_ALLOWED, CFG_PROOF, "the file"):
         return "no proof harness: file-level attribute not supported"
+    last = "no #[kani::proof] fn outside macros, nested fns and unsupported cfg"
     for pos, name, stack in a.found:
         attrs = attributes_before(a.stripped, text, pos)
         if not any(attr_name(x) == "kani::proof" for x in attrs):
             continue
         problem, _ = check_contexts(stack, f"fn {name}", CFG_PROOF)
-        if problem is None and check_attrs(attrs, PROOF_FN_ALLOWED, CFG_PROOF, f"fn {name}") is None:
+        problem = problem or check_attrs(attrs, PROOF_FN_ALLOWED, CFG_PROOF, f"fn {name}")
+        if problem:
+            last = problem
+            continue
+        body = harness_body(a.stripped, pos)
+        if body is None:
+            last = f"fn {name} has no body"
+        elif ASSUME_FALSE.search(body):
+            last = f"fn {name} uses kani::assume(false)"
+        elif not ASSERT_RE.search(body):
+            last = f"fn {name} has no assertion (kani::assert, assert!, assert_eq! or assert_ne!)"
+        else:
             return None
-    return "no proof harness (a #[kani::proof] fn outside macros, nested fns and unsupported cfg)"
+    return f"no proof harness: {last}"
 
 
-def declared_problem(root, crate, parts, depth=0):
+def module_info(root, crate, parts, depth=0):
     if parts in (["lib.rs"], ["main.rs"]):
-        return None
+        return [], [], None
+    last = f"{'/'.join([crate, 'src', *parts])} is not declared by a mod chain from lib.rs or main.rs"
     if depth > 32:
-        return "module nesting too deep"
+        return [], [], "module nesting too deep"
     *dirs, fname = parts
     if fname == "mod.rs":
         name = dirs[-1]
-        parent_dirs = dirs[:-1]
+        D = dirs[:-1]
     else:
         name = fname[:-3]
-        parent_dirs = dirs
-    if parent_dirs:
-        parents = [parent_dirs[:-1] + [parent_dirs[-1] + ".rs"], parent_dirs + ["mod.rs"]]
-    else:
-        parents = [["lib.rs"], ["main.rs"]]
+        D = dirs
     base = root / crate / "src"
-    last = None
-    for par in parents:
-        f = base.joinpath(*par)
-        if not f.is_file():
-            continue
-        text = f.read_text(errors="replace")
-        stripped = strip_rust(text)
-        pattern = re.compile(rf"^[ \t]*(?P<d>(?:pub(?:\([^)]*\))?\s+)?mod\s+{re.escape(name)}\s*;)", re.M)
-        m = pattern.search(stripped)
-        if not m:
-            continue
-        attrs = attributes_before(stripped, text, m.start("d"))
-        problem = check_attrs(attrs, MOD_ALLOWED, CFG_TEST, f"mod {name} declaration")
-        if problem:
-            return problem
-        last = declared_problem(root, crate, par, depth + 1)
-        if last is None:
-            return None
-    return last or f"{'/'.join([crate, 'src', *parts])} is not declared by a mod chain from lib.rs or main.rs"
+    for split in range(len(D), -1, -1):
+        inline = D[split:]
+        if split == 0:
+            parents = [["lib.rs"], ["main.rs"]]
+        else:
+            parents = [D[:split - 1] + [D[split - 1] + ".rs"], D[:split] + ["mod.rs"]]
+        for par in parents:
+            f = base.joinpath(*par)
+            if not f.is_file():
+                continue
+            a = analyze_file(f)
+            if a.global_problem:
+                last = a.global_problem
+                continue
+            for pos, dname, stack in a.mod_decls:
+                if dname != name:
+                    continue
+                if any(c["kind"] != "mod" for c in stack):
+                    last = f"mod {name} is declared inside a fn, macro or other block"
+                    continue
+                if [c["name"] for c in stack] != inline:
+                    continue
+                attrs = attributes_before(a.stripped, a.text, pos)
+                problem = check_attrs(a.file_inner, MOD_ALLOWED, CFG_TEST, "the file")
+                problem = problem or check_attrs(attrs, MOD_ALLOWED, CFG_TEST, f"mod {name} declaration")
+                feats = []
+                if not problem:
+                    problem, feats = check_contexts(stack, f"mod {name}", CFG_TEST)
+                if problem:
+                    last = problem
+                    continue
+                if par in (["lib.rs"], ["main.rs"]):
+                    pm, pf, pp = [], [], None
+                else:
+                    pm, pf, pp = module_info(root, crate, par, depth + 1)
+                if pp:
+                    last = pp
+                    continue
+                gathered = pf + features_of(a.file_inner) + feats + features_of(attrs)
+                return pm + inline + [name], gathered, None
+    return [], [], last
 
 
-def location_problem(root, rel):
+def location_info(root, rel):
     parts = rel.split("/")
     if parts[0] not in CRATES:
-        return f"unknown crate directory {parts[0]!r}; citations must be {LOCATIONS}"
+        return f"unknown crate directory {parts[0]!r}; citations must be {LOCATIONS}", [], []
     if len(parts) == 3 and parts[1] == "tests" and parts[2].endswith(".rs"):
-        return None
+        return None, [], []
     if len(parts) >= 3 and parts[1] == "src" and parts[-1].endswith(".rs"):
-        return declared_problem(root, parts[0], parts[2:])
-    return f"{rel} is not compiled by cargo test; citations must be {LOCATIONS}"
+        modpath, feats, problem = module_info(root, parts[0], parts[2:])
+        return problem, modpath, feats
+    return f"{rel} is not compiled by cargo test; citations must be {LOCATIONS}", [], []
 
 
 def resolve(root, rel, label, errors, prefix=None):
@@ -401,11 +518,11 @@ def resolve(root, rel, label, errors, prefix=None):
         return None
     real_rel = real.relative_to(base).as_posix()
     if prefix is None:
-        problem = location_problem(root, rel)
+        problem = location_info(root, rel)[0]
         if problem:
             errors.append(f"{label}: {problem}")
             return None
-        if real_rel != rel and location_problem(root, real_rel):
+        if real_rel != rel and location_info(root, real_rel)[0]:
             errors.append(f"{label}: resolves outside the allowed test locations: {rel}")
             return None
     elif not real.is_relative_to((base / prefix).resolve()):
@@ -414,7 +531,7 @@ def resolve(root, rel, label, errors, prefix=None):
     return full
 
 
-def check_covered_by(root, inv, errors, targets, extra_features=()):
+def check_covered_by(root, inv, errors, targets, features):
     label = inv["id"]
     done = inv["status"] in DONE
     if done and not inv["covered_by"]:
@@ -432,11 +549,14 @@ def check_covered_by(root, inv, errors, targets, extra_features=()):
         if not sep or not name.split("::")[-1]:
             errors.append(f"{label}: {inv['status']} entries must be path::name: {entry}")
             continue
-        problem, features = locate_test(full.read_text(errors="replace"), name)
+        problem, found, chain = locate_test(full.read_text(errors="replace"), name)
         if problem:
             errors.append(f"{label}: {path}: {problem}")
-        else:
-            targets.append((label, path, name, sorted(set(features) | set(extra_features))))
+            continue
+        _, modpath, decl_features = location_info(root, path)
+        expected = "::".join(modpath + chain + [name.split("::")[-1]])
+        wanted = sorted(set(found) | set(decl_features) | set(features.get(path.split("/")[0], [])))
+        targets.append((label, path, expected, wanted))
 
 
 def check_proof(root, inv, errors, proofs):
@@ -473,8 +593,8 @@ def check_proof(root, inv, errors, proofs):
         if problem:
             errors.append(f"{label}: {proof}: {problem}")
         return
-    code = re.sub(r"--[^\n]*", "", re.sub(r"/-.*?-/", "", text, flags=re.S))
-    for word in ("sorry", "axiom", "admit"):
+    code = strip_lean(text)
+    for word in LEAN_FORBIDDEN:
         if re.search(rf"\b{word}\b", code):
             errors.append(f"{label}: {proof} contains {word}")
             return
@@ -484,6 +604,28 @@ def check_proof(root, inv, errors, proofs):
 
 def normalise_id(value):
     return unicodedata.normalize("NFC", value).casefold().strip()
+
+
+def parse_features(inv, label, errors):
+    raw = inv.get("features", [])
+
+    def valid(names):
+        return isinstance(names, list) and all(isinstance(x, str) and FEATURE_OK.fullmatch(x) for x in names)
+
+    message = f"{label}: features must be a list of cargo feature names or a table of crate = [names]"
+    if isinstance(raw, dict):
+        if not all(k in CRATES and valid(v) for k, v in raw.items()):
+            errors.append(message)
+            return None
+        return raw
+    if not valid(raw):
+        errors.append(message)
+        return None
+    crates = {e.partition("::")[0].split("/")[0] for e in inv["covered_by"]}
+    if raw and len(crates) > 1:
+        errors.append(f"{label}: features list is ambiguous for an entry citing several crates; use a table")
+        return None
+    return {c: raw for c in crates}
 
 
 def check_entry(root, inv, seen, errors, targets, proofs):
@@ -515,17 +657,21 @@ def check_entry(root, inv, seen, errors, targets, proofs):
         if field in inv and not isinstance(inv[field], str):
             errors.append(f"{label}: {field} must be a string")
             return
-    feats = inv.get("features", [])
-    if not isinstance(feats, list) or not all(isinstance(x, str) and re.fullmatch(r"[\w-]+", x) for x in feats):
-        errors.append(f"{label}: features must be a list of cargo feature names")
+    features = parse_features(inv, label, errors)
+    if features is None:
         return
-    check_covered_by(root, inv, errors, targets, feats)
+    check_covered_by(root, inv, errors, targets, features)
     check_proof(root, inv, errors, proofs)
 
 
 def cargo_args(root, path, features):
     parts = path.split("/")
-    base = ["test", "-p", parts[0]]
+    base = ["test"]
+    if (root / "Cargo.lock").exists():
+        base.append("--locked")
+    if os.environ.get("GATE_OFFLINE") == "1":
+        base.append("--offline")
+    base += ["-p", parts[0]]
     if parts[1] == "tests":
         base += ["--test", parts[2][:-3]]
     elif (root / parts[0] / "src" / "lib.rs").exists():
@@ -537,49 +683,73 @@ def cargo_args(root, path, features):
     return base
 
 
-def run_cargo(root, args, env):
-    timeout = int(os.environ.get("GATE_CARGO_TIMEOUT", "3600"))
-    return subprocess.run(["cargo", *args], cwd=root, env=env, capture_output=True, text=True, timeout=timeout)
+def scrubbed_env():
+    env = {}
+    for k, v in os.environ.items():
+        upper = k.upper()
+        if k.startswith("GIT_") or any(w in upper for w in SECRET_WORDS):
+            continue
+        env[k] = v
+    return env
 
 
-def run_targets(root, targets):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+def run_cargo(root, args, env, timeout):
+    proc = subprocess.Popen(
+        ["cargo", *args],
+        cwd=root,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        proc.communicate()
+        raise
+    return types.SimpleNamespace(returncode=proc.returncode, stdout=out, stderr=err)
+
+
+def run_targets(root, targets, timeout):
+    env = scrubbed_env()
     errors = []
     done = set()
-    for label, path, name, features in targets:
-        if (path, name) in done:
+    for label, path, expected, features in targets:
+        key = (path, expected, tuple(features))
+        if key in done:
             continue
-        done.add((path, name))
-        *module_path, last = name.split("::")
+        done.add(key)
         base = cargo_args(root, path, features)
         try:
-            listed = run_cargo(root, base + ["--", "--list"], env)
+            listed = run_cargo(root, base + ["--", "--list"], env, timeout)
+            if listed.returncode != 0:
+                errors.append(f"{label}: cargo test --list failed for {path}::{expected}")
+                continue
             hits = []
             for line in listed.stdout.splitlines():
                 m = re.fullmatch(r"(\S+): test", line.strip())
-                if not m:
-                    continue
-                segs = m.group(1).split("::")
-                if segs[-1] != last:
-                    continue
-                if module_path and segs[len(segs) - 1 - len(module_path):-1] != module_path:
-                    continue
-                hits.append(m.group(1))
-            if listed.returncode != 0:
-                errors.append(f"{label}: cargo test --list failed for {path}::{name}")
-                continue
+                if m and m.group(1) == expected:
+                    hits.append(m.group(1))
             if len(hits) != 1:
-                errors.append(f"{label}: collected {len(hits)} tests for {path}::{name}, expected exactly 1")
+                errors.append(f"{label}: collected {len(hits)} tests named {expected} from {path}, expected exactly 1")
                 continue
-            ran = run_cargo(root, base + ["--", "--exact", hits[0]], env)
+            ran = run_cargo(root, base + ["--", "--exact", expected], env, timeout)
         except FileNotFoundError:
             errors.append("cargo not found on PATH")
             return errors
         except subprocess.TimeoutExpired:
-            errors.append(f"{label}: cargo timed out for {path}::{name}")
+            errors.append(f"{label}: cargo timed out after {timeout}s (GATE_CARGO_TIMEOUT) for {path}::{expected}")
             continue
+        except OSError as e:
+            errors.append(f"cannot run cargo: {e.strerror or e}")
+            return errors
         if ran.returncode != 0 or not re.search(r"test result: ok\. 1 passed;", ran.stdout):
-            errors.append(f"{label}: {path}::{name} did not pass exactly one test")
+            errors.append(f"{label}: {path}::{expected} did not pass exactly one test")
     return errors
 
 
@@ -605,9 +775,20 @@ def main(argv):
         return 2
     phase, run, root_arg = parsed
     root = pathlib.Path(root_arg) if root_arg else pathlib.Path(__file__).resolve().parents[2]
-    if run and "CARGO_TARGET_DIR" not in os.environ:
-        print("--run needs CARGO_TARGET_DIR in the environment", file=sys.stderr)
-        return 2
+    timeout = DEFAULT_TIMEOUT
+    if run:
+        if "CARGO_TARGET_DIR" not in os.environ:
+            print("--run needs CARGO_TARGET_DIR in the environment", file=sys.stderr)
+            return 2
+        raw = os.environ.get("GATE_CARGO_TIMEOUT")
+        if raw is not None:
+            try:
+                timeout = int(raw)
+                if timeout <= 0:
+                    raise ValueError
+            except ValueError:
+                print("GATE_CARGO_TIMEOUT must be a positive integer number of seconds", file=sys.stderr)
+                return 2
     ledger_path = root / "tests/invariants.toml"
     try:
         data = tomllib.loads(ledger_path.read_text())
@@ -635,7 +816,7 @@ def main(argv):
             if isinstance(inv, dict) and inv.get("surface") == "interface" and inv.get("status") not in DONE:
                 errors.append(f"{inv.get('id', '?')}: interface invariant not covered ({inv.get('status')})")
     if run and not errors:
-        errors += run_targets(root, targets)
+        errors += run_targets(root, targets, timeout)
     print("\n".join(errors))
     return 1 if errors else 0
 
