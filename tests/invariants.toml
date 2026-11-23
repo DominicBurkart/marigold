@@ -72,7 +72,7 @@ covered_by = [
 [[invariant]]
 id = "multi-consumer-fanout"
 surface = "interface"
-statement = "With the tokio or async-std feature and T: Copy, every receiver obtained from MultiConsumerStream::get before run() is called observes every item of the source exactly once, in source order."
+statement = "With the tokio feature and T: Copy, every receiver obtained from MultiConsumerStream::get before run() is called observes every item of the source exactly once, in source order."
 status = "covered"
 provable = "none"
 covered_by = ["marigold-impl/src/multi_consumer_stream.rs::multiple_consumers_each_receive_full_stream"]
