@@ -39,3 +39,88 @@ min_score = 7
 [flow.outcome]
 mode = "draft_pr"
 blocking = "required"
+
+[[flow]]
+name = "test-design"
+trigger = { kind = "label", label = "inchworm:test-design" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "scout"
+identity = "marigold-invariant-scout"
+
+[[flow.step]]
+name = "design"
+identity = "marigold-test-designer"
+
+[[flow.step]]
+name = "publish"
+identity = "pr-shepherd"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 600
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
+
+[[flow]]
+name = "close-coverage"
+trigger = { kind = "label", label = "inchworm:coverage" }
+base = "main"
+max_attempts = 3
+retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "close"
+identity = "marigold-coverage-closer"
+
+[[flow.step]]
+name = "publish"
+identity = "pr-shepherd"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 600
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"
+
+[[flow]]
+name = "prove"
+trigger = { kind = "label", label = "inchworm:prove" }
+base = "main"
+max_attempts = 2
+retry_on = ["agent_failed", "judge_rejected"]
+
+[[flow.step]]
+name = "prove"
+identity = "marigold-kani-prover"
+
+[[flow.step]]
+name = "publish"
+identity = "pr-shepherd"
+
+[[flow.judge]]
+kind = "diff"
+max_lines = 800
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
+
+[[flow.judge]]
+kind = "nanna_clean"
+
+[flow.outcome]
+mode = "draft_pr"
+blocking = "required"

@@ -102,4 +102,39 @@ mod tests {
             .await;
         assert_eq!(result.len(), 10);
     }
+
+    #[tokio::test]
+    async fn combinations_count_and_distinctness_over_small_inputs() {
+        fn binomial(n: usize, k: usize) -> usize {
+            if k > n {
+                return 0;
+            }
+            (0..k).fold(1, |acc, i| acc * (n - i) / (i + 1))
+        }
+        for n in 0usize..=6 {
+            for k in 0usize..=7 {
+                let result: Vec<Vec<usize>> = futures::stream::iter(0..n)
+                    .combinations(k)
+                    .await
+                    .collect::<Vec<_>>()
+                    .await;
+                assert_eq!(result.len(), binomial(n, k), "n={n} k={k}");
+                let distinct: std::collections::HashSet<_> = result.iter().cloned().collect();
+                assert_eq!(distinct.len(), result.len(), "n={n} k={k}");
+                assert!(result
+                    .iter()
+                    .all(|c| c.len() == k && c.windows(2).all(|w| w[0] < w[1])));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn combinations_of_repeated_items_are_not_distinct() {
+        let result: Vec<Vec<i32>> = futures::stream::iter(vec![1, 1])
+            .combinations(1)
+            .await
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(result, vec![vec![1], vec![1]]);
+    }
 }
