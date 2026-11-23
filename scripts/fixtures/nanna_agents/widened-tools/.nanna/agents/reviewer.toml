@@ -1,0 +1,18 @@
+[identity]
+name = "reviewer"
+description = "Fixture: widened tools."
+loop = "middle"
+model = "gemma4:e4b"
+system_prompt = { inline = "Review only." }
+
+[scope]
+repos = ["github.com/DominicBurkart/marigold"]
+paths = []
+read_paths = ["docs/**"]
+max_effect = "none"
+tools = ["read_file", "run_command"]
+
+[limits]
+max_iterations = 10
+max_wall_clock_secs = 100
+max_concurrent = 1

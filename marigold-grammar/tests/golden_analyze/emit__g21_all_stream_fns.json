@@ -1,0 +1,39 @@
+{
+  "analyze": {
+    "streams": [
+      {
+        "description": "input.permutations(2).combinations(2).permutations_with_replacement(2).keep_first_n(3, ...).fold(...).map(...).filter(...).filter_map(...).return",
+        "cardinality": "≤≤1",
+        "time_class": "O(n)",
+        "exact_time": "O(n)",
+        "space_class": "O(1)",
+        "exact_space": "O(8)",
+        "collects_input": true
+      }
+    ],
+    "program_time": "O(n)",
+    "program_exact_time": "O(n)",
+    "program_space": "O(1)",
+    "program_exact_space": "O(8)",
+    "program_cardinality": "≤≤1"
+  },
+  "nodes": [
+    {
+      "name": null,
+      "expr_index": 0,
+      "range": {
+        "start": 0,
+        "end": 150
+      },
+      "complexity": {
+        "description": "input.permutations(2).combinations(2).permutations_with_replacement(2).keep_first_n(3, ...).fold(...).map(...).filter(...).filter_map(...).return",
+        "cardinality": "≤≤1",
+        "time_class": "O(n)",
+        "exact_time": "O(n)",
+        "space_class": "O(1)",
+        "exact_space": "O(8)",
+        "collects_input": true
+      }
+    }
+  ]
+}

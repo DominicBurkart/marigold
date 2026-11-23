@@ -1,0 +1,39 @@
+{
+  "analyze": {
+    "streams": [
+      {
+        "description": "input.combinations(2).map(...).filter(...).keep_first_n(13, ...).fold(...).return",
+        "cardinality": "1",
+        "time_class": "O(C(n,2))",
+        "exact_time": "O(2C(n,2))",
+        "space_class": "O(1)",
+        "exact_space": "O(5)",
+        "collects_input": true
+      }
+    ],
+    "program_time": "O(C(n,2))",
+    "program_exact_time": "O(2C(n,2))",
+    "program_space": "O(1)",
+    "program_exact_space": "O(5)",
+    "program_cardinality": "1"
+  },
+  "nodes": [
+    {
+      "name": null,
+      "expr_index": 6,
+      "range": {
+        "start": 1597,
+        "end": 1705
+      },
+      "complexity": {
+        "description": "input.combinations(2).map(...).filter(...).keep_first_n(13, ...).fold(...).return",
+        "cardinality": "1",
+        "time_class": "O(C(n,2))",
+        "exact_time": "O(2C(n,2))",
+        "space_class": "O(1)",
+        "exact_space": "O(5)",
+        "collects_input": true
+      }
+    }
+  ]
+}

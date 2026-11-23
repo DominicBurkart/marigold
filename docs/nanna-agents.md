@@ -4,14 +4,25 @@ nanna spawns agents from human-authored identity cards. This repository ships
 four cards scoped to its workspace layout, a base catalog they narrow, and a
 check that parses both with nanna's own parser.
 
+## Status
+
+The cards in `.nanna/agents/` take effect only in `nanna agents list --repo`
+(DominicBurkart/nanna-coder#931). They do not constrain running tasks, which
+get the global base card.
+
+The inchworm flow in `inchworm.toml` is configuration only today. A flow cannot
+reach `pr_open` until nanna creates the branch and pull request, because
+inchworm itself never publishes.
+
 ## Files
 
-| Path | Role |
-| --- | --- |
-| `.nanna/agents/*.toml` | Repo-local cards. Each names a base card and may only narrow it. |
-| `.nanna/catalog/*.toml` | Reference copy of the base catalog (including the required `auditor`). |
-| `.nanna/catalog/prompts/` | System prompts for the base cards. |
-| `scripts/check_nanna_agents.sh` | Parses both layers with nanna and fails on a widening override. |
+- `.nanna/agents/*.toml`: Repo-local cards. Each names a base card and may only
+  narrow it.
+- `.nanna/catalog/*.toml`: Reference copy of the base catalog (including the
+  required `auditor`).
+- `.nanna/catalog/prompts/`: System prompts for the base cards.
+- `scripts/check_nanna_agents.sh`: Parses both layers with nanna and fails on a
+  widening override.
 
 `.nanna/**` is in nanna's fixed protected set for every repository, so an
 agent cannot edit these cards.
@@ -24,12 +35,18 @@ nanna merges `.nanna/agents/` over a host-owned global catalog
 card and may only narrow it: `scope.max_effect` and every `[limits]` value at
 or below the base; `scope.repos`, `scope.paths`, `scope.tools` and
 `scope.read_paths` string-subsets of the base lists. A name with no global card
-is rejected, and `auditor` cannot be overridden. Installing the base is a human
-step on the host that runs nanna:
+is rejected, and `auditor` cannot be overridden.
+
+`.nanna/catalog` is a marigold-only reference copy, not an installer. A host
+catalog is shared across repositories (its cards list several repositories and
+paths), so copying this directory over it would overwrite those cards. Merge
+the marigold entries into the host cards by hand, or install the reference only
+into a scratch directory:
 
 ```sh
-mkdir -p ~/.config/nanna/agents
-cp -r .nanna/catalog/. ~/.config/nanna/agents/
+mkdir -p /tmp/nanna-scratch/agents
+cp -r .nanna/catalog/. /tmp/nanna-scratch/agents/
+NANNA_CONFIG_DIR=/tmp/nanna-scratch nanna agents list --repo .
 ```
 
 ## Identities
@@ -38,13 +55,37 @@ Write scopes (`paths`) use the workspace crates: `marigold`, `marigold-macros`,
 `marigold-grammar`, `marigold-lsp`, `marigold-impl`, plus `tests/` and
 `examples/`.
 
-| Name | Loop | Writes (`paths`, repo-local) | Ceiling | Tools (repo-local) |
-| --- | --- | --- | --- | --- |
-| `rust-implementer` | inner | the five crates and `tests/**` (base also allows `examples/**`) | workspace | `read_file`, `write_file`, `list_directory`, `search`, `git_status`, `git_diff`, `cargo_check`, `cargo_test` (base adds `cargo_build`) |
-| `pr-shepherd` | middle | none | repository | `read_file`, `search`, `git_status`, `git_diff`, `git_commit`, `git_push_branch`, `github_pr_open`, `github_pr_comments` |
-| `reviewer` | middle | none | none | `read_file`, `list_directory`, `search`, `git_status`, `git_diff` |
-| `docs-writer` | inner | `docs/**`, `README.md` | workspace | `read_file`, `write_file`, `list_directory`, `search`, `git_status`, `git_diff` |
-| `auditor` | inner | none | none | none (base only, cannot be overridden) |
+- `rust-implementer`
+  - Loop: inner
+  - Writes (`paths`, repo-local): the five crates and `tests/**` (base also
+    allows `examples/**`)
+  - Ceiling: workspace
+  - Tools (repo-local): `read_file`, `write_file`, `list_directory`, `search`,
+    `git_status`, `git_diff`, `cargo_check`, `cargo_test` (base adds
+    `cargo_build`)
+- `pr-shepherd`
+  - Loop: middle
+  - Writes (`paths`, repo-local): none
+  - Ceiling: repository
+  - Tools (repo-local): `read_file`, `search`, `git_status`, `git_diff`,
+    `git_commit`, `git_push_branch`, `github_pr_open`, `github_pr_comments`
+- `reviewer`
+  - Loop: middle
+  - Writes (`paths`, repo-local): none
+  - Ceiling: none
+  - Tools (repo-local): `read_file`, `list_directory`, `search`, `git_status`,
+    `git_diff`
+- `docs-writer`
+  - Loop: inner
+  - Writes (`paths`, repo-local): `docs/**`, `README.md`
+  - Ceiling: workspace
+  - Tools (repo-local): `read_file`, `write_file`, `list_directory`, `search`,
+    `git_status`, `git_diff`
+- `auditor`
+  - Loop: inner
+  - Writes (`paths`, repo-local): none
+  - Ceiling: none
+  - Tools (repo-local): none (base only, cannot be overridden)
 
 All cards use model `gemma4:e4b` and repository
 `github.com/DominicBurkart/marigold`.
@@ -60,8 +101,12 @@ globs.
 
 `docs-writer` has no markdown-specific tool: nanna ships none, so it gets the
 file tools only. The pre-commit hook requires `README.md` and
-`marigold/README.md` to be identical; the card cannot write the latter, so its
-prompt tells it to report the needed sync.
+`marigold/README.md` to be identical, but the host base card does not allow
+writing `marigold/README.md`, and a repo card cannot widen its base. So
+`docs-writer` cannot keep the two files identical: its prompt tells it to
+report the needed sync, and a human or a card with the right paths does the
+copy. No flow step can sync them today. `rust-implementer`'s `marigold/**` path
+technically allows writing `marigold/README.md`, while its prompt forbids it.
 
 ## No deployer card
 
@@ -76,10 +121,29 @@ credentials, not something an agent should hold a card for.
 scripts/check_nanna_agents.sh
 ```
 
-The script (needs a `nanna` binary on `PATH`, or `NANNA_BIN`) copies the base
-catalog to a scratch config directory and runs `nanna agents list --repo .`.
-It exits non-zero when an override widens its base, names an unknown card, or
-fails to parse. It is not wired into CI.
+The script (needs a `nanna` binary on `PATH`, or `NANNA_BIN`, and `python3`)
+copies the repo catalog to a scratch config directory and runs
+`nanna agents list --repo .`. When a host catalog exists (`NANNA_CONFIG_DIR`,
+else `$XDG_CONFIG_HOME/nanna`, else `~/.config/nanna`, with an `agents`
+directory), it also runs the listing against that real config, because the
+host base is what nanna merges at run time. Rejection by the host is a failure.
+A difference between `.nanna/catalog` and the host catalog is only a printed
+warning, since the repo catalog is intentionally a marigold-only subset.
+
+It reads each card name from `[identity]` with `tomllib`. It exits 1 when an
+override widens its base (from either catalog), names an unknown card, fails to
+parse, declares a name that differs from its file name, or when
+`.nanna/agents` is empty or absent. An empty `NANNA_CONFIG_DIR` counts as unset,
+as in nanna. It is not wired into CI.
+
+`scripts/test_check_nanna_agents.sh` runs the script against fixtures under
+`scripts/fixtures/nanna_agents/` and asserts the exact exit status and message
+for a narrowed card (0), one widened card per dimension (`scope.paths`,
+`scope.max_effect`, `scope.tools`; 1), a name and file mismatch (1), an empty
+or absent agents directory (1), a matching host catalog (0), a drifted but
+compatible host catalog (0 with a warning), a host base narrower than the repo
+catalog (1, with the `widens` cause) and an empty `NANNA_CONFIG_DIR` falling
+back to `XDG_CONFIG_HOME` (1 when that host catalog rejects the cards).
 
 ## Limits
 
@@ -94,13 +158,15 @@ fails to parse. It is not wired into CI.
 nanna runs a task in a dev container only when the repository has both
 `flake.nix` and `.devcontainer/`. This repository now has both:
 
-| Path | Role |
-| --- | --- |
-| `flake.nix` | Exposes `packages.<system>.devContainerImage` (nix2container, x86_64 and aarch64 linux) and a `devShells.default`. |
-| `flake.lock` | Pins nixpkgs, rust-overlay and nix2container. |
-| `.devcontainer/devcontainer.json` | Opt-in marker; nanna only checks that the directory exists. |
-| `.nanna/protected.toml` | Declares `.inchworm/**` as an extra protected glob. |
-| `.nanna/prompt.md` | Per-project prompt: workspace layout and the checks CI and the pre-commit hook run. |
+- `flake.nix`: Exposes `packages.<system>.devContainerImage` (nix2container,
+  x86_64 and aarch64 linux) and a `devShells.default`.
+- `flake.lock`: Pins nixpkgs, rust-overlay and nix2container.
+- `.devcontainer/devcontainer.json`: Opt-in marker; nanna only checks that the
+  directory exists.
+- `.nanna/protected.toml`: Declares `inchworm.toml`, `.inchworm/**` and other CI
+  and release files as extra protected globs.
+- `.nanna/prompt.md`: Per-project prompt: workspace layout and the checks CI and
+  the pre-commit hook run.
 
 The image carries the toolchain read from `rust-toolchain.toml` through
 `rust-bin.fromRustupToolchainFile` (stable, with rustfmt and clippy), a C

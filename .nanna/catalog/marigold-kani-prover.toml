@@ -7,7 +7,7 @@ system_prompt = "prompts/marigold-kani-prover.md"
 
 [scope]
 repos = ["github.com/DominicBurkart/marigold"]
-paths = ["marigold-impl/**", "marigold-grammar/**", "tests/**", "tests/proofs/**", "tests/invariants.toml"]
+paths = ["tests/proofs/**", "tests/invariants.toml"]
 read_paths = ["marigold-impl/**", "marigold-grammar/**", "marigold-macros/**", "marigold/**", "tests/**", ".nanna/inchworm/**", "Cargo.toml", "codecov.yml", "README.md", "rust-toolchain.toml"]
 max_effect = "workspace"
 tools = ["read_file", "list_directory", "search", "git_status", "git_diff", "write_file", "cargo_check", "cargo_test"]

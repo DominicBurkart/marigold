@@ -1,5 +1,12 @@
+[offramp]
+default = "noop"
+
 [auditor]
 runs_in = { kind = "nanna", identity = "auditor" }
+on_failure = "block"
+
+[merge]
+allow = false
 
 [[flow]]
 name = "issue"
@@ -18,7 +25,7 @@ identity = "pr-shepherd"
 [[flow.judge]]
 kind = "diff"
 max_lines = 400
-forbid_paths = ["publish.sh", ".github/**", ".inchworm/**"]
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
@@ -31,17 +38,7 @@ min_score = 7
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = [
-  "Aarch64 Build",
-  "Linux ARMv7 Build",
-  "Linux x86 Build",
-  "Mac x86_64 Build",
-  "Windows x86_64 Build",
-  "WASM Build",
-  "Tests",
-  "Benches",
-  "style hooks",
-]
+blocking = "required"
 
 [[flow]]
 name = "test-design"
@@ -58,17 +55,21 @@ identity = "marigold-invariant-scout"
 name = "design"
 identity = "marigold-test-designer"
 
+[[flow.step]]
+name = "publish"
+identity = "pr-shepherd"
+
 [[flow.judge]]
 kind = "diff"
 max_lines = 600
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/catalog/**", ".nanna/agents/**", ".nanna/inchworm/gate.py", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "close-coverage"
@@ -81,17 +82,21 @@ retry_on = ["agent_failed", "tests_failed", "judge_rejected"]
 name = "close"
 identity = "marigold-coverage-closer"
 
+[[flow.step]]
+name = "publish"
+identity = "pr-shepherd"
+
 [[flow.judge]]
 kind = "diff"
 max_lines = 600
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/**", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "prove"
@@ -104,17 +109,21 @@ retry_on = ["agent_failed", "judge_rejected"]
 name = "prove"
 identity = "marigold-kani-prover"
 
+[[flow.step]]
+name = "publish"
+identity = "pr-shepherd"
+
 [[flow.judge]]
 kind = "diff"
 max_lines = 800
-forbid_paths = [".github/**", ".inchworm/**", ".nanna/catalog/**", ".nanna/agents/**", ".nanna/inchworm/gate.py", "inchworm.toml", "codecov.yml", "deny.toml", "publish.sh", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**"]
+forbid_paths = ["publish.sh", ".github/**", ".inchworm/**", "inchworm.toml", "deny.toml", "codecov.yml", ".cargo-husky/**", "flake.nix", "flake.lock", ".devcontainer/**", ".nanna/**", "install.sh", "Cargo.toml", "**/Cargo.toml", "examples/**", "marigold/src/**", "marigold-*/src/**", "marigold-*/benches/**", "**/build.rs", "scripts/**"]
 
 [[flow.judge]]
 kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "test-lead-proptest"
@@ -145,7 +154,7 @@ kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "test-lead-e2e"
@@ -176,7 +185,7 @@ kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "test-lead-formal"
@@ -207,7 +216,7 @@ kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "implement-bugfix"
@@ -238,7 +247,7 @@ kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "implement-feature"
@@ -269,7 +278,7 @@ kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "research-grammar"
@@ -296,7 +305,7 @@ kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "research-runtime"
@@ -323,7 +332,7 @@ kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "research-analyzer-lsp"
@@ -350,7 +359,7 @@ kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "research-integrations"
@@ -377,7 +386,7 @@ kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"
 
 [[flow]]
 name = "research-docs"
@@ -404,4 +413,4 @@ kind = "nanna_clean"
 
 [flow.outcome]
 mode = "draft_pr"
-required_checks = ["Tests", "style hooks"]
+blocking = "required"

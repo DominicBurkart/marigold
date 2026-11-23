@@ -49,6 +49,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 cpu-time = "1.0"
 tracing-subscriber = { version = "0.3", features = ["registry"] }
 opentelemetry_sdk = { version = "=0.33.0", default-features = false, features = ["trace", "metrics", "testing"] }
+proptest = "1"
 
 [[bench]]
 name = "keep_first_n"

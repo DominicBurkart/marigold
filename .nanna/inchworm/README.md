@@ -1,50 +1,303 @@
 # marigold test-design inchworm
 
-Four nanna identities, an invariant ledger, a gate, and three inchworm flows that find untested invariants of marigold's interfaces, pin them with tests, then close coverage to 100%, and prove what can be proven. Everything runs on local models.
+Four nanna identities, an invariant ledger, a manual gate, and three inchworm
+flows that find interface invariants without a pinning test, pin them with
+tests, then close coverage, and prove what can be proven. Everything is meant to
+run on local models.
 
-| Identity (`.nanna/catalog/`) | Model | Job |
-|---|---|---|
-| marigold-invariant-scout | gemma4:e4b | finds untested interface invariants, writes the ledger |
-| marigold-test-designer | gemma4:e4b | pins one `untested` invariant per run with tests |
-| marigold-coverage-closer | gemma4:e4b | closes remaining coverage, only after the interface gate passes |
-| marigold-kani-prover | leanstral-whitedwarf | Kani harnesses (bounded) and Lean 4 via Aeneas (unbounded) |
+## Identities
+
+Cards live in `.nanna/catalog/`.
+
+- `marigold-invariant-scout` (gemma4:e4b). Writes only
+  `tests/invariants.toml`. Finds invariants without a pinning test and records
+  them in the ledger.
+- `marigold-test-designer` (gemma4:e4b). Writes only test directories. Pins one
+  `candidate` invariant per run with tests.
+- `marigold-coverage-closer` (gemma4:e4b). Writes only test directories. Closes
+  remaining coverage, only after the interface gate passes.
+- `marigold-kani-prover` (leanstral-whitedwarf). Writes only `tests/proofs/**`
+  and `tests/invariants.toml`. Kani harnesses (bounded) and Lean 4 via Aeneas
+  (unbounded).
 
 ## Flows
 
-The root `inchworm.toml` holds the repository's `[auditor]` table, the existing `issue` flow and these three flows, in inchworm's merged schema (`inchworm validate` reports 0 errors and 0 warnings). `inchworm.toml` is listed in `.nanna/protected.toml`. Each flow is label-triggered, ends in a draft PR, and forbids edits to CI, release scripts, cards, the gate and manifests.
+The root `inchworm.toml` holds the repository's `[offramp]`, `[auditor]` and
+`[merge]` tables, the existing `issue` flow and these three flows.
+`inchworm.toml` is listed in `.nanna/protected.toml`. The `inchworm` binary is
+not installed on the machine that edited this file, so the file is checked only
+as valid TOML; run `inchworm validate` before relying on it. Each flow is
+label-triggered, ends with the same `publish` step (`pr-shepherd`) as the
+`issue` flow, and ends in a draft PR.
 
-| Flow | Label | Steps |
-|---|---|---|
-| test-design | `inchworm:test-design` | scout, design |
-| close-coverage | `inchworm:coverage` | close |
-| prove | `inchworm:prove` | prove |
+- `test-design`, label `inchworm:test-design`. Steps: scout, design, publish.
+  Can run once the pi broker (nanna-coder #962) lands.
+- `close-coverage`, label `inchworm:coverage`. Steps: close, publish. Cannot
+  run: needs the coverage tool (nanna-coder #1049 to #1051).
+- `prove`, label `inchworm:prove`. Steps: prove, publish. Cannot run: needs the
+  kani and lean tools (nanna-coder #1049 to #1051).
 
-## Ordering is enforced by the gate
+No flow can reach `pr_open` yet. The flows are configuration only until nanna
+creates the branch and the PR.
 
-`python3 .nanna/inchworm/gate.py ledger` validates that every `covered` or `proven` ledger entry links to existing test paths. `python3 .nanna/inchworm/gate.py coverage` additionally fails while any `surface = "interface"` invariant is not `covered` or `proven`. The coverage closer's prompt requires that exit 0 before it starts. Inchworm cannot run a repo command as a gate step yet (inchworm issue 14), so until then the identity enforces it itself.
+The coverage tool and the kani and lean tools are not available yet
+(nanna-coder #1049 to #1051), so the closer and prover identities list only the
+tools nanna has (`read_file`, `list_directory`, `search`, `git_status`,
+`git_diff`, `write_file`, `cargo_check`, `cargo_test`). Their prompts name the
+missing tools; until those exist, `close-coverage` and `prove` cannot do their
+job and must not be dispatched.
+
+## Enforcement of "no production edits"
+
+The designer, closer and prover are meant to add tests and proofs, never change
+production code. Two layers enforce this:
+
+- Each card's `scope.paths` lists only test directories
+  (`marigold-impl/tests/**`, `marigold-grammar/tests/**`, `marigold/tests/**`,
+  `tests/**`; the prover only `tests/proofs/**` and the ledger).
+- Each flow's diff judge uses the `issue` flow's `forbid_paths` (CI, release
+  scripts, `.nanna/**`, `.inchworm/**`, `inchworm.toml`, `deny.toml`,
+  `codecov.yml`, `flake.nix`, `flake.lock`, `.devcontainer/**`,
+  `.cargo-husky/**`) plus `install.sh`, every `Cargo.toml`, `examples/**`,
+  `marigold/src/**`, `marigold-*/src/**`, `marigold-*/benches/**`,
+  `**/build.rs` and `scripts/**`.
+
+Residual risk: `forbid_paths` is a path blocklist and cannot express "only test
+code". Test code that lives inside `src/` files (`#[cfg(test)]` modules,
+doctests) is out of scope for these identities, and a path outside the listed
+globs can still be edited by a judge-passing diff (for example `tests/src/**`,
+the helper crate shared by tests). The designer cannot add dev-dependencies,
+because the judges forbid every `Cargo.toml`; that is why this PR adds
+`proptest = "1"` by hand to `marigold-impl` and the `tests` crate, where
+`marigold-impl/tests/count_properties.rs` uses it. A new dev-dependency needs a
+manual change. `local only` is a property of the
+card models, and nanna does not enforce it (nanna-coder #1048).
+
+## The gate is manual
+
+`python3 -I .nanna/inchworm/gate.py ledger` checks `tests/invariants.toml`. It
+is not invoked by any flow, CI job or git hook yet: inchworm cannot run a repo
+command as a gate step (inchworm issue 14), and wiring it and its tests into CI
+is tracked in [issue 470](https://github.com/DominicBurkart/marigold/issues/470).
+Until then run it by hand, and the identities are told to run it themselves.
+
+There are two modes.
+
+- Default: a fast, offline static LINT. It is not a proof that a cited test
+  runs: it reads Rust with a hand-written scanner (comments, string literals
+  including raw, byte and C strings, braces, attributes) and can be fooled by
+  constructs it does not model.
+- `--run` (for example `CARGO_TARGET_DIR=/var/tmp/gate-target python3 -I
+  .nanna/inchworm/gate.py ledger --run`): after the lint passes, it asks cargo
+  what it builds and runs the cited tests. It needs `CARGO_TARGET_DIR` in the
+  environment. It first runs `cargo metadata --no-deps --format-version 1` and
+  requires the selected target's `src_path` to be the cited file for
+  `<crate>/tests/*.rs`, or, for `<crate>/src` citations, derives the `mod`
+  chain from the crate's real lib or bin roots (a root that is not under `src/`
+  is ignored; a file declared from several roots is rejected as ambiguous;
+  `--lib` or `--bin <name>` is chosen by the root that holds the chain). It
+  then derives the full test name (module path, inline modules, fn, for example
+  `a::b::tests::foo`) and the features from the `cfg(feature = ...)` gates on
+  the `mod` declaration chain, the enclosing modules and the fn, and runs
+  `cargo test [--locked] [--offline] -p <crate> <target> [--features ...] --
+  --list`. It requires exactly one collected test with exactly that name, then
+  runs it with `-- --exact` and requires exit 0 and `1 passed`. An optional
+  ledger `features` list (one crate) or table (`[invariant.features]`,
+  `crate = [names]`) adds features per crate; names must match
+  `[A-Za-z0-9_][A-Za-z0-9_-]*`, so `dep/feat` syntax, which can enable
+  dependency features no cfg mentions, is not accepted. This is the stronger
+  check; it still executes repository code and is not tamper-proof.
+
+`--run` safety and limits:
+
+- It executes repository code: build scripts, proc-macros, `.cargo/config.toml`
+  runners and rustc wrappers, `rust-toolchain.toml` and the tests themselves.
+  Never run it on untrusted PR code outside a sandbox.
+- Dropping variables is not a sandbox. The child environment loses `GIT_*`,
+  `DATABASE_URL` and every variable whose name contains `TOKEN`, `SECRET`,
+  `KEY`, `PASS`, `AUTH` or `CREDENTIAL` (so `SSH_AUTH_SOCK` and
+  `CARGO_REGISTRIES_*_TOKEN` are gone, which breaks private registries), but
+  `HOME`, `PATH`, `CARGO_HOME`, `RUSTUP_HOME` and `LD_LIBRARY_PATH` stay, so
+  files such as `~/.ssh`, `~/.cargo/credentials.toml` and the `gh` config remain
+  readable by the code that runs.
+- A test target with `harness = false` can print `test result: ok. 1 passed;`
+  without running anything.
+- `Cargo.lock` is git-ignored here, so the first `--run` in a fresh checkout
+  resolves floating dependency versions and results are not reproducible across
+  machines. `--locked` is added only when a `Cargo.lock` exists, and `--offline`
+  when `GATE_OFFLINE=1`.
+- Each cargo call has a timeout (`GATE_CARGO_TIMEOUT` seconds, default 900, a
+  positive integer, otherwise exit 2). Output goes to temporary files, and the
+  cargo process group is killed on timeout, on SIGINT (the gate prints
+  `interrupted` and exits 130), on SIGTERM (exit 143) and SIGHUP (exit 129),
+  so CI cancellation or `timeout N` stop cargo too, and after every call, so
+  daemons left in the group do not leak. SIGKILL cannot be caught, and a
+  grandchild that starts its own session escapes the group kill.
+
+Cases the lint accepts but cargo rejects, which `--run` catches: an inner `cfg`
+inside an fn body, a module declared only in `main.rs` while `lib.rs` also
+exists (the lint tries both, `--run` picks the right target), `x.rs` next to
+`x/mod.rs` (the lint rejects this up front), and the same test name in two
+bins.
+
+What the lint checks:
+
+- Required fields, unique ids (compared after Unicode NFC normalisation, case
+  folding and trimming), and the enums `status` (`candidate`, `covered`,
+  `proven`, `disputed`), `surface` (`interface`, `internal`) and `provable`
+  (`none`, `kani`, `lean`); a value of the wrong type or an invalid UTF-8
+  ledger is a clean error.
+- Every `covered_by` entry is a repository-relative `.rs` file that cargo
+  compiles as a test: `<crate>/tests/*.rs` directly (no subdirectories, no
+  `benches/`, no `tests/proofs/`), or a `<crate>/src` file declared by a `mod`
+  chain from `lib.rs` or `main.rs`, for the crates `marigold`, `marigold-impl`,
+  `marigold-grammar`, `marigold-lsp`, `marigold-macros` and `tests`. No absolute
+  paths, no `..`, no symlink escapes.
+- For `covered` and `proven`, entries must be written `path::name`, with
+  optional module segments before the name. Exactly one `fn` of that name must
+  match (the module segments must be the innermost enclosing modules; without
+  them the name must be unique in the file), so a same-named test elsewhere
+  cannot satisfy a citation.
+- That fn must carry `#[test]`, `#[tokio::test(...)]`, `#[async_std::test]` or
+  `#[rstest::rstest]`, including inside `proptest!` (a bare fn there is a plain
+  function, so it still needs `#[test]`; the macro head must be `proptest` or
+  `proptest::proptest`, with braces, parentheses or brackets). Only
+  `should_panic`, lint attributes (`allow`, `warn`, `deny`, `forbid`, `expect`),
+  `doc` and `cfg` are accepted besides, where a `cfg` predicate must be `test`,
+  `feature = "tokio"`, `feature = "async-std"` or an `any(...)` of the two
+  features. The same `cfg` rule applies to every enclosing module, to inner
+  `#![...]` attributes at the head of a file or body, and to the `mod`
+  declaration of a cited `src` file. An inner attribute anywhere else,
+  `#[ignore]`, any other `cfg`, `cfg_attr` and any other attribute are
+  rejected, as is an fn nested in another fn, or inside `macro_rules!`, any
+  other macro invocation (`name!{}`, `name!()`, `name![]`) or any other block.
+  A cited `src` file must be declared by a top-level or inline-module `mod x;`
+  (not in an fn body, macro, impl or extern block) whose location matches the
+  file; the declaration's own `cfg` is checked.
+- `proven` needs `provable` other than `none`, and a `proof` file under
+  `tests/proofs/` (the directory must not be a symlink and the resolved path
+  must stay inside it), used by one id only. For `kani` it is a `.rs` file with
+  a `#[kani::proof]` fn (not in a macro, a nested fn or an unsupported cfg
+  gate; `cfg(kani)` is fine); for `lean` it is a `.lean` file with a `theorem`
+  or `lemma` and none of `sorry`, `sorryAx`, `stop`, `axiom`, `admit`,
+  `native_decide`, `ofReduceBool`, `reduceBool`, `unsafe`, `implemented_by`,
+  `macro`, `macro_rules`, `elab`, `syntax`, `run_cmd`, `import Lean`,
+  `open Lean`, `debug.skipKernelTC`, `initialize`, `opaque`, `@[extern` or an
+  `import` other than `Mathlib`, `Aeneas`, `Std` and `Init` outside comments
+  and strings (nested block comments, string escapes and real char literals are
+  handled; a `'` after an identifier character is a prime, not a char).
+  This Lean lint is advisory: a reviewer must read the proof, and `lean_check`
+  (nanna-coder #1051) is the real check. A kani harness must be gated by
+  `cfg(kani)` exactly (on the file, an enclosing module or the fn; `cfg(test)`,
+  `any(kani, test)` and `not(kani)` are rejected), contain an assertion
+  (`kani::assert`, `assert!` with a condition other than the literal `true`,
+  `assert_eq!` or `assert_ne!`) and no syntactically vacuous `kani::assume`
+  (`false`, `!true`, redundant parentheses around either, a comparison of two
+  integer literals that is false, or `x != x`, `x < x`, `x > x`); the check is
+  literal and syntactic only (`let b = false; kani::assume(b)` passes), and a
+  harness can still be trivial in ways the lint cannot see.
+- `proof_blocker` is an optional string saying why `provable = "none"` for code
+  that is provable in principle.
+
+What `proven` means: a proof artifact of the right kind exists, is wired to one
+ledger id and passes this lint. It does not mean Kani or Lean were run or that
+the harness proves the statement; the gate does not execute either tool, and a
+reviewer must read the proof.
+
+Likewise `covered` is only as good as the reviewer's reading: a vacuous
+`#[test] fn t() {}` or a `should_panic` body passes both modes.
+
+`python3 -I .nanna/inchworm/gate.py coverage` additionally fails while any
+`surface = "interface"` invariant is not `covered` or `proven`. Both phases take
+`--run`. Exit codes: 0 pass, 1 ledger problems, 2 usage, 129 SIGHUP, 130
+SIGINT, 143 SIGTERM. When `cargo test --list` fails, the error names the likely
+causes (a build error, or a target with `required-features` that are not
+enabled) and shows the last five stderr lines. Tests (the run mode
+uses a fake `cargo` on `PATH`): `python3 -I .nanna/inchworm/test_gate.py`,
+`test_import.py` and `test_check_models.py` in the same directory.
+
+## Ledger status
+
+`covered` means an existing test pins the statement as written, including its
+preconditions. `disputed` means the statement was falsified against the code.
+Currently `grammar-parse-total` is a `candidate` and `keep-first-n-tie-break` is
+`disputed`: with the tokio or async-std implementation, tied items that span
+concurrently processed chunks can keep a later item in place of an earlier one.
+This is a production bug in `marigold-impl/src/keep_first_n.rs`, tracked in
+[issue 461](https://github.com/DominicBurkart/marigold/issues/461) with a fix
+proposed in [PR 463](https://github.com/DominicBurkart/marigold/pull/463); it is
+not fixed here. `keep-first-n-bounded-descending` is stated for the tokio
+feature only, because no async-std test exists, and so is
+`multi-consumer-fanout`, whose cited test is written with `#[tokio::test]`. The
+keep-first-n, permutations and combinations invariants are
+`provable = "none"` because their code is async or itertools-based and Aeneas
+and Kani cannot translate it; each carries
+`proof_blocker = "needs a pure sync core extracted from the async wrapper"`.
 
 ## Schedule
 
-Inchworm has no time trigger yet (inchworm issue 13). Until it lands, apply `inchworm:test-design` weekly and `inchworm:prove` after invariants are covered.
+Inchworm has no time trigger yet (inchworm issue 13). Until it lands, apply
+`inchworm:test-design` weekly and `inchworm:prove` after invariants are
+covered.
 
 ## Install
 
+Do not copy `.nanna/catalog` over a host catalog: it is shared across
+repositories and a recursive copy would overwrite its cards. Merge only the
+marigold cards by hand into the host catalog (see `docs/nanna-agents.md`): the
+four `.nanna/catalog/marigold-*.toml` cards and their
+`.nanna/catalog/prompts/marigold-*.md` prompts. To try them without touching a
+host catalog, copy just those files into a scratch directory and point
+`NANNA_CONFIG_DIR` at it.
+
 ```sh
-cp -r .nanna/catalog/. ~/.config/nanna/agents/
 .nanna/inchworm/leanstral/import.sh /path/to/Leanstral-WhiteDwarf-seed-v3.gguf
 .nanna/inchworm/check_models.sh
 ```
 
-`check_models.sh` exits non-zero when any card's model is not served by Ollama or fails to generate. Run it before dispatching a flow: pi accepts unknown model names and exits 0 on a gateway failure, so a missing model would otherwise look like a successful run.
+`check_models.sh` exits non-zero when any card's model is not served by Ollama,
+fails to load within `LOAD_TIMEOUT_SECS` (default 900, reported as a timeout),
+or fails to generate. It probes each model with its own context size: the
+Leanstral model with the `num_ctx` from its Modelfile (8192), so it is not
+reloaded for a different size, and every other model with Ollama's default. Run
+it before dispatching a flow: pi accepts unknown model names and exits 0 on a
+gateway failure, so a missing model would otherwise look like a successful run.
 
 ## Local Leanstral
 
-Leanstral 1.5 (119B total, 6.5B active, Apache-2.0) is run from SEBK4C's `Leanstral-WhiteDwarf-seed-v3.gguf` (49.9 GB, IQ2_XXS experts, sha256 `1058b791...afa0`), an early-stopped community quantization that kept 76% of the FP8 score on a miniF2F slice. On a 54 GB RAM, CPU-only machine it loads in about 35 s and decodes about 10 tokens per second.
+Leanstral 1.5 (119B total, 6.5B active, Apache-2.0) is run from SEBK4C's
+`Leanstral-WhiteDwarf-seed-v3.gguf` (49.9 GB, IQ2_XXS experts, sha256
+`1058b791...afa0`), an early-stopped community quantization that kept 76% of the
+FP8 score on a miniF2F slice. On a 54 GB RAM, CPU-only machine it loads in about
+35 s and decodes about 10 tokens per second.
 
-`ollama create` from the CLI fails with this model ("neither 'from' or 'files' was specified"), so `import.sh` uploads the blob and calls `/api/create` directly with the Go-template translation of Mistral's chat template (`leanstral/Modelfile`; the original Jinja is `leanstral/chat_template.jinja`). The reasoning effort is fixed to `none` in the template.
+`ollama create` from the CLI fails with this model ("neither 'from' or 'files'
+was specified"), so `import.sh` streams the blob with `curl -T` (skipping the
+upload when `HEAD /api/blobs/sha256:<sum>` returns 200), then calls
+`/api/create` with the Go-template translation of Mistral's chat template
+(`leanstral/Modelfile`; the original Jinja is `leanstral/chat_template.jinja`).
+The template and the `PARAMETER` lines are read from the Modelfile, and an
+`error` in the create response fails the script. `LEANSTRAL_SHA256` overrides
+the expected checksum, which the script test uses with a small stub file against
+a fake HTTP server; the real import was not re-run. The reasoning effort is
+fixed to `none` in the template.
+
+Double BOS risk, not verified: the template begins with a literal `<s>`, as does
+Mistral's original Jinja (`{{- '<s>' }}`), which assumes the caller adds no BOS
+of its own. If the GGUF sets `tokenizer.ggml.add_bos_token` to true and Ollama
+also tokenizes the rendered prompt with special tokens added, the prompt starts
+with two BOS tokens. The GGUF is not on this machine, so this was not confirmed
+either way and the template is unchanged. To check on the machine that has the
+model: `curl -s localhost:11434/api/show -d '{"model":"leanstral-whitedwarf"}'`
+and read `model_info["tokenizer.ggml.add_bos_token"]`; if it is true, drop the
+leading `<s>` from the Modelfile TEMPLATE.
 
 ## Not yet runnable end to end
 
-- The pi broker (nanna-coder #962) is unmerged, so nothing launches identities in containers yet.
-- nanna has no kani, lean or tarpaulin tools beyond the coverage tool in nanna-coder #1049, and identities have no container image field (nanna-coder #1041, #1012). The image must provide `cargo-kani`, `cargo-tarpaulin`, Lean 4 and Aeneas.
-- Identities list `cargo_check` and `cargo_test`; the kani prover needs a kani tool (nanna-coder #1047).
+- The pi broker (nanna-coder #962) is unmerged, so nothing launches identities
+  in containers yet, and no flow can reach `pr_open`.
+- The coverage tool and the kani and lean tools do not exist (nanna-coder #1049
+  to #1051), and identities have no container image field (nanna-coder #1041,
+  #1012). The image must provide `cargo-kani`, `cargo-tarpaulin`, Lean 4 and
+  Aeneas. `close-coverage` and `prove` cannot run until these land.
+- `local only` is not enforced by nanna (nanna-coder #1048).

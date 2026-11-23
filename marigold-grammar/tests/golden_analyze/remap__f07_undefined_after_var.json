@@ -1,0 +1,56 @@
+{
+  "analyze": {
+    "streams": [
+      {
+        "description": "xs.map(...).write_file(...)",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(2)",
+        "space_class": "O(1)",
+        "exact_space": "O(2)",
+        "collects_input": false
+      }
+    ],
+    "program_time": "O(1)",
+    "program_exact_time": "O(2)",
+    "program_space": "O(1)",
+    "program_exact_space": "O(2)",
+    "program_cardinality": "5"
+  },
+  "nodes": [
+    {
+      "name": "xs",
+      "expr_index": 1,
+      "range": {
+        "start": 32,
+        "end": 57
+      },
+      "complexity": {
+        "description": "xs = input.map(...)",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(1)",
+        "space_class": "O(1)",
+        "exact_space": "O(1)",
+        "collects_input": false
+      }
+    },
+    {
+      "name": null,
+      "expr_index": 2,
+      "range": {
+        "start": 58,
+        "end": 102
+      },
+      "complexity": {
+        "description": "xs.map(...).write_file(...)",
+        "cardinality": "5",
+        "time_class": "O(1)",
+        "exact_time": "O(2)",
+        "space_class": "O(1)",
+        "exact_space": "O(2)",
+        "collects_input": false
+      }
+    }
+  ]
+}

@@ -78,6 +78,41 @@ Output:
 4
 ```
 
+### Returning results
+
+A program that ends in `.return` hands its items to the command line:
+`marigold run` prints each one on its own line as JSON (JSON Lines), then exits.
+
+```marigold
+fn double(x: i32) -> i32 { x * 2 }
+
+range(0, 4).map(double).return
+```
+
+```sh
+marigold run double.marigold
+```
+
+Output:
+
+```text
+0
+2
+4
+6
+```
+
+Numbers print as plain numbers, strings as quoted JSON strings, arrays as JSON
+arrays (`[1,2]`) and structs as JSON objects (`{"x":0,"y":1}`). Use `write_file`
+with `csv` when a program should produce CSV rows. A program may mix `.return` and
+`write_file` streams: the returned items are printed and the files are written.
+When a program has several `.return` streams, their items are interleaved as
+they arrive, so the order across streams is unspecified.
+
+`marigold run` builds the program against the published `marigold` crate that
+matches the installed CLI version. To build against a local checkout instead,
+set `MARIGOLD_WORKSPACE_PATH` to the checkout's `marigold` crate directory.
+
 ### Static Analysis
 
 Marigold can statically analyze your program's complexity:

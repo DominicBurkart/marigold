@@ -357,6 +357,75 @@ fn run_emit(format: EmitFormat, file: Option<&str>) -> i32 {
 }
 
 #[cfg(feature = "cli")]
+const MAIN_PRELUDE: &str = r#"#![allow(dead_code)]
+trait MarigoldFinish {
+    type Item;
+    fn items(self) -> ::std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item = Self::Item>>>;
+}
+
+impl MarigoldFinish for () {
+    type Item = ();
+    fn items(self) -> ::std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item = ()>>> {
+        Box::pin(::marigold::marigold_impl::futures::stream::empty())
+    }
+}
+
+impl<T: 'static> MarigoldFinish
+    for ::marigold::marigold_impl::futures::stream::SelectAll<
+        ::std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item = T>>>,
+    >
+{
+    type Item = T;
+    fn items(self) -> ::std::pin::Pin<Box<dyn ::marigold::marigold_impl::futures::Stream<Item = T>>> {
+        Box::pin(self)
+    }
+}
+
+struct MarigoldJson<'a, T>(&'a T);
+
+trait MarigoldJsonArray {
+    fn json_line(&self) -> String;
+}
+impl<'a, T: ::marigold::marigold_impl::serde::Serialize, const N: usize> MarigoldJsonArray for &&MarigoldJson<'a, [T; N]> {
+    fn json_line(&self) -> String {
+        ::serde_json::to_string(&self.0[..]).expect("could not serialize a returned item as JSON")
+    }
+}
+
+trait MarigoldJsonNestedArray {
+    fn json_line(&self) -> String;
+}
+impl<'a, T: ::marigold::marigold_impl::serde::Serialize, const M: usize, const N: usize> MarigoldJsonNestedArray for &MarigoldJson<'a, [[T; M]; N]> {
+    fn json_line(&self) -> String {
+        let rows: Vec<&[T]> = self.0.iter().map(|row| &row[..]).collect();
+        ::serde_json::to_string(&rows).expect("could not serialize a returned item as JSON")
+    }
+}
+
+trait MarigoldJsonSerialize {
+    fn json_line(&self) -> String;
+}
+impl<'a, T: ::marigold::marigold_impl::serde::Serialize> MarigoldJsonSerialize for MarigoldJson<'a, T> {
+    fn json_line(&self) -> String {
+        ::serde_json::to_string(self.0).expect("could not serialize a returned item as JSON")
+    }
+}
+
+macro_rules! marigold_print_json {
+    ($item:expr) => {
+        println!("{}", (&&&MarigoldJson(&$item)).json_line())
+    };
+}
+"#;
+
+#[cfg(feature = "cli")]
+fn program_main_source(program_contents: &str) -> String {
+    format!(
+        "{MAIN_PRELUDE}\n#[tokio::main] async fn main() {{ use ::marigold::marigold_impl::futures::StreamExt; let mut items = MarigoldFinish::items(marigold::m!({program_contents}).await); while let Some(item) = items.next().await {{ marigold_print_json!(item); }} }}"
+    )
+}
+
+#[cfg(feature = "cli")]
 fn main() -> Result<()> {
     use MarigoldCommand::*;
 
@@ -473,8 +542,7 @@ fn main() -> Result<()> {
 
     std::fs::write(
         program_src_dir.join("main.rs"),
-        format!("#[tokio::main] async fn main() {{ marigold::m!({program_contents}).await }}")
-            .as_str(),
+        program_main_source(&program_contents),
     )?;
 
     const MARIGOLD_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -497,6 +565,7 @@ version = "0.0.1"
 
 [dependencies]
 serde = "1"
+serde_json = "1"
 tokio = {{ version = "1", features = ["full"]}}
 {marigold_dep}
         "#
@@ -555,6 +624,45 @@ tokio = {{ version = "1", features = ["full"]}}
     };
 
     std::process::exit(exit_status.code().unwrap_or(0));
+}
+
+#[cfg(all(test, feature = "cli"))]
+mod wrapper_tests {
+    use super::{program_main_source, MAIN_PRELUDE};
+
+    #[test]
+    fn wraps_the_program_verbatim_and_finishes_what_it_yields() {
+        let program = "fn f(x: i32) -> i32 { { x } }\nrange(0, 2).map(f).return";
+        let source = program_main_source(program);
+        assert!(source.starts_with(MAIN_PRELUDE));
+        assert_eq!(source.matches(program).count(), 1);
+        let (before, after) = source.split_once(program).unwrap();
+        let wrapper = &before[MAIN_PRELUDE.len()..];
+        let main_at = wrapper.find("async fn main()").unwrap();
+        assert!(wrapper[..main_at].contains("#[tokio::main]"));
+        let finish_at = wrapper.find("MarigoldFinish::items(").unwrap();
+        assert!(main_at < finish_at);
+        assert!(wrapper.ends_with("marigold::m!("));
+        assert!(after.starts_with(").await"));
+        assert!(after.trim_end().ends_with('}'));
+        let outside = format!("{wrapper}{after}");
+        assert_eq!(outside.matches('{').count(), outside.matches('}').count());
+        assert_eq!(outside.matches('(').count(), outside.matches(')').count());
+    }
+
+    #[test]
+    fn braces_in_the_program_are_not_interpreted() {
+        let program = "fn id(x: i32) -> i32 { let y = {x}; y }\nrange(0, 2).map(id).return";
+        let source = program_main_source(program);
+        assert!(source.contains(&format!("marigold::m!({program}).await")));
+    }
+
+    #[test]
+    fn the_prelude_finishes_both_shapes_of_program_value() {
+        assert!(MAIN_PRELUDE.contains("impl MarigoldFinish for () {"));
+        assert!(MAIN_PRELUDE.contains("stream::SelectAll<"));
+        assert!(MAIN_PRELUDE.contains("macro_rules! marigold_print_json"));
+    }
 }
 
 #[cfg(all(test, feature = "cli"))]

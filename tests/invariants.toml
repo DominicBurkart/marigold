@@ -1,7 +1,7 @@
 [[invariant]]
 id = "grammar-parse-total"
 surface = "interface"
-statement = "marigold_parse never panics on any input string; it returns Ok(code) or Err."
+statement = "For inputs of bounded size and nesting depth, marigold_parse never panics and returns Ok(code) or Err."
 status = "candidate"
 provable = "none"
 covered_by = []
@@ -9,39 +9,72 @@ covered_by = []
 [[invariant]]
 id = "grammar-check-agrees-with-parse"
 surface = "interface"
-statement = "marigold_check returns no error diagnostics exactly when marigold_parse returns Ok."
-status = "candidate"
+statement = "For inputs of at most MAX_CHECK_INPUT_BYTES (10 MiB), marigold_check returns no error diagnostics exactly when marigold_parse returns Ok; larger inputs get a single input-too-large error from marigold_check."
+status = "covered"
 provable = "none"
-covered_by = []
+covered_by = [
+  "marigold-grammar/tests/check_diagnostics.rs::check_agrees_with_parse",
+  "marigold-grammar/tests/check_diagnostics.rs::oversized_input_is_rejected_with_a_single_bounded_diagnostic",
+  "marigold-grammar/tests/check_diagnostics.rs::input_at_the_size_limit_is_still_checked",
+]
 
 [[invariant]]
 id = "keep-first-n-bounded-descending"
 surface = "interface"
-statement = "KeepFirstN returns at most N items in descending order, and exactly the N largest by the comparator, with ties broken by earlier stream position."
-status = "candidate"
-provable = "kani"
-covered_by = []
+statement = "With the tokio feature, KeepFirstN returns at most N items in descending order of the comparator and exactly the N largest by it."
+status = "covered"
+provable = "none"
+features = ["tokio"]
+proof_blocker = "needs a pure sync core extracted from the async wrapper"
+covered_by = [
+  "marigold-impl/src/keep_first_n.rs::large_stream_correctness",
+  "marigold-impl/src/keep_first_n.rs::cross_chunk_concurrent_correctness",
+  "marigold-impl/tests/keep_first_n_multi_thread.rs::cross_chunk_correctness_on_a_multi_thread_runtime",
+]
+
+[[invariant]]
+id = "keep-first-n-tie-break"
+surface = "interface"
+statement = "With the tokio or async-std feature, among items the comparator reports Equal, KeepFirstN keeps the ones earlier in the stream."
+status = "disputed"
+provable = "none"
+proof_blocker = "needs a pure sync core extracted from the async wrapper"
+note = "Holds when the ties are processed in stream order (tie_breaking_determinism). Violated when tied items span chunks that run concurrently: the heap comparator orders equal items so the lowest index is the heap minimum, and the replacement test only admits a lower index than that minimum, so a later tied item can be kept in place of an earlier one. Reproduced with 4 tied items split over two chunks and n=2: kept indices {2,5}, expected {2,3}. Tracked in issue 461 (https://github.com/DominicBurkart/marigold/issues/461), fix proposed in PR 463 (https://github.com/DominicBurkart/marigold/pull/463)."
+covered_by = ["marigold-impl/src/keep_first_n.rs::tie_breaking_determinism"]
 
 [[invariant]]
 id = "permutations-count"
 surface = "interface"
-statement = "Permutable over n items with length k yields n!/(n-k)! items, each a distinct ordering."
-status = "candidate"
-provable = "lean"
-covered_by = []
+statement = "For n distinct items and length k, Permutable yields n!/(n-k)! items when k <= n and none when k > n, all distinct; with repeated items it permutes positions, so equal permutations can repeat."
+status = "covered"
+provable = "none"
+proof_blocker = "needs a pure sync core extracted from the async wrapper"
+covered_by = [
+  "marigold-impl/src/permutations.rs::permutations_count",
+  "marigold-impl/src/permutations.rs::permutations_count_and_distinctness_over_small_inputs",
+  "marigold-impl/src/permutations.rs::permutations_of_repeated_items_are_not_distinct",
+  "marigold-impl/tests/count_properties.rs::permutations_of_distinct_items_are_counted_and_distinct",
+]
 
 [[invariant]]
 id = "combinations-count"
 surface = "interface"
-statement = "Combinable over n items with length k yields C(n,k) items, no two equal as sets."
-status = "candidate"
-provable = "lean"
-covered_by = []
+statement = "For n distinct items and length k, Combinable yields C(n,k) items when k <= n and none when k > n, no two equal as sets; with repeated items it combines positions, so equal combinations can repeat."
+status = "covered"
+provable = "none"
+proof_blocker = "needs a pure sync core extracted from the async wrapper"
+covered_by = [
+  "marigold-impl/src/combinations.rs::combinations_count",
+  "marigold-impl/src/combinations.rs::combinations_count_and_distinctness_over_small_inputs",
+  "marigold-impl/src/combinations.rs::combinations_of_repeated_items_are_not_distinct",
+  "marigold-impl/tests/count_properties.rs::combinations_of_distinct_items_are_counted_and_distinct",
+]
 
 [[invariant]]
 id = "multi-consumer-fanout"
 surface = "interface"
-statement = "Every receiver from MultiConsumerStream::get observes every item of the source exactly once, in source order."
-status = "candidate"
+statement = "With the tokio feature and T: Copy, every receiver obtained from MultiConsumerStream::get before run() is called observes every item of the source exactly once, in source order."
+status = "covered"
 provable = "none"
-covered_by = []
+features = ["tokio"]
+covered_by = ["marigold-impl/src/multi_consumer_stream.rs::multiple_consumers_each_receive_full_stream"]
