@@ -4,6 +4,16 @@ nanna spawns agents from human-authored identity cards. This repository ships
 four cards scoped to its workspace layout, a base catalog they narrow, and a
 check that parses both with nanna's own parser.
 
+## Status
+
+The cards in `.nanna/agents/` take effect only in `nanna agents list --repo`
+(DominicBurkart/nanna-coder#931). They do not constrain running tasks, which
+get the global base card.
+
+The inchworm flow in `inchworm.toml` is configuration only today. A flow cannot
+reach `pr_open` until nanna creates the branch and pull request, because
+inchworm itself never publishes.
+
 ## Files
 
 - `.nanna/agents/*.toml`: Repo-local cards. Each names a base card and may only
@@ -61,7 +71,7 @@ Write scopes (`paths`) use the workspace crates: `marigold`, `marigold-macros`,
     `git_diff`
 - `docs-writer`
   - Loop: inner
-  - Writes (`paths`, repo-local): `docs/**`, `README.md`
+  - Writes (`paths`, repo-local): `docs/**`, `README.md`, `marigold/README.md`
   - Ceiling: workspace
   - Tools (repo-local): `read_file`, `write_file`, `list_directory`, `search`,
     `git_status`, `git_diff`
@@ -85,8 +95,8 @@ globs.
 
 `docs-writer` has no markdown-specific tool: nanna ships none, so it gets the
 file tools only. The pre-commit hook requires `README.md` and
-`marigold/README.md` to be identical; the card cannot write the latter, so its
-prompt tells it to report the needed sync.
+`marigold/README.md` to be identical, so the card may write both and its prompt
+tells it to apply every README edit to each.
 
 ## No deployer card
 
@@ -101,10 +111,26 @@ credentials, not something an agent should hold a card for.
 scripts/check_nanna_agents.sh
 ```
 
-The script (needs a `nanna` binary on `PATH`, or `NANNA_BIN`) copies the base
-catalog to a scratch config directory and runs `nanna agents list --repo .`.
-It exits non-zero when an override widens its base, names an unknown card, or
-fails to parse. It is not wired into CI.
+The script (needs a `nanna` binary on `PATH`, or `NANNA_BIN`, and `python3`)
+copies the base catalog to a scratch config directory and runs
+`nanna agents list --repo .`. It reads each card name from `[identity]` with
+`tomllib`. It exits non-zero when an override widens its base, names an unknown
+card, fails to parse, or declares a name that differs from its file name. It is
+not wired into CI.
+
+`scripts/test_check_nanna_agents.sh` runs the script against fixtures under
+`scripts/fixtures/nanna_agents/` and asserts exit status for a narrowed card
+(zero), a widened card (non-zero), a name and file mismatch (non-zero), and a
+host catalog that matches or drifts from `.nanna/catalog`.
+
+### Catalog drift
+
+The check validates the overrides against the repo copy in `.nanna/catalog`,
+but nanna merges them over the host's global catalog at run time. If the two
+differ, the check can pass while the host rejects or widens a card. When
+`NANNA_CONFIG_DIR` is set and has an `agents` directory, the script also runs
+`diff -r` between `.nanna/catalog` and that directory and fails on any
+difference. Without `NANNA_CONFIG_DIR` the drift is not checked.
 
 ## Limits
 
